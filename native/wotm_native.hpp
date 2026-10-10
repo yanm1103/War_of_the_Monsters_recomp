@@ -123,6 +123,7 @@ struct MeshData {
     uint32_t sig = 0;        // assinatura barata para detectar RAM reaproveitada por outro nivel
     uint16_t texId = 0;
     bool valid = false;
+    bool lowAlpha = false;   // algum vertice com alfa baixo (< 0x3C; 0x40 = opaco): nevoa/sombras, desenhado no passe translucido
     bool skinned = false;    // polyPkt e uma cadeia de sub-pacotes com V4-32 (codigos de osso + peso)
     bool abe = false;        // PRIM.ABE da tag GIF: so entao o alfa de vertice vale (blend); senao opaco
 };
@@ -259,6 +260,7 @@ inline MeshData decodeObject(const Ram &ram, uint32_t node) {
     if (!ram.ok(pp, 16)) return md;
     md.texId = ram.u16(node + 0x50);
     for (int guard = 0; pp && guard < 256; ++guard) pp = decodePacket(ram, pp, md, guard == 0);
+    for (const Vtx &v : md.tris) if (v.a < 0x3C) { md.lowAlpha = true; break; }
     return md;
 }
 
@@ -459,6 +461,35 @@ public:
                 for (uint32_t c : px) { const uint32_t a = c >> 24; if (a == 0) ++a0; else if (a < 255) ++am; }
                 if (a0 || am) std::fprintf(stderr, "alpha tex=%u %ux%u transparente=%.0f%% parcial=%.0f%%\n", ram.u16(node + 0x50), w, h, 100.0 * a0 / px.size(), 100.0 * am / px.size());
             }
+            {
+                // Texels com alfa 0 guardam uma cor qualquer (escura); o filtro bilinear a mistura nas bordas e faz uma franja.
+                // Espalha a cor dos vizinhos visiveis para dentro dos transparentes (2 passos de 3x3).
+                size_t partial = 0, clear = 0;
+                for (uint32_t c : px) { const uint32_t a = c >> 24; if (a == 0) ++clear; else if (a < 250) ++partial; }
+                partial_[key] = partial * 100 > px.size();   // mais de 1% dos texels semitransparentes
+                if (clear && clear < px.size()) {
+                    std::vector<uint8_t> solid(px.size());
+                    for (size_t i = 0; i < px.size(); ++i) solid[i] = (px[i] >> 24) != 0;
+                    for (int pass = 0; pass < 2; ++pass) {
+                        std::vector<uint32_t> np = px;
+                        std::vector<uint8_t> ns = solid;
+                        for (uint32_t y = 0; y < h; ++y)
+                            for (uint32_t x = 0; x < w; ++x) {
+                                if (solid[y * w + x]) continue;
+                                uint32_t r = 0, g = 0, b = 0, n = 0;
+                                for (int dy = -1; dy <= 1; ++dy)
+                                    for (int dx = -1; dx <= 1; ++dx) {
+                                        const size_t q = size_t((y + h + uint32_t(dy)) % h) * w + (x + w + uint32_t(dx)) % w;
+                                        if (!solid[q]) continue;
+                                        r += px[q] & 255; g += (px[q] >> 8) & 255; b += (px[q] >> 16) & 255; ++n;
+                                    }
+                                if (n) { np[y * w + x] = (r / n) | ((g / n) << 8) | ((b / n) << 16); ns[y * w + x] = 1; }
+                            }
+                        px.swap(np);
+                        solid.swap(ns);
+                    }
+                }
+            }
             Image img{};
             img.data = px.data(); img.width = int(w); img.height = int(h); img.mipmaps = 1;
             img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
@@ -571,15 +602,47 @@ public:
         drawList(ram, sky, wire);
         rlDrawRenderBatchActive();
         rlEnableDepthTest();
-        drawList(ram, items, wire);
+        drawList(ram, items, wire, wire ? -1 : 0);
+        if (!wire) {
+            rlDrawRenderBatchActive();
+            rlDisableDepthMask();   // translucidos testam profundidade mas nao a escrevem
+            drawList(ram, items, wire, 1);
+            rlDrawRenderBatchActive();
+            rlEnableDepthMask();
+        }
         if (useShader) EndShaderMode();
     }
 
-    void drawList(const Ram &ram, const std::vector<DrawItem> &list, bool wire) {
+    // Translucido: textura com alfa parcial ou vertices de alfa baixo. Esses vao no segundo passe (tras para frente, sem escrever profundidade).
+    bool translucent(const Ram &ram, const DrawItem &it) {
+        const MeshData *md = mesh(ram, it.node);
+        if (md && md->lowAlpha) return true;
+        const uint64_t k = texKey(ram, it.node);
+        if (!k) return false;
+        textureId(ram, it.node);
+        const auto f = partial_.find(k);
+        return f != partial_.end() && f->second;
+    }
+
+    // pass: -1 tudo; 0 so opacos/recortados; 1 so translucidos (ordenados do mais longe ao mais perto)
+    void drawList(const Ram &ram, const std::vector<DrawItem> &list, bool wire, int pass = -1) {
         rlDisableBackfaceCulling();
         std::vector<std::pair<uint64_t, uint32_t>> order;   // (tex0, indice do item)
         order.reserve(list.size());
-        for (uint32_t i = 0; i < list.size(); ++i) order.push_back({wire ? 0 : texKey(ram, list[i].node), i});
+        const bool far2near = pass == 1 && !wire;
+        for (uint32_t i = 0; i < list.size(); ++i) {
+            if (pass >= 0 && !wire && translucent(ram, list[i]) != (pass == 1)) continue;
+            uint64_t key = wire ? 0 : texKey(ram, list[i].node);
+            if (far2near) {
+                const M4 &m = list[i].m;
+                const float dx = m.m[3][0] - eye_[0], dy = m.m[3][1] - eye_[1], dz = m.m[3][2] - eye_[2];
+                const float d2 = dx * dx + dy * dy + dz * dz;
+                uint32_t bits;
+                std::memcpy(&bits, &d2, 4);
+                key = uint64_t(~bits) + 1;   // maior distancia primeiro; nunca 0 (0 = "sem textura" abaixo)
+            }
+            order.push_back({key, i});
+        }
         std::stable_sort(order.begin(), order.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
 
         const unsigned white = rlGetTextureIdDefault();
@@ -589,7 +652,7 @@ public:
             const DrawItem &it = list[o.second];
             const MeshData *md = mesh(ram, it.node);
             if (!md || !md->valid || md->tris.empty()) continue;
-            if (o.first != cur || !open) {
+            if (o.first != cur || !open || far2near) {
                 if (open) { rlEnd(); rlDrawRenderBatchActive(); }   // um lote por textura (evita o alinhamento automatico do rlgl)
                 cur = o.first;
                 const unsigned id = wire ? 0 : textureId(ram, it.node);
@@ -634,6 +697,7 @@ private:
     int lod_ = -1;
     Shader alphaShader_{};
     bool alphaShaderTried_ = false;
+    std::unordered_map<uint64_t, bool> partial_;   // textura (texKey) com alfa semitransparente
     uint32_t resSig_ = 0;   // assinatura dos recursos em fileStatus ja carregados (loadResources)
     bool eyeOk_ = false;
     float eye_[3] = {0, 0, 0};
