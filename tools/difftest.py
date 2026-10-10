@@ -67,6 +67,18 @@ def build_alt(tu, workdir):
     sym, _ = retail_symbols()
     script = workdir / 'alt.ld'
     nl = chr(10)
+    # retail addresses go in the script with quoted names: --defsym parses its argument as an expression, which
+    # breaks on names like _7Cameras$m_numCameras
+    assigns = []
+    missing = []
+    for u in und:
+        m = re.search(r'_([0-9A-Fa-f]{8})$', u)
+        if u in sym:
+            assigns.append(f'"{u}" = {sym[u]:#x};')
+        elif m:                                  # splat data label: the address is part of the name
+            assigns.append(f'"{u}" = {int(m.group(1), 16):#x};')
+        else:
+            missing.append(u)
     script.write_text(nl.join([
         'SECTIONS {',
         f'  . = {ALT_TEXT:#x};',
@@ -76,19 +88,9 @@ def build_alt(tu, workdir):
         '  .data : { *(.data*) *(.sdata*) }',
         '  .bss : { *(.sbss*) *(.bss*) *(COMMON) }',
         '}',
-        f'_gp = {GP:#x};',
-        '']))
+        f'_gp = {GP:#x};'] + assigns + ['']))
     cmd = ['mips-linux-gnu-ld', '-EL', '-T', str(script), '--unresolved-symbols=ignore-all', '--no-check-sections', '--noinhibit-exec',
            '-o', str(workdir / 'alt.elf'), str(obj)]
-    missing = []
-    for u in und:
-        m = re.search(r'_([0-9A-Fa-f]{8})$', u)
-        if u in sym:
-            cmd.append(f'--defsym={u}={sym[u]:#x}')
-        elif m:                                  # splat data label: the address is part of the name
-            cmd.append(f'--defsym={u}={int(m.group(1), 16):#x}')
-        else:
-            missing.append(u)
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         sys.exit('link failed:\n' + r.stderr[-1500:])
@@ -260,6 +262,8 @@ class Run:
         words = np.where(kind < 0.40, small, np.where(kind < 0.55, flt, np.where(kind < 0.60, special, ptr))).astype(np.uint32)
         uc.mem_write(ARENA, words.tobytes())
         self.rnd = rnd
+        self.rets = None
+        self.nargs = None
         if INIT:
             uc.mem_write(STUB, struct.pack('<II', 0x03E00008, 0))
             env = {'THIS': ARENA + 0x20000, 'ARENA': ARENA, 'STUB': STUB, 'uc': uc,
@@ -267,6 +271,10 @@ class Run:
                    'W16': lambda a, v: uc.mem_write(a, struct.pack('<H', v & 0xFFFF)),
                    'W8': lambda a, v: uc.mem_write(a, struct.pack('<B', v & 0xFF))}
             exec(INIT, env)
+            # optional RETS(name, n, args) -> $v0 for the n-th intercepted call (None keeps the default pointer)
+            self.rets = env.get('RETS')
+            # optional NARGS {callee: number of integer args to compare} (default: from the mangled name, else 1)
+            self.nargs = env.get('NARGS')
         for ra_, aa_, sz_ in self.alias:       # variables the TU defines itself start from the retail values
             uc.mem_write(aa_, bytes(uc.mem_read(ra_, sz_)))
         for r in range(32):
@@ -281,7 +289,8 @@ class Run:
 
     def setup_args(self, spec, rnd):
         uc = self.uc
-        ireg = [UC_MIPS_REG_4, UC_MIPS_REG_5, UC_MIPS_REG_6, UC_MIPS_REG_7]
+        # EE (SN o64-style) ABI: integer args in $a0-$a3, then $t0-$t3
+        ireg = [UC_MIPS_REG_4 + i for i in range(8)]
         freg = [UC_MIPS_REG_F12, UC_MIPS_REG_F13]
         ni = nf = 0
         for t in spec:
@@ -293,6 +302,8 @@ class Run:
                 val = rnd.randrange(0, 9)
             elif t == 'b':
                 val = rnd.randrange(0, 2)
+            elif t.startswith('='):                # fixed integer, e.g. =2
+                val = int(t[1:], 0)
             elif t == 'f':
                 fv = rnd.uniform(-10, 10)
                 if nf >= len(freg):
@@ -302,8 +313,8 @@ class Run:
                 continue
             else:
                 raise SystemExit(f'bad arg spec {t}')
-            if ni >= 4:
-                raise SystemExit('more than 4 integer arguments (stack arguments are not supported)')
+            if ni >= len(ireg):
+                raise SystemExit('more than 8 integer arguments (stack arguments are not supported)')
             uc.reg_write(ireg[ni], val)
             ni += 1
 
@@ -353,6 +364,8 @@ class Run:
             else:
                 ni = min(4, sum(1 for t in cs if t != 'f'))
                 nf = min(2, sum(1 for t in cs if t == 'f'))
+            if self.nargs and name in self.nargs:  # e.g. varargs C functions: up to 8 integer args ($a0-$a3, $t0-$t3)
+                ni = min(8, self.nargs[name])
             a = tuple(self.norm(uc.reg_read(UC_MIPS_REG_4 + i) & 0xFFFFFFFF) for i in range(ni))
             f12 = uc.reg_read(UC_MIPS_REG_F12) & 0xFFFFFFFF if nf >= 1 else 0
             f13 = uc.reg_read(UC_MIPS_REG_F13) & 0xFFFFFFFF if nf >= 2 else 0
@@ -360,6 +373,10 @@ class Run:
             n = len(self.calls)
             uc.reg_write(UC_MIPS_REG_2, ARENA + 0x100000 + 0x40 * (n % 64))
             uc.reg_write(UC_MIPS_REG_F0, 0)
+            if self.rets:
+                v = self.rets(name, n, a)
+                if v is not None:
+                    uc.reg_write(UC_MIPS_REG_2, v & 0xFFFFFFFF)
 
     def snapshot(self, segs):
         """Final contents of the arena and of the retail data/bss (everything the function could have changed)."""
