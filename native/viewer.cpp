@@ -84,6 +84,7 @@ int main(int argc, char **argv) {
 
     scene.collect(ram, lod);
     std::fprintf(stderr, "itens=%zu visitados=%u\n", scene.items.size(), scene.visited);
+    if (std::getenv("WOTM_UVSTAT")) scene.dumpUv(ram);
     scene.dumpSkinned(ram);
     if (!haveCam) {   // enquadra a cena (ignora o domo do ceu)
         float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};

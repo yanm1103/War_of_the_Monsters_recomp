@@ -452,6 +452,11 @@ public:
         std::vector<uint32_t> px;
         uint32_t w = 0, h = 0;
         if (decodeTex(ram, node, px, w, h)) {
+            if (std::getenv("WOTM_ALPHASTAT")) {
+                size_t a0 = 0, am = 0;
+                for (uint32_t c : px) { const uint32_t a = c >> 24; if (a == 0) ++a0; else if (a < 255) ++am; }
+                if (a0 || am) std::fprintf(stderr, "alpha tex=%u %ux%u transparente=%.0f%% parcial=%.0f%%\n", ram.u16(node + 0x50), w, h, 100.0 * a0 / px.size(), 100.0 * am / px.size());
+            }
             Image img{};
             img.data = px.data(); img.width = int(w); img.height = int(h); img.mipmaps = 1;
             img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
@@ -496,6 +501,20 @@ public:
         csList(ram, addr::csHPActiveList);
     }
 
+    // Diagnostico: faixa de UV por item texturizado (agrupada por tamanho da faixa).
+    void dumpUv(const Ram &ram) {
+        int shown = 0;
+        for (const DrawItem &it : items) {
+            const MeshData *md = mesh(ram, it.node);
+            if (!md || md->tris.empty() || !texKey(ram, it.node)) continue;
+            float u0 = 1e9f, u1 = -1e9f, v0 = 1e9f, v1 = -1e9f;
+            for (const Vtx &v : md->tris) { u0 = std::min(u0, v.u); u1 = std::max(u1, v.u); v0 = std::min(v0, v.v); v1 = std::max(v1, v.v); }
+            if ((u1 - u0 > 1.01f || v1 - v0 > 1.01f || u0 < -0.01f || v0 < -0.01f) && shown++ < 12)
+                std::fprintf(stderr, "uv node=%06x tex=%u u[%.2f %.2f] v[%.2f %.2f] tris=%zu\n", it.node, ram.u16(it.node + 0x50), u0, u1, v0, v1, md->tris.size() / 3);
+        }
+        std::fprintf(stderr, "uv fora de [0,1]: %d itens (mostrados ate 12)\n", shown);
+    }
+
     // Diagnostico: lista os itens skinned (no, triangulos, posicao no mundo, paleta achada?).
     void dumpSkinned(const Ram &ram) {
         for (const DrawItem &it : items) {
@@ -503,12 +522,17 @@ public:
             if (!md || !md->skinned) continue;
             std::fprintf(stderr, "skinned no=%06x tris=%zu pos=(%.0f %.0f %.0f) animPkt=%06x lod=%d pal=%06x\n", it.node, md->tris.size() / 3,
                          it.m.m[3][0], it.m.m[3][1], it.m.m[3][2], it.animPkt, it.lodIdx, palette(ram, it));
+            {
+                float u0 = 1e9f, u1 = -1e9f, v0 = 1e9f, v1 = -1e9f;
+                for (const Vtx &v : md->tris) { u0 = std::min(u0, v.u); u1 = std::max(u1, v.u); v0 = std::min(v0, v.v); v1 = std::max(v1, v.v); }
+                std::fprintf(stderr, "   uv u[%.2f %.2f] v[%.2f %.2f] abe=%d\n", u0, u1, v0, v1, int(md->abe));
+            }
             const uint64_t t0v = objectTex0(ram, it.node);
             const gs::Tex0 t0 = gs::Tex0::decode(t0v);
             const uint32_t ptr = ram.u32(addr::texInfo + 16 * ram.u16(it.node + 0x50)) & 0x0FFFFFFF;
             std::fprintf(stderr, "   texId=%u tex0=%016llx cbp=%u csa=%u base=%u psm=%u ptr=%06x hasPal=%d\n", ram.u16(it.node + 0x50),
                          (unsigned long long)t0v, t0.cbp, t0.csa, ram.u32(addr::tempVramTexAddr) >> 6, ram.u8(ptr + 0x2B), ptr,
-                         int(rtxPal.count(t0.cbp - (ram.u32(addr::tempVramTexAddr) >> 6))));
+                         int(rtxPal.count(t0.cbp)));
         }
     }
 
@@ -529,11 +553,24 @@ public:
 
     // Desenha com o raylib (deve estar dentro de BeginMode3D).
     void draw(const Ram &ram, bool wire = false) {
+        // Teste de alfa: pixels transparentes (sombras, helices, grades) nao podem escrever profundidade nem cor.
+        if (!alphaShaderTried_) {
+            alphaShaderTried_ = true;
+            static const char *fs =
+                "#version 330\n"
+                "in vec2 fragTexCoord; in vec4 fragColor;\n"
+                "uniform sampler2D texture0; uniform vec4 colDiffuse; out vec4 finalColor;\n"
+                "void main() { vec4 t = texture(texture0, fragTexCoord) * fragColor * colDiffuse; if (t.a < 0.06) discard; finalColor = t; }\n";
+            alphaShader_ = LoadShaderFromMemory(nullptr, fs);
+        }
+        const bool useShader = !wire && alphaShader_.id > 0;
+        if (useShader) BeginShaderMode(alphaShader_);
         rlDisableDepthTest();   // o ceu e desenhado primeiro, centrado no olho, sem profundidade
         drawList(ram, sky, wire);
         rlDrawRenderBatchActive();
         rlEnableDepthTest();
         drawList(ram, items, wire);
+        if (useShader) EndShaderMode();
     }
 
     void drawList(const Ram &ram, const std::vector<DrawItem> &list, bool wire) {
@@ -588,6 +625,8 @@ private:
     std::unordered_map<uint64_t, Texture2D> tex_;
     std::vector<uint32_t> seen_;   // nos ja visitados neste quadro (ciclos / DAG)
     int lod_ = -1;
+    Shader alphaShader_{};
+    bool alphaShaderTried_ = false;
     uint32_t resSig_ = 0;   // assinatura dos recursos em fileStatus ja carregados (loadResources)
     bool eyeOk_ = false;
     float eye_[3] = {0, 0, 0};
