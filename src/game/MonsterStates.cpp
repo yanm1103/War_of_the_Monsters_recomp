@@ -61,6 +61,8 @@ public:
     void playShockedSound(void);
     void playVictorySound(int anim);
     void playImpalerRemoveSound(void);
+    void playGeneratorTazerSound(void);
+    void playGrappleThrowSound(void);
 };
 /* Animation overlay blend (layout still unknown; `active` is the byte cancelOverride checks). */
 class AnimBlend {
@@ -227,6 +229,61 @@ public:
     void handlePreemption(MonsterState *next);
 };
 typedef char _size_StateImpaled[sizeof(StateImpaled) == 0x34 ? 1 : -1];
+/* Base of the attack states; its constructor zeroes the two words below (meaning not seen yet). */
+class AttackState : public MonsterState {
+public:
+    int unk14; /* 0x14 */
+    int unk18; /* 0x18 */
+};
+/* Gun attack (Monster+0x10E90): animation 0xF4. */
+class StateGunAttack : public AttackState {
+public:
+    float blendTime; /* 0x1C: 100 */
+    float speed;     /* 0x20: 1.0 */
+    float unk24;     /* 0x24: 0.5, used by update (asm) */
+    int unk28;       /* 0x28: zeroed on entry */
+
+    int transitionOK(void);
+    void transitionInto(void);
+};
+typedef char _size_StateGunAttack[sizeof(StateGunAttack) == 0x2C ? 1 : -1];
+/* Tazer attack (Monster+0x10D50): animation 0xF4 plus electric arcs from the monster to `target`. */
+class StateTazerAttack : public AttackState {
+public:
+    float blendTime; /* 0x1C: 100 */
+    float speed;     /* 0x20: 1.0 */
+    float unk24;     /* 0x24: 0.5, used by update (asm) */
+    int unk28;       /* 0x28: zeroed on entry */
+    int arcsLeft;    /* 0x2C: 5 */
+    _fvector target; /* 0x30 */
+
+    int transitionOK(void);
+    void transitionInto(void);
+    int launchProjectile(void);
+    static int launchProjectile(void *self);
+};
+typedef char _size_StateTazerAttack[sizeof(StateTazerAttack) == 0x40 ? 1 : -1];
+/* Two-handed throw (Monster+0x1074C): throwing a two-handed pickup with mapped action 0xA (animation 0x37) or 0xB
+ * (animation 0x38, rigid body pickups only). */
+class StateTwoHandedThrow : public AttackState {
+public:
+    float blendA;  /* 0x1C: into animation 0x37 (250) */
+    float unk20;   /* 0x20: 0.35, used by update (asm) */
+    float blendB;  /* 0x24: into animation 0x38 (250) */
+    float unk28;   /* 0x28: 0.9 */
+    float unk2C;   /* 0x2C: 80 */
+    float unk30;   /* 0x30: 500 */
+    int anim;      /* 0x34 */
+    char pad38[0x44 - 0x38];
+
+    int transitionOK(void);
+    int transitionFeasible(void);
+    void transitionInto(void);
+};
+typedef char _size_StateTwoHandedThrow[sizeof(StateTwoHandedThrow) == 0x44 ? 1 : -1];
+void electricArc(_fvector *from, _fvector *to, unsigned colorA, unsigned colorB, float a, float b, float c, float d, int n,
+                 unsigned seed, unsigned e);
+extern "C" int rand(void);
 #define ST_COUNTERED 0x11114
 #define ST_BLOCK 0x7DA0
 #define VCALL_INT(st, slot) \
@@ -562,8 +619,18 @@ INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", findVictor__10StateDeath);
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", handlePreemption__10StateDeathP12MonsterState);
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", setKiller__10StateDeathP7Monster);
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", __14StateGunAttack);
-INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", transitionOK__14StateGunAttack);
-INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", transitionInto__14StateGunAttack);
+/* Needs the gun animation (0xF4). */
+int StateGunAttack::transitionOK(void)
+{
+    return owner->m_anims[0xF4].a != 0;
+}
+void StateGunAttack::transitionInto(void)
+{
+    frames = 0;
+    animationSetSpeed(owner->m_anims[0xF4], speed);
+    animationTransitionInto(owner->m_anims[0xF4], blendTime, 1, 1);
+    unk28 = 0;
+}
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", update__14StateGunAttack);
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", __16StateGetupAttack);
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", transitionOK__16StateGetupAttack);
@@ -899,9 +966,62 @@ void StateThrow::cancelOverride(void)
     }
 }
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", __19StateTwoHandedThrow);
+/* Only on mapped action 0xA or 0xB, and then if transitionFeasible agrees. */
+#ifdef NON_MATCHING
+/* untuned: 3/21 words; tools/difftest.py 200/200 */
+int StateTwoHandedThrow::transitionOK(void)
+{
+    int ok = 0;
+
+    if (owner->m_padFlags.curMappedAction == 0xA || owner->m_padFlags.curMappedAction == 0xB)
+        ok = VCALL_INT(this, VT_TRANSITION_FEASIBLE) != 0;
+    return ok;
+}
+#else
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", transitionOK__19StateTwoHandedThrow);
+#endif
+/* Attacks enabled, animation 0x37 and a two-handed pickup in hand; action 0xB also needs a rigid body pickup. */
+#ifdef NON_MATCHING
+/* untuned: 3/34 words (retail tests the 64-bit pickup bits with dsll/dsra32); tools/difftest.py 200/200 */
+int StateTwoHandedThrow::transitionFeasible(void)
+{
+    Monster *m = owner;
+    unsigned long long bits;
+
+    if (!m->m_attacksEnabled || m->m_anims[0x37].a == 0 || m->m_pickup == 0)
+        return 0;
+    bits = (*(Pickup **)m->m_pickup)->bits;
+    if (!((bits >> 1) & 1))
+        return 0;
+    if (m->m_padFlags.curMappedAction == 0xB)
+        return (bits >> 2) & 1 ? 1 : 0;
+    return 1;
+}
+#else
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", transitionFeasible__19StateTwoHandedThrow);
-INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", transitionInto__19StateTwoHandedThrow);
+#endif
+/* Zeroed tunables get their defaults back; action 0xA plays animation 0x37, anything else 0x38. */
+void StateTwoHandedThrow::transitionInto(void)
+{
+    frames = 0;
+    if (unk2C == 0.0f)
+        unk2C = 80.0f;
+    if (unk30 == 0.0f)
+        unk30 = 500.0f;
+    if (blendB == 0.0f)
+        blendB = 250.0f;
+    if (unk28 == 0.0f)
+        unk28 = 0.9f;
+    if (owner->m_padFlags.curMappedAction == 0xA) {
+        anim = 0x37;
+        animationTransitionInto(owner->m_anims[0x37], blendA, 1, 1);
+    } else {
+        anim = 0x38;
+        animationTransitionInto(owner->m_anims[0x38], blendB, 1, 1);
+    }
+    owner->m_unk49 = 1;
+    ((MonsterSound *)owner->m_sound)->playGrappleThrowSound();
+}
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", update__19StateTwoHandedThrow);
 void handlePreemption__19StateTwoHandedThrowP12MonsterState(void *self) __asm__("handlePreemption__19StateTwoHandedThrowP12MonsterState");
 void handlePreemption__19StateTwoHandedThrowP12MonsterState(void *self)
@@ -976,10 +1096,31 @@ INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", transitionInto__16StateStompA
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", update__16StateStompAttack);
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", startChain__16StateStompAttack);
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", __16StateTazerAttack);
-INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", transitionOK__16StateTazerAttack);
-INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", transitionInto__16StateTazerAttack);
+/* Needs the attack animation (0xF4). */
+int StateTazerAttack::transitionOK(void)
+{
+    return owner->m_anims[0xF4].a != 0;
+}
+void StateTazerAttack::transitionInto(void)
+{
+    frames = 0;
+    animationSetSpeed(owner->m_anims[0xF4], speed);
+    animationTransitionInto(owner->m_anims[0xF4], blendTime, 1, 1);
+    unk28 = 0;
+    ((MonsterSound *)owner->m_sound)->playGeneratorTazerSound();
+}
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", update__16StateTazerAttack);
+/* One electric arc from the monster (owner + 0x3E40) to target; as a task it reruns while arcs are left. */
+#ifdef NON_MATCHING
+/* untuned: 26/42 words; tools/difftest.py 200/200 */
+int StateTazerAttack::launchProjectile(void)
+{
+    electricArc((_fvector *)((char *)owner + 0x3E40), &target, 0x80FF1B3B, 0x80FFFF80, 0.0f, 15.0f, 0.0f, 0.25f, 3, rand(), 2);
+    return (arcsLeft-- > 0) << 1;
+}
+#else
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", launchProjectile__16StateTazerAttack);
+#endif
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", __17StateShieldAttack);
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", transitionOK__17StateShieldAttack);
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", transitionFeasible__17StateShieldAttack);
@@ -1415,7 +1556,11 @@ void setDamage__12StateShockedf(void *self, float v)
 }
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", __tf16StateStompAttack);
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", __tf16StateTazerAttack);
-INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", launchProjectile__16StateTazerAttackPv);
+/* Task callback form of launchProjectile. */
+int StateTazerAttack::launchProjectile(void *self)
+{
+    return ((StateTazerAttack *)self)->launchProjectile();
+}
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", __tf17StateShieldAttack);
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", __tf15StateBigTakeHit);
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", __tf12StateVictory);
