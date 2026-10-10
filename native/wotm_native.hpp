@@ -165,8 +165,11 @@ inline uint32_t decodePacket(const Ram &ram, uint32_t pp, MeshData &md, bool fir
             std::vector<bool> restart(n + 1, false);
             for (uint32_t k : adc) if (k < n) restart[k] = true;
             std::vector<Vtx> strip;
+            // ADC (bit de GIF no vertice k): o GS NAO desenha o triangulo que termina em k, mas a tira continua (a convencao de
+            // "novo strip" e ADC nos dois primeiros vertices). Tratar como reinicio perdia um triangulo por reinicio (furos).
             auto emit = [&]() {
                 for (size_t k = 2; k < strip.size(); ++k) {
+                    if (k < restart.size() && restart[k]) continue;
                     const Vtx &a = strip[(k & 1) ? k - 1 : k - 2];
                     const Vtx &b = strip[(k & 1) ? k - 2 : k - 1];
                     const Vtx &c = strip[k];
@@ -178,7 +181,6 @@ inline uint32_t decodePacket(const Ram &ram, uint32_t pp, MeshData &md, bool fir
                 strip.clear();
             };
             for (uint32_t k = 0; k < n; ++k) {
-                if (restart[k]) emit();
                 const uint32_t j = idx[k];
                 const P3 p = j < pos.size() ? pos[j] : P3{0, 0, 0, 1.f, 0, 0, 0};
                 Vtx v{};
