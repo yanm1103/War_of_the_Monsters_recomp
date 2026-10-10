@@ -478,7 +478,7 @@ public:
         seen_.clear();
         lod_ = maxLod;
         eyeOk_ = false;
-        if (lod_ < 0) {
+        {
             const GameCamera gc = readGameCamera(ram, 0);
             eyeOk_ = gc.ok;
             for (int c = 0; c < 3; ++c) eye_[c] = gc.pos[c];
@@ -598,11 +598,16 @@ public:
             const unsigned tid = (wire || !cur) ? 0 : textureId(ram, it.node);
             const auto &t = md->tris;
             const uint32_t pal = md->skinned ? palette(ram, it) : 0;
+            // zBufferFudge (objeto +0x28): multiplicador da profundidade (1,0 = nada). Escalar o vertice ao longo do raio a partir do
+            // olho muda so a profundidade, nao a posicao na tela: resolve o z-fighting de camadas coplanares.
+            const float fz = ram.f32(it.node + 0x28);
+            const bool fudge = !wire && eyeOk_ && fz > 0.5f && fz < 2.f && fz != 1.f;
             for (size_t k = 0; k + 2 < t.size(); k += 3) {
                 float p[3][3];
                 for (int c = 0; c < 3; ++c) {
                     if (pal) skinVertex(ram, pal, it.m, t[k + c], p[c]);
                     else xform(it.m, t[k + c].x, t[k + c].y, t[k + c].z, p[c]);
+                    if (fudge) for (int a = 0; a < 3; ++a) p[c][a] = eye_[a] + (p[c][a] - eye_[a]) * fz;
                 }
                 for (int c = 0; c < 3; ++c) {
                     const int cs[2] = {c, (c + 1) % 3};
