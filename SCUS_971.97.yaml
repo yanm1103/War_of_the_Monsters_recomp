@@ -210,7 +210,7 @@ segments:
       - [0x0F9290, asm, common/electric]  # c++, 5 funcs, name: guess
       - [0x0FA228, cpp, common/file]  # c++, 44 funcs, name: guess
       - [0x0FBBD8, cpp, common/fog]  # c++, 16 funcs, name: guess
-      - [0x0FC3D0, asm, common/font]  # c++, 30 funcs, name: guess
+      - [0x0FC3D0, cpp, common/font]  # c++, 30 funcs, name: guess
       - [0x0FD650, cpp, common/GsPkt]  # c++, 4 funcs, name: guess
       - [0x0FD7F8, asm, common/hd]  # c++, 16 funcs, name: guess
       - [0x0FE980, cpp, common/hdHat]  # c++, 3 funcs, name: manual
@@ -226,7 +226,7 @@ segments:
       - [0x109D88, cpp, common/hieri]  # c++, 3 funcs, name: manual
       - [0x109EB8, cpp, common/hoser]  # c++, 10 funcs, name: guess
       - [0x10A480, asm, common/IncognitoEntertainmentGS]  # c++, 11 funcs, name: guess
-      - [0x10AD60, asm, common/input]  # c++, 29 funcs, name: guess
+      - [0x10AD60, cpp, common/input]  # c++, 29 funcs, name: guess
       - [0x10C5D8, cpp, common/light]  # c++, 3 funcs, name: guess
       - [0x10C6C0, asm, common/mathf]  # c++, 84 funcs, name: guess
       - [0x10F180, cpp, common/vu]  # c++, 6 funcs, name: guess
@@ -243,7 +243,7 @@ segments:
       - [0x11DCE8, cpp, common/PointToolKit]  # c++, 15 funcs, name: guess
       - [0x11E090, cpp, common/videocb]  # c++, 3 funcs, name: manual
       - [0x11E3C0, cpp, common/readbuf]  # c++, 6 funcs, name: manual
-      - [0x11E4D0, asm, common/resetcom]  # c++, 18 funcs, name: guess
+      - [0x11E4D0, cpp, common/resetcom]  # c++, 18 funcs, name: guess
       - [0x11EF08, asm, common/RigidBody]  # c++, 37 funcs, name: guess
       - [0x120510, asm, common/ScreenPolys]  # c++, 19 funcs, name: guess
       - [0x121090, cpp, common/ShiftJIS]  # c++, 7 funcs, name: guess
@@ -597,20 +597,20 @@ segments:
       - [0x5F37D0, .rodata, common/CsPool]
       - [0x5F3870, .rodata, common/dbs]
       - [0x5F3B30, .rodata, common/file]
-      - [0x5F3D80, rodata, common/font]
+      - [0x5F3D80, .rodata, common/font]
       - [0x5F3E30, .rodata, common/hdSphere]
       - [0x5F3E50, rodata, common/hdTraverse]
       - [0x5F3FA0, rodata, common/texm]
       - [0x5F4058, rodata, common/ps]
       - [0x5F40B0, .rodata, common/hoser]
-      - [0x5F40D0, rodata, common/input]
+      - [0x5F40D0, .rodata, common/input]
       - [0x5F4420, rodata, common/mathf]
       - [0x5F4480, rodata, common/MpegMovie]
       - [0x5F44E0, rodata, common/partdraw]
       - [0x5F4620, rodata, common/particle]
       - [0x5F4720, .rodata, common/PointToolKit]
       - [0x5F4810, .rodata, common/videocb]
-      - [0x5F4830, rodata, common/resetcom]
+      - [0x5F4830, .rodata, common/resetcom]
       - [0x5F4A70, .rodata, common/ShiftJIS]
       - [0x5F4A88, .rodata, common/str]
       - [0x5F4B40, rodata, common/blit]
