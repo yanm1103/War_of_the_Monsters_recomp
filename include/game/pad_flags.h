@@ -7,7 +7,9 @@ class GamePad;
 
 /* One per-frame snapshot of the pad state (94 bytes); only the fields seen so far are named. */
 struct PadEntry {
-    char data[0x16];
+    char data[0xA];
+    unsigned short face[4]; /* 0x0A..0x10: four buttons, probably the face buttons; a fresh press of any of them is a struggle in StateImpaled */
+    char pad12[0x16 - 0x12];
     unsigned short f16, f18, f1A, f1C, f1E, f20;
     short f22, f24, f26, f28;
     char pad2A[0x2E - 0x2A];
@@ -23,6 +25,8 @@ struct PadEntry {
     signed char f5C; /* retail reads it with lb */
     char pad5D;
 };
+typedef char _size_PadEntry[sizeof(PadEntry) == 0x5E ? 1 : -1];
+typedef char _at_PadEntry_face[(unsigned)&((PadEntry *)0)->face == 0xA ? 1 : -1];
 class Monster;
 
 enum ButtonActions { BUTTON_ACTION_NONE = 20 };

@@ -60,6 +60,7 @@ public:
     void playTauntSound(void);
     void playShockedSound(void);
     void playVictorySound(int anim);
+    void playImpalerRemoveSound(void);
 };
 /* Animation overlay blend (layout still unknown; `active` is the byte cancelOverride checks). */
 class AnimBlend {
@@ -205,6 +206,27 @@ public:
     static int fade(void *self);
 };
 typedef char _size_StateVictory[sizeof(StateVictory) == 0x20 ? 1 : -1];
+/* Impaled (Monster+0x106E0): stuck on an impaler pickup, the player mashes to break free. `hold` starts at 100, regains
+ * regenRate per field and loses struggleCost per fresh press of any of the four PadEntry::face buttons; at 0 the monster
+ * pulls the impaler out (animation 0x90) and ends up holding it. */
+class StateImpaled : public MonsterState {
+public:
+    float blendIn;       /* 0x14: into the stuck loop (animation 0x8E) */
+    float struggleBlend; /* 0x18: into a struggle animation (0x10F/0x110) */
+    float pullBlend;     /* 0x1C: into the pull-out (0x90) */
+    float regenRate;     /* 0x20: hold regained per field */
+    float struggleCost;  /* 0x24: hold lost per press */
+    int lastPressed;     /* 0x28 */
+    int anim;            /* 0x2C */
+    float hold;          /* 0x30 */
+
+    int transitionOK(void);
+    void transitionInto(void);
+    void update(void);
+    void handleCollis(_hdResult &r);
+    void handlePreemption(MonsterState *next);
+};
+typedef char _size_StateImpaled[sizeof(StateImpaled) == 0x34 ? 1 : -1];
 #define ST_COUNTERED 0x11114
 #define ST_BLOCK 0x7DA0
 #define VCALL_INT(st, slot) \
@@ -550,11 +572,104 @@ INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", update__16StateGetupAttack);
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", enterSubState__16StateGetupAttackQ216StateGetupAttack8SubState);
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", acceptHit__16StateGetupAttackR8HitEvent);
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", __12StateImpaled);
-INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", transitionOK__12StateImpaled);
+/* Needs the stuck, struggle and pull-out animations (0x8E, 0x8F, 0x90). */
+int StateImpaled::transitionOK(void)
+{
+    Monster *m = owner;
+
+    if (m->m_anims[0x8E].a == 0 || m->m_anims[0x8F].a == 0 || m->m_anims[0x90].a == 0)
+        return 0;
+    return 1;
+}
+/* In the central level's normal mode player 1 gets the tutorial text box 0x1C; otherwise player 1 (if alive) gets HUD
+ * message 0x24. */
+#ifdef NON_MATCHING
+/* untuned: 51/79 words (retail lays out the early return differently); tools/difftest.py 200/200 */
+void StateImpaled::transitionInto(void)
+{
+    frames = 0;
+    ((StateThrow *)STATE_AT(owner, ST_THROW))->cancelOverride();
+    owner->m_attacksEnabled = 0;
+    anim = 0x8E;
+    animationLoop(owner->m_anims[0x8E], true);
+    animationTransitionInto(owner->m_anims[anim], blendIn, 1, 1);
+    hold = 100.0f;
+    if (game->m_gameMode == 1 && game->m_levelId == 1 && owner->m_playerNum == 1) {
+        game->m_huds[0].addTextBoxMessage(0x1C);
+        return;
+    }
+    if (owner->m_playerNum == 1 && owner->m_health > 0.0f)
+        game->m_huds[owner->m_cameraView].addMessage(0x24, 0);
+}
+#else
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", transitionInto__12StateImpaled);
+#endif
+#ifdef NON_MATCHING
+/* untuned: 113/220 words; tools/difftest.py 200/200 */
+void StateImpaled::update(void)
+{
+    PadEntry *p;
+    int pressed;
+    int done;
+
+    MonsterState::update();
+    if (owner->m_unk1E8 < 0.0f)
+        owner->m_unk1B8 = 1.5f;
+    ((MonsterDynamics *)((char *)owner + 0x100))->updateTurn(false);
+    ((MonsterDynamics *)((char *)owner + 0x100))->updateMove(false);
+    if (anim == 0x90) {
+        if (animationGetCurrentPercent(owner->m_anims[0x90]) >= 0.99f)
+            owner->enterNewState(STATE_AT(owner, ST_IDLE));
+        return;
+    }
+    hold = hold + (float)timerGetFieldsLastFrame() * regenRate;
+    if (hold > 100.0f)
+        hold = 100.0f;
+    pressed = 0;
+    if (owner->m_padFlags[0]->face[2] != 0 || owner->m_padFlags[0]->face[3] != 0 ||
+        owner->m_padFlags[0]->face[0] != 0 || owner->m_padFlags[0]->face[1] != 0)
+        pressed = 1;
+    if (pressed && lastPressed == 0) {
+        hold = hold - struggleCost;
+        if (anim == 0x8E) {
+            anim = mathfRand(0, 1) + 0x10F;
+            animationSetSpeed(owner->m_anims[anim], 1.5f);
+            animationTransitionInto(owner->m_anims[anim], struggleBlend, 1, 1);
+        }
+    } else {
+        done = 0;
+        if (animationGetCurrentPercent(owner->m_anims[anim]) >= 1.0f)
+            done = !animationIsRunning(owner->m_anims[0x8E]);
+        if (done) {
+            anim = 0x8E;
+            animationTransitionInto(owner->m_anims[0x8E], blendIn, 0, 1);
+        }
+    }
+    lastPressed = pressed;
+    if (hold <= 0.0f) {
+        anim = 0x90;
+        animationTransitionInto(owner->m_anims[0x90], pullBlend, 1, 1);
+        owner->m_pickup = owner->m_impaler != 0 ? owner->m_impaler : owner->m_reverseImpaler;
+        LevelPickups::grabPickup(*(PickupIter *)&owner->m_pickup, owner->m_id);
+        owner->detachPickupImpaler(false);
+        ((MonsterSound *)owner->m_sound)->playImpalerRemoveSound();
+    }
+}
+#else
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", update__12StateImpaled);
-INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", handleCollis__12StateImpaledR9_hdResult);
-INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", handlePreemption__12StateImpaledP12MonsterState);
+#endif
+void StateImpaled::handleCollis(_hdResult &r)
+{
+    ((StateStunned *)STATE_AT(owner, ST_STUNNED))->handleCollis(r);
+}
+/* Leaving for anything but states 0x2D and 0x21 lets go of the impaler. */
+void StateImpaled::handlePreemption(MonsterState *next)
+{
+    owner->m_attacksEnabled = 1;
+    owner->m_unk1B8 = 1.0f;
+    if (next->id != 0x2D && next->id != 0x21)
+        owner->detachPickupImpaler(true);
+}
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", __12StateJavelin);
 /* Attacks enabled, the javelin animation, a fresh press of the action button and a type 7 pickup in hand. */
 #ifdef NON_MATCHING
