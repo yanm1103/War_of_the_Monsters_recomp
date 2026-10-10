@@ -122,7 +122,7 @@ INCLUDE_ASM("asm/nonmatchings/game/MovementStates", enterSubState__9StateDashQ29
 INCLUDE_ASM("asm/nonmatchings/game/MovementStates", handleCollis__9StateDashR9_hdResult);
 void StateDash::handlePreemption(MonsterState *next)
 {
-    ((MonsterSound *)((char *)owner + 0x1A7C))->terminateDashSound();
+    ((MonsterSound *)owner->m_sound)->terminateDashSound();
     *(int *)((char *)owner + 0x484) = 1;
 }
 INCLUDE_ASM("asm/nonmatchings/game/MovementStates", transitionInto__11JumpFlyBase);
