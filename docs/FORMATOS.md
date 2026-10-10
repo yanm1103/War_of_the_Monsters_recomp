@@ -153,8 +153,8 @@ Nas fases aparecem as classes 0 (349), 1 (1041), 2 (109), 3 (28) e 4 (39). O `De
 também gravado nos bits 7..17 da primeira palavra do `INTERACTIVE_STATE`), `hitPointClass` (`+0x30`), a posição (`+0x40`), a matriz (`+0x50`) e o estado pedido (`+0x90`).
 
 **Regra de troca** (`takeHit` -> `GenericTakeHit` -> `ChangeState`):
-1. Um golpe só tira vida se o dano for **maior** que o dano mínimo (ou se o `HitEvent::s_takeHitInfo` tiver `source` 5 e `subtype` 15 ou 16). Exceções por id: 0x1A90..0x1B57 não perdem vida; no modo 6, os ids
-   0x2712 e 0x2715..0x2718 (Three Mile) só aceitam dano de monstro do jogador (?); no modo 7, o id 0x2762 só aceita dano exatamente 100.
+1. Um golpe só tira vida se o dano for **maior** que o dano mínimo (ou se o `HitEvent::s_takeHitInfo` tiver `source` 5 e `subtype` 15 ou 16). Exceções por id: 0x1A90..0x1B57 não perdem vida; na fase 6 (`TheGame::m_levelId`, Three Mile), os ids
+   0x2712 e 0x2715..0x2718 (respiradouro e chaminés) só aceitam dano de monstro do jogador (?); na fase 7 (San Francisco), o id 0x2762 só aceita dano exatamente 100.
 2. `q = (int)vida * 65535 / (int)vidaMáxima` (fração da vida em 1/65535). O novo estado é o **primeiro** `i` com `damageThreshold[i] < q`, mas o laço para em `numKids - 1` e em
    `estadoAtual + 1`: **um golpe avança no máximo um estado**. Nas fases os limiares típicos são `62258` (95%), `49151` (75%), `32767` (50%) e `0`; `65534` faz o estado mudar no primeiro dano.
 3. Se `i` passou do atual: grava `+0x90 = i`, executa as `actions` do estado `i`, derruba os monstros que estavam em cima (`shedMonsters`), dá 50 tokens ("Destructibles") ao monstro que bateu e
