@@ -2,6 +2,7 @@
 // PS2X_DUMP_RAM) e desenha a cena com raylib, com camera livre. Serve para iterar sem o emulador.
 //
 //   viewer ram.bin [--vram vram.bin] [--shot saida.png] [--cam x y z yaw pitch] [--lod n] [--wire]
+// Recursos: por padrao le LVL/MON de `disc/` (--disc <dir>) conforme fileStatus; --rtx <arquivo> forca um RTX de nivel.
 // Sem --vram, procura vram_<n>.bin ao lado de ram_<n>.bin.
 // Teclas: botao direito + mouse = olhar; WASD = mover (Shift = rapido); Q/E = descer/subir; Tab = arame; L = LOD; F12 = captura.
 #include <cstdlib>
@@ -36,7 +37,7 @@ int main(int argc, char **argv) {
     const char *shot = nullptr;
     std::string vramPath;
     const char *texdump = nullptr;
-    std::string rtxPath;
+    std::string rtxPath, discRoot = "disc";
     bool wire = false, haveCam = false;
     int lod = -1;   // -1 = automatico por distancia
     bool useFree = false;
@@ -47,6 +48,7 @@ int main(int argc, char **argv) {
         else if (a == "--wire") wire = true;
         else if (a == "--free") useFree = true;
         else if (a == "--rtx" && i + 1 < argc) rtxPath = argv[++i];
+        else if (a == "--disc" && i + 1 < argc) discRoot = argv[++i];
         else if (a == "--texdump" && i + 1 < argc) texdump = argv[++i];
         else if (a == "--vram" && i + 1 < argc) vramPath = argv[++i];
         else if (a == "--lod" && i + 1 < argc) lod = std::atoi(argv[++i]);
@@ -67,8 +69,12 @@ int main(int argc, char **argv) {
     wotm::Ram ram{data.data(), data.size()};
     wotm::Scene scene;
     scene.vram = {vram.data(), vram.size()};
-    if (!rtxPath.empty()) {
-        const bool ok = scene.loadRtx(rtxPath.c_str());
+    if (rtxPath.empty()) {   // padrao: nivel + monstros do jogo, achados por fileStatus (nomes e bases das paletas) no disco extraido
+        std::string log;
+        const bool ok = scene.loadResources(ram, discRoot, &log);
+        std::fprintf(stderr, "recursos (%s): %s -> %s (%zu paletas)\n", discRoot.c_str(), log.c_str(), ok ? "ok" : "falhou", scene.rtxPal.size());
+    } else {
+        const bool ok = scene.loadRtx(rtxPath.c_str(), ram.u32(wotm::addr::tempVramTexAddr) >> 6);
         std::fprintf(stderr, "rtx %s: %s (%zu paletas)\n", rtxPath.c_str(), ok ? "ok" : "falhou", scene.rtxPal.size());
     }
 

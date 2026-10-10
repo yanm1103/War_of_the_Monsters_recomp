@@ -12,7 +12,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cctype>
 #include <cstring>
+#include <string>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -47,6 +49,7 @@ constexpr uint32_t worldToScreenMat = 0x006E1FD0; // 5 x 0x40
 constexpr uint32_t csActiveList = 0x0043A2C0;     // CsPool::m_activeList (CsNode: cs@0, next@4)
 constexpr uint32_t csHPActiveList = 0x0043A2E0;   // CsPool::m_HPActiveList
 constexpr uint32_t tempVramTexAddr = 0x006F8818;  // fim dos recursos (.RTX) na VRAM, em palavras; >> 6 = bloco base das paletas
+constexpr uint32_t fileStatus = 0x00445390;      // FileStatus: resAddr@0x78, resLoaded@0xB0, names[14][9]@0xB1, maxTexAddr[14]@0x14C
 constexpr uint32_t texInfo = 0x0050F100;         // texInfo[1000] x 16: [0] = pacote de upload da textura (RAM), [4] = residencia/VRAM
 }
 
@@ -310,10 +313,48 @@ public:
     // Paletas da fase, lidas do `.RTX` do disco: entradas de `(palavra0 >> 2) * 16` bytes com cabecalho de 16 bytes (descritor GS
     // em +8: DBP relativo no meia-palavra +0xA, TW/TH nos bits 40..47) e o corpo em ordem logica de paleta (entrada i = palavra i):
     // 16x16 CT32 = 256 cores, 8x2 CT32 = 16 cores. O TEX0.CBP do objeto e `base + DBP`, com base = tempVramTexAddr >> 6.
+    // A chave e o CBP ABSOLUTO (base do arquivo + DBP). Base do nivel = tempVramTexAddr >> 6; a do monstro i = fileStatus.maxTexAddr[i-1]
+    // (texmResInit empilha os arquivos .RTX na ordem em que o Shell os carregou: nivel, jogadores, IAs).
     std::unordered_map<uint32_t, std::vector<uint32_t>> rtxPal;
 
-    bool loadRtx(const char *path) {
+    void clearRtx() { rtxPal.clear(); }
+
+    // Carrega o nivel e os monstros do jogo atual a partir do disco extraido (`root` contem LVL/ e MON/). Idempotente: so refaz quando
+    // os nomes/bases em fileStatus mudam. Devolve verdadeiro se achou ao menos o arquivo do nivel.
+    bool loadResources(const Ram &ram, const std::string &root, std::string *log = nullptr) {
+        const uint32_t fs = addr::fileStatus;
+        const int n = ram.u8(fs + 0xB0);
+        if (n < 1 || n > 14) return false;
+        uint32_t sig = ram.u32(addr::tempVramTexAddr) * 2654435761u;
+        std::vector<std::string> names;
+        names.resize(size_t(n));
+        for (int i = 0; i < n; ++i) {
+            for (int c = 0; c < 8; ++c) {
+                const char ch = char(ram.u8(fs + 0xB1 + 9 * i + c));
+                if (!ch) break;
+                names[size_t(i)] += char(std::toupper(static_cast<unsigned char>(ch)));
+            }
+            sig = (sig ^ ram.u16(fs + 0x14C + 2 * i)) * 16777619u;
+            for (char ch : names[size_t(i)]) sig = (sig ^ uint8_t(ch)) * 16777619u;
+        }
+        if (resSig_ == sig && !rtxPal.empty()) return true;
+        if (names[0].empty()) return false;
+        std::string sep = root.empty() || root.back() == '/' || root.back() == '\\' ? "" : "/";
         rtxPal.clear();
+        bool lvl = loadRtx((root + sep + "LVL/" + names[0] + ".RTX").c_str(), ram.u32(addr::tempVramTexAddr) >> 6);
+        if (log) *log = names[0] + (lvl ? "" : " (nao achado)");
+        for (int i = 1; i < n; ++i) {
+            if (names[size_t(i)].empty()) continue;
+            const bool ok = loadRtx((root + sep + "MON/" + names[size_t(i)] + ".RTX").c_str(), ram.u16(fs + 0x14C + 2 * (i - 1)), true);
+            if (log) *log += " " + names[size_t(i)] + (ok ? "" : "(?)");
+        }
+        invalidate();
+        resSig_ = sig;
+        return lvl;
+    }
+
+    bool loadRtx(const char *path, uint32_t base, bool append = false) {
+        if (!append) rtxPal.clear();
         std::vector<uint8_t> raw;
         if (FILE *f = std::fopen(path, "rb")) {
             std::fseek(f, 0, SEEK_END);
@@ -341,7 +382,7 @@ public:
         } else {
             data = raw;
         }
-        size_t off = 0;
+        size_t off = 0, added = 0;
         while (off + 16 <= data.size()) {
             uint32_t w[4];
             std::memcpy(w, data.data() + off, 16);
@@ -353,11 +394,12 @@ public:
             if (psm == 0 && ((tw == 4 && th == 4) || (tw == 3 && th == 1))) {
                 std::vector<uint32_t> p((sz - 16) / 4);
                 std::memcpy(p.data(), data.data() + off + 16, p.size() * 4);
-                rtxPal[(w[2] >> 16) & 0xFFFF] = std::move(p);
+                rtxPal[base + ((w[2] >> 16) & 0xFFFF)] = std::move(p);
+                ++added;
             }
             off += sz;
         }
-        return !rtxPal.empty();
+        return added > 0;
     }
 
     void invalidate() {
@@ -393,9 +435,7 @@ public:
         const uint32_t psm = ram.u8(ptr + 0x2B);
         if (psm == gs::T8 || psm == gs::T4) {
             // A paleta vem do .RTX carregado (loadRtx); sem ela a textura cai para a cor de vertice.
-            const uint32_t base = ram.u32(addr::tempVramTexAddr) >> 6;
-            if (t0.cbp < base) return false;
-            const auto it = rtxPal.find(t0.cbp - base);
+            const auto it = rtxPal.find(t0.cbp);
             if (it == rtxPal.end()) return false;
             for (size_t i = 0; i < it->second.size() && i < 256; ++i) pal[i] = gs::fixAlpha(it->second[i]);
         }
@@ -463,6 +503,12 @@ public:
             if (!md || !md->skinned) continue;
             std::fprintf(stderr, "skinned no=%06x tris=%zu pos=(%.0f %.0f %.0f) animPkt=%06x lod=%d pal=%06x\n", it.node, md->tris.size() / 3,
                          it.m.m[3][0], it.m.m[3][1], it.m.m[3][2], it.animPkt, it.lodIdx, palette(ram, it));
+            const uint64_t t0v = objectTex0(ram, it.node);
+            const gs::Tex0 t0 = gs::Tex0::decode(t0v);
+            const uint32_t ptr = ram.u32(addr::texInfo + 16 * ram.u16(it.node + 0x50)) & 0x0FFFFFFF;
+            std::fprintf(stderr, "   texId=%u tex0=%016llx cbp=%u csa=%u base=%u psm=%u ptr=%06x hasPal=%d\n", ram.u16(it.node + 0x50),
+                         (unsigned long long)t0v, t0.cbp, t0.csa, ram.u32(addr::tempVramTexAddr) >> 6, ram.u8(ptr + 0x2B), ptr,
+                         int(rtxPal.count(t0.cbp - (ram.u32(addr::tempVramTexAddr) >> 6))));
         }
     }
 
@@ -542,6 +588,7 @@ private:
     std::unordered_map<uint64_t, Texture2D> tex_;
     std::vector<uint32_t> seen_;   // nos ja visitados neste quadro (ciclos / DAG)
     int lod_ = -1;
+    uint32_t resSig_ = 0;   // assinatura dos recursos em fileStatus ja carregados (loadResources)
     bool eyeOk_ = false;
     float eye_[3] = {0, 0, 0};
     uint32_t atMat_ = 0;   // animOutput.atMat do CHAR_INSTANCE que contem o no atual
