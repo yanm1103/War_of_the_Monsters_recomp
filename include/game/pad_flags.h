@@ -7,17 +7,26 @@ class GamePad;
 
 /* One per-frame snapshot of the pad state (94 bytes); only the fields seen so far are named. */
 struct PadEntry {
-    char data[0x16];
+    char data[0xA];
+    unsigned short face[4]; /* 0x0A..0x10: four buttons, probably the face buttons; a fresh press of any of them is a struggle in StateImpaled */
+    char pad12[0x16 - 0x12];
     unsigned short f16, f18, f1A, f1C, f1E, f20;
     short f22, f24, f26, f28;
-    char pad2A[0x32 - 0x2A];
+    char pad2A[0x2E - 0x2A];
+    unsigned short action;  /* 0x2E: grab/throw button (StateThrow; StateClimb starts on a fresh press too) */
+    char pad30[0x32 - 0x30];
     unsigned short f32;
-    char pad34[0x3E - 0x34];
+    unsigned short block;   /* 0x34: block button held (StateBlock) */
+    char pad36[0x3E - 0x36];
     short f3E;
-    char pad40[0x5C - 0x40];
+    char pad40[0x46 - 0x40];
+    unsigned short counter; /* 0x46: counter button pressed (StateCounter) */
+    char pad48[0x5C - 0x48];
     signed char f5C; /* retail reads it with lb */
     char pad5D;
 };
+typedef char _size_PadEntry[sizeof(PadEntry) == 0x5E ? 1 : -1];
+typedef char _at_PadEntry_face[(unsigned)&((PadEntry *)0)->face == 0xA ? 1 : -1];
 class Monster;
 
 enum ButtonActions { BUTTON_ACTION_NONE = 20 };
