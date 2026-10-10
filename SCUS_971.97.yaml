@@ -226,7 +226,7 @@ segments:
       - [0x109D88, cpp, common/hieri]  # c++, 3 funcs, name: manual
       - [0x109EB8, cpp, common/hoser]  # c++, 10 funcs, name: guess
       - [0x10A480, asm, common/IncognitoEntertainmentGS]  # c++, 11 funcs, name: guess
-      - [0x10AD60, asm, common/input]  # c++, 29 funcs, name: guess
+      - [0x10AD60, cpp, common/input]  # c++, 29 funcs, name: guess
       - [0x10C5D8, cpp, common/light]  # c++, 3 funcs, name: guess
       - [0x10C6C0, asm, common/mathf]  # c++, 84 funcs, name: guess
       - [0x10F180, cpp, common/vu]  # c++, 6 funcs, name: guess
@@ -603,7 +603,7 @@ segments:
       - [0x5F3FA0, rodata, common/texm]
       - [0x5F4058, rodata, common/ps]
       - [0x5F40B0, .rodata, common/hoser]
-      - [0x5F40D0, rodata, common/input]
+      - [0x5F40D0, .rodata, common/input]
       - [0x5F4420, rodata, common/mathf]
       - [0x5F4480, rodata, common/MpegMovie]
       - [0x5F44E0, rodata, common/partdraw]

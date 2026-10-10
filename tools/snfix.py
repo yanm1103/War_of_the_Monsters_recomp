@@ -17,7 +17,9 @@ Rules reproduced:
   * `__asm__("#SNFIX_SMALL sym")` in the source marks `sym` as already defined in .sbss at that point, for TUs whose
     original defined the variable earlier in the file (we only declare it, the linker script places it).
   * R5900 short-loop errata: a backward conditional branch closing a loop of fewer than 6 instructions
-    (label through branch) gets nops inserted before the branch until the loop is 6 long.
+    (label through branch) gets nops inserted before the branch until the loop is 6 long; the closing branch
+    keeps its own delay nop (GNU as would move a padding nop into the slot).
+  * no hazard nop after `mfc1` (the R5900 interlocks; GNU as would insert one before a use of the register).
 
     python3 tools/snfix.py in.s out.s
 """
@@ -247,6 +249,35 @@ def fix_fp_compare_labels(out):
     return res
 
 
+def fix_mfc1_hazard(out):
+    """The SN assembler does not separate an mfc1 from the next instruction (the R5900 interlocks); in .set reorder
+    mode GNU as inserts a nop when that instruction reads the moved register. Put the pair in a noreorder block
+    (gcc marks the spot with a `#nop` comment). Only done when the next instruction is not a branch/jump."""
+    res = []
+    reorder = True
+    i = 0
+    while i < len(out):
+        line = out[i]
+        stripped = line.strip()
+        if stripped.startswith('.set'):
+            arg = stripped.split()[-1]
+            if arg in ('reorder', 'noreorder'):
+                reorder = arg == 'reorder'
+        m = INSN.match(line) if reorder and not stripped.startswith(('.', '#')) else None
+        if m and m.group(2) == 'mfc1':
+            j = i + 1
+            while j < len(out) and out[j].strip().startswith('#'):
+                j += 1
+            n = INSN.match(out[j]) if j < len(out) and not out[j].strip().startswith(('.', '#')) and not LABEL.match(out[j]) else None
+            if n and n.group(2) not in JUMPS:
+                res += ['	.set	noreorder', line, out[j], '	.set	reorder']
+                i = j + 1
+                continue
+        res.append(line)
+        i += 1
+    return res
+
+
 def main():
     src, dst = sys.argv[1], sys.argv[2]
     fixer = Fixer()
@@ -257,6 +288,7 @@ def main():
         except ValueError as e:
             sys.exit(f'{src}:{n}: {e}')
     out = fix_fp_compare_labels(out)
+    out = fix_mfc1_hazard(out)
     out = pad_short_loops(out)
     out += ['	.text', '	.align 3']  # retail text objects end 8-aligned (the padding is nops, not part of the next object)
     open(dst, 'w', encoding='latin1', newline='\n').write('\n'.join(out) + '\n')
