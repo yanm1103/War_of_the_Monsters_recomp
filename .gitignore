@@ -29,3 +29,6 @@ tools/pcsx2_auto/*.bin
 
 # saida do PS2Recomp (codigo do jogo traduzido): nunca versionar
 /recomp/
+
+# caminho local do runtime (salvo por run_live.bat)
+.wotm_recomp_dir
