@@ -1,13 +1,6 @@
 #include "common.h"
 #include "game/shell.h"
-
-/* One monster-select slot (0x2C bytes); the table holds groups of four per player, then the unlock flags of the levels. */
-struct SelectSlot {
-    int taken;      /* 0x00: the slot holds a model */
-    int state;      /* 0x04 */
-    char pad8[0x24];
-};
-extern SelectSlot monsterSelectMode[];
+#include "game/monster_select.h"
 extern int numModsLeft;
 extern int unlocked_3092 __asm__("unlocked.3092");
 extern int numSelectablesOne __asm__("numSelectablesOne.3096");
@@ -177,25 +170,25 @@ void screenGameModes2P(void)
         sel = currentSelection[currScreen];
         if (sel == 1) {
             shell->m_mode = 3;
-            *(int *)((char *)shell + 0x2B54) = 3;
+            shell->m_battleMode = 3;
             g_levelList = PO_MPFreeForAll;
             hierSetSwitch(*(_hierswitch **)((char *)shell + 0x5CC), 0);
             changeScreen(5, 0xD, 1, 2, true);
             initSelectSwitches();
         } else if (sel == 2) {
             shell->m_mode = 6;
-            *(int *)((char *)shell + 0x2B54) = 6;
-            *(int *)((char *)shell + 0x2A44) = 0;
+            shell->m_battleMode = 6;
+            shell->m_killTarget = 0;
             g_levelList = PO_MPElimination;
-            *(int *)((char *)shell + 0x2B4C) = 0;
-            *(int *)((char *)shell + 0x2B50) = 0;
+            shell->m_wins[0] = 0;
+            shell->m_wins[1] = 0;
             hierSetSwitch(*(_hierswitch **)((char *)shell + 0x5CC), 0);
             changeScreen(5, 0xB, 1, 2, true);
             initSelectSwitches();
         } else if (sel == 3) {
             changeScreen(5, 0xE, 1, 8, true);
             hierSetSwitch(*(_hierswitch **)((char *)shell + 0x48C), currentSelection[14]);
-            *(int *)((char *)shell + 0x2A44) = 0;
+            shell->m_killTarget = 0;
         } else {
             printf("Two Player Game Modes Screen has screwed up item indexing! - We think we selected #%i
 ", sel);
@@ -439,7 +432,7 @@ void screenFreeForAllOptions2P(void)
 INCLUDE_ASM("asm/nonmatchings/game/screen", screenFreeForAllOptions2P__Fv);
 #endif
 #ifdef NON_MATCHING
-/* Two-player elimination options: the cursor (0..4) picks the elimination setting, stored (+1) in the shell at 0x2B48 and copied to 0x2B44/0x2B40. */
+/* Two-player elimination options: the cursor (0..4) picks the elimination setting, stored (+1) in shell->m_elimination and copied to both m_continues. */
 void screenElimOptions2P(void)
 {
     int input, sel;
@@ -479,12 +472,12 @@ void screenElimOptions2P(void)
     case 6:
         sel = currentSelection[currScreen];
         if (sel >= 0 && sel <= 4) {
-            *(int *)((char *)shell + 0x2B48) = sel + 1;
+            shell->m_elimination = sel + 1;
             changeScreen(0xB, 6, 1, 0, true);
             initSelectSwitches();
         }
-        *(int *)((char *)shell + 0x2B44) = *(int *)((char *)shell + 0x2B48);
-        *(int *)((char *)shell + 0x2B40) = *(int *)((char *)shell + 0x2B48);
+        shell->m_continues[1] = shell->m_elimination;
+        shell->m_continues[0] = shell->m_elimination;
         ((ShellSound *)((char *)shell + 0x2918))->playShellSFXSound(8);
         return;
     case 5:
@@ -547,7 +540,7 @@ void screenMGSelect(void)
         }
         if (level != 0) {
             shell->m_levelNum = level;
-            *(int *)((char *)shell + 0x2B54) = mode;
+            shell->m_battleMode = mode;
             shell->m_mode = mode;
             hierSetSwitch(*(_hierswitch **)((char *)shell + 0x48C), 4);
             changeScreen(0xE, 7, 1, 0, true);
@@ -655,7 +648,7 @@ INCLUDE_ASM("asm/nonmatchings/game/screen", resetSelectables__Fv);
 #endif
 void resetGameMode(void)
 {
-    int mode = *(int *)((char *)shell + 0x2B54);
+    int mode = shell->m_battleMode;
 
     if (mode != 0)
         shell->m_mode = mode;

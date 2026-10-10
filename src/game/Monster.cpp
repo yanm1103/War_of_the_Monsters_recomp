@@ -94,13 +94,13 @@ void Monster::recomputeDynamics(void)
 }
 void Monster::playerUpdateInputs(void)
 {
-    ((GamePad *)((char *)this + 0x5024))->loadPadInputs(*(int *)m_playerInfo);
+    ((GamePad *)m_gamePad)->loadPadInputs(*(int *)m_playerInfo);
 }
 #ifdef NON_MATCHING
 /* 10/341 words, untuned: written from the m2c draft; the retail clamps with min.s */
 void Monster::update(void)
 {
-    GamePad *gp = (GamePad *)((char *)this + 0x5024);
+    GamePad *gp = (GamePad *)m_gamePad;
     PadFlags *pf;
     HealthMeter *health = (HealthMeter *)((char *)this + 0x448);
 
@@ -135,7 +135,7 @@ void Monster::update(void)
         } else if (m_playerNum == 2) {
             gp->clearInputs();
             if (m_unkF9 != 0) {
-                ((Ai *)((char *)this + 0x4E0))->updateInputs();
+                ((Ai *)m_ai)->updateInputs();
                 LevelPickups::computeHighlight(*this);
             }
         }
@@ -203,18 +203,18 @@ void Monster::update(void)
             m_cs->colorQuad.fVec[3] = (timerGetFieldCount() % 6 >= 3) ? 0.0f : 1.0f;
         }
     }
-    ((MonsterSound *)((char *)this + 0x1A7C))->updateMonsterSound();
+    ((MonsterSound *)m_sound)->updateMonsterSound();
 }
 #else
 INCLUDE_ASM("asm/nonmatchings/game/Monster", update__7Monster);
 #endif
 void Monster::startCinema(void)
 {
-    ((AnimBlend *)((char *)this + 0x2FE0))->setPercent(0.5f);
-    ((AnimBlend *)((char *)this + 0x3048))->setPercent(0.5f);
-    if (*(int *)((char *)this + 0x311C)) {
-        ((AnimBlend *)((char *)this + 0x30B4))->rampOut(0.0f);
-        *(int *)((char *)this + 0x311C) = 0;
+    ((AnimBlend *)m_cinemaBlendA)->setPercent(0.5f);
+    ((AnimBlend *)m_cinemaBlendB)->setPercent(0.5f);
+    if (m_cinemaBlendCOn) {
+        ((AnimBlend *)m_cinemaBlendC)->rampOut(0.0f);
+        m_cinemaBlendCOn = 0;
     }
     ((float *)((char *)m_cs + 0x70))[0] = 1.0f;
     ((float *)((char *)m_cs + 0x70))[1] = 1.0f;
@@ -222,14 +222,14 @@ void Monster::startCinema(void)
     ((float *)((char *)m_cs + 0x70))[3] = 1.0f;
     enterNewState((MonsterState *)((char *)this + 0x7984));
     if (game->m_gameMode != 1)
-        animationTransitionInto(*(_animHandle *)((char *)this + 0x2290), 96.0f, 1, 1);
+        animationTransitionInto(m_anims[0x5A], 96.0f, 1, 1);
 }
 #ifdef NON_MATCHING
 /* 4/90 words, untuned: written from the m2c draft */
 void Monster::updateCinema(void)
 {
     float f = 0.0f;
-    float *p = *(float **)((char *)this + 0x2FD8);
+    float *p = *(float **)(m_animPappy + 0x28);
 
     if (p)
         f = *p;
@@ -237,7 +237,7 @@ void Monster::updateCinema(void)
         QwData *cs = (QwData *)((char *)m_cs + 0x20);
         QwData *d = (QwData *)((char *)this + 0x50);
 
-        ((AnimPappy *)((char *)this + 0x2FB0))->update(*(DbInteractive *)this);
+        ((AnimPappy *)m_animPappy)->update(*(DbInteractive *)this);
         d[0] = cs[0];
         d[1] = cs[1];
         d[2] = cs[2];
@@ -257,7 +257,7 @@ void Monster::updateCinema(void)
             TaskManager::global.add(ActionDispatch::stopAllActiveActions, 30);
         }
     }
-    ((MonsterSound *)((char *)this + 0x1A7C))->updateMonsterCinemaSound();
+    ((MonsterSound *)m_sound)->updateMonsterCinemaSound();
 }
 #else
 INCLUDE_ASM("asm/nonmatchings/game/Monster", updateCinema__7Monster);
@@ -285,7 +285,7 @@ void Monster::setReticles(int view)
                 if (d)
                     d[8] = m->m_reticleState;
             }
-            if (*(int *)((char *)m + 0x6C00)) {
+            if (m->m_stickyReticleOn) {
                 char *s = (char *)m->m_stickyReticleCS;
 
                 if (s)
@@ -1073,7 +1073,7 @@ void Monster::creditHealth(float amount)
 }
 void Monster::breathFire(void)
 {
-    FireBreath *fb = (FireBreath *)((char *)this + 0x68C0);
+    FireBreath *fb = (FireBreath *)m_fireBreath;
 
     if (!fb->state)
         fb->Activate(*(float *)((char *)this + 0xF990), *(float *)((char *)this + 0xF994), *(float *)((char *)this + 0xF998),
@@ -1082,7 +1082,7 @@ void Monster::breathFire(void)
 }
 void Monster::lightOnFire(float count, float damage, int source)
 {
-    if (m_typeBits == 0x120 && *(int *)((char *)this + 0x68C0))
+    if (m_typeBits == 0x120 && ((FireBreath *)m_fireBreath)->state)
         return;
     m_onFireCount = count;
     m_onFireDamage = damage;
@@ -1102,10 +1102,10 @@ void Monster::updateOnFire(void)
         if (m_fireFx == -1)
             m_fireFx = particleCreateFx((_fvector *)((char *)this + 0x3E30), (float (*)[4])((char *)this + 0x3340), 0x2C, 3.0f, 0, 0, false, 0.0f);
         takeDamage(m_onFireDamage / (float)(timerGetFieldsLastFrame() * 60), true, m_fireSource);
-        ((FireSound *)((char *)this + 0x1A7C))->updateFireSound((_fvector *)((char *)m_cs + 0x10));
+        ((FireSound *)m_sound)->updateFireSound((_fvector *)((char *)m_cs + 0x10));
     } else if (m_fireFx != -1) {
         particleKillFx(m_fireFx);
-        ((FireSound *)((char *)this + 0x1A7C))->terminateFireSound();
+        ((FireSound *)m_sound)->terminateFireSound();
         m_fireSource = 0;
     }
 }
@@ -1190,7 +1190,7 @@ void Monster::setCloakOn(void)
         m_cloaked = 1;
         m_cloakTime = PowerUps::instance.getCloakTime();
         setEnvMapping();
-        ((MonsterSound *)((char *)this + 0x1A7C))->playCloakingSound();
+        ((MonsterSound *)m_sound)->playCloakingSound();
     }
 }
 void Monster::setCloakOff(void)
@@ -1224,20 +1224,20 @@ void Monster::updateWaterWake(float y, bool on)
                      "sq %0, %2
 	"
                      "sq %1, %4"
-                     : "+r"(t0), "=&r"(t1), "=m"(*(Q16 *)((char *)this + 0x6C90))
-                     : "m"(*(Q16 *)((char *)this + 0x270)), "m"(*(Q16 *)((char *)this + 0x6CA0)));
-    *(float *)((char *)this + 0x6C9C) = y;
+                     : "+r"(t0), "=&r"(t1), "=m"(*(Q16 *)m_wakePos)
+                     : "m"(*(Q16 *)((char *)this + 0x270)), "m"(*(Q16 *)m_wakeX6CA0));
+    m_wakePos[3] = y;
     if (on) {
         *(int *)((char *)this + 0x6CB8) = 0;
-        if (*(int *)((char *)this + 0x6C80) == -1)
-            attachFxToHandle((int *)((char *)this + 0x6C80), (_fvector *)((char *)this + 0x6C90), 0x92);
-        if (*(int *)((char *)this + 0x6C84) == -1)
-            attachFxToHandle((int *)((char *)this + 0x6C84), (_fvector *)((char *)this + 0x6C90), 0x14);
+        if (*&m_wakeFx == -1)
+            attachFxToHandle(&m_wakeFx, (_fvector *)m_wakePos, 0x92);
+        if (*&m_splashFx == -1)
+            attachFxToHandle(&m_splashFx, (_fvector *)m_wakePos, 0x14);
     } else {
-        if (*(int *)((char *)this + 0x6C80) != -1)
-            particleKillFx(*(int *)((char *)this + 0x6C80));
-        if (*(int *)((char *)this + 0x6C84) != -1)
-            particleKillFx(*(int *)((char *)this + 0x6C84));
+        if (*&m_wakeFx != -1)
+            particleKillFx(*&m_wakeFx);
+        if (*&m_splashFx != -1)
+            particleKillFx(*&m_splashFx);
     }
 }
 #else
@@ -1252,8 +1252,8 @@ struct MovieCleanup {
 void Monster::cleanUpForMovie(void)
 {
     setCloakOff();
-    if (*(int *)((char *)this + 0x68C0))
-        ((FireBreath *)((char *)this + 0x68C0))->ApplyMint();
+    if (((FireBreath *)m_fireBreath)->state)
+        ((FireBreath *)m_fireBreath)->ApplyMint();
     if (m_x6874)
         *(char *)(m_x6874 + 0xC) = 0;
     if (((MovieCleanup *)((char *)this + 0x10714))->p)
@@ -1332,7 +1332,7 @@ void Monster::updateMove(bool b)
 }
 void Monster::stopFireBreath(void)
 {
-    ((FireBreath *)((char *)this + 0x68C0))->ApplyMint();
+    ((FireBreath *)m_fireBreath)->ApplyMint();
 }
 void Monster::putOutFire(void)
 {

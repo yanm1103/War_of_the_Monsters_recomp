@@ -9,9 +9,11 @@ class MonsterState {
 public:
     int id;             /* 0x00 */
     int flags;          /* 0x04: bit 0x10 = the state is a reaction that keeps the last attacker (see takeHit) */
-    char pad8[4];
+    unsigned frames;    /* 0x08: frames since transitionInto (zeroed there, compared against timing fields in update) */
     Monster *owner;     /* 0x0C */
     void *vptr;         /* 0x10 */
+
+    void update(void); /* base update: frame counter and common bookkeeping */
 };
 
 #endif
