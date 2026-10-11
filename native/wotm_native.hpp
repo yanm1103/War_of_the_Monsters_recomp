@@ -347,7 +347,10 @@ public:
         if (names[0].empty()) return false;
         std::string sep = root.empty() || root.back() == '/' || root.back() == '\\' ? "" : "/";
         rtxPal.clear();
-        bool lvl = loadRtx((root + sep + "LVL/" + names[0] + ".RTX").c_str(), ram.u32(addr::tempVramTexAddr) >> 6);
+        const uint32_t base0 = ram.u32(addr::tempVramTexAddr) >> 6;
+        bool lvl = loadRtx((root + sep + "LVL/" + names[0] + ".RTX").c_str(), base0);
+        // O menu (SHELL) mora em SHELL/SHELL.RTX, nao em LVL/.
+        if (!lvl) lvl = loadRtx((root + sep + names[0] + "/" + names[0] + ".RTX").c_str(), base0);
         if (log) *log = names[0] + (lvl ? "" : " (nao achado)");
         for (int i = 1; i < n; ++i) {
             if (names[size_t(i)].empty()) continue;
