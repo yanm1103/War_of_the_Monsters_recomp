@@ -441,6 +441,16 @@ public:
         const uint32_t ptr = ram.u32(addr::texInfo + 16 * ram.u16(node + 0x50)) & 0x0FFFFFFF;
         if (!ram.ok(ptr + 0x80)) return false;
         uint32_t pal[256] = {};
+        if (t0.psm == gs::T8H || t0.psm == gs::T4HL || t0.psm == gs::T4HH) {
+            // Texturas do menu em PSMT8H/4HL/4HH (telas, fontes, logos): o pacote NAO tem cabecalho; os indices comecam em `ptr`
+            // (8 bits, ou 4 bits empacotados com o nibble baixo primeiro) e o tamanho vem do TW/TH do TEX0 (espacamento entre
+            // pacotes: 64x64 = 0x1000 (+0x80) em 8 bits, 0x800 (+0x80) em 4 bits; 512x512 = 0x40000).
+            const auto it = rtxPal.find(t0.cbp);
+            if (it == rtxPal.end()) return false;
+            for (size_t i = 0; i < it->second.size() && i < 256; ++i) pal[i] = gs::fixAlpha(it->second[i]);
+            w = 1u << t0.tw; h = 1u << t0.th;
+            return gs::decodeUpload(ram.p + ptr, ram.size - ptr, w, h, t0.psm == gs::T8H ? gs::T8 : gs::T4, t0.csa, pal, px);
+        }
         const uint32_t psm = ram.u8(ptr + 0x2B);
         if (psm == gs::T8 || psm == gs::T4) {
             // A paleta vem do .RTX carregado (loadRtx); sem ela a textura cai para a cor de vertice.
