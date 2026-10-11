@@ -85,6 +85,7 @@ int main(int argc, char **argv) {
     scene.collect(ram, lod);
     std::fprintf(stderr, "itens=%zu visitados=%u\n", scene.items.size(), scene.visited);
     if (std::getenv("WOTM_UVSTAT")) scene.dumpUv(ram);
+    if (std::getenv("WOTM_UVISO")) scene.dumpUvIso(ram);
     scene.dumpSkinned(ram);
     if (!haveCam) {   // enquadra a cena (ignora o domo do ceu)
         float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
@@ -109,7 +110,7 @@ int main(int argc, char **argv) {
         std::unordered_map<uint64_t, int> done;
         for (const auto &it : scene.items) {
             const uint64_t key = wotm::Scene::texKey(ram, it.node);
-            if (!key || done.count(key) || done.size() >= 24) continue;
+            if (!key || done.count(key) || done.size() >= 400) continue;
             std::vector<uint32_t> px;
             uint32_t w = 0, h = 0;
             const bool ok = scene.decodeTex(ram, it.node, px, w, h);

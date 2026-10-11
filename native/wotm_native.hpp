@@ -13,6 +13,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cctype>
+#include <map>
+#include <set>
 #include <cstring>
 #include <string>
 #include <memory>
@@ -546,6 +548,49 @@ public:
                 std::fprintf(stderr, "uv node=%06x tex=%u u[%.2f %.2f] v[%.2f %.2f] tris=%zu\n", it.node, ram.u16(it.node + 0x50), u0, u1, v0, v1, md->tris.size() / 3);
         }
         std::fprintf(stderr, "uv fora de [0,1]: %d itens (mostrados ate 12)\n", shown);
+    }
+
+    // Diagnostico (WOTM_UVISO): razao |grad u| / |grad v| por tamanho de textura. Deu 1,0 ate em 128x64: so mostra que as texturas
+    // 128x64 sao arte quadrada comprimida. NAO prova UV em texels: renderizar com texel=uv/16 gera ruido; o UV normalizado (4096 = 1,0) esta certo.
+    void dumpUvIso(const Ram &ram) {
+        std::map<std::pair<uint32_t, uint32_t>, std::vector<float>> byDim;
+        for (const DrawItem &it : items) {
+            const MeshData *md = mesh(ram, it.node);
+            if (!md || md->skinned || md->tris.empty() || !texKey(ram, it.node)) continue;
+            const uint32_t ptr = ram.u32(addr::texInfo + 16 * ram.u16(it.node + 0x50)) & 0x0FFFFFFF;
+            const uint32_t w = ram.u16(ptr + 0x24), h = ram.u16(ptr + 0x26);
+            if (!w || !h) continue;
+            for (size_t i = 0; i + 2 < md->tris.size(); i += 3) {
+                const Vtx &a = md->tris[i], &b = md->tris[i + 1], &c = md->tris[i + 2];
+                const double e1[3] = {b.x - a.x, b.y - a.y, b.z - a.z}, e2[3] = {c.x - a.x, c.y - a.y, c.z - a.z};
+                const double g11 = e1[0]*e1[0] + e1[1]*e1[1] + e1[2]*e1[2], g22 = e2[0]*e2[0] + e2[1]*e2[1] + e2[2]*e2[2];
+                const double g12 = e1[0]*e2[0] + e1[1]*e2[1] + e1[2]*e2[2];
+                const double det = g11 * g22 - g12 * g12;
+                if (det < 1e-3 * g11 * g22 || g11 < 1e-4) continue;   // degenerado/fino demais
+                // |grad f|^2 = [d1 d2] G^-1 [d1 d2]^T, com d = diferencas de f ao longo de e1/e2
+                auto gmag = [&](double d1, double d2) { return std::sqrt((g22 * d1 * d1 - 2 * g12 * d1 * d2 + g11 * d2 * d2) / det); };
+                const double gu = gmag(b.u - a.u, c.u - a.u), gv = gmag(b.v - a.v, c.v - a.v);
+                if (gu < 1e-7 || gv < 1e-7) continue;
+                byDim[{w, h}].push_back(float(gu / gv));
+            }
+            {   // TW/TH do TEX0 (2^n) vs descritor, uma vez por textura
+                static std::set<uint32_t> seenTex;
+                const uint32_t tid = ram.u16(it.node + 0x50);
+                if (seenTex.insert(tid).second) {
+                    const gs::Tex0 t0 = gs::Tex0::decode(objectTex0(ram, it.node));
+                    float u0 = 1e9f, u1 = -1e9f, v0 = 1e9f, v1 = -1e9f;
+                    for (const Vtx &v : md->tris) { u0 = std::min(u0, v.u); u1 = std::max(u1, v.u); v0 = std::min(v0, v.v); v1 = std::max(v1, v.v); }
+                    std::fprintf(stderr, "uviso-tex id=%u desc=%ux%u tex0 TW=%u TH=%u (=%ux%u) tfx=%u uv[%.2f %.2f][%.2f %.2f]\n", tid, w, h, t0.tw, t0.th, 1u << t0.tw, 1u << t0.th, t0.tfx, u0, u1, v0, v1);
+                }
+            }
+        }
+        for (auto &kv : byDim) {
+            auto &v = kv.second;
+            if (v.size() < 20) continue;
+            std::sort(v.begin(), v.end());
+            std::fprintf(stderr, "uviso tex %ux%u: tris=%zu razao |gu|/|gv| p25=%.3f med=%.3f p75=%.3f (h/w=%.3f)\n", kv.first.first, kv.first.second, v.size(),
+                         v[v.size() / 4], v[v.size() / 2], v[v.size() * 3 / 4], double(kv.first.second) / kv.first.first);
+        }
     }
 
     // Diagnostico: lista os itens skinned (no, triangulos, posicao no mundo, paleta achada?).
