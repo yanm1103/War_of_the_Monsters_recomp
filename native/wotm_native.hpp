@@ -770,6 +770,7 @@ public:
                 rlSetTexture((id && !idc) ? id : white);
                 open = true;
             }
+            static const bool idcMode = std::getenv("WOTM_IDCOLOR") != nullptr;   // uma vez: getenv por vertice e lento no Windows
             const unsigned tid = (wire || !cur) ? 0 : textureId(ram, it.node, slot);
             const auto &t = md->tris;
             const uint32_t pal = md->skinned ? palette(ram, it) : 0;
@@ -789,7 +790,7 @@ public:
                     const int cs[2] = {c, (c + 1) % 3};
                     for (int e = 0; e < (wire ? 2 : 1); ++e) {
                         const Vtx &v = t[k + cs[e]];
-                        if (std::getenv("WOTM_IDCOLOR")) { const uint32_t tx = objectTexId(ram, it.node, slot); rlColor4ub(uint8_t(tx & 255), uint8_t(tx >> 8), 128, 255); }
+                        if (idcMode) { const uint32_t tx = objectTexId(ram, it.node, slot); rlColor4ub(uint8_t(tx & 255), uint8_t(tx >> 8), 128, 255); }
                         else rlColor4ub(uint8_t(std::min(255, v.r * 2)), uint8_t(std::min(255, v.g * 2)), uint8_t(std::min(255, v.b * 2)), uint8_t(std::min(255, v.a * 4)));
                         if (tid) rlTexCoord2f(v.u, v.v);
                         rlVertex3f(p[cs[e]][0], p[cs[e]][1], p[cs[e]][2]);
