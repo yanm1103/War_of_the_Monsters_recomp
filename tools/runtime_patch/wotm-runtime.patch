@@ -259,10 +259,10 @@ index 5658928..d8b3573 100644
          updatePreferredDisplaySourceForDraw(batch);
 diff --git a/ps2xRuntime/src/lib/ps2_hostprof.cpp b/ps2xRuntime/src/lib/ps2_hostprof.cpp
 new file mode 100644
-index 0000000..d4af0e3
+index 0000000..9d839e4
 --- /dev/null
 +++ b/ps2xRuntime/src/lib/ps2_hostprof.cpp
-@@ -0,0 +1,144 @@
+@@ -0,0 +1,147 @@
 +// Amostrador de perfil do HOST (Windows): com PS2X_HOSTPROF=1 uma thread suspende cada thread do processo a cada ~1 ms, le o RIP e
 +// faz um histograma por funcao (via dbghelp + PDB). Grava hostprof.txt a cada 10 s. Diagnostico do projeto WotM, nao e codigo do jogo.
 +#ifdef _WIN32
@@ -366,15 +366,18 @@ index 0000000..d4af0e3
 +                continue;
 +            if (SuspendThread(th) != (DWORD)-1)
 +            {
++                // Sem alocar nada enquanto a thread esta suspensa (ela pode segurar o lock do heap).
 +                CONTEXT ctx;
 +                ctx.ContextFlags = CONTEXT_CONTROL;
-+                if (GetThreadContext(th, &ctx))
++                const bool got = GetThreadContext(th, &ctx) != 0;
++                const unsigned long long rip = got ? ctx.Rip : 0ull;
++                ResumeThread(th);
++                if (got)
 +                {
 +                    Hist &h = hist[tid];
-+                    ++h.byAddr[ctx.Rip];
++                    ++h.byAddr[rip];
 +                    ++h.total;
 +                }
-+                ResumeThread(th);
 +            }
 +            CloseHandle(th);
 +        }
