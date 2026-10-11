@@ -117,6 +117,7 @@ struct Vtx {
     uint8_t r, g, b, a;
     float w = 1.f;                    // peso do osso de x (so objetos skinned)
     uint8_t cx = 0, cy = 0, cz = 0;   // codigos de osso (endereco de qword no VU1: slot = (codigo & 0x7F) / 4)
+    uint8_t slot = 0;                 // indice do gsTexCtx/texId da secao (palavra 3 da tag GIF = 1 + 3*slot; 0 = slot 0)
 };
 
 struct MeshData {
@@ -128,6 +129,7 @@ struct MeshData {
     bool lowAlpha = false;   // algum vertice com alfa baixo (< 0x3C; 0x40 = opaco): nevoa/sombras, desenhado no passe translucido
     bool skinned = false;    // polyPkt e uma cadeia de sub-pacotes com V4-32 (codigos de osso + peso)
     bool abe = false;        // PRIM.ABE da tag GIF: so entao o alfa de vertice vale (blend); senao opaco
+    uint32_t slotMask = 0;   // slots de textura usados pelas secoes (bit i = gsTexCtx[i])
 };
 
 // Decodifica um sub-pacote em `md`; devolve o endereco do proximo (cadeia skinned) ou 0.
@@ -154,7 +156,7 @@ inline uint32_t decodePacket(const Ram &ram, uint32_t pp, MeshData &md, bool fir
 
     struct P3 { float x, y, z, w; uint8_t cx, cy, cz; };
     std::vector<P3> pos;
-    uint32_t hdrAddr = 0, nloop = 0;
+    uint32_t hdrAddr = 0, nloop = 0, hdrSel = 0;
     bool haveHdr = false;
     std::vector<uint8_t> idx;
     std::vector<std::array<uint8_t, 4>> rgba;
@@ -188,6 +190,8 @@ inline uint32_t decodePacket(const Ram &ram, uint32_t pp, MeshData &md, bool fir
                 const P3 p = j < pos.size() ? pos[j] : P3{0, 0, 0, 1.f, 0, 0, 0};
                 Vtx v{};
                 v.x = p.x; v.y = p.y; v.z = p.z; v.w = p.w; v.cx = p.cx; v.cy = p.cy; v.cz = p.cz;
+                v.slot = uint8_t(hdrSel >= 1 && hdrSel <= 13 ? (hdrSel - 1) / 3 : 0);
+                md.slotMask |= 1u << v.slot;
                 if (k < rgba.size()) { v.r = rgba[k][0]; v.g = rgba[k][1]; v.b = rgba[k][2]; v.a = rgba[k][3]; }
                 else { v.r = v.g = v.b = v.a = 128; }
                 if (k < uv.size()) { v.u = uv[k][0] / 4096.f; v.v = uv[k][1] / 4096.f; }
@@ -221,6 +225,7 @@ inline uint32_t decodePacket(const Ram &ram, uint32_t pp, MeshData &md, bool fir
                 }
             } else if (vn == 3 && vl == 0 && n == 1) {                        // V4-32: tag GIF
                 hdrAddr = addr; nloop = ram.u32(a) & 0x7FFF; haveHdr = true;
+                hdrSel = ram.u32(a + 12);   // palavra alta de REGS: o jogo a usa como seletor de textura (1 + 3*slot)
                 if (((ram.u32(a + 4) >> 15) >> 6) & 1) md.abe = true;
             } else if (haveHdr && vn == 0 && vl == 2 && (mask & 0xFF) == 0xBF) {   // S-8 sob mascara: ADC
                 for (uint32_t k = 0; k < n; ++k) {
@@ -424,15 +429,22 @@ public:
     }
 
     // TEX0 do objeto (gsTexCtx[0]); 0 quando o objeto nao tem textura
-    static uint64_t objectTex0(const Ram &ram, uint32_t node) {
-        if (ram.u16(node + 0x5A) == 0) return 0;
-        return uint64_t(ram.u32(node + 0x70)) | (uint64_t(ram.u32(node + 0x74)) << 32);
+    static uint64_t objectTex0(const Ram &ram, uint32_t node, uint32_t slot = 0) {
+        const uint32_t n = ram.u16(node + 0x5A);
+        if (n == 0) return 0;
+        if (slot >= n || slot >= 5) slot = 0;
+        return uint64_t(ram.u32(node + 0x70 + 0x30 * slot)) | (uint64_t(ram.u32(node + 0x74 + 0x30 * slot)) << 32);
+    }
+    // texId do slot (texId[5] em +0x50); slot invalido cai no 0
+    static uint32_t objectTexId(const Ram &ram, uint32_t node, uint32_t slot = 0) {
+        if (slot >= ram.u16(node + 0x5A) || slot >= 5) slot = 0;
+        return ram.u16(node + 0x50 + 2 * slot);
     }
 
     // Chave de textura de um objeto: id no `texInfo` + paleta (CBP/CSA/CPSM do TEX0). 0 = sem textura.
-    static uint64_t texKey(const Ram &ram, uint32_t node) {
-        const uint64_t t0 = objectTex0(ram, node);
-        const uint32_t tid = ram.u16(node + 0x50);
+    static uint64_t texKey(const Ram &ram, uint32_t node, uint32_t slot = 0) {
+        const uint64_t t0 = objectTex0(ram, node, slot);
+        const uint32_t tid = objectTexId(ram, node, slot);
         if (!t0 || !tid) return 0;
         const gs::Tex0 t = gs::Tex0::decode(t0);
         return (uint64_t(tid) << 40) | (uint64_t(t.cbp) << 12) | (uint64_t(t.csa) << 4) | t.cpsm | (1ull << 62);
@@ -451,11 +463,11 @@ public:
 
     // Textura do objeto: os pixels vem do pacote de upload apontado por `texInfo[texId]` (pixels lineares a partir de +0x80,
     // descritor em +0x24 largura, +0x26 altura, +0x2B PSM); a paleta vem da VRAM (carregada junto com a fase).
-    bool decodeTex(const Ram &ram, uint32_t node, std::vector<uint32_t> &px, uint32_t &w, uint32_t &h) const {
-        const uint64_t t0v = objectTex0(ram, node);
+    bool decodeTex(const Ram &ram, uint32_t node, std::vector<uint32_t> &px, uint32_t &w, uint32_t &h, uint32_t slot = 0) const {
+        const uint64_t t0v = objectTex0(ram, node, slot);
         if (!t0v) return false;
         const gs::Tex0 t0 = gs::Tex0::decode(t0v);
-        const uint32_t ptr = ram.u32(addr::texInfo + 16 * ram.u16(node + 0x50)) & 0x0FFFFFFF;
+        const uint32_t ptr = ram.u32(addr::texInfo + 16 * objectTexId(ram, node, slot)) & 0x0FFFFFFF;
         if (!ram.ok(ptr + 0x80)) return false;
         uint32_t pal[256] = {};
         if (t0.psm == gs::T8H || t0.psm == gs::T4HL || t0.psm == gs::T4HH) {
@@ -482,15 +494,15 @@ public:
         return gs::decodeUpload(ram.p + ptr + 0x80, ram.size - ptr - 0x80, w, h, psm, t0.csa, pal, px);
     }
 
-    unsigned textureId(const Ram &ram, uint32_t node) {
-        const uint64_t key = texKey(ram, node);
+    unsigned textureId(const Ram &ram, uint32_t node, uint32_t slot = 0) {
+        const uint64_t key = texKey(ram, node, slot);
         if (!key) return 0;
         auto it = tex_.find(key);
         if (it != tex_.end()) return it->second.id;
         Texture2D t{};
         std::vector<uint32_t> px;
         uint32_t w = 0, h = 0;
-        if (decodeTex(ram, node, px, w, h)) {
+        if (decodeTex(ram, node, px, w, h, slot)) {
             if (std::getenv("WOTM_ALPHASTAT")) {
                 size_t a0 = 0, am = 0;
                 for (uint32_t c : px) { const uint32_t a = c >> 24; if (a == 0) ++a0; else if (a < 255) ++am; }
@@ -695,17 +707,22 @@ public:
     bool translucent(const Ram &ram, const DrawItem &it) {
         const MeshData *md = mesh(ram, it.node);
         if (md && md->lowAlpha) return true;
-        const uint64_t k = texKey(ram, it.node);
-        if (!k) return false;
-        textureId(ram, it.node);
-        const auto f = partial_.find(k);
-        return f != partial_.end() && f->second;
+        for (uint32_t sl = 0; sl < 5; ++sl) {
+            if (md && md->slotMask && !(md->slotMask & (1u << sl))) continue;
+            const uint64_t k = texKey(ram, it.node, sl);
+            if (!k) continue;
+            textureId(ram, it.node, sl);
+            const auto f = partial_.find(k);
+            if (f != partial_.end() && f->second) return true;
+        }
+        return false;
     }
 
     // pass: -1 tudo; 0 so opacos/recortados; 1 so translucidos (ordenados do mais longe ao mais perto)
     void drawList(const Ram &ram, const std::vector<DrawItem> &list, bool wire, int pass = -1) {
         rlDisableBackfaceCulling();
-        std::vector<std::pair<uint64_t, uint32_t>> order;   // (tex0, indice do item)
+        struct Ent { uint64_t key; uint32_t item; uint32_t slot; };
+        std::vector<Ent> order;   // (chave de textura, indice do item, slot de textura)
         order.reserve(list.size());
         const bool far2near = pass == 1 && !wire;
         for (uint32_t i = 0; i < list.size(); ++i) {
@@ -717,7 +734,11 @@ public:
                     if (s.find("," + std::to_string(ram.u16(list[i].node + 0x50)) + ",") == std::string::npos) continue;
                 }
             }
-            uint64_t key = wire ? 0 : texKey(ram, list[i].node);
+            const MeshData *mdi = mesh(ram, list[i].node);
+            const uint32_t smask = (mdi && mdi->slotMask) ? mdi->slotMask : 1u;
+            for (uint32_t sl = 0; sl < 5; ++sl) {
+            if (!(smask & (1u << sl))) continue;
+            uint64_t key = wire ? 0 : texKey(ram, list[i].node, sl);
             if (far2near) {
                 const M4 &m = list[i].m;
                 const float dx = m.m[3][0] - eye_[0], dy = m.m[3][1] - eye_[1], dz = m.m[3][2] - eye_[2];
@@ -726,26 +747,30 @@ public:
                 std::memcpy(&bits, &d2, 4);
                 key = uint64_t(~bits) + 1;   // maior distancia primeiro; nunca 0 (0 = "sem textura" abaixo)
             }
-            order.push_back({key, i});
+            order.push_back({key, i, sl});
+            }
         }
-        std::stable_sort(order.begin(), order.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
+        std::stable_sort(order.begin(), order.end(), [](const Ent &a, const Ent &b) { return a.key < b.key; });
 
         const unsigned white = rlGetTextureIdDefault();
         uint64_t cur = ~0ull;
         bool open = false;
         for (const auto &o : order) {
-            const DrawItem &it = list[o.second];
+            const DrawItem &it = list[o.item];
             const MeshData *md = mesh(ram, it.node);
             if (!md || !md->valid || md->tris.empty()) continue;
-            if (o.first != cur || !open || far2near) {
+            const uint32_t slot = o.slot;
+            const bool multi = md->slotMask & (md->slotMask - 1);   // mais de um slot usado
+            if (o.key != cur || !open || far2near) {
                 if (open) { rlEnd(); rlDrawRenderBatchActive(); }   // um lote por textura (evita o alinhamento automatico do rlgl)
-                cur = o.first;
-                const unsigned id = wire ? 0 : textureId(ram, it.node);
+                cur = o.key;
+                const unsigned id = wire ? 0 : textureId(ram, it.node, slot);
                 rlBegin(wire ? RL_LINES : RL_TRIANGLES);   // rlBegin com outro modo reseta a textura do lote: setar depois
-                rlSetTexture(id ? id : white);
+                static const bool idc = std::getenv("WOTM_IDCOLOR") != nullptr;   // diagnostico: cor = texId do objeto (leia o pixel para achar o id)
+                rlSetTexture((id && !idc) ? id : white);
                 open = true;
             }
-            const unsigned tid = (wire || !cur) ? 0 : textureId(ram, it.node);
+            const unsigned tid = (wire || !cur) ? 0 : textureId(ram, it.node, slot);
             const auto &t = md->tris;
             const uint32_t pal = md->skinned ? palette(ram, it) : 0;
             // zBufferFudge (objeto +0x28): multiplicador da profundidade (1,0 = nada). Escalar o vertice ao longo do raio a partir do
@@ -753,6 +778,7 @@ public:
             const float fz = ram.f32(it.node + 0x28);
             const bool fudge = !wire && eyeOk_ && fz > 0.5f && fz < 2.f && fz != 1.f;
             for (size_t k = 0; k + 2 < t.size(); k += 3) {
+                if (multi && t[k].slot != slot) continue;   // so as secoes deste slot
                 float p[3][3];
                 for (int c = 0; c < 3; ++c) {
                     if (pal) skinVertex(ram, pal, it.m, t[k + c], p[c]);
@@ -763,7 +789,8 @@ public:
                     const int cs[2] = {c, (c + 1) % 3};
                     for (int e = 0; e < (wire ? 2 : 1); ++e) {
                         const Vtx &v = t[k + cs[e]];
-                        rlColor4ub(uint8_t(std::min(255, v.r * 2)), uint8_t(std::min(255, v.g * 2)), uint8_t(std::min(255, v.b * 2)), uint8_t(std::min(255, v.a * 4)));
+                        if (std::getenv("WOTM_IDCOLOR")) { const uint32_t tx = objectTexId(ram, it.node, slot); rlColor4ub(uint8_t(tx & 255), uint8_t(tx >> 8), 128, 255); }
+                        else rlColor4ub(uint8_t(std::min(255, v.r * 2)), uint8_t(std::min(255, v.g * 2)), uint8_t(std::min(255, v.b * 2)), uint8_t(std::min(255, v.a * 4)));
                         if (tid) rlTexCoord2f(v.u, v.v);
                         rlVertex3f(p[cs[e]][0], p[cs[e]][1], p[cs[e]][2]);
                     }
