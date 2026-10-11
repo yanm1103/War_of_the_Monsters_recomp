@@ -86,6 +86,18 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "itens=%zu visitados=%u\n", scene.items.size(), scene.visited);
     if (std::getenv("WOTM_UVSTAT")) scene.dumpUv(ram);
     if (std::getenv("WOTM_UVISO")) scene.dumpUvIso(ram);
+    if (std::getenv("WOTM_SKINSAN")) scene.dumpSkinSanity(ram);
+    if (const char *cv = std::getenv("WOTM_COVER")) {   // "ref,ref,..:teste,teste,.."
+        std::vector<uint32_t> refs, tests; std::vector<uint32_t> *cur = &refs; unsigned v = 0; bool has = false;
+        for (const char *q = cv;; ++q) {
+            const char ch = *q;
+            if ((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f')) { v = v * 16 + unsigned(ch <= '9' ? ch - '0' : ch - 'a' + 10); has = true; }
+            else { if (has) cur->push_back(v); v = 0; has = false; if (ch == ':') cur = &tests; if (!ch) break; }
+        }
+        scene.coverage(ram, refs, tests, std::getenv("WOTM_COVERTOL") ? float(std::atof(std::getenv("WOTM_COVERTOL"))) : 6.f);
+    }
+    if (const char *bc = std::getenv("WOTM_BONECODES")) { unsigned n = 0; if (std::sscanf(bc, "%x", &n) == 1) scene.boneCodes(ram, n); }
+    if (const char *sf = std::getenv("WOTM_SKINFIT")) { unsigned a = 0, b = 0, c = 0; if (std::sscanf(sf, "%x,%x,%x", &a, &b, &c) == 3) scene.fitSkin(ram, a, b, c); }
     scene.dumpSkinned(ram);
     if (!haveCam) {   // enquadra a cena (ignora o domo do ceu)
         float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
