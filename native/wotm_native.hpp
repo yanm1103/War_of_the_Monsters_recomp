@@ -698,6 +698,13 @@ public:
         const bool far2near = pass == 1 && !wire;
         for (uint32_t i = 0; i < list.size(); ++i) {
             if (pass >= 0 && !wire && translucent(ram, list[i]) != (pass == 1)) continue;
+            {   // diagnostico: WOTM_ONLYTEX=<id[,id..]> desenha so esses texId (bisseccao de defeitos)
+                static const char *only = std::getenv("WOTM_ONLYTEX");
+                if (only) {
+                    const std::string s = std::string(",") + only + ",";
+                    if (s.find("," + std::to_string(ram.u16(list[i].node + 0x50)) + ",") == std::string::npos) continue;
+                }
+            }
             uint64_t key = wire ? 0 : texKey(ram, list[i].node);
             if (far2near) {
                 const M4 &m = list[i].m;
