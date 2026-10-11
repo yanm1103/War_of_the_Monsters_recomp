@@ -1,0 +1,1458 @@
+diff --git a/ps2xIOP/src/emulator/iop_emulator.cpp b/ps2xIOP/src/emulator/iop_emulator.cpp
+index e5f63a9..2a93dcf 100644
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ -19,6 +19,7 @@
+ 
+ #include <algorithm>
+ #include <cctype>
++#include <cstdlib>
+ #include <map>
+ #include <optional>
+ #include <span>
+@@ -741,7 +742,20 @@ namespace ps2x::iop::detail
+ 
+     void IopEmulator::runEeCycles(uint64_t eeCycles) noexcept
+     {
++        // WotM: o laco do IOP (varre threads/timers/DMA) custava ~18% da CPU por ser chamado a cada
++        // checkpoint de EE com poucos ciclos. Acumula e roda em lotes (PS2X_IOP_BATCH, ciclos de IOP).
++        static const uint64_t batch = []() -> uint64_t
++        {
++            const char *e = std::getenv("PS2X_IOP_BATCH");
++            const long v = e ? std::atol(e) : 256;
++            return v > 0 ? static_cast<uint64_t>(v) : 1u;
++        }();
+         const uint64_t total = m_impl->eeCycleCarry + eeCycles;
++        if (total < batch * 8u)
++        {
++            m_impl->eeCycleCarry = total;
++            return;
++        }
+         const uint64_t iopCycles = total / 8u;
+         m_impl->eeCycleCarry = total % 8u;
+         if (iopCycles)
+diff --git a/ps2xRuntime/CMakeLists.txt b/ps2xRuntime/CMakeLists.txt
+index 589d768..03a094e 100644
+--- a/ps2xRuntime/CMakeLists.txt
++++ b/ps2xRuntime/CMakeLists.txt
+@@ -393,6 +393,7 @@ add_library(ps2_runtime STATIC
+     src/lib/vu/ps2_vu1_core.cpp
+     src/lib/vu/ps2_vu1_upper.cpp
+     src/lib/vu/ps2_vu1_lower.cpp
++    src/lib/ps2_hostprof.cpp
+     src/lib/games_database.cpp
+ )
+ 
+@@ -608,3 +609,9 @@ endif()
+ install(DIRECTORY include/
+     DESTINATION include
+ )
++
++# WOTM_NATIVE_DIR: pasta native/ do repo WoTM (wotm_native.hpp): habilita o desenho nativo ao vivo (wotm_live.inc)
++set(WOTM_NATIVE_DIR "" CACHE PATH "WoTM native/ directory (optional)")
++if(WOTM_NATIVE_DIR)
++    target_include_directories(ps2_runtime PRIVATE "${WOTM_NATIVE_DIR}")
++endif()
+diff --git a/ps2xRuntime/cmake/ReleaseMode.cmake b/ps2xRuntime/cmake/ReleaseMode.cmake
+index 92ef0d5..13f370a 100644
+--- a/ps2xRuntime/cmake/ReleaseMode.cmake
++++ b/ps2xRuntime/cmake/ReleaseMode.cmake
+@@ -4,6 +4,15 @@ check_ipo_supported(RESULT IPO_SUPPORTED OUTPUT IPO_ERROR)
+ 
+ function(EnableFastReleaseMode TargetName)
+     message("> Enabling optimization for: ${TargetName}")
++    if(PS2X_FAST_LINK)
++        # Build de desenvolvimento: mesma otimizacao por arquivo, mas sem otimizacao de programa inteiro (/GL, /LTCG, IPO).
++        # O link cai de ~25 min para segundos/minutos; o codigo fica um pouco mais lento (sem inline entre arquivos).
++        if(MSVC)
++            target_compile_options(${TargetName} PRIVATE
++                $<$<CONFIG:Release>:/O2 /Ob2 /Oi /Gy /Gw /GF /Zc:inline /fp:fast /DNDEBUG /arch:AVX2 /GS- /Qspectre->)
++        endif()
++        return()
++    endif()
+     if(MSVC)
+         target_compile_options(${TargetName} PRIVATE
+             $<$<CONFIG:Release>:
+diff --git a/ps2xRuntime/include/ps2_runtime_macros.h b/ps2xRuntime/include/ps2_runtime_macros.h
+index 0f19c9f..cbe7866 100644
+--- a/ps2xRuntime/include/ps2_runtime_macros.h
++++ b/ps2xRuntime/include/ps2_runtime_macros.h
+@@ -604,11 +604,51 @@ inline __m128i ps2_u64_to_epi64_pair(uint64_t value)
+ #define PS2_PMFHL_SH(hi, lo) _mm_shufflehi_epi16(_mm_shufflelo_epi16(_mm_packs_epi32(ps2_u64_to_epi64_pair(lo), ps2_u64_to_epi64_pair(hi)), _MM_SHUFFLE(3, 1, 2, 0)), _MM_SHUFFLE(3, 1, 2, 0))
+ 
+ // FPU (COP1) operations
++// O FPU do R5900 nao tem infinito nem NaN nem denormais: estouro, divisao por zero e operacoes invalidas dao +-Fmax (0x7F7FFFFF), denormais
++// viram +-0, e cvt.w.s TRUNCA (nao arredonda) e satura em 0x7FFFFFFF/0x80000000. O IEEE do PC (inf/NaN) fazia o iterador de grade da
++// colisao (HdItGridLine) nunca terminar: x/0 = inf -> cvt.w.s = INT_MIN.
++static inline float ps2_fpu_fix(float v)
++{
++    uint32_t b;
++    std::memcpy(&b, &v, sizeof(b));
++    const uint32_t e = b & 0x7F800000u;
++    if (e == 0x7F800000u) // inf ou NaN -> +-Fmax
++        b = (b & 0x80000000u) | 0x7F7FFFFFu;
++    else if (e == 0u) // zero ou denormal -> +-0
++        b &= 0x80000000u;
++    std::memcpy(&v, &b, sizeof(v));
++    return v;
++}
++static inline float ps2_fpu_div(float a, float b)
++{
++    a = ps2_fpu_fix(a);
++    b = ps2_fpu_fix(b);
++    if (b == 0.0f) // inclusive 0/0: resultado +-Fmax com o sinal do xor
++    {
++        uint32_t ba, bb;
++        std::memcpy(&ba, &a, sizeof(ba));
++        std::memcpy(&bb, &b, sizeof(bb));
++        const uint32_t r = ((ba ^ bb) & 0x80000000u) | 0x7F7FFFFFu;
++        float f;
++        std::memcpy(&f, &r, sizeof(f));
++        return f;
++    }
++    return ps2_fpu_fix(a / b);
++}
++static inline int32_t ps2_fpu_cvt_w(float v)
++{
++    v = ps2_fpu_fix(v);
++    if (v >= 2147483648.0f)
++        return 0x7FFFFFFF;
++    if (v <= -2147483648.0f)
++        return (int32_t)0x80000000u;
++    return (int32_t)v; // trunca
++}
+ #define FPU_SET_ACC(ctx, res) (ctx->f_acc = res)
+-#define FPU_ADD_S(a, b) ((float)(a) + (float)(b))
+-#define FPU_SUB_S(a, b) ((float)(a) - (float)(b))
+-#define FPU_MUL_S(a, b) ((float)(a) * (float)(b))
+-#define FPU_DIV_S(a, b) ((float)(a) / (float)(b))
++#define FPU_ADD_S(a, b) ps2_fpu_fix(ps2_fpu_fix((float)(a)) + ps2_fpu_fix((float)(b)))
++#define FPU_SUB_S(a, b) ps2_fpu_fix(ps2_fpu_fix((float)(a)) - ps2_fpu_fix((float)(b)))
++#define FPU_MUL_S(a, b) ps2_fpu_fix(ps2_fpu_fix((float)(a)) * ps2_fpu_fix((float)(b)))
++#define FPU_DIV_S(a, b) ps2_fpu_div((float)(a), (float)(b))
+ #define FPU_SQRT_S(a) sqrtf((float)(a))
+ #define FPU_ABS_S(a) fabsf((float)(a))
+ #define FPU_MOV_S(a) ((float)(a))
+@@ -618,12 +658,12 @@ inline __m128i ps2_u64_to_epi64_pair(uint64_t value)
+ #define FPU_CEIL_L_S(a) ((int64_t)ceilf((float)(a)))
+ #define FPU_FLOOR_L_S(a) ((int64_t)floorf((float)(a)))
+ #define FPU_ROUND_W_S(a) ((int32_t)nearbyintf((float)(a)))
+-#define FPU_TRUNC_W_S(a) ((int32_t)(float)(a))
++#define FPU_TRUNC_W_S(a) ps2_fpu_cvt_w((float)(a))
+ #define FPU_CEIL_W_S(a) ((int32_t)ceilf((float)(a)))
+ #define FPU_FLOOR_W_S(a) ((int32_t)floorf((float)(a)))
+ #define FPU_CVT_S_W(a) ((float)(int32_t)(a))
+ #define FPU_CVT_S_L(a) ((float)(int64_t)(a))
+-#define FPU_CVT_W_S(a) ((int32_t)nearbyintf((float)(a)))
++#define FPU_CVT_W_S(a) ps2_fpu_cvt_w((float)(a))
+ #define FPU_CVT_L_S(a) ((int64_t)(float)(a))
+ #define FPU_C_F_S(a, b) (0)
+ #define FPU_C_UN_S(a, b) (isnan((float)(a)) || isnan((float)(b)))
+diff --git a/ps2xRuntime/include/runtime/ps2_vu1.h b/ps2xRuntime/include/runtime/ps2_vu1.h
+index 67c8184..bd412c6 100644
+--- a/ps2xRuntime/include/runtime/ps2_vu1.h
++++ b/ps2xRuntime/include/runtime/ps2_vu1.h
+@@ -209,6 +209,9 @@ private:
+     uint64_t m_cachedCodeGeneration = 0;
+     bool m_decodedCodeCacheValid = false;
+ 
++    // Menor readyCycle entre as entradas validas dos pipelines (~0 = nenhuma): commitReadyPipelines nao varre nada antes disso.
++    uint64_t m_earliestPending = ~0ull;
++    void recomputeEarliestPending();
+     std::array<FlagPipelineEntry, kMaxFlagEntries> m_flagPipeline{};
+     ScalarPipelineEntry m_fdiv{};
+     std::array<ScalarPipelineEntry, 2> m_efu{};
+diff --git a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+index c5e31c4..6521665 100644
+--- a/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
++++ b/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp
+@@ -4,10 +4,26 @@
+ #include "ps2_runtime_macros.h"
+ 
+ #include <algorithm>
++#include <atomic>
++#include <chrono>
+ #include <cassert>
+ #include <cstring>
+ #include <limits>
+ #include <stdexcept>
++extern std::atomic<unsigned long long> g_wotmIdleUs, g_wotmIdleCalls, g_wotmPaceUs, g_wotmPaceCalls;
++namespace {
++struct WotmUsTimer
++{
++    std::atomic<unsigned long long> &acc;
++    std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
++    explicit WotmUsTimer(std::atomic<unsigned long long> &a) : acc(a) {}
++    ~WotmUsTimer()
++    {
++        acc.fetch_add(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count(),
++                      std::memory_order_relaxed);
++    }
++};
++}
+ 
+ namespace
+ {
+@@ -1800,6 +1816,8 @@ void EeScheduler::processDueDeadlines()
+ 
+             if (now < pacingDeadline)
+             {
++                WotmUsTimer wotmPaceTimer(g_wotmPaceUs);
++                g_wotmPaceCalls.fetch_add(1, std::memory_order_relaxed);
+                 m_eventCv.wait_until(lock, pacingDeadline, [this]()
+                                      { return !m_events.empty() ||
+                                               m_stopRequested.load(std::memory_order_acquire); });
+@@ -1994,8 +2012,11 @@ void EeScheduler::writeGuestU32(uint32_t address, uint32_t value)
+     std::memcpy(m_rdram + physical, &value, sizeof(value));
+ }
+ 
++std::atomic<unsigned long long> g_wotmIdleUs{0}, g_wotmIdleCalls{0}, g_wotmPaceUs{0}, g_wotmPaceCalls{0};
+ void EeScheduler::waitForEvent()
+ {
++    WotmUsTimer wotmIdleTimer(g_wotmIdleUs);
++    g_wotmIdleCalls.fetch_add(1, std::memory_order_relaxed);
+     std::unique_lock lock(m_eventMutex);
+     if (!m_events.empty() || m_stopRequested.load(std::memory_order_acquire))
+     {
+diff --git a/ps2xRuntime/src/lib/gs/gs_frontend.cpp b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+index 5658928..d8b3573 100644
+--- a/ps2xRuntime/src/lib/gs/gs_frontend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_frontend.cpp
+@@ -638,8 +638,28 @@ bool GS::copyLatchedHostPresentationFrame(std::vector<uint8_t> &outPixels,
+     return true;
+ }
+ 
++#include <chrono>
++std::atomic<unsigned long long> g_wotmGifPackets{0}, g_wotmGifBytes{0}, g_wotmGifUs{0};
++namespace {
++struct WotmScopedUs
++{
++    std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
++    ~WotmScopedUs()
++    {
++        g_wotmGifUs.fetch_add(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count(),
++                              std::memory_order_relaxed);
++    }
++};
++} // namespace
+ void GS::processGIFPacket(const uint8_t *data, uint32_t sizeBytes)
+ {
++    WotmScopedUs wotmTimer;
++    g_wotmGifPackets.fetch_add(1, std::memory_order_relaxed);
++    g_wotmGifBytes.fetch_add(sizeBytes, std::memory_order_relaxed);
++    static const bool s_noGs = std::getenv("PS2X_NO_GS") != nullptr; // teste: nao rasterizar (o port desenha nativo)
++    static const bool s_uploads = std::getenv("PS2X_GS_UPLOADS") != nullptr; // com NO_GS: processa so os uploads (texturas na VRAM)
++    if (s_noGs && !s_uploads)
++        return;
+     std::lock_guard<std::recursive_mutex> lock(m_stateMutex);
+     if (!data || sizeBytes < 16 || !m_backend)
+         return;
+@@ -1572,7 +1592,8 @@ void GS::vertexKick(bool drawing)
+     if (m_vtxCount < needed)
+         return;
+ 
+-    if (drawing && m_backend)
++    static const bool s_noDraw = std::getenv("PS2X_NO_GS") != nullptr; // NO_GS + GS_UPLOADS: so uploads, sem rasterizar
++    if (drawing && m_backend && !s_noDraw)
+     {
+         GSPrimitiveBatch batch = buildDrawBatch(needed);
+         updatePreferredDisplaySourceForDraw(batch);
+diff --git a/ps2xRuntime/src/lib/ps2_hostprof.cpp b/ps2xRuntime/src/lib/ps2_hostprof.cpp
+new file mode 100644
+index 0000000..d4af0e3
+--- /dev/null
++++ b/ps2xRuntime/src/lib/ps2_hostprof.cpp
+@@ -0,0 +1,144 @@
++// Amostrador de perfil do HOST (Windows): com PS2X_HOSTPROF=1 uma thread suspende cada thread do processo a cada ~1 ms, le o RIP e
++// faz um histograma por funcao (via dbghelp + PDB). Grava hostprof.txt a cada 10 s. Diagnostico do projeto WotM, nao e codigo do jogo.
++#ifdef _WIN32
++#define WIN32_LEAN_AND_MEAN
++#define NOMINMAX
++#include <windows.h>
++#include <tlhelp32.h>
++#include <dbghelp.h>
++#pragma comment(lib, "dbghelp.lib")
++
++#include <algorithm>
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
++#include <map>
++#include <string>
++#include <thread>
++#include <unordered_map>
++#include <vector>
++
++namespace
++{
++struct Hist
++{
++    std::unordered_map<unsigned long long, unsigned> byAddr;
++    unsigned total = 0;
++};
++
++void report(std::map<DWORD, Hist> &hist, HANDLE proc)
++{
++    FILE *f = std::fopen("hostprof.txt", "w");
++    if (!f)
++        return;
++    for (auto &kv : hist)
++    {
++        if (kv.second.total < 50)
++            continue;
++        std::unordered_map<std::string, unsigned> byName;
++        for (auto &a : kv.second.byAddr)
++        {
++            alignas(SYMBOL_INFO) char buf[sizeof(SYMBOL_INFO) + 256];
++            SYMBOL_INFO *sym = reinterpret_cast<SYMBOL_INFO *>(buf);
++            sym->SizeOfStruct = sizeof(SYMBOL_INFO);
++            sym->MaxNameLen = 255;
++            DWORD64 disp = 0;
++            std::string name = "?";
++            if (SymFromAddr(proc, a.first, &disp, sym))
++                name = sym->Name;
++            else
++            {
++                char tmp[40];
++                std::snprintf(tmp, sizeof(tmp), "0x%llx", a.first);
++                name = tmp;
++            }
++            byName[name] += a.second;
++        }
++        std::vector<std::pair<std::string, unsigned>> v(byName.begin(), byName.end());
++        std::sort(v.begin(), v.end(), [](auto &x, auto &y) { return x.second > y.second; });
++        std::fprintf(f, "== thread %lu: %u amostras\n", (unsigned long)kv.first, kv.second.total);
++        for (size_t i = 0; i < v.size() && i < 30; ++i)
++            std::fprintf(f, "  %5.1f%%  %s\n", 100.0 * v[i].second / kv.second.total, v[i].first.c_str());
++    }
++    std::fclose(f);
++}
++
++void samplerMain()
++{
++    HANDLE proc = GetCurrentProcess();
++    SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_UNDNAME);
++    SymInitialize(proc, nullptr, TRUE);
++    const DWORD self = GetCurrentThreadId();
++    std::map<DWORD, Hist> hist;
++    auto lastReport = std::chrono::steady_clock::now();
++    std::vector<DWORD> tids;
++    int refresh = 0;
++    const auto startTime = std::chrono::steady_clock::now();
++    const char *skipEnv = std::getenv("PS2X_HOSTPROF_SKIP");
++    const int skipSecs = skipEnv ? std::atoi(skipEnv) : 0;
++    bool skipDone = skipSecs <= 0;
++    for (;;)
++    {
++        if (refresh-- <= 0)
++        {
++            refresh = 200;
++            tids.clear();
++            HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
++            if (snap != INVALID_HANDLE_VALUE)
++            {
++                THREADENTRY32 te;
++                te.dwSize = sizeof(te);
++                for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te))
++                    if (te.th32OwnerProcessID == GetCurrentProcessId() && te.th32ThreadID != self)
++                        tids.push_back(te.th32ThreadID);
++                CloseHandle(snap);
++            }
++        }
++        for (DWORD tid : tids)
++        {
++            HANDLE th = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, tid);
++            if (!th)
++                continue;
++            if (SuspendThread(th) != (DWORD)-1)
++            {
++                CONTEXT ctx;
++                ctx.ContextFlags = CONTEXT_CONTROL;
++                if (GetThreadContext(th, &ctx))
++                {
++                    Hist &h = hist[tid];
++                    ++h.byAddr[ctx.Rip];
++                    ++h.total;
++                }
++                ResumeThread(th);
++            }
++            CloseHandle(th);
++        }
++        Sleep(1);
++        const auto now = std::chrono::steady_clock::now();
++        if (!skipDone && now - startTime > std::chrono::seconds(skipSecs))
++        {
++            skipDone = true;
++            hist.clear();
++        }
++        if (now - lastReport > std::chrono::seconds(10))
++        {
++            lastReport = now;
++            report(hist, proc);
++        }
++    }
++}
++
++} // namespace
++
++void wotmHostProfInit()
++{
++    static bool once = false;
++    if (once)
++        return;
++    once = true;
++    if (std::getenv("PS2X_HOSTPROF"))
++        std::thread(samplerMain).detach();
++}
++#else
++void wotmHostProfInit() {}
++#endif
+diff --git a/ps2xRuntime/src/lib/ps2_memory.cpp b/ps2xRuntime/src/lib/ps2_memory.cpp
+index 37b6a4d..3f2567f 100644
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -1802,8 +1802,12 @@ void PS2Memory::processPendingTransfers()
+     m_pendingVif0Transfers.clear();
+ 
+     const bool hadVif1 = !m_pendingVif1Transfers.empty();
++    static const bool s_noVif1 = std::getenv("PS2X_NO_VIF1") != nullptr; // teste: nao executar VU1/VIF1 (o port desenha nativo)
++    static const bool s_vif1Uploads = std::getenv("PS2X_VIF1_UPLOADS") != nullptr; // com NO_VIF1: processa a cadeia (uploads de textura/CLUT por DIRECT) sem executar o VU1
+     for (auto &p : m_pendingVif1Transfers)
+     {
++        if (s_noVif1 && !s_vif1Uploads)
++            continue;
+         if (!p.chainData.empty())
+         {
+             processVIF1Data(p.chainData.data(), static_cast<uint32_t>(p.chainData.size()));
+diff --git a/ps2xRuntime/src/lib/ps2_pad.cpp b/ps2xRuntime/src/lib/ps2_pad.cpp
+index 8590f14..68ebd78 100644
+--- a/ps2xRuntime/src/lib/ps2_pad.cpp
++++ b/ps2xRuntime/src/lib/ps2_pad.cpp
+@@ -1,6 +1,10 @@
+ #include "runtime/ps2_pad.h"
+ #include "ps2_host_backend.h"
+ #include <cstring>
++#include <cstdio>
++#include <cstdlib>
++#include <string>
++#include <vector>
+ 
+ namespace
+ {
+@@ -87,36 +91,101 @@ bool PSPadBackend::readState(int /*port*/, int /*slot*/, uint8_t *data, size_t s
+         data[4] = static_cast<uint8_t>(128 + rx * 127);
+         data[5] = static_cast<uint8_t>(128 + ry * 127);
+     }
+-    else
++    // Teclado sempre ativo, somado ao gamepad (um gamepad/dispositivo virtual presente nao pode desligar o teclado).
++    // Mapeamento (definido pelo dono):
++    //   Setas = analogico esquerdo        I/J/K/L = D-pad (cima/esquerda/baixo/direita)
++    //   Espaco = X   Z = quadrado   X = triangulo   S = bola
++    //   Enter = Start   Backspace = Select
++    //   Q = L1   W = R1   Shift = L1+R1   A = L2   C = R2
+     {
+-        if (IsKeyDown(KEY_UP) || IsKeyDown(KEY_W))
++        if (IsKeyDown(KEY_I))
+             clearBit(PAD_UP);
+-        if (IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S))
++        if (IsKeyDown(KEY_K))
+             clearBit(PAD_DOWN);
+-        if (IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A))
++        if (IsKeyDown(KEY_J))
+             clearBit(PAD_LEFT);
+-        if (IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D))
++        if (IsKeyDown(KEY_L))
+             clearBit(PAD_RIGHT);
+-        if (IsKeyDown(KEY_X) || IsKeyDown(KEY_SPACE))
++        if (IsKeyDown(KEY_SPACE))
+             clearBit(PAD_CROSS);
+-        if (IsKeyDown(KEY_C) || IsKeyDown(KEY_ESCAPE))
++        if (IsKeyDown(KEY_S))
+             clearBit(PAD_CIRCLE);
+-        if (IsKeyDown(KEY_Z) || IsKeyDown(KEY_KP_0))
++        if (IsKeyDown(KEY_Z))
+             clearBit(PAD_SQUARE);
+-        if (IsKeyDown(KEY_V) || IsKeyDown(KEY_KP_1))
++        if (IsKeyDown(KEY_X))
+             clearBit(PAD_TRIANGLE);
+         if (IsKeyDown(KEY_Q))
+             clearBit(PAD_L1);
+-        if (IsKeyDown(KEY_E))
++        if (IsKeyDown(KEY_W))
+             clearBit(PAD_R1);
+-        if (IsKeyDown(KEY_LEFT_SHIFT))
++        if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT))
++        {
++            clearBit(PAD_L1);
++            clearBit(PAD_R1);
++        }
++        if (IsKeyDown(KEY_A))
+             clearBit(PAD_L2);
+-        if (IsKeyDown(KEY_RIGHT_SHIFT))
++        if (IsKeyDown(KEY_C))
+             clearBit(PAD_R2);
+         if (IsKeyDown(KEY_ENTER))
+             clearBit(PAD_START);
+-        if (IsKeyDown(KEY_TAB))
++        if (IsKeyDown(KEY_BACKSPACE))
+             clearBit(PAD_SELECT);
++
++        // Analogico esquerdo pelas setas (so quando alguma seta esta pressionada; senao fica o valor do gamepad/centro)
++        const bool aL = IsKeyDown(KEY_LEFT), aR = IsKeyDown(KEY_RIGHT), aU = IsKeyDown(KEY_UP), aD = IsKeyDown(KEY_DOWN);
++        if (aL != aR)
++            data[6] = aL ? 0x00 : 0xFF;
++        if (aU != aD)
++            data[7] = aU ? 0x00 : 0xFF;
++    }
++
++    // Roteiro de botoes por tempo (teste sem tela): PS2X_PAD="seg:dur:botao;seg:dur:botao;..." (botao: up,down,left,right,cross,circle,square,triangle,l1,r1,l2,r2,start,select)
++    {
++        struct Step { double t0, dur; uint16_t mask; };
++        static std::vector<Step> steps;
++        static bool parsed = false;
++        if (!parsed)
++        {
++            parsed = true;
++            if (const char *env = std::getenv("PS2X_PAD"))
++            {
++                std::string s(env);
++                size_t pos = 0;
++                while (pos < s.size())
++                {
++                    size_t end = s.find(';', pos);
++                    if (end == std::string::npos) end = s.size();
++                    std::string item = s.substr(pos, end - pos);
++                    pos = end + 1;
++                    size_t a = item.find(':'), b = item.find(':', a + 1);
++                    if (a == std::string::npos || b == std::string::npos) continue;
++                    const std::string name = item.substr(b + 1);
++                    uint16_t m = 0;
++                    if (name == "up") m = PAD_UP; else if (name == "down") m = PAD_DOWN; else if (name == "left") m = PAD_LEFT;
++                    else if (name == "right") m = PAD_RIGHT; else if (name == "cross") m = PAD_CROSS; else if (name == "circle") m = PAD_CIRCLE;
++                    else if (name == "square") m = PAD_SQUARE; else if (name == "triangle") m = PAD_TRIANGLE; else if (name == "l1") m = PAD_L1;
++                    else if (name == "r1") m = PAD_R1; else if (name == "l2") m = PAD_L2; else if (name == "r2") m = PAD_R2;
++                    else if (name == "start") m = PAD_START; else if (name == "select") m = PAD_SELECT;
++                    if (m) steps.push_back({std::atof(item.substr(0, a).c_str()), std::atof(item.substr(a + 1, b - a - 1).c_str()), m});
++                }
++            }
++        }
++        if (!steps.empty())
++        {
++            const double now = GetTime();
++            static uint16_t lastBtns = 0xFFFFu;
++            static unsigned long calls = 0;
++            ++calls;
++            for (const Step &st : steps)
++                if (now >= st.t0 && now < st.t0 + st.dur)
++                    clearBit(st.mask);
++            if (btns != lastBtns)
++            {
++                std::fprintf(stderr, "[pad] t=%.1f readState#%lu btns=%04x\n", now, calls, btns);
++                lastBtns = btns;
++            }
++        }
+     }
+ 
+     data[2] = static_cast<uint8_t>(btns & 0xFF);
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 45cb9d2..cffb1ac 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -1,3 +1,5 @@
++#include <cstdio>
++#include <vector>
+ #include "ps2_runtime.h"
+ #include "ps2_log.h"
+ #include "ps2_stubs.h"
+@@ -1342,6 +1344,11 @@ void PS2Runtime::reportMissingFunction(uint8_t *rdram,
+     }
+ }
+ 
++#include "rlgl.h"
++#include "wotm_scene.inc"
++static std::vector<uint32_t> g_wotmCov(0x1000000u >> 2, 0);
++
++std::atomic<R5900Context *> g_wotmLiveCtx{nullptr};
+ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
+                                      R5900Context *ctx,
+                                      uint32_t targetPc,
+@@ -1351,7 +1358,10 @@ bool PS2Runtime::dispatchGuestBranch(uint8_t *rdram,
+                                      const char *debugName)
+ {
+     ctx->pc = targetPc;
++    g_wotmLiveCtx.store(ctx, std::memory_order_relaxed);
+     const bool isCall = (kind == GuestBranchKind::DirectCall || kind == GuestBranchKind::IndirectCall);
++    if (targetPc < 0x1000000u)
++        ++g_wotmCov[targetPc >> 2];
+ 
+     // Every inter-function transfer is also a deterministic EE safe point.
+     // Backward edges inside generated functions use eeCheckpointDue(), while
+@@ -1423,9 +1433,31 @@ void PS2Runtime::SignalException(R5900Context *ctx, PS2Exception exception)
+                        exception == EXCEPTION_TLB_REFILL);
+ }
+ 
++// Diagnostico (PS2X_STATS): custo do interpretador de VU0 (VCALLMS dentro de hierTraverseAsm etc.)
++void wotmHostProfInit();
++std::atomic<unsigned long long> g_wotmVu0Us{0}, g_wotmVu0Calls{0};
++std::atomic<unsigned long long> g_wotmVu0PcCalls[512], g_wotmVu0PcUs[512];
++std::atomic<unsigned long long> g_wotmVu0Phase[3];   // ns: reset+copia de entrada, execucao, copia de saida
++
+ void PS2Runtime::executeVU0Microprogram(uint8_t *rdram, R5900Context *ctx, uint32_t address)
+ {
+     (void)rdram;
++    static const bool hostProfInit = (wotmHostProfInit(), true);
++    (void)hostProfInit;
++    struct Vu0Timer
++    {
++        std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
++        uint32_t slot;
++        explicit Vu0Timer(uint32_t pc) : slot((pc >> 3) & 511u) {}
++        ~Vu0Timer()
++        {
++            const auto us = (unsigned long long)std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
++            g_wotmVu0Us += us;
++            ++g_wotmVu0Calls;
++            g_wotmVu0PcUs[slot] += us;
++            ++g_wotmVu0PcCalls[slot];
++        }
++    } vu0Timer(address);
+ 
+     uint8_t *const vu0Code = m_memory.getVU0Code();
+     uint8_t *const vu0Data = m_memory.getVU0Data();
+@@ -1437,13 +1469,86 @@ void PS2Runtime::executeVU0Microprogram(uint8_t *rdram, R5900Context *ctx, uint3
+         return;
+     }
+ 
++    // PS2X_VU0_VERIFY: executa antes a mesma chamada num interpretador de referencia (atalho do agendador desligado) e compara com o normal
++    static const bool verifyVu0 = std::getenv("PS2X_VU0_VERIFY") != nullptr;
++    static VU1Interpreter s_vu0Ref(VU1Interpreter::Unit::VU0);
++    static uint8_t s_refData[PS2_VU0_DATA_SIZE];
++    static unsigned long long s_verifyCalls = 0, s_verifyBad = 0;
++    if (verifyVu0)
++    {
++        extern bool g_wotmVuNoSkip;
++        s_vu0Ref.reset();
++        copyVu0ContextToState(ctx, s_vu0Ref.state());
++        std::memcpy(s_refData, vu0Data, PS2_VU0_DATA_SIZE);
++        g_wotmVuNoSkip = true;
++        s_vu0Ref.execute(vu0Code, PS2_VU0_CODE_SIZE, s_refData, PS2_VU0_DATA_SIZE, m_gs, &m_memory, startPC, 0u, ctx->vu0_itop, 4096);
++        g_wotmVuNoSkip = false;
++    }
++    const auto ph0 = std::chrono::steady_clock::now();
+     m_vu0.reset();
+     copyVu0ContextToState(ctx, m_vu0.state());
++    const auto ph1 = std::chrono::steady_clock::now();
++    // PS2X_DUMP_VU0: grava o microcodigo e amostras (estado/dados de entrada e saida) das primeiras chamadas de cada microprograma, em regime
++    static const bool dumpVu0 = std::getenv("PS2X_DUMP_VU0") != nullptr;
++    static unsigned s_dumpPerPc[512];
++    VU1State dumpIn{};
++    static uint8_t dumpDataIn[PS2_VU0_DATA_SIZE];
++    const bool dumpThis = dumpVu0 && g_wotmVu0Calls.load() > 300000 && s_dumpPerPc[(startPC >> 3) & 511u] < 60;
++    if (dumpThis)
++    {
++        dumpIn = m_vu0.state();
++        std::memcpy(dumpDataIn, vu0Data, PS2_VU0_DATA_SIZE);
++        static bool codeWritten = false;
++        if (!codeWritten)
++        {
++            codeWritten = true;
++            if (FILE *f = std::fopen("vu0_code.bin", "wb"))
++            {
++                std::fwrite(vu0Code, 1, PS2_VU0_CODE_SIZE, f);
++                std::fclose(f);
++            }
++        }
++    }
+     m_vu0.execute(vu0Code, PS2_VU0_CODE_SIZE,
+                   vu0Data, PS2_VU0_DATA_SIZE,
+                   m_gs, &m_memory,
+                   startPC, 0u, ctx->vu0_itop, 4096);
++    const auto ph2 = std::chrono::steady_clock::now();
++    if (verifyVu0)
++    {
++        ++s_verifyCalls;
++        const VU1State &a = m_vu0.state();
++        const VU1State &b = s_vu0Ref.state();
++        const bool same = std::memcmp(a.vf, b.vf, sizeof(a.vf)) == 0 && std::memcmp(a.vi, b.vi, sizeof(a.vi)) == 0 &&
++                          std::memcmp(a.acc, b.acc, sizeof(a.acc)) == 0 && std::memcmp(&a.q, &b.q, 4) == 0 && std::memcmp(&a.p, &b.p, 4) == 0 &&
++                          std::memcmp(&a.i, &b.i, 4) == 0 && a.r == b.r && a.pc == b.pc && a.mac == b.mac && a.clip == b.clip &&
++                          a.status == b.status && a.cycles == b.cycles && std::memcmp(vu0Data, s_refData, PS2_VU0_DATA_SIZE) == 0;
++        if (!same && ++s_verifyBad <= 5)
++            std::fprintf(stderr, "[vu0-verify] DIVERGIU em pc=0x%x (chamada %llu): mac %x/%x clip %x/%x status %x/%x cycles %llu/%llu\n", startPC,
++                         s_verifyCalls, a.mac, b.mac, a.clip, b.clip, a.status, b.status, (unsigned long long)a.cycles, (unsigned long long)b.cycles);
++        if (s_verifyCalls % 500000 == 0)
++            std::fprintf(stderr, "[vu0-verify] %llu chamadas comparadas, %llu divergencias\n", s_verifyCalls, s_verifyBad);
++    }
++    if (dumpThis)
++    {
++        ++s_dumpPerPc[(startPC >> 3) & 511u];
++        static FILE *sf = std::fopen("vu0_samples.bin", "wb");
++        if (sf)
++        {
++            const uint32_t hdr[3] = {startPC, (uint32_t)sizeof(VU1State), (uint32_t)PS2_VU0_DATA_SIZE};
++            std::fwrite(hdr, sizeof(hdr), 1, sf);
++            std::fwrite(&dumpIn, sizeof(VU1State), 1, sf);
++            std::fwrite(&m_vu0.state(), sizeof(VU1State), 1, sf);
++            std::fwrite(dumpDataIn, 1, PS2_VU0_DATA_SIZE, sf);
++            std::fwrite(vu0Data, 1, PS2_VU0_DATA_SIZE, sf);
++            std::fflush(sf);
++        }
++    }
+     copyVu0StateToContext(m_vu0.state(), ctx);
++    const auto ph3 = std::chrono::steady_clock::now();
++    g_wotmVu0Phase[0] += (unsigned long long)std::chrono::duration_cast<std::chrono::nanoseconds>(ph1 - ph0).count();
++    g_wotmVu0Phase[1] += (unsigned long long)std::chrono::duration_cast<std::chrono::nanoseconds>(ph2 - ph1).count();
++    g_wotmVu0Phase[2] += (unsigned long long)std::chrono::duration_cast<std::chrono::nanoseconds>(ph3 - ph2).count();
+ }
+ 
+ void PS2Runtime::vu0StartMicroProgram(uint8_t *rdram, R5900Context *ctx, uint32_t address)
+@@ -2422,7 +2527,11 @@ void PS2Runtime::run()
+         });
+         uint32_t presentWidth = FB_WIDTH;
+         uint32_t presentHeight = DEFAULT_DISPLAY_HEIGHT;
++        static unsigned long long s_upUs = 0, s_drawUs = 0;
++        const auto wotmT0 = std::chrono::steady_clock::now();
+         UploadFrame(frameTex, this, presentWidth, presentHeight);
++        const auto wotmT1 = std::chrono::steady_clock::now();
++        s_upUs += std::chrono::duration_cast<std::chrono::microseconds>(wotmT1 - wotmT0).count();
+ 
+         BeginDrawing();
+         ClearBackground(BLACK);
+@@ -2444,7 +2553,174 @@ void PS2Runtime::run()
+         {
+             m_debugUiDrawCallback(*this, m_debugUiUserData);
+         }
++        {
++            // captura de teste: PS2X_SHOT_FRAMES="300,900,1800" -> shot_<frame>.png (cwd)
++            static long s_frame = 0;
++            ++s_frame;
++            if (std::getenv("PS2X_SCENE"))
++                wotmDrawScene(m_memory.getRDRAM());
++            if (std::getenv("PS2X_PROF")) // amostrador de PC: histograma por palavra, gravado em prof.<frame>
++            {
++                static std::unordered_map<uint32_t, uint32_t> s_hist;
++                static std::mutex s_histMx;
++                static std::atomic<uint64_t> s_samples{0}, s_failed{0};
++                static bool s_started = false;
++                if (!s_started)
++                {
++                    s_started = true;
++                    std::thread([this]() {
++                        for (;;)
++                        {
++                            std::this_thread::sleep_for(std::chrono::milliseconds(2));
++                            bool ok = false;
++                            if (R5900Context *lc = g_wotmLiveCtx.load(std::memory_order_relaxed))
++                            {
++                                const uint32_t pc = lc->pc;
++                                std::lock_guard<std::mutex> lk(s_histMx);
++                                ++s_hist[pc];
++                                ok = true;
++                            }
++                            if (ok) ++s_samples; else ++s_failed;
++                        }
++                    }).detach();
++                }
++                if (s_frame % 600 == 0)
++                {
++                    std::lock_guard<std::mutex> lk(s_histMx);
++                    const std::string pn = std::string("prof.") + std::to_string(s_frame);
++                    if (FILE *f = std::fopen(pn.c_str(), "w"))
++                    {
++                        std::fprintf(f, "# samples=%llu norunning=%llu\n", (unsigned long long)s_samples.load(), (unsigned long long)s_failed.load());
++                        for (const auto &kv : s_hist) std::fprintf(f, "0x%06x %u\n", kv.first, kv.second);
++                        std::fclose(f);
++                    }
++                }
++            }
++            if (s_frame % 300 == 0 && std::getenv("PS2X_STATS"))
++            {
++                {
++                    const uint8_t *rd = m_memory.getRDRAM();
++                    auto rw = [&](uint32_t a) { uint32_t v; std::memcpy(&v, rd + a, 4); return v; };
++                    if (const char *pk = std::getenv("PS2X_PEEK")) // "6F8464,6F8080,..." palavras da RDRAM (hex)
++                    {
++                        std::string s(pk);
++                        std::fprintf(stderr, "[peek] f=%ld", s_frame);
++                        size_t p = 0;
++                        while (p < s.size())
++                        {
++                            size_t e = s.find(',', p);
++                            if (e == std::string::npos) e = s.size();
++                            const uint32_t a = static_cast<uint32_t>(std::strtoul(s.substr(p, e - p).c_str(), nullptr, 16));
++                            p = e + 1;
++                            if (a && a + 4 <= PS2_RAM_SIZE) std::fprintf(stderr, " %x=%08x", a, rw(a));
++                        }
++                        std::fprintf(stderr, "\n");
++                    }
++                    std::fprintf(stderr, "[ui] currScreen=%u next=%d between=%u select=%d firstPass=%u exitUi=%u movieReq=%u\n", rw(0x6F8464),
++                                 (int)rw(0x6F846C), rw(0x6F7E8C), (int)rw(0x6F84A8), rw(0x6F7E80), rw(0x6F84B0), rw(0x6F8840));
++                }
++                extern std::atomic<unsigned long long> g_wotmGifPackets, g_wotmGifBytes;
++                std::fprintf(stderr, "[wotm] frame %ld gifPackets=%llu gifBytes=%llu\n", s_frame,
++                             g_wotmGifPackets.load(), g_wotmGifBytes.load());
++                {
++                    const auto ds = iopDebugSnapshot();
++                    std::fprintf(stderr, "[iop] t=%.1f iopCycles=%llu iopInstr=%llu threads=%u modules=%u\n", GetTime(),
++                                 (unsigned long long)ds.emulatorCycles, (unsigned long long)ds.emulatorInstructions,
++                                 ds.emulatorThreads, ds.emulatorLoadedModules);
++                }
++            }
++            if (s_frame % 600 == 0 && std::getenv("PS2X_STATS") && m_eeScheduler)
++            {
++                const EeKernelSnapshot ks = m_eeScheduler->snapshot();
++                std::fprintf(stderr, "[wotm] --- sched frame %ld running=%d cycle=%llu\n", s_frame, ks.runningThreadId, (unsigned long long)ks.eeCycle);
++                for (const auto &t : ks.threads)
++                    std::fprintf(stderr, "[wotm]  thr %d st=%d wait=%d wid=%d prio=%d pc=%06x ra=%06x entry=%06x inv=%u\n", t.id, (int)t.status,
++                                 (int)t.waitReason, t.waitId, t.currentPriority, t.pc, t.ra, t.entry, t.invocationDepth);
++                for (const auto &s : ks.semaphores)
++                    std::fprintf(stderr, "[wotm]  sema %d count=%d max=%d waiters=%u\n", s.id, s.count, s.maxCount, s.waiters);
++                for (const auto &e : ks.eventFlags)
++                    std::fprintf(stderr, "[wotm]  evf %d bits=%08x waiters=%u\n", e.id, e.bits, e.waiters);
++            }
++            if (const char *cov = std::getenv("PS2X_COVERAGE"))
++            {
++                if (s_frame % 300 == 0)
++                {
++                    const std::string covName = std::string(cov) + "." + std::to_string(s_frame);
++                    FILE *f = std::fopen(covName.c_str(), "w");
++                    if (f)
++                    {
++                        for (uint32_t i = 0; i < g_wotmCov.size(); ++i)
++                            if (g_wotmCov[i])
++                                std::fprintf(f, "0x%06x %u\n", i << 2, g_wotmCov[i]);
++                        std::fclose(f);
++                    }
++                }
++            }
++            if (const char *sf = std::getenv("PS2X_SHOT_FRAMES"))
++            {
++                std::string list = std::string(",") + sf + ",";
++                if (list.find("," + std::to_string(s_frame) + ",") != std::string::npos)
++                {
++                    rlDrawRenderBatchActive(); // o raylib agrupa o desenho em lote; sem isso a captura sai vazia
++                    TakeScreenshot(("shot_" + std::to_string(s_frame) + ".png").c_str());
++                }
++            }
++            if (const char *df = std::getenv("PS2X_DUMP_RAM")) // "600,900": grava a RAM do EE em ram_<frame>.bin (cwd), para o visualizador nativo
++            {
++                const std::string dl = std::string(",") + df + ",";
++                if (dl.find("," + std::to_string(s_frame) + ",") != std::string::npos)
++                {
++                    if (FILE *rf = std::fopen(("ram_" + std::to_string(s_frame) + ".bin").c_str(), "wb"))
++                    {
++                        std::fwrite(m_memory.getRDRAM(), 1, PS2_RAM_SIZE, rf);
++                        std::fclose(rf);
++                    }
++                    m_gs.refreshDisplaySnapshot(); // VRAM do GS (texturas enviadas por upload): vram_<frame>.bin
++                    uint32_t vramSize = 0;
++                    if (const uint8_t *vram = m_gs.lockDisplaySnapshot(vramSize))
++                    {
++                        if (FILE *vf = std::fopen(("vram_" + std::to_string(s_frame) + ".bin").c_str(), "wb"))
++                        {
++                            std::fwrite(vram, 1, vramSize, vf);
++                            std::fclose(vf);
++                        }
++                    }
++                    m_gs.unlockDisplaySnapshot();
++                }
++            }
++        }
+         EndDrawing();
++        s_drawUs += std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - wotmT1).count();
++        {
++            static long s_n = 0;
++            if (++s_n % 300 == 0 && std::getenv("PS2X_STATS"))
++            {
++                extern std::atomic<unsigned long long> g_wotmGifUs;
++                std::fprintf(stderr, "[time] t=%.1f frames=%ld uploadMs=%llu drawMs=%llu gifMs=%llu\n", GetTime(), s_n, s_upUs / 1000,
++                             s_drawUs / 1000, g_wotmGifUs.load() / 1000);
++                if (m_eeScheduler)
++                {
++                    const EeKernelSnapshot ks2 = m_eeScheduler->snapshot();
++                    std::fprintf(stderr, "[time]   vsyncTick=%llu eeCycle=%llu run=%d", (unsigned long long)m_eeScheduler->currentVSyncTick(),
++                                 (unsigned long long)ks2.eeCycle, ks2.runningThreadId);
++                    for (const auto &t : ks2.threads)
++                        std::fprintf(stderr, " | thr%d st=%d wait=%d pc=%06x", t.id, (int)t.status, (int)t.waitReason, t.pc);
++                    std::fprintf(stderr, "\n");
++                    extern std::atomic<unsigned long long> g_wotmIdleUs, g_wotmIdleCalls, g_wotmPaceUs, g_wotmPaceCalls;
++                    std::fprintf(stderr, "[time]   idleMs=%llu (%llu calls) paceMs=%llu (%llu calls)\n", g_wotmIdleUs.load() / 1000,
++                                 g_wotmIdleCalls.load(), g_wotmPaceUs.load() / 1000, g_wotmPaceCalls.load());
++                    {
++                        extern std::atomic<unsigned long long> g_wotmVu0Us, g_wotmVu0Calls, g_wotmVu0PcCalls[512], g_wotmVu0PcUs[512];
++                        std::fprintf(stderr, "[time]   vu0 fases(ms) entrada=%llu exec=%llu saida=%llu\n", g_wotmVu0Phase[0].load() / 1000000, g_wotmVu0Phase[1].load() / 1000000, g_wotmVu0Phase[2].load() / 1000000);
++                        std::fprintf(stderr, "[time]   vu0 calls=%llu ms=%llu |", g_wotmVu0Calls.load(), g_wotmVu0Us.load() / 1000);
++                        for (uint32_t i = 0; i < 512; ++i)
++                            if (g_wotmVu0PcCalls[i].load() > 1000)
++                                std::fprintf(stderr, " pc=0x%x:%llu calls,%llu ms", i * 8, g_wotmVu0PcCalls[i].load(), g_wotmVu0PcUs[i].load() / 1000);
++                        std::fprintf(stderr, "\n");
++                    }
++                }
++            }
++        }
+ 
+         if (WindowShouldClose())
+         {
+diff --git a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+index b02c7ca..e56cb12 100644
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -1,4 +1,5 @@
+ // Based on Blackline Interactive implementation
++#include <cstdlib>
+ #include "runtime/ps2_memory.h"
+ #include <cstring>
+ 
+@@ -416,7 +417,8 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+                 vif1_regs.tops = (vif1_regs.base + vif1_regs.ofst) & 0x3FFu;
+             vif1_regs.stat ^= (1u << 7); // toggle DBF
+ 
+-            if (m_vu1MscalCallback)
++            static const bool s_noVuExec = std::getenv("PS2X_NO_VIF1") != nullptr; // NO_VIF1: nao executa microprogramas
++            if (m_vu1MscalCallback && !s_noVuExec)
+                 m_vu1MscalCallback(startPC, runTop, runItop);
+             continue;
+         }
+@@ -434,7 +436,8 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+                 vif1_regs.tops = (vif1_regs.base + vif1_regs.ofst) & 0x3FFu;
+             vif1_regs.stat ^= (1u << 7); // toggle DBF
+ 
+-            if (m_vu1MscntCallback)
++            static const bool s_noVuExec2 = std::getenv("PS2X_NO_VIF1") != nullptr;
++            if (m_vu1MscntCallback && !s_noVuExec2)
+                 m_vu1MscntCallback(runTop, runItop);
+             continue;
+         }
+diff --git a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
+index bd75bba..68b4ada 100644
+--- a/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
++++ b/ps2xRuntime/src/lib/vu/ps2_vu1_core.cpp
+@@ -81,6 +81,7 @@ void VU1Interpreter::resetScheduler()
+     m_viLatestWrite = {};
+     m_accLatestWrite = {};
+     m_nextWriteSequence = 0;
++    m_earliestPending = ~0ull;
+     m_efuResourceReady = 0;
+     m_workingClip = m_state.clip;
+     m_viBranchBackupValue = 0;
+@@ -533,6 +534,7 @@ void VU1Interpreter::updateFmacFlags(const uint8_t laneFlags[4], uint8_t dest,
+     entry->valid = true;
+     entry->issueCycle = m_cycle;
+     entry->readyCycle = m_cycle + kFmacLatency;
++    m_earliestPending = std::min(m_earliestPending, entry->readyCycle);
+     entry->mac = mac;
+     entry->status = status;
+     entry->extraSticky = extraSticky;
+@@ -572,6 +574,7 @@ void VU1Interpreter::queueFsset(uint16_t immediate)
+             entry.valid = true;
+             entry.issueCycle = m_cycle;
+             entry.readyCycle = m_cycle + kFmacLatency;
++            m_earliestPending = std::min(m_earliestPending, entry.readyCycle);
+             entry.status = static_cast<uint32_t>(immediate) & 0xFC0u;
+             entry.writesSticky = true;
+             return;
+@@ -591,6 +594,7 @@ void VU1Interpreter::queueClip(uint32_t clip)
+             entry.valid = true;
+             entry.issueCycle = m_cycle;
+             entry.readyCycle = m_cycle + kFmacLatency;
++            m_earliestPending = std::min(m_earliestPending, entry.readyCycle);
+             entry.clip = m_workingClip;
+             entry.writesClip = true;
+             return;
+@@ -615,6 +619,7 @@ void VU1Interpreter::queueFcset(uint32_t clip)
+             entry.valid = true;
+             entry.issueCycle = m_cycle;
+             entry.readyCycle = m_cycle + kFmacLatency;
++            m_earliestPending = std::min(m_earliestPending, entry.readyCycle);
+             entry.clip = m_workingClip;
+             entry.writesClip = true;
+             return;
+@@ -629,6 +634,7 @@ void VU1Interpreter::queueQ(float value, uint32_t latency, uint32_t statusDi)
+     value = normalizeResult(value, ignoredFlags);
+     m_fdiv.valid = true;
+     m_fdiv.readyCycle = m_cycle + latency;
++    m_earliestPending = std::min(m_earliestPending, m_fdiv.readyCycle);
+     m_fdiv.value = value;
+     m_fdiv.statusDi = statusDi & 0x30u;
+ }
+@@ -643,6 +649,7 @@ void VU1Interpreter::queueP(float value, uint32_t latency)
+         {
+             entry.valid = true;
+             entry.readyCycle = m_cycle + latency;
++            m_earliestPending = std::min(m_earliestPending, entry.readyCycle);
+             entry.value = value;
+             // EFU throughput is one cycle shorter than result visibility.
+             m_efuResourceReady = m_cycle + (latency > 0u ? latency - 1u : 0u);
+@@ -660,6 +667,7 @@ void VU1Interpreter::queueStore(uint32_t address, const uint32_t words[4], uint8
+         {
+             store.valid = true;
+             store.readyCycle = m_cycle + 1u;
++            m_earliestPending = std::min(m_earliestPending, store.readyCycle);
+             store.address = address;
+             store.laneMask = laneMask;
+             std::copy(words, words + 4, store.words.begin());
+@@ -681,6 +689,7 @@ void VU1Interpreter::queueVfWrite(uint8_t reg, uint8_t laneMask,
+             write = {};
+             write.valid = true;
+             write.readyCycle = m_cycle + latency;
++            m_earliestPending = std::min(m_earliestPending, write.readyCycle);
+             write.sequence = ++m_nextWriteSequence;
+             write.reg = reg;
+             write.laneMask = laneMask;
+@@ -707,6 +716,7 @@ void VU1Interpreter::queueViWrite(uint8_t reg, int32_t value, uint32_t latency)
+             write = {};
+             write.valid = true;
+             write.readyCycle = m_cycle + latency;
++            m_earliestPending = std::min(m_earliestPending, write.readyCycle);
+             write.sequence = ++m_nextWriteSequence;
+             write.reg = reg;
+             write.value = value;
+@@ -728,6 +738,7 @@ void VU1Interpreter::queueAccWrite(uint8_t laneMask, const float value[4], uint3
+             write = {};
+             write.valid = true;
+             write.readyCycle = m_cycle + latency;
++            m_earliestPending = std::min(m_earliestPending, write.readyCycle);
+             write.sequence = ++m_nextWriteSequence;
+             write.laneMask = laneMask;
+             std::copy(value, value + 4, write.value.begin());
+@@ -742,8 +753,12 @@ void VU1Interpreter::queueAccWrite(uint8_t laneMask, const float value[4], uint3
+     reportReservedInstruction(true, 0xFFFFFFF5u);
+ }
+ 
++bool g_wotmVuNoSkip = false; // verificacao: desliga o atalho de commitReadyPipelines (PS2X_VU0_VERIFY)
++
+ void VU1Interpreter::commitReadyPipelines()
+ {
++    if (!g_wotmVuNoSkip && m_cycle < m_earliestPending)
++        return;
+     for (FlagPipelineEntry &entry : m_flagPipeline)
+     {
+         if (!entry.valid || entry.readyCycle > m_cycle)
+@@ -838,6 +853,33 @@ void VU1Interpreter::commitReadyPipelines()
+         }
+         write = {};
+     }
++    recomputeEarliestPending();
++}
++
++void VU1Interpreter::recomputeEarliestPending()
++{
++    uint64_t e = ~0ull;
++    for (const FlagPipelineEntry &x : m_flagPipeline)
++        if (x.valid && x.readyCycle < e)
++            e = x.readyCycle;
++    if (m_fdiv.valid && m_fdiv.readyCycle < e)
++        e = m_fdiv.readyCycle;
++    for (const ScalarPipelineEntry &x : m_efu)
++        if (x.valid && x.readyCycle < e)
++            e = x.readyCycle;
++    for (const PendingStore &x : m_storePipeline)
++        if (x.valid && x.readyCycle < e)
++            e = x.readyCycle;
++    for (const PendingVfWrite &x : m_vfWritePipeline)
++        if (x.valid && x.readyCycle < e)
++            e = x.readyCycle;
++    for (const PendingViWrite &x : m_viWritePipeline)
++        if (x.valid && x.readyCycle < e)
++            e = x.readyCycle;
++    for (const PendingAccWrite &x : m_accWritePipeline)
++        if (x.valid && x.readyCycle < e)
++            e = x.readyCycle;
++    m_earliestPending = e;
+ }
+ 
+ void VU1Interpreter::progressXgkick()
+diff --git a/ps2xRuntime/src/lib/wotm_live.inc b/ps2xRuntime/src/lib/wotm_live.inc
+new file mode 100644
+index 0000000..9850324
+--- /dev/null
++++ b/ps2xRuntime/src/lib/wotm_live.inc
+@@ -0,0 +1,134 @@
++// wotm_live.inc: desenho nativo ao vivo (incluido por wotm_scene.inc, no escopo global de ps2_runtime.cpp).
++// Usa native/wotm_native.hpp (do repo WoTM; passe -DWOTM_NATIVE_DIR=<WoTM>/native ao CMake). Sem o header, nao faz nada.
++#if __has_include("wotm_native.hpp")
++#include "wotm_native.hpp"
++#include <filesystem>
++#define WOTM_HAVE_NATIVE 1
++
++namespace wotm_live
++{
++// Diagnostico de queda: sem windows.h (conflita com o raylib), espelha so o que o filtro precisa.
++struct ExcRecord
++{
++    unsigned long code, flags;
++    ExcRecord *next;
++    void *address;
++    unsigned long nparams;
++    unsigned long long info[15];
++};
++struct ExcPointers
++{
++    ExcRecord *rec;
++    void *ctx;
++};
++extern "C" __declspec(dllimport) void *__stdcall SetUnhandledExceptionFilter(long(__stdcall *)(ExcPointers *));
++extern "C" __declspec(dllimport) void *__stdcall GetModuleHandleA(const char *);
++inline const char *g_stage = "idle";   // etapa da camada nativa em andamento (para localizar a queda)
++inline long __stdcall crashFilter(ExcPointers *e)
++{
++    const char *base = static_cast<const char *>(GetModuleHandleA(nullptr));
++    std::fprintf(stderr, "[CRASH] code=0x%08lx addr=%p (exe+0x%llx) stage=%s", e->rec->code, e->rec->address,
++                 (unsigned long long)(static_cast<const char *>(e->rec->address) - base), g_stage);
++    if (e->rec->code == 0xC0000005)
++        std::fprintf(stderr, " acesso=%s endereco=0x%llx", e->rec->info[0] == 1 ? "escrita" : (e->rec->info[0] == 8 ? "execucao" : "leitura"), e->rec->info[1]);
++    std::fprintf(stderr, "\n");
++    std::fflush(stderr);
++    return 0; // EXCEPTION_CONTINUE_SEARCH
++}
++struct State
++{
++    wotm::Scene scene;
++    RenderTexture2D rt{};
++    uint32_t levelSig = 0;
++    bool rtxChosen = false;
++    std::string rtxPath;
++    long frame = 0;
++};
++
++inline uint32_t levelSignature(const wotm::Ram &ram)
++{
++    uint32_t h = ram.u32(wotm::addr::tempVramTexAddr) * 2654435761u;
++    for (uint32_t a = 0xA00000; a < 0xA00400; a += 4)
++        h = (h ^ ram.u32(a)) * 16777619u;
++    return h;
++}
++
++} // namespace wotm_live
++
++// Desenha a fase lida da RAM (sem VU1/GS) por cima do quadro; devolve falso (e nao desenha) quando nao ha fase carregada.
++static bool wotmDrawNative(const uint8_t *rdram)
++{
++    static wotm_live::State S;
++    static bool filterInstalled = false;
++    if (!filterInstalled)
++    {
++        filterInstalled = true;
++        wotm_live::SetUnhandledExceptionFilter(wotm_live::crashFilter);
++    }
++    const wotm::Ram ram{rdram, PS2_RAM_SIZE};
++    const uint32_t wc = ram.u32(wotm::addr::world);
++    if (!ram.ok(wc, 0x40) || !ram.ok(ram.u32(wc)))
++        return false;
++
++    const uint32_t sig = wotm_live::levelSignature(ram);
++    if (sig != S.levelSig)
++    {
++        S.scene.invalidate();
++        S.levelSig = sig;
++        S.rtxChosen = false;
++    }
++    wotm_live::g_stage = "collect";
++    S.scene.collect(ram);
++    if (S.scene.items.size() < 20)
++        return false;
++    {
++        // nivel + monstros: nomes e bases das paletas vem de fileStatus (idempotente; refaz so quando mudam)
++        std::string log;
++        wotm_live::g_stage = "loadResources";
++        S.rtxChosen = S.scene.loadResources(ram, "", &log);
++        if (!log.empty() && log != S.rtxPath)
++        {
++            S.rtxPath = log;
++            std::fprintf(stderr, "[native] recursos: %s\n", log.c_str());
++        }
++    }
++
++    const wotm::GameCamera gc = wotm::readGameCamera(ram, 0);
++    if (!gc.ok)
++        return false;
++
++    const int RW = 960, RH = 720;
++    if (S.rt.id == 0)
++        S.rt = LoadRenderTexture(RW, RH);
++
++    BeginTextureMode(S.rt);
++    ClearBackground(Color{30, 40, 60, 255});
++    rlSetClipPlanes(0.5, 30000.0);
++    Camera3D c3{};
++    c3.position = {gc.pos[0], gc.pos[1], gc.pos[2]};
++    c3.target = {gc.pos[0] + gc.fwd[0], gc.pos[1] + gc.fwd[1], gc.pos[2] + gc.fwd[2]};
++    c3.up = {gc.up[0], gc.up[1], gc.up[2]};
++    c3.fovy = gc.fovy;
++    c3.projection = CAMERA_PERSPECTIVE;
++    BeginMode3D(c3);
++    wotm_live::g_stage = "draw";
++    S.scene.draw(ram, false);
++    wotm_live::g_stage = "idle";
++    EndMode3D();
++    EndTextureMode();
++
++    // letterbox 4:3 na janela
++    const float sw = static_cast<float>(GetScreenWidth()), sh = static_cast<float>(GetScreenHeight());
++    const float k = std::min(sw / RW, sh / RH);
++    const Rectangle src{0.f, 0.f, static_cast<float>(RW), -static_cast<float>(RH)};
++    const Rectangle dst{(sw - RW * k) * 0.5f, (sh - RH * k) * 0.5f, RW * k, RH * k};
++    DrawTexturePro(S.rt.texture, src, dst, Vector2{0.f, 0.f}, 0.f, WHITE);
++
++    if (++S.frame % 300 == 0 && std::getenv("PS2X_STATS"))
++        std::fprintf(stderr, "[native] frame %ld itens=%zu ceu=%zu nos=%u rtx=%s\n", S.frame, S.scene.items.size(), S.scene.sky.size(),
++                     S.scene.visited, S.rtxPath.c_str());
++    return true;
++}
++#else
++static bool wotmDrawNative(const uint8_t *) { return false; }
++#endif
+diff --git a/ps2xRuntime/src/lib/wotm_scene.inc b/ps2xRuntime/src/lib/wotm_scene.inc
+new file mode 100644
+index 0000000..cda24a7
+--- /dev/null
++++ b/ps2xRuntime/src/lib/wotm_scene.inc
+@@ -0,0 +1,159 @@
++// wotm_scene.inc (incluido por ps2_runtime.cpp; raylib e ps2_runtime.h ja estao incluidos)
++#include <cctype>
++#include "wotm_live.inc"
++namespace wotm_scene_ns
++{
++const uint8_t *g_rd = nullptr;
++
++inline bool okAddr(uint32_t a) { return a >= 0x00100000u && a < 0x01F00000u; }
++inline uint32_t u32(uint32_t a) { uint32_t v; std::memcpy(&v, g_rd + a, 4); return v; }
++inline uint16_t u16(uint32_t a) { uint16_t v; std::memcpy(&v, g_rd + a, 2); return v; }
++inline uint8_t u8(uint32_t a) { return g_rd[a]; }
++inline float f32(uint32_t a) { float v; std::memcpy(&v, g_rd + a, 4); return v; }
++
++enum Op { OBJECT = 0, GROUP = 1, LOD = 2, TRANSLATE = 3, ROTATE = 4, SWITCH = 6, SCALE = 30 };
++
++struct Pt { float x, y, z, r; uint32_t node; int src; };
++
++struct Walker
++{
++    std::vector<Pt> pts;
++    int src = 0;
++    uint32_t perSrc[4] = {};
++    uint32_t visited = 0, byOp[64] = {};
++    uint32_t seen[8192];
++    uint32_t nseen = 0;
++
++    bool already(uint32_t n)
++    {
++        for (uint32_t i = 0; i < nseen; ++i) if (seen[i] == n) return true;
++        if (nseen < 8192) seen[nseen++] = n;
++        return false;
++    }
++
++    void kids(uint32_t arr, uint32_t n, float x, float y, float z, int depth)
++    {
++        if (n > 512) n = 512;
++        for (uint32_t i = 0; i < n; ++i)
++        {
++            uint32_t c = u32(arr + 4 * i);
++            if (okAddr(c)) walk(c, x, y, z, depth + 1);
++        }
++    }
++
++    void walk(uint32_t node, float x, float y, float z, int depth)
++    {
++        if (depth > 48 || visited > 60000 || !okAddr(node)) return;
++        if (already(node)) return;
++        ++visited;
++        const uint32_t op = u32(node) & 0x3Fu;
++        ++byOp[op & 63];
++        switch (op)
++        {
++        case OBJECT:
++        {
++            float r2 = f32(node + 8);
++            pts.push_back({x, y, z, (r2 > 0 && r2 < 1e12f) ? std::sqrt(r2) : 0.f, node, src});
++            ++perSrc[src & 3];
++            break;
++        }
++        case GROUP: kids(node + 0x20, u16(node + 8), x, y, z, depth); break;
++        case TRANSLATE:
++            kids(node + 0x1C, u32(node + 8), x + f32(node + 0x10), y + f32(node + 0x14), z + f32(node + 0x18), depth);
++            break;
++        case ROTATE: kids(node + 0x50, u32(node + 8), x, y, z, depth); break;       // rotacao ignorada neste marco
++        case SCALE: kids(node + 0x2C, u32(node + 8), x, y, z, depth); break;        // escala ignorada neste marco
++        case SWITCH:
++        {
++            uint32_t which = u8(node + 8), n = u8(node + 0xB);
++            if (which < n) { uint32_t c = u32(node + 0xC + 4 * which); if (okAddr(c)) walk(c, x, y, z, depth + 1); }
++            break;
++        }
++        case LOD:
++        {
++            uint32_t n = u32(node + 4);
++            if (n > 0 && n < 16) { uint32_t c = u32(node + 0x20 + 8); if (okAddr(c)) walk(c, x, y, z, depth + 1); } // lod mais detalhado
++            break;
++        }
++        default: break; // nos de colisao, luz, particulas, animacao... (proximos marcos)
++        }
++    }
++};
++} // namespace
++using namespace wotm_scene_ns;
++
++static void wotmDrawScene(const uint8_t *rdram)
++{
++    static long frame = 0;
++    ++frame;
++    g_rd = rdram;
++    if (!g_rd) return;
++    {
++        // Sem VU1 ninguem conclui o pacote: o jogo espera `objsInPacket | objsInAlphaPacket` zerarem (rtWaitForVu1, e um laco
++        // embutido em particleDraw). A apresentacao (60 Hz) faz o papel da conclusao do VU1.
++        static const bool s_noVu1 = std::getenv("PS2X_NO_VU1") != nullptr;
++        if (s_noVu1)
++        {
++            const uint32_t zero = 0;
++            std::memcpy(const_cast<uint8_t *>(rdram) + 0x6F87A0u, &zero, 4);
++            std::memcpy(const_cast<uint8_t *>(rdram) + 0x6F87A4u, &zero, 4);
++        }
++    }
++    if (wotmDrawNative(rdram)) return; // camada nativa (native/wotm_native.hpp): fase lida da RAM, sem VU1/GS
++    const uint32_t root = u32(0x006F87C4u); // world
++    Walker w;
++    if (okAddr(root))
++    {
++        w.src = 0; w.walk(root, 0, 0, 0, 0);                        // mundo
++        uint32_t sky = u32(root + 4);
++        if (okAddr(sky)) { w.src = 3; w.walk(sky, 0, 0, 0, 0); }    // ceu
++    }
++    auto csList = [&](uint32_t head, int src) {                     // listas de _cs ativas (personagens/instancias)
++        uint32_t n = u32(head + 4);
++        for (int guard = 0; okAddr(n) && n != head && guard < 4096; ++guard, n = u32(n + 4))
++        {
++            uint32_t cs = u32(n);
++            if (!okAddr(cs) || !u8(cs + 0xC)) continue;               // drawMe
++            uint32_t ep = u32(cs);
++            if (okAddr(ep)) { w.src = src; w.walk(ep, f32(cs + 0x10), f32(cs + 0x14), f32(cs + 0x18), 0); }
++        }
++    };
++    csList(0x0043A2C0u, 1);   // CsPool::m_activeList
++    csList(0x0043A2E0u, 2);   // CsPool::m_HPActiveList
++
++    if (frame % 300 == 0 && std::getenv("PS2X_STATS"))
++    {
++        std::fprintf(stderr, "[scene] frame %ld currScreen=%u world=%06x visited=%u objetos=%zu (mundo=%u cs=%u hp=%u ceu=%u) | ops: obj=%u grp=%u lod=%u trn=%u rot=%u sw=%u scl=%u\n", frame,
++                     u32(0x006F8464u), root, w.visited, w.pts.size(), w.perSrc[0], w.perSrc[1], w.perSrc[2], w.perSrc[3], w.byOp[0], w.byOp[1], w.byOp[2], w.byOp[3], w.byOp[4], w.byOp[6], w.byOp[30]);
++    }
++
++    const int W = GetScreenWidth(), H = GetScreenHeight();
++    DrawRectangle(0, 0, W, H, Color{10, 12, 20, 255});
++    if (w.pts.empty())
++    {
++        DrawText(okAddr(root) ? "cena: 0 objetos" : "cena: world == null", 12, 12, 20, Color{200, 200, 200, 255});
++        return;
++    }
++    float minx = 1e30f, maxx = -1e30f, minz = 1e30f, maxz = -1e30f;
++    for (const Pt &p : w.pts)
++    {
++        if (!std::isfinite(p.x) || !std::isfinite(p.z) || std::fabs(p.x) > 1e7f || std::fabs(p.z) > 1e7f) continue;
++        minx = std::fmin(minx, p.x); maxx = std::fmax(maxx, p.x);
++        minz = std::fmin(minz, p.z); maxz = std::fmax(maxz, p.z);
++    }
++    if (minx > maxx) return;
++    const float sx = (W - 40.f) / std::fmax(maxx - minx, 1.f), sz = (H - 60.f) / std::fmax(maxz - minz, 1.f);
++    const float s = std::fmin(sx, sz);
++    for (const Pt &p : w.pts)
++    {
++        if (!std::isfinite(p.x) || !std::isfinite(p.z) || std::fabs(p.x) > 1e7f || std::fabs(p.z) > 1e7f) continue;
++        float px = 20.f + (p.x - minx) * s, py = 40.f + (p.z - minz) * s;
++        float rad = std::fmax(1.5f, std::fmin(p.r * s, 14.f));
++        static const Color cols[4] = {Color{90, 200, 255, 255}, Color{255, 220, 80, 255}, Color{120, 255, 120, 255}, Color{170, 170, 170, 255}};
++        DrawCircleLines((int)px, (int)py, rad, cols[p.src & 3]);
++        DrawPixel((int)px, (int)py, Color{255, 255, 255, 255});
++    }
++    char buf[160];
++    std::snprintf(buf, sizeof buf, "cena: %zu obj (mundo %u amarelo=cs %u verde=hp %u cinza=ceu %u) x[%.0f..%.0f] z[%.0f..%.0f]", w.pts.size(), w.perSrc[0], w.perSrc[1], w.perSrc[2], w.perSrc[3], minx, maxx, minz, maxz);
++    DrawText(buf, 10, 10, 16, Color{255, 220, 120, 255});
++}
+diff --git a/ps2xRuntime/src/main.cpp b/ps2xRuntime/src/main.cpp
+index 563bcbd..c8a0915 100644
+--- a/ps2xRuntime/src/main.cpp
++++ b/ps2xRuntime/src/main.cpp
+@@ -164,6 +164,26 @@ namespace
+     }
+ }
+ 
++#include "ps2_runtime_macros.h"
++
++// Hook de teste: pula os filmes (decoder IPU do jogo ainda nao tem backend).
++// Faz o que o fim natural faria: movieRequested=1, movieIsCompletelyFinished=1.
++static void hook_skipMovie(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
++{
++    WRITE32(0x006F8840u, 1u);
++    WRITE32(0x006F8844u, 1u);
++}
++
++// Corte na fronteira da engine (sem VU1/GS emulado): o VU1 do runtime executa microcodigo invalido e o DMA do VIF1
++// nunca conclui. rtWaitForVu1 esperava objsInPacket|objsInAlphaPacket zerarem (quem zerava era hierDmaHandler).
++static void hook_noop(uint8_t *, R5900Context *, PS2Runtime *) {}
++static void hook_ret1(uint8_t *, R5900Context *ctx, PS2Runtime *) { setReturnS32(ctx, 1); } // CMovie::Update: "terminou"
++static void hook_flushObjQ(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
++{
++    WRITE32(0x006F87A0u, 0u); // objsInPacket
++    WRITE32(0x006F87A4u, 0u); // objsInAlphaPacket
++}
++
+ int main(int argc, char *argv[])
+ {
+ #if defined(__ANDROID__)
+@@ -220,12 +240,57 @@ int main(int argc, char *argv[])
+             return 1;
+         }
+ 
++        if (const char *cdImg = std::getenv("PS2X_CD_IMAGE"))
++        {
++            PS2Runtime::IoPaths io = PS2Runtime::getIoPaths();
++            io.cdImage = cdImg;
++            runtime.setIoPaths(io);
++        }
++
+         if (!runtime.loadELF(filePathStr))
+         {
+             std::cerr << "Failed to load ELF file: " << filePathStr << std::endl;
+             return 1;
+         }
+ 
++        if (std::getenv("PS2X_SKIP_MOVIES"))
++        {
++            runtime.registerFunction(0x0020F4B0u, hook_skipMovie); // playMpegMovieWithDB
++            runtime.registerFunction(0x0020F440u, hook_skipMovie); // playMpegMovie
++            runtime.registerFunction(0x0020F540u, hook_skipMovie); // updateMpegMovieDecoding (corpo da thread)
++            std::cout << "[hook] filmes pulados" << std::endl;
++        }
++        if (std::getenv("PS2X_SKIP_CMOVIE")) // caminho CMovie (menu): Play vira no-op, Update devolve 1
++        {
++            runtime.registerFunction(0x00210090u, hook_noop); // CMovie::Play
++            runtime.registerFunction(0x00210408u, hook_ret1); // CMovie::Update
++            std::cout << "[hook] CMovie::Play/Update pulados" << std::endl;
++        }
++
++        if (const char *noop = std::getenv("PS2X_NOOP")) // lista de enderecos hex separados por virgula: funcoes viram no-op
++        {
++            std::string s(noop);
++            size_t pos = 0;
++            while (pos < s.size())
++            {
++                size_t end = s.find(',', pos);
++                if (end == std::string::npos) end = s.size();
++                const std::string tok = s.substr(pos, end - pos);
++                pos = end + 1;
++                if (tok.empty()) continue;
++                const uint32_t addr = static_cast<uint32_t>(std::strtoul(tok.c_str(), nullptr, 16));
++                runtime.registerFunction(addr, hook_noop);
++                std::cout << "[hook] no-op em 0x" << std::hex << addr << std::dec << std::endl;
++            }
++        }
++        if (const char *nv = std::getenv("PS2X_NO_VU1"))
++        {
++            runtime.registerFunction(0x00188FD8u, hook_noop);        // rtWaitForVu1
++            if (nv[0] != '2') // PS2X_NO_VU1=2: o DMA do quadro segue (PS2X_VIF1_UPLOADS leva as texturas/CLUTs ao GS) sem esperar o VU1
++                runtime.registerFunction(0x00209D88u, hook_flushObjQ);   // hierFlushObjQ (nao dispara o DMA do VIF1)
++            std::cout << "[hook] VU1/DMA do VIF1 cortados (rtWaitForVu1, hierFlushObjQ)" << std::endl;
++        }
++
+         runtime.run();
+ 
+ #ifdef _DEBUG
