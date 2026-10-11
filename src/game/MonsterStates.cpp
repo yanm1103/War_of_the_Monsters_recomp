@@ -5,6 +5,7 @@
 #include "game/pickup.h"
 #include "game/level_pickups.h"
 #include "game/shell.h"
+#include "game/hit_history.h"
 
 int mathfRand(int lo, int hi);
 extern int gUseUnifiedView;
@@ -63,6 +64,8 @@ public:
     void playImpalerRemoveSound(void);
     void playGeneratorTazerSound(void);
     void playGrappleThrowSound(void);
+    void playStompAttackSound(void);
+    void playTakeHit(Monster *attacker);
 };
 /* Animation overlay blend (layout still unknown; `active` is the byte cancelOverride checks). */
 class AnimBlend {
@@ -281,6 +284,74 @@ public:
     void transitionInto(void);
 };
 typedef char _size_StateTwoHandedThrow[sizeof(StateTwoHandedThrow) == 0x44 ? 1 : -1];
+/* Stomping a downed monster (Monster+0x10CF0). Each stomp is one animation, alternating 0xF0/0xF1 (0xE2/0xEF with a
+ * pickup in hand); pressing attack again between chainStart and chainEnd of the animation queues the next one, up to
+ * maxStomps. */
+class StateStompAttack : public AttackState {
+public:
+    float blendTime;       /* 0x1C: 250 */
+    float staminaCost;     /* 0x20: 6, per stomp */
+    float speed;           /* 0x24: 1.0, bare */
+    float speedArmed;      /* 0x28: 1.0, with a pickup */
+    float reachAngle;      /* 0x2C: pi/4 */
+    float reach;           /* 0x30: 300 */
+    float hitPercent;      /* 0x34: 0.5, bare */
+    float hitPercentArmed; /* 0x38: 0.75, with a pickup */
+    float damage;          /* 0x3C: 5, bare (with a pickup, the pickup type's damage) */
+    float chainStart;      /* 0x40: 0.6 */
+    float chainEnd;        /* 0x44: 1.0 */
+    int maxStomps;         /* 0x48: 5 */
+    Monster *victim;       /* 0x4C */
+    int anim;              /* 0x50: MonsterAnim playing */
+    int landed;            /* 0x54: this animation's stomp landed */
+    int stompCount;        /* 0x58 */
+    int chained;           /* 0x5C: another stomp is queued */
+
+    int transitionOK(void);
+    int transitionFeasible(void);
+    void transitionInto(void);
+    void update(void);
+    void startChain(void);
+};
+typedef char _size_StateStompAttack[sizeof(StateStompAttack) == 0x60 ? 1 : -1];
+/* Shield bash (Monster+0x10D90), animation 0xF5, only while holding the shield (pickup type 0x10). The fields past
+ * `anim` are used by update (VU0, still asm). */
+class StateShieldAttack : public AttackState {
+public:
+    float blendTime;   /* 0x1C: 100 */
+    float speed;       /* 0x20: 1.0 */
+    char pad24[0x74 - 0x24];
+    int anim;          /* 0x74 */
+    char hitHistory[0xC4 - 0x78]; /* 0x78: HitHistory */
+    int unkC4;         /* 0xC4: zeroed on entry */
+    char padC8[0xE0 - 0xC8];
+
+    int transitionOK(void);
+    int transitionFeasible(void);
+    void transitionInto(void);
+};
+typedef char _size_StateShieldAttack[sizeof(StateShieldAttack) == 0xE0 ? 1 : -1];
+/* Thrown or knocked down (StateThrowBack.cpp); subState (0x260) 2 and 3 are the monster lying on the ground. */
+class StateThrowBack : public MonsterState {
+public:
+    enum SubState { SUB_0, SUB_1, SUB_2, SUB_3, SUB_4 };
+    void takeStomp(void);
+    void enterSubState(SubState s);
+};
+#define THROWBACK_SUBSTATE(s) (*(int *)((char *)(s) + 0x260))
+struct ActuatorData {
+    int w[8];
+};
+void inputSetActuator(int pad, ActuatorData *a);
+extern "C" float atan2f(float y, float x);
+extern "C" float fabsf(float);
+void boundEulerAngle(float *p);
+void mathfRotMatrixRPH(float (*m)[4], _fvector *rph);
+/* virtual call on a Monster (vptr at 0x10, same entry layout as the states) */
+#define MONSTER_VCALL_PTR(m, slot) \
+    (((void *(*)(void *))*(void **)(*(char **)((char *)(m) + 0x10) + (slot) + 4))( \
+        (char *)(m) + *(short *)(*(char **)((char *)(m) + 0x10) + (slot))))
+#define VT_MONSTER_GET_PIN_TRANS 0x10
 void electricArc(_fvector *from, _fvector *to, unsigned colorA, unsigned colorB, float a, float b, float c, float d, int n,
                  unsigned seed, unsigned e);
 extern "C" int rand(void);
@@ -292,6 +363,7 @@ extern "C" int rand(void);
 class StatePunch : public MonsterState {
 public:
     int transitionOK(void);
+    void playPunchEffect(_fvector &pos);
 };
 class StateGrapple : public MonsterState {
 public:
@@ -1090,11 +1162,156 @@ void StateShocked::handlePreemption(MonsterState *next)
     owner->m_unk1B8 = 1.0f;
 }
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", __16StateStompAttack);
-INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", transitionOK__16StateStompAttack);
+/* Only on mapped action 0 or 5, and then if transitionFeasible agrees. */
+int StateStompAttack::transitionOK(void)
+{
+    int ok = 0;
+
+    if (owner->m_padFlags.curMappedAction == 0 || owner->m_padFlags.curMappedAction == 5)
+        ok = VCALL_INT(this, VT_TRANSITION_FEASIBLE) != 0;
+    return ok;
+}
+/* Attacks enabled (or the monster is in state 3 or 0x29), no lock-on target, bare or holding pickup type 6, the stomp
+ * animation, enough stamina, and a monster in reach lying on the ground (StateThrowBack sub-state 2 or 3) at most 50
+ * units above or below. */
+#ifdef NON_MATCHING
+/* untuned: 34/75 words (register allocation and branch layout); tools/difftest.py 200/200 */
+int StateStompAttack::transitionFeasible(void)
+{
+    Monster *m = owner;
+    Monster *v;
+    MonsterState *s;
+
+    int bad;
+
+    if (!m->m_attacksEnabled && *m->m_state != 3 && *m->m_state != 0x29)
+        return 0;
+    m = owner;
+    if (m->m_target != 0)
+        return 0;
+    bad = 0;
+    if (m->m_pickup != 0)
+        bad = (*(Pickup **)m->m_pickup)->pickupType != 6;
+    if (bad)
+        return 0;
+    if (m->m_anims[0xF0].a == 0)
+        return 0;
+    if (!m->m_stamina.hasEnough(staminaCost))
+        return 0;
+    v = owner->getClosestMonsterToPunch(reach, reachAngle, reach);
+    if (v == 0)
+        return 0;
+    if (50.0f < fabsf(v->m_cs->trans.z - owner->m_cs->trans.z))
+        return 0;
+    s = (MonsterState *)v->m_state;
+    if (!(s->flags & 0x10))
+        return 0;
+    switch (THROWBACK_SUBSTATE(s)) {
+    case 2:
+    case 3:
+        return 1;
+    }
+    return 0;
+}
+#else
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", transitionFeasible__16StateStompAttack);
-INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", transitionInto__16StateStompAttack);
+#endif
+void StateStompAttack::transitionInto(void)
+{
+    frames = 0;
+    stompCount = 0;
+    victim = owner->getClosestMonsterToPunch(reach, reachAngle, reach);
+    ((MonsterSound *)owner->m_sound)->playStompAttackSound();
+    startChain();
+}
+/* The stomp lands at hitPercent of the animation: damage (bare) or the pickup type's damage plus 3 of use damage to the
+ * pickup; the victim takes the stomp (or, at the last one, StateThrowBack sub-state 4), a punch effect at its pin and,
+ * for player 1, a rumble. Past the stomp, attack in [chainStart, chainEnd] queues another; at the end of the animation
+ * the next stomp starts or the monster goes back to Idle. */
+#ifdef NON_MATCHING
+/* untuned: 21/196 words; tools/difftest.py 200/200 */
+void StateStompAttack::update(void)
+{
+    float pct;
+
+    MonsterState::update();
+    ((MonsterDynamics *)((char *)owner + 0x100))->updateTurn(false);
+    ((MonsterDynamics *)((char *)owner + 0x100))->updateMove(false);
+    pct = animationGetCurrentPercent(owner->m_anims[anim]);
+    if (!landed && (owner->m_pickup != 0 ? hitPercentArmed : hitPercent) <= pct) {
+        MonsterState *s;
+        Monster *v;
+
+        landed = 1;
+        stompCount++;
+        if (owner->m_pickup == 0) {
+            victim->takeDamage(damage, false, owner);
+        } else {
+            Pickup *p = *(Pickup **)owner->m_pickup;
+            victim->takeDamage(*(float *)((char *)&LevelPickups::s_info[p->pickupType] + 0x10), false, owner);
+            (*(Pickup **)owner->m_pickup)->takeUseDamage(3.0f);
+        }
+        s = (MonsterState *)victim->m_state;
+        if (s->flags & 0x10) {
+            if (stompCount >= maxStomps)
+                ((StateThrowBack *)s)->enterSubState(StateThrowBack::SUB_4);
+            else
+                ((StateThrowBack *)s)->takeStomp();
+        }
+        ((MonsterSound *)victim->m_sound)->playTakeHit(owner);
+        v = victim;
+        ((StatePunch *)STATE_AT(owner, ST_PUNCH))
+            ->playPunchEffect(*(_fvector *)MONSTER_VCALL_PTR(v, VT_MONSTER_GET_PIN_TRANS));
+        if (victim->m_playerNum == 1) {
+            ActuatorData a = *(ActuatorData *)((char *)game + 0x1227C0);
+            inputSetActuator(victim->m_index, &a);
+        }
+        return;
+    }
+    if (!chained && chainStart <= pct && pct <= chainEnd
+        && (owner->m_padFlags.curMappedAction == 0 || owner->m_padFlags.curMappedAction == 5)
+        && VCALL_INT(this, VT_TRANSITION_FEASIBLE) && stompCount < maxStomps) {
+        chained = 1;
+        return;
+    }
+    if (1.0f <= pct) {
+        if (chained)
+            startChain();
+        else
+            owner->enterNewState(STATE_AT(owner, ST_IDLE));
+    }
+}
+#else
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", update__16StateStompAttack);
+#endif
+/* Next stomp: switches foot, drains the stamina and turns the monster to face the victim. */
+#ifdef NON_MATCHING
+/* untuned: 11/91 words; tools/difftest.py 200/200 */
+void StateStompAttack::startChain(void)
+{
+    Monster *m = owner;
+    float yaw;
+
+    if (m->m_pickup == 0) {
+        anim = anim != 0xF0 ? 0xF0 : 0xF1;
+        animationSetSpeed(m->m_anims[anim], speed);
+    } else {
+        anim = anim != 0xE2 ? 0xE2 : 0xEF;
+        animationSetSpeed(m->m_anims[anim], speedArmed);
+    }
+    animationTransitionInto(owner->m_anims[anim], blendTime, 1, 1);
+    landed = 0;
+    chained = 0;
+    owner->m_stamina.drain(staminaCost, true, false);
+    yaw = atan2f(((float *)((char *)victim + 0x3E30))[0] - owner->m_cs->trans.x,
+                 ((float *)((char *)victim + 0x3E30))[1] - owner->m_cs->trans.y);
+    boundEulerAngle(&yaw);
+    owner->m_cs->rot.z = yaw;
+    mathfRotMatrixRPH(owner->m_cs->mat, &owner->m_cs->rot);
+}
+#else
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", startChain__16StateStompAttack);
+#endif
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", __16StateTazerAttack);
 /* Needs the attack animation (0xF4). */
 int StateTazerAttack::transitionOK(void)
@@ -1122,9 +1339,42 @@ int StateTazerAttack::launchProjectile(void)
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", launchProjectile__16StateTazerAttack);
 #endif
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", __17StateShieldAttack);
+/* Attacks enabled, holding the shield (pickup type 0x10), mapped action 0 or 5, and transitionFeasible. */
+#ifdef NON_MATCHING
+/* untuned: 5/32 words (retail nests the pickup test in a branch-likely); tools/difftest.py 200/200 */
+int StateShieldAttack::transitionOK(void)
+{
+    Monster *m = owner;
+    int ok;
+
+    if (!m->m_attacksEnabled)
+        return 0;
+    ok = 0;
+    if (m->m_pickup != 0) {
+        if ((*(Pickup **)m->m_pickup)->pickupType != 0x10)
+            return 0;
+        if (m->m_padFlags.curMappedAction == 5 || m->m_padFlags.curMappedAction == 0)
+            ok = VCALL_INT(this, VT_TRANSITION_FEASIBLE) != 0;
+    }
+    return ok;
+}
+#else
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", transitionOK__17StateShieldAttack);
-INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", transitionFeasible__17StateShieldAttack);
-INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", transitionInto__17StateShieldAttack);
+#endif
+/* Needs the shield bash animation (0xF5). */
+int StateShieldAttack::transitionFeasible(void)
+{
+    return owner->m_anims[0xF5].a != 0;
+}
+void StateShieldAttack::transitionInto(void)
+{
+    anim = 0xF5;
+    frames = 0;
+    animationSetSpeed(owner->m_anims[0xF5], speed);
+    animationTransitionInto(owner->m_anims[anim], blendTime, 1, 7);
+    ((HitHistory *)hitHistory)->reset();
+    unkC4 = 0;
+}
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", update__17StateShieldAttack);
 INCLUDE_ASM("asm/nonmatchings/game/MonsterStates", __12StateVictory);
 /* When a monster may celebrate. Never in game mode 4; in modes 2 and 3 only once its wins reach the shell's kill
