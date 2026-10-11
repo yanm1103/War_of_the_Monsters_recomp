@@ -438,6 +438,17 @@ public:
         return (uint64_t(tid) << 40) | (uint64_t(t.cbp) << 12) | (uint64_t(t.csa) << 4) | t.cpsm | (1ull << 62);
     }
 
+    // Preenche a paleta de 256 entradas. O GS le CLUTs de 256 cores em CSM1 com os bits 3 e 4 do indice trocados (entradas 8-15 e
+    // 16-23 de cada grupo de 32); o .RTX guarda o upload cru, entao a leitura tem que aplicar a troca (sem ela: granulado em degrades).
+    // WOTM_PALNOSWAP=1 desliga (diagnostico).
+    static void fillPal(uint32_t pal[256], const std::vector<uint32_t> &src, bool is8bit) {
+        static const bool swap = std::getenv("WOTM_PALNOSWAP") == nullptr;
+        for (size_t i = 0; i < 256 && i < src.size(); ++i) {
+            const size_t k = (swap && is8bit && src.size() >= 256) ? ((i & 0xE7) | ((i & 0x08) << 1) | ((i & 0x10) >> 1)) : i;
+            pal[i] = gs::fixAlpha(src[k]);
+        }
+    }
+
     // Textura do objeto: os pixels vem do pacote de upload apontado por `texInfo[texId]` (pixels lineares a partir de +0x80,
     // descritor em +0x24 largura, +0x26 altura, +0x2B PSM); a paleta vem da VRAM (carregada junto com a fase).
     bool decodeTex(const Ram &ram, uint32_t node, std::vector<uint32_t> &px, uint32_t &w, uint32_t &h) const {
@@ -453,7 +464,7 @@ public:
             // 8 bits, ou 4 bits empacotados (nibble baixo primeiro); tamanho = TW/TH do TEX0. Fallback: a RAM em `ptr` (nao confiavel).
             const auto it = rtxPal.find(t0.cbp);
             if (it == rtxPal.end()) return false;
-            for (size_t i = 0; i < it->second.size() && i < 256; ++i) pal[i] = gs::fixAlpha(it->second[i]);
+            fillPal(pal, it->second, t0.psm == gs::T8H);
             w = 1u << t0.tw; h = 1u << t0.th;
             const auto im = rtxImg.find((t0.psm << 16) | t0.tbp0);
             if (im != rtxImg.end())
@@ -465,7 +476,7 @@ public:
             // A paleta vem do .RTX carregado (loadRtx); sem ela a textura cai para a cor de vertice.
             const auto it = rtxPal.find(t0.cbp);
             if (it == rtxPal.end()) return false;
-            for (size_t i = 0; i < it->second.size() && i < 256; ++i) pal[i] = gs::fixAlpha(it->second[i]);
+            fillPal(pal, it->second, psm == gs::T8);
         }
         w = ram.u16(ptr + 0x24); h = ram.u16(ptr + 0x26);
         return gs::decodeUpload(ram.p + ptr + 0x80, ram.size - ptr - 0x80, w, h, psm, t0.csa, pal, px);
