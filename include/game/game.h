@@ -19,6 +19,7 @@ class _fvector;
 class ActAiNavigation;
 class DbInteractive;
 enum MonsterAnim { MonsterAnim_dummy };
+enum MonsterReticleState { MonsterReticleState_dummy };
 enum ePickupType { PICKUP_TYPE_0 };
 
 class Camera {
@@ -26,6 +27,16 @@ public:
     enum CameraPOV { POV_0, POV_1, POV_2, POV_3 };
 };
 
+/* Monster (0x11190 bytes). Its MonsterStates live inside it at fixed offsets (from the constructor):
+ *   0x7984 Idle, 0x79AC Run, 0x7A90 Dash, 0x7AD4 Jump, 0x7DA0 Block, 0x7DD8 Counter, 0x7E30 Recoil, 0x7EA0 KnockBack,
+ *   0x8450 Death, 0x8470 Punch, 0xAE90 BatSwipe, 0xDC70 PickUp, 0xDCE0 Grapple, 0xDD54 GrappleLift, 0xDD74 GrappleThrow,
+ *   0xDDA0 GrappleThrow1, 0xDDCC Grappled, 0xDE30 BeingSlammed, 0xE3E0 BeingThrown, 0xE990 GrappleBreak, 0xEF40 Throw,
+ *   0xEFE0 Climb, 0xF0B0 Fly, 0xF3F0 CrowdControl, 0xF6F4 SonicRoar, 0xF974 FireBreath, 0xF9D8 BugAttack, 0xFA1C ButtSlam,
+ *   0xFD40 RamAttack, 0xFE20 Taunt, 0xFE38 Javelin, 0xFE5C RobotSpecial, 0x102A8 RockSpecial, 0x1059C ZapAttack,
+ *   0x10600 GrappleHook, 0x106E0 Impaled, 0x10714 Stunned, 0x1074C TwoHandedThrow, 0x10790 AirStrike, 0x10930 LavaBlast,
+ *   0x10AE0 GrappleOHAttack, 0x10B34 MonkeyOHAttack, 0x10BA0 Shocked, 0x10BF0 Catch, 0x10C40 GetupAttack, 0x10CF0 StompAttack,
+ *   0x10D50 TazerAttack, 0x10D90 ShieldAttack, 0x10E70 Victory, 0x10E90 GunAttack, 0x10EBC TopSpin, 0x10F60 CannonHands,
+ *   0x11100 BigTakeHit, 0x11114 Countered, 0x11130 UltraTazer. MonsterDynamics is embedded at 0x100. */
 class Monster {
 public:
     void enterNewState(MonsterState *state);
@@ -78,8 +89,10 @@ public:
     void creditStamina(float amount, bool baseOnly);
     void startCinema(void);
     Monster *getClosestMonster(float maxDist);
+    void updateLock(MonsterReticleState state);
     Monster *getClosestMonster2D(float maxDist);
     Monster *getClosestMonsterWithLos(float maxDist);
+    Monster *getClosestMonsterToPunch(float maxDist, float angle, float c); /* c: a third limit, not read yet */
     Monster *getClosestMonster(int locA, int locB, float radius);
     bool isIdle(unsigned t);
     int inCameraFov(_fvector &a, _fvector &b);
@@ -319,17 +332,21 @@ public:
     unsigned char m_unkEC;   /* 0xEC */
     char padED[0xEF - 0xED];
     signed char m_cloaked;   /* 0xEF */
-    char padF0[0xF1 - 0xF0];
+    signed char m_wantsTaunt;   /* 0xF0: a taunt was requested; StateTaunt::transitionOK consumes it */
     signed char m_turning;   /* 0xF1 */
     char padF2[0xF3 - 0xF2];
     unsigned char m_specialWeapon;   /* 0xF3 */
     char padF4[0xF5 - 0xF4];
     signed char m_unkF5;   /* 0xF5 */
     signed char m_unkF6;   /* 0xF6 */
-    signed char m_unkF7;   /* 0xF7 */
+    signed char m_unkF7;   /* 0xF7: victory shown (StateVictory sets it at 85% of the celebration; blocks another one) */
     char padF8[0xF9 - 0xF8];
     unsigned char m_unkF9;   /* 0xF9 */
-    char padFA[0x250 - 0xFA];
+    char padFA[0x1B8 - 0xFA];
+    float m_unk1B8;   /* 0x1B8: MonsterDynamics (embedded at 0x100) +0xB8; set back to 1.0 by the handlePreemption of several states (Block, Death, Punch, Counter, Climb, Grapple) */
+    char pad1BC[0x1E8 - 0x1BC];
+    float m_unk1E8;   /* 0x1E8: MonsterDynamics (embedded at 0x100) +0xE8; StateBlock::update sets m_unk1B8 to 1.5 while it is negative */
+    char pad1EC[0x250 - 0x1EC];
     float m_speed;   /* 0x250 */
     char pad254[0x280 - 0x254];
     signed char m_freeFalling;   /* 0x280 */
@@ -357,7 +374,8 @@ public:
     int m_specialGlow[3];   /* 0x4C8 */
     char pad4D4[0x4D8 - 0x4D4];
     PlayerDat * m_playerInfo;   /* 0x4D8 */
-    char pad4DC[0x1A10 - 0x4DC];
+    char pad4DC[0x4E0 - 0x4DC];
+    char m_ai[0x1A10 - 0x4E0];   /* 0x4E0: the embedded Ai (ai.h) that drives an AI monster's inputs; its exact size is not known, this runs up to the next named field */
     AiPath * m_closestPath;   /* 0x1A10 */
     char pad1A14[0x1A3C - 0x1A14];
     _cs * m_shadow;   /* 0x1A3C */
@@ -365,9 +383,16 @@ public:
     int m_shadowOff;   /* 0x1A70 */
     char * m_shadowCs;   /* 0x1A74 */
     int m_shadowSaved;   /* 0x1A78 */
-    char pad1A7C[0x3120 - 0x1A7C];
+    char m_sound[0x1CF0 - 0x1A7C];   /* 0x1A7C: the embedded MonsterSound (fire_breath.h); FireSound calls use the same address */
+    _animHandle m_anims[0x12C];   /* 0x1CF0: one handle per MonsterAnim (getAnim); a = 0 when the monster has no such animation */
+    char m_animPappy[0x2FE0 - 0x2FB0];   /* 0x2FB0: AnimPappy; updateCinema reads the float pointer at +0x28 (0x2FD8) */
+    char m_cinemaBlendA[0x3048 - 0x2FE0];   /* 0x2FE0: AnimBlend set to 50% by startCinema */
+    char m_cinemaBlendB[0x30B4 - 0x3048];   /* 0x3048: AnimBlend set to 50% by startCinema */
+    char m_cinemaBlendC[0x311C - 0x30B4];   /* 0x30B4: AnimBlend that startCinema ramps out when m_cinemaBlendCOn is set */
+    int m_cinemaBlendCOn;   /* 0x311C */
     _fvector * m_lookAtOverride;   /* 0x3120 */
-    char pad3124[0x5040 - 0x3124];
+    char pad3124[0x5024 - 0x3124];
+    char m_gamePad[0x5040 - 0x5024];   /* 0x5024: the embedded GamePad (loadPadInputs / clearInputs) that m_padFlags interprets */
     PadFlags m_padFlags;   /* 0x5040 */
     char pad6854[0x6868 - 0x6854];
     int m_hudTexture;   /* 0x6868 */
@@ -382,7 +407,7 @@ public:
     void * m_target;   /* 0x68B4 */
     Monster * m_grappleAttempt;   /* 0x68B8 */
     Monster * m_beamVictim;   /* 0x68BC */
-    char pad68C0[0x697C - 0x68C0];
+    char m_fireBreath[0x697C - 0x68C0];   /* 0x68C0: the embedded FireBreath (fire_breath.h); its first word (state) is nonzero while breathing */
     int m_launchDelay;   /* 0x697C */
     int m_launchCounter;   /* 0x6980 */
     char pad6984[0x69A0 - 0x6984];
@@ -403,7 +428,7 @@ public:
     float m_puSpeedMod[28];   /* 0x6B88 */
     _cs * m_reticleCS;   /* 0x6BF8 */
     _cs * m_stickyReticleCS;   /* 0x6BFC */
-    char pad6C00[0x6C04 - 0x6C00];
+    int m_stickyReticleOn;   /* 0x6C00: draw m_stickyReticleCS too */
     int m_pinTarget;   /* 0x6C04 */
     float m_pinTime;   /* 0x6C08 */
     char pad6C0C[0x6C14 - 0x6C0C];
@@ -418,7 +443,13 @@ public:
     int m_aimHeadingEnabled;   /* 0x6C3C */
     float m_aimHeading;   /* 0x6C40 */
     float m_aimPitch;   /* 0x6C44 */
-    char pad6C48[0x6CB4 - 0x6C48];
+    char pad6C48[0x6C80 - 0x6C48];
+    int m_wakeFx;   /* 0x6C80: water wake particle fx (WaterWake), -1 when off (updateWaterWake) */
+    int m_splashFx;   /* 0x6C84: water splash particle fx (WaterSplash), -1 when off */
+    char pad6C88[0x6C90 - 0x6C88];
+    float m_wakePos[4];   /* 0x6C90: where both fx are attached; [3] gets the y argument of updateWaterWake + 2 */
+    float m_wakeX6CA0[4];   /* 0x6CA0: copied from this + 0x270 together with m_wakePos (meaning unknown) */
+    char pad6CB0[0x6CB4 - 0x6CB0];
     int m_fireFx;   /* 0x6CB4 */
     float m_onFireCount;   /* 0x6CB8 */
     float m_onFireDamage;   /* 0x6CBC */
@@ -454,6 +485,20 @@ public:
     char pad10E71[0x11190 - 0x10E71];
 };
 typedef char _size_Monster[sizeof(Monster) == 0x11190 ? 1 : -1];
+#define MONSTER_AT(f, off) typedef char _monster_at_##f[(unsigned)&((Monster *)0)->f == (off) ? 1 : -1]
+MONSTER_AT(m_ai, 0x4E0);
+MONSTER_AT(m_sound, 0x1A7C);
+MONSTER_AT(m_animPappy, 0x2FB0);
+MONSTER_AT(m_cinemaBlendA, 0x2FE0);
+MONSTER_AT(m_cinemaBlendB, 0x3048);
+MONSTER_AT(m_cinemaBlendC, 0x30B4);
+MONSTER_AT(m_cinemaBlendCOn, 0x311C);
+MONSTER_AT(m_gamePad, 0x5024);
+MONSTER_AT(m_fireBreath, 0x68C0);
+MONSTER_AT(m_stickyReticleOn, 0x6C00);
+MONSTER_AT(m_wakeFx, 0x6C80);
+MONSTER_AT(m_wakePos, 0x6C90);
+MONSTER_AT(m_wakeX6CA0, 0x6CA0);
 
 class TheGame {
 public:
@@ -566,6 +611,7 @@ public:
     static void Update(void);
     static void SetCameraToFollowMonster(int view, Monster *m);
     static void SetCameraPOV(int view, Camera::CameraPOV pov);
+    static void SetCameraMonster(int view, Monster *m);
     static void TogglePOV(int view);
     static float GetUnifiedTime(void);
 };
