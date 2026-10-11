@@ -354,6 +354,7 @@ public:
         bool lvl = loadRtx((root + sep + "LVL/" + names[0] + ".RTX").c_str(), base0);
         // O menu (SHELL) mora em SHELL/SHELL.RTX, nao em LVL/.
         if (!lvl) lvl = loadRtx((root + sep + names[0] + "/" + names[0] + ".RTX").c_str(), base0);
+        if (!lvl) lvl = loadRtx((root + sep + "SHELL/" + names[0] + ".RTX").c_str(), base0);   // LOAD, UI, SHELL2, PRESHELL
         if (log) *log = names[0] + (lvl ? "" : " (nao achado)");
         for (int i = 1; i < n; ++i) {
             if (names[size_t(i)].empty()) continue;
