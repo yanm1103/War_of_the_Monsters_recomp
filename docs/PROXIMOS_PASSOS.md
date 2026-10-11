@@ -38,7 +38,12 @@ Variáveis novas: `PS2X_NO_VIF1` (ignora a execução do DMA do VIF1/VU1 mas sin
 3. A thread de decodificação de filme girava 2M `switchThread` porque `CMovie::Play` (menu) não estava coberto pelo hook de skip.
 4. `currScreen` 0x14 = `screenWaitForStart` (Press Start): só aceita `screenGetInput(1)==0x10` (Start) quando `betweenScreens==0`; antes ficava preso no fade (animação lenta pelo relógio virtual).
    Telas: 0x10 só faz `changeScreen(0x10->0x14)`, 1 menu, 99 (0x63) carregamento (`Shell::FadeScreen`, `DisplayLoadBackground`); dentro da fase `currScreen=1`.
-5. Endereços úteis: currScreen 0x6F8464, nextScreen 0x6F846C, betweenScreens 0x6F7E8C, screenFirstPass 0x6F7E80, targetAlpha 0x6F7E74, currAnimationIndex 0x6F7E88, fadingIn/Out 0x6F807C/0x6F8080, world 0x6F87C4.
+5. **Câmera lenta na fase (34 vsync/s) era o laço do IOP**, não o VU0 (2026-10-10). Um amostrador de RIP do host (`PS2X_HOSTPROF=1`, `PS2X_HOSTPROF_SKIP=<s>` descarta o carregamento) mostrou ~18% da thread do guest em
+   `IopKernel::beginNextReady/nextWakeCycle`: `EeScheduler::accountCycles` chamava `IopEmulator::runEeCycles` a cada checkpoint de EE (poucos ciclos), e cada chamada varre threads/timers/DMA do IOP. Acumular e rodar em lotes
+   (`PS2X_IOP_BATCH`, em ciclos de IOP; padrão 256 = 2048 de EE, ~7 µs) leva a fase a **60 vsync/s** (batch 1: 31,8; 64: 48,7; 256: 60,1; 1024: 59,9) e a CPU de ~145% para ~50% de um núcleo. Os mesmos erros de som
+   (`snd_BankLoad`) aparecem com e sem lote. O atalho do agendador do VU0 (`PS2X_VU0_VERIFY`: 0 divergências em 1,5M chamadas) não deu ganho mensurável; a reescrita do VU0 em C++ deixou de ser necessária. A mudança está só no clone
+   do runtime (`wotm-recomp-win\PS2Recomp`), não no repo.
+6. Endereços úteis: currScreen 0x6F8464, nextScreen 0x6F846C, betweenScreens 0x6F7E8C, screenFirstPass 0x6F7E80, targetAlpha 0x6F7E74, currAnimationIndex 0x6F7E88, fadingIn/Out 0x6F807C/0x6F8080, world 0x6F87C4.
 
 **Próximos passos, em ordem:**
 1. ~~Versionar o patch de runtime~~ (feito em 2026-10-10, `a6b9af2`); falta só o push no fork.
