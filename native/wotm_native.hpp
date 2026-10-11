@@ -322,8 +322,11 @@ public:
     // A chave e o CBP ABSOLUTO (base do arquivo + DBP). Base do nivel = tempVramTexAddr >> 6; a do monstro i = fileStatus.maxTexAddr[i-1]
     // (texmResInit empilha os arquivos .RTX na ordem em que o Shell os carregou: nivel, jogadores, IAs).
     std::unordered_map<uint32_t, std::vector<uint32_t>> rtxPal;
+    // Imagens residentes do .RTX (PSMT8H/4HL/4HH: telas, fontes, logos do menu): chave (psm << 16) | DBP. Os pixels da RAM em
+    // `texInfo[id]` nao servem (o ponteiro aponta para outra coisa); o TBP0 do TEX0 e o DBP da entrada coincidem.
+    std::unordered_map<uint32_t, std::vector<uint8_t>> rtxImg;
 
-    void clearRtx() { rtxPal.clear(); }
+    void clearRtx() { rtxPal.clear(); rtxImg.clear(); }
 
     // Carrega o nivel e os monstros do jogo atual a partir do disco extraido (`root` contem LVL/ e MON/). Idempotente: so refaz quando
     // os nomes/bases em fileStatus mudam. Devolve verdadeiro se achou ao menos o arquivo do nivel.
@@ -346,7 +349,7 @@ public:
         if (resSig_ == sig && !rtxPal.empty()) return true;
         if (names[0].empty()) return false;
         std::string sep = root.empty() || root.back() == '/' || root.back() == '\\' ? "" : "/";
-        rtxPal.clear();
+        rtxPal.clear(); rtxImg.clear();
         const uint32_t base0 = ram.u32(addr::tempVramTexAddr) >> 6;
         bool lvl = loadRtx((root + sep + "LVL/" + names[0] + ".RTX").c_str(), base0);
         // O menu (SHELL) mora em SHELL/SHELL.RTX, nao em LVL/.
@@ -363,7 +366,7 @@ public:
     }
 
     bool loadRtx(const char *path, uint32_t base, bool append = false) {
-        if (!append) rtxPal.clear();
+        if (!append) { rtxPal.clear(); rtxImg.clear(); }
         std::vector<uint8_t> raw;
         if (FILE *f = std::fopen(path, "rb")) {
             std::fseek(f, 0, SEEK_END);
@@ -405,6 +408,8 @@ public:
                 std::memcpy(p.data(), data.data() + off + 16, p.size() * 4);
                 rtxPal[base + ((w[2] >> 16) & 0xFFFF)] = std::move(p);
                 ++added;
+            } else if ((psm == gs::T8H || psm == gs::T4HL || psm == gs::T4HH) && sz > 0x80) {
+                rtxImg[(psm << 16) | ((w[2] >> 16) & 0xFFFF)].assign(data.begin() + long(off) + 0x80, data.begin() + long(off + sz));
             }
             off += sz;
         }
@@ -442,13 +447,16 @@ public:
         if (!ram.ok(ptr + 0x80)) return false;
         uint32_t pal[256] = {};
         if (t0.psm == gs::T8H || t0.psm == gs::T4HL || t0.psm == gs::T4HH) {
-            // Texturas do menu em PSMT8H/4HL/4HH (telas, fontes, logos): o pacote NAO tem cabecalho; os indices comecam em `ptr`
-            // (8 bits, ou 4 bits empacotados com o nibble baixo primeiro) e o tamanho vem do TW/TH do TEX0 (espacamento entre
-            // pacotes: 64x64 = 0x1000 (+0x80) em 8 bits, 0x800 (+0x80) em 4 bits; 512x512 = 0x40000).
+            // Texturas residentes do menu em PSMT8H/4HL/4HH (telas, fontes, logos, retratos): `texInfo[id]` aponta para outra coisa; os
+            // pixels vem do .RTX do disco, entrada com DBP == TEX0.TBP0 e mesmo psm (4HL e 4HH repartem o DBP: sao os dois nibbles).
+            // 8 bits, ou 4 bits empacotados (nibble baixo primeiro); tamanho = TW/TH do TEX0. Fallback: a RAM em `ptr` (nao confiavel).
             const auto it = rtxPal.find(t0.cbp);
             if (it == rtxPal.end()) return false;
             for (size_t i = 0; i < it->second.size() && i < 256; ++i) pal[i] = gs::fixAlpha(it->second[i]);
             w = 1u << t0.tw; h = 1u << t0.th;
+            const auto im = rtxImg.find((t0.psm << 16) | t0.tbp0);
+            if (im != rtxImg.end())
+                return gs::decodeUpload(im->second.data(), im->second.size(), w, h, t0.psm == gs::T8H ? gs::T8 : gs::T4, t0.csa, pal, px);
             return gs::decodeUpload(ram.p + ptr, ram.size - ptr, w, h, t0.psm == gs::T8H ? gs::T8 : gs::T4, t0.csa, pal, px);
         }
         const uint32_t psm = ram.u8(ptr + 0x2B);

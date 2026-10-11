@@ -115,7 +115,7 @@ int main(int argc, char **argv) {
             uint32_t w = 0, h = 0;
             const bool ok = scene.decodeTex(ram, it.node, px, w, h);
             const auto t = wotm::gs::Tex0::decode(wotm::Scene::objectTex0(ram, it.node));
-            std::fprintf(stderr, "texId=%u psm=%02x %ux%u tw=%u th=%u cbp=%u cpsm=%u csa=%u -> %s\n", unsigned(key >> 40) & 0xFFFF, t.psm, w, h, 1u << t.tw, 1u << t.th, t.cbp, t.cpsm, t.csa, ok ? "ok" : "falhou");
+            std::fprintf(stderr, "texId=%u psm=%02x %ux%u tw=%u th=%u tbp0=%u tbw=%u cbp=%u cpsm=%u csa=%u -> %s\n", unsigned(key >> 40) & 0xFFFF, t.psm, w, h, 1u << t.tw, 1u << t.th, t.tbp0, t.tbw, t.cbp, t.cpsm, t.csa, ok ? "ok" : "falhou");
             if (ok) {
                 Image img{px.data(), int(w), int(h), 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8};
                 ExportImage(img, TextFormat("%s_%02d.png", texdump, int(done.size())));
