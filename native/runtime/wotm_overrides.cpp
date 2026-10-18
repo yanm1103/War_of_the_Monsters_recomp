@@ -816,7 +816,8 @@ namespace
     constexpr uint32_t kViewUpdate = wotm::fn::viewUpdate__Fi, kScePadRead = wotm::fn::scePadRead;
     constexpr uint32_t kViewInfo = wotm::sym::viewInfo;   // 5 x 0x14: [0] = _cs* da vista
     PS2Runtime::RecompiledFunction g_origViewUpdate = nullptr, g_origCamerasUpdateFree = nullptr, g_origPadRead = nullptr;
-    uint32_t g_camUpdates = 0;   // chamadas do Cameras::Update (a camera moderna sabe se o quadro anterior foi dela)    std::atomic<uint8_t> g_padRStick[2] = {0x80, 0x80};   // analogico direito do pad 0 como o scePadRead entregou (camera moderna)
+    uint32_t g_camUpdates = 0;   // chamadas do Cameras::Update (a camera moderna sabe se o quadro anterior foi dela)
+    std::atomic<uint8_t> g_padRStick[2] = {0x80, 0x80};   // analogico direito do pad 0 como o scePadRead entregou (camera moderna)
 
     void putF(uint8_t *rdram, uint32_t a, float v) { std::memcpy(rdram + a, &v, 4); }
     float getF(const uint8_t *rdram, uint32_t a)
