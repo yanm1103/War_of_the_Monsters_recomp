@@ -23,10 +23,9 @@ class Launcher : Form
     // Chaves com ':' sao parametros do run_live.ps1; as outras viram variaveis de ambiente (=1 quando marcadas, removidas quando nao).
     // Diagnosticos sem caixa continuam valendo pela variavel (WOTM_RATEMIN=0, WOTM_VU0_INTERP, PS2X_PAD_DEADZONE; tabela no NATIVO.md).
     static readonly Flag[] Flags = {
-        new Flag("Mods", "WOTM_MODCAM", false, "Camera moderna (mouse ou analogico direito giram a camera)",
-            "Na luta, a camera gira em volta do seu monstro com o mouse (cursor preso na janela) ou o analogico direito; parado o comando, " +
-            "ela volta devagar para tras do monstro quando ele anda. Corpo a corpo, nocaute, vitoria e cinemas seguem com a camera original. " +
-            "Desmarcado: camera original do jogo."),
+        new Flag("Mods", "WOTM_MODCAM", false, "Camera moderna (so o analogico direito gira a camera)",
+            "Na luta, a camera gira em volta do seu monstro so pelo analogico direito; o monstro anda e vira sem levar a camera junto. " +
+            "Corpo a corpo, nocaute, vitoria e cinemas seguem com a camera original. Desmarcado: camera original do jogo."),
 
         new Flag("Execucao", ":Auto", true, "Roteiro automatico ate a fase", "-Auto 1: o pad do roteiro joga ate uma fase (~50 s). Desmarcado: voce joga com o teclado."),
         new Flag("Execucao", "WOTM_FOTOS", true, "Fotos para depurar (F7 pausa, F6 avanca, F8 foto com nota)", "F8 grava o quadro (instantaneo da checagem VU1 x nativo, ~40 MB), um PNG da janela e a sua nota em <runtime>\\fotos\\<data>. Apague as fotos depois de resolvidas."),

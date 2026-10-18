@@ -59,13 +59,10 @@ std::atomic<bool> g_wotmFreeCamPad{false};
 std::mutex g_wotmFreeCamM;
 WotmFreeCamPose g_wotmFreeCamPose;
 
-// Camera moderna (mod, WOTM_MODCAM): a thread do EE poe a pose no _cs depois do Camera::normalUpdate (modCamApply); a janela
-// (wotm_modcam.inc) prende o cursor e soma o mouse.
+// Camera moderna (mod, WOTM_MODCAM): a thread do EE poe a pose no _cs depois do Camera::normalUpdate (modCamApply).
 #include "wotm_modcam.h"
 std::atomic<bool> g_wotmModCam{false};
 std::atomic<int64_t> g_wotmModCamDrivingMs{0};
-std::mutex g_wotmModCamM;
-WotmModCamMouse g_wotmModCamMouse;
 
 namespace
 {
@@ -819,8 +816,7 @@ namespace
     constexpr uint32_t kViewUpdate = wotm::fn::viewUpdate__Fi, kScePadRead = wotm::fn::scePadRead;
     constexpr uint32_t kViewInfo = wotm::sym::viewInfo;   // 5 x 0x14: [0] = _cs* da vista
     PS2Runtime::RecompiledFunction g_origViewUpdate = nullptr, g_origCamerasUpdateFree = nullptr, g_origPadRead = nullptr;
-    uint32_t g_camUpdates = 0;   // chamadas do Cameras::Update (a camera moderna sabe se o quadro anterior foi dela)
-    std::atomic<uint8_t> g_padRStick[2] = {0x80, 0x80};   // analogico direito do pad 0 como o scePadRead entregou (camera moderna)
+    uint32_t g_camUpdates = 0;   // chamadas do Cameras::Update (a camera moderna sabe se o quadro anterior foi dela)    std::atomic<uint8_t> g_padRStick[2] = {0x80, 0x80};   // analogico direito do pad 0 como o scePadRead entregou (camera moderna)
 
     void putF(uint8_t *rdram, uint32_t a, float v) { std::memcpy(rdram + a, &v, 4); }
     float getF(const uint8_t *rdram, uint32_t a)
@@ -908,14 +904,13 @@ namespace
     // a distancia quando o jogador olha de frente), e na saida a pose dela e guardada e a nossa vai para o _cs, antes do checkCollision
     // do Cameras::Update (predios "fantasma" pela camera nova) e do resto do quadro (controle relativo a camera, recorte, som, desenho).
     // Da pose do jogo saem o ponto olhado (onde o raio dela cruza o eixo vertical do monstro), a distancia e a elevacao; o rumo e
-    // nosso (mouse, analogico direito, volta para tras do monstro), mais a elevacao extra do comando. O tremor (shakeCamera, chamado de
+    // nosso e so muda pelo analogico direito (o monstro vira sem levar a camera), mais a elevacao extra do comando. O tremor (shakeCamera, chamado de
     // dentro do normalUpdate: soma um deslocamento aleatorio ao trans) e medido e somado a nossa posicao. So o jogador 1 (m_playerNum 1,
     // +0x18), fora da tela unificada, de cinema (shell m_inCinema) e de filme. Fora do POV 0 nada muda, e as outras cameras partem da
     // nossa pose (a troca nao corta).
     constexpr uint32_t kNormalUpdate = wotm::fn::normalUpdate__6Camera, kShakeCamera = wotm::fn::shakeCamera__6Camera;
     PS2Runtime::RecompiledFunction g_origNormalUpdate = nullptr, g_origShakeCamera = nullptr;
     constexpr float kTwoPi = 6.2831853f;
-    constexpr float kMouseRad = 0.0035f;   // radianos por pixel
     struct ModCam
     {
         uint32_t cam = 0;            // Camera com a pose nossa no quadro anterior (0 = nenhuma)
@@ -924,8 +919,6 @@ namespace
         float yaw = 0.f;             // rumo (heading do _cs)
         float pitch = 0.f;           // elevacao somada a do jogo
         float lookZ = 0.f;           // altura do ponto olhado, suavizada
-        float mon[2] = {0.f, 0.f};   // monstro no quadro anterior (velocidade)
-        float idle = 0.f;            // segundos sem comando
         float testT = 0.f;           // WOTM_MODCAM_TESTE: segundos com a camera no comando
         int64_t lastMs = 0;
     } g_mc;
@@ -968,13 +961,12 @@ namespace
         }
         const bool cont = g_mc.cam == cam && g_camUpdates - g_mc.upd <= 1u;
         std::memcpy(g_mc.game, rdram + cs + 0x10, sizeof g_mc.game);
-        float P[3], F[3], M[3], mf[3];
+        float P[3], F[3], M[3];
         for (int i = 0; i < 3; ++i)
         {
             P[i] = getF(rdram, cs + 0x10 + 4 * i) - g_shake[i];   // sem o tremor
             F[i] = getF(rdram, cs + 0x30 + 4 * i);                 // frente
             M[i] = getF(rdram, mcs + 0x10 + 4 * i);
-            mf[i] = getF(rdram, mcs + 0x30 + 4 * i);               // frente do monstro
         }
         const int64_t now = wotmModCamNowMs();
         const float dt = cont ? std::clamp((now - g_mc.lastMs) / 1000.f, 0.f, 0.1f) : 0.f;
@@ -990,10 +982,7 @@ namespace
             g_mc.yaw = std::atan2(F[0], F[1]);   // comeca onde a camera do jogo esta (mathfRotationFromVector)
             g_mc.pitch = 0.f;
             g_mc.lookZ = lz;
-            g_mc.idle = 0.f;
             g_mc.testT = 0.f;
-            g_mc.mon[0] = M[0];
-            g_mc.mon[1] = M[1];
             std::fprintf(stderr, "[modcam] no comando (camera 0x%x, rumo %.2f, distancia %.0f)\n", cam, g_mc.yaw, std::sqrt(hx * hx + hy * hy + (P[2] - lz) * (P[2] - lz)));
         }
         g_mc.lookZ += (lz - g_mc.lookZ) * std::min(1.f, 8.f * dt);
@@ -1001,46 +990,23 @@ namespace
         const float dist = std::sqrt(horiz * horiz + dz * dz);
         const float elevGame = std::atan2(dz, std::max(horiz, 1.f));
 
-        // comando: mouse (pixels somados pela janela) e analogico direito (para baixo e para a direita positivos, como o mouse)
-        WotmModCamMouse ms;
-        {
-            std::lock_guard<std::mutex> lk(g_wotmModCamM);
-            ms = g_wotmModCamMouse;
-            g_wotmModCamMouse = WotmModCamMouse{};
-        }
-        float dyaw = ms.dx * kMouseRad + stickAxis(g_padRStick[0].load(std::memory_order_relaxed)) * 2.6f * dt;
-        float dpitch = ms.dy * kMouseRad + stickAxis(g_padRStick[1].load(std::memory_order_relaxed)) * 1.6f * dt;
-        g_mc.idle = (dyaw != 0.f || dpitch != 0.f) ? 0.f : g_mc.idle + dt;
+        // comando: so o analogico direito (para baixo e para a direita positivos). Sem ele o rumo fica parado: o monstro anda e vira
+        // sem levar a camera junto
+        float dyaw = stickAxis(g_padRStick[0].load(std::memory_order_relaxed)) * 2.6f * dt;
+        const float dpitch = stickAxis(g_padRStick[1].load(std::memory_order_relaxed)) * 1.6f * dt;
         if (g_modCamTestAt >= 0.f)
-        {   // teste sem comando: depois de <s> segundos no comando, uma volta inteira em 7 s; depois a camera volta sozinha
+        {   // teste sem comando: depois de <s> segundos no comando, uma volta inteira em 7 s
             const float t0 = g_mc.testT;
             g_mc.testT += dt;
             if (t0 < g_modCamTestAt && g_mc.testT >= g_modCamTestAt)
                 std::fprintf(stderr, "[modcam] teste: girando\n");
             if (g_mc.testT >= g_modCamTestAt && g_mc.testT < g_modCamTestAt + 7.f)
-            {
                 dyaw += kTwoPi / 7.f * dt;
-                g_mc.idle = 0.f;
-            }
             if (t0 < g_modCamTestAt + 7.f && g_mc.testT >= g_modCamTestAt + 7.f)
                 std::fprintf(stderr, "[modcam] teste: parou de girar\n");
         }
         g_mc.yaw += dyaw;
         g_mc.pitch += dpitch;
-
-        // sem comando por 1,2 s e com o monstro andando, o rumo volta devagar para o dele (se ele nao estiver de frente para a camera)
-        const float vx = M[0] - g_mc.mon[0], vy = M[1] - g_mc.mon[1];
-        const float speed = dt > 0.f ? std::sqrt(vx * vx + vy * vy) / dt : 0.f;
-        g_mc.mon[0] = M[0];
-        g_mc.mon[1] = M[1];
-        if (g_mc.idle > 1.2f && speed > 40.f)
-        {
-            const float d = std::remainder(std::atan2(mf[0], mf[1]) - g_mc.yaw, kTwoPi);
-            const float k = std::min(1.f, 1.5f * dt) * std::min(1.f, speed / 200.f);
-            if (std::fabs(d) < 2.f)
-                g_mc.yaw += d * k;
-            g_mc.pitch -= g_mc.pitch * k;
-        }
         g_mc.yaw = std::remainder(g_mc.yaw, kTwoPi);
         const float elev = std::clamp(elevGame + g_mc.pitch, -0.3f, 1.25f);
         g_mc.pitch = elev - elevGame;
@@ -1262,7 +1228,7 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
             runtime.registerFunction(kNormalUpdate, &normalUpdateModern);
             runtime.registerFunction(kShakeCamera, &shakeCameraMeasured);
             if (g_wotmModCam)
-                std::fprintf(stderr, "[wotm] camera moderna ligada (WOTM_MODCAM): mouse ou analogico direito giram a camera da luta\n");
+                std::fprintf(stderr, "[wotm] camera moderna ligada (WOTM_MODCAM): o analogico direito gira a camera da luta\n");
         }
         else if (g_wotmModCam)
         {
