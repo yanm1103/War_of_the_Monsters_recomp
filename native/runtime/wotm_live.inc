@@ -192,6 +192,7 @@ static void wotmBootPresent(uint32_t eePc, uint64_t vsync)
 #include "wotm_cheats.h"   // menu de debug (F1)
 #include <filesystem>
 #include "wotm_freecam.inc"   // camera livre de debug (F5)
+#include "wotm_modcam.inc"    // camera moderna (mod, WOTM_MODCAM): cursor preso e mouse
 #define WOTM_HAVE_NATIVE 1
 
 namespace wotm_live
@@ -609,6 +610,7 @@ static bool wotmDrawNative(const uint8_t *rdram)
         new (&S) wotm_live::State();
     }
     wotm_live::g_state = &S;
+    wotm_modcam::present();   // antes de qualquer saida cedo: o cursor tem que voltar tambem no menu
     S.scene.movieTexture = []() -> unsigned {   // objeto do menu com texId 999
 #ifdef WOTM_HAVE_FMV
         if (const unsigned id = wotm::fmv::Player::get().screenTexture()) return id;
