@@ -926,6 +926,7 @@ namespace
     uint32_t g_shakeCam = 0;               // Camera do normalUpdate em andamento (o shakeCamera dela e medido)
     float g_shake[3] = {0.f, 0.f, 0.f};    // deslocamento somado pelo tremor nesse normalUpdate
     float g_modCamTestAt = -1.f;           // WOTM_MODCAM_TESTE=<s>
+    float g_modCamSign[2] = {1.f, 1.f};    // -1 inverte o eixo horizontal / vertical do analogico (WOTM_MODCAM_INVX / _INVY)
     uint32_t g_nuRa = 0, g_nuCam = 0;
     bool g_nuPending = false;
 
@@ -993,8 +994,8 @@ namespace
 
         // comando: so o analogico direito (para baixo e para a direita positivos). Sem ele o rumo fica parado: o monstro anda e vira
         // sem levar a camera junto
-        float dyaw = stickAxis(g_padRStick[0].load(std::memory_order_relaxed)) * 2.6f * dt;
-        const float dpitch = stickAxis(g_padRStick[1].load(std::memory_order_relaxed)) * 1.6f * dt;
+        float dyaw = stickAxis(g_padRStick[0].load(std::memory_order_relaxed)) * 2.6f * dt * g_modCamSign[0];
+        const float dpitch = stickAxis(g_padRStick[1].load(std::memory_order_relaxed)) * 1.6f * dt * g_modCamSign[1];
         if (g_modCamTestAt >= 0.f)
         {   // teste sem comando: depois de <s> segundos no comando, uma volta inteira em 7 s
             const float t0 = g_mc.testT;
@@ -1224,12 +1225,16 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
             g_wotmModCam = *e != '\0' && std::strcmp(e, "0") != 0;
         if (const char *e = std::getenv("WOTM_MODCAM_TESTE"))
             g_modCamTestAt = static_cast<float>(std::atof(e));
+        const auto envOn = [](const char *name) { const char *e = std::getenv(name); return e && *e && std::strcmp(e, "0") != 0; };
+        g_modCamSign[0] = envOn("WOTM_MODCAM_INVX") ? -1.f : 1.f;
+        g_modCamSign[1] = envOn("WOTM_MODCAM_INVY") ? -1.f : 1.f;
         if ((g_origNormalUpdate = runtime.lookupFunction(kNormalUpdate)) && (g_origShakeCamera = runtime.lookupFunction(kShakeCamera)))
         {
             runtime.registerFunction(kNormalUpdate, &normalUpdateModern);
             runtime.registerFunction(kShakeCamera, &shakeCameraMeasured);
             if (g_wotmModCam)
-                std::fprintf(stderr, "[wotm] camera moderna ligada (WOTM_MODCAM): o analogico direito gira a camera da luta\n");
+                std::fprintf(stderr, "[wotm] camera moderna ligada (WOTM_MODCAM): o analogico direito gira a camera da luta%s%s\n",
+                             g_modCamSign[0] < 0.f ? ", horizontal invertido" : "", g_modCamSign[1] < 0.f ? ", vertical invertido" : "");
         }
         else if (g_wotmModCam)
         {

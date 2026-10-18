@@ -23,9 +23,13 @@ class Launcher : Form
     // Chaves com ':' sao parametros do run_live.ps1; as outras viram variaveis de ambiente (=1 quando marcadas, removidas quando nao).
     // Diagnosticos sem caixa continuam valendo pela variavel (WOTM_RATEMIN=0, WOTM_VU0_INTERP, PS2X_PAD_DEADZONE; tabela no NATIVO.md).
     static readonly Flag[] Flags = {
-        new Flag("Mods", "WOTM_MODCAM", false, "Camera moderna (so o analogico direito gira a camera)",
+        new Flag("Jogabilidade", "WOTM_MODCAM", false, "Camera moderna (so o analogico direito gira a camera)",
             "Na luta, a camera gira em volta do seu monstro so pelo analogico direito; o monstro anda e vira sem levar a camera junto. " +
             "Corpo a corpo, nocaute, vitoria e cinemas seguem com a camera original. Desmarcado: camera original do jogo."),
+        new Flag("Jogabilidade", "WOTM_MODCAM_INVX", false, "Camera: inverter eixo horizontal",
+            "Com a camera moderna: analogico direito para a direita gira a camera para a esquerda."),
+        new Flag("Jogabilidade", "WOTM_MODCAM_INVY", false, "Camera: inverter eixo vertical",
+            "Com a camera moderna: analogico direito para cima sobe a camera (olha para baixo), em vez de olhar para cima."),
 
         new Flag("Execucao", ":Auto", true, "Roteiro automatico ate a fase", "-Auto 1: o pad do roteiro joga ate uma fase (~50 s). Desmarcado: voce joga com o teclado."),
         new Flag("Execucao", "WOTM_FOTOS", true, "Fotos para depurar (F7 pausa, F6 avanca, F8 foto com nota)", "F8 grava o quadro (instantaneo da checagem VU1 x nativo, ~40 MB), um PNG da janela e a sua nota em <runtime>\\fotos\\<data>. Apague as fotos depois de resolvidas."),
@@ -95,6 +99,12 @@ class Launcher : Form
             inner.Controls.Add(cb);
             boxes[f] = cb;
         }
+        // Inverter eixos so vale com a camera moderna
+        CheckBox modcam = Box("WOTM_MODCAM");
+        CheckBox[] modcamOpts = { Box("WOTM_MODCAM_INVX"), Box("WOTM_MODCAM_INVY") };
+        EventHandler sync = delegate { foreach (CheckBox c in modcamOpts) c.Enabled = modcam.Checked; };
+        modcam.CheckedChanged += sync;
+        sync(null, EventArgs.Empty);
 
         var buttons = new FlowLayoutPanel { AutoSize = true };
         var play = new Button { Text = "Jogar", AutoSize = true };
@@ -211,10 +221,16 @@ class Launcher : Form
         return null;
     }
 
+    CheckBox Box(string key)
+    {
+        foreach (var kv in boxes) if (kv.Key.Key == key) return kv.Value;
+        return null;
+    }
+
     bool On(string key)
     {
-        foreach (var kv in boxes) if (kv.Key.Key == key) return kv.Value.Checked;
-        return false;
+        CheckBox cb = Box(key);
+        return cb != null && cb.Checked;
     }
 
     void Play()
