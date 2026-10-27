@@ -10,7 +10,10 @@ pasta de trabalho do mod com miniaturas; "edited" = mudou desde a extracao (vai 
 editor escolhido em "Editors..." (ou no programa padrao do Windows) e toca o som na propria janela; botao direito: Play, Open with...,
 Save to folder..., Remove. Skins: "New skin..." (dialogo: monstro, traje base com os retratos, nome, id, CPUs) cria a skin; o grupo
 dela na lista ("Skin: ...") mostra as propriedades do skin.json no lugar da previa (Save regrava), e o botao direito duplica ou apaga;
-"Turn into skin..." num traje extraido (MON/SHOGUN3) leva os PNGs dele para uma skin nova. Embaixo: "Build mod" (modkit pack so da pasta do mod), "Check mods" (modkit check), abrir a pasta dos mods
+"Turn into skin..." num traje extraido (MON/SHOGUN3) leva os PNGs dele para uma skin nova. Monstros custom: "New monster..."
+(dialogo: tipo base, traje, nome, id, camera, narrador, CPUs, texturas proprias) cria o monster.json e extrai o traje para
+monsters/<id>/files/; o grupo dele ("Monster: ...") mostra as propriedades (camera, narrador, regras, retrato do HUD, modelo
+proprio) e o botao direito duplica, apaga ou cria uma skin dele; "Turn into custom monster..." num traje extraido. Embaixo: "Build mod" (modkit pack so da pasta do mod), "Check mods" (modkit check), abrir a pasta dos mods
 e a de trabalho; o log tem divisoria arrastavel. Pastas, ultimo mod, editores e altura do log ficam em ~/.wotm_modkit.json. Precisa
 do Pillow (pip install pillow) para as miniaturas.
 """
@@ -96,7 +99,7 @@ class App:
         self.portraits = {}   # prefixo -> {traje: PhotoImage ou None} (retratos dos trajes, carregados em segundo plano)
         self.portrait_cbs = {}   # prefixo -> [funcoes a chamar quando os retratos chegarem]
         self.portrait_q = queue.Queue()
-        self._panel_sid = None   # skin mostrada no painel de propriedades
+        self._panel_sid = None   # grupo mostrado no painel de propriedades ("skins/<id>", "monsters/<id>")
         self._customs = {}   # find_customs da ultima refresh_work (rotulos das skins)
         self.style()
         self.build()
@@ -195,8 +198,11 @@ class App:
         self.work_hint.pack(side="left", padx=(10, 0))
         ttk.Checkbutton(h, text="edited only", variable=self.only_edited, command=self.refresh_work).pack(side="right")
         ttk.Button(h, text="Refresh", command=self.refresh_work).pack(side="right", padx=6)
+        self.btn_new_monster = ttk.Button(h, text="New monster...", command=self.new_monster)
+        self.btn_new_monster.pack(side="right")
+        self.mod_buttons.append(self.btn_new_monster)
         self.btn_new_skin = ttk.Button(h, text="New skin...", command=self.new_skin)
-        self.btn_new_skin.pack(side="right")
+        self.btn_new_skin.pack(side="right", padx=(0, 6))
         self.mod_buttons.append(self.btn_new_skin)
         # so liga com um grupo de traje de monstro jogavel selecionado (MON/SHOGUN3): vira skin com os PNGs dele
         self.btn_turn_skin = ttk.Button(h, text="Turn into skin...", command=self.turn_selected_into_skin, state="disabled")
@@ -484,8 +490,8 @@ class App:
     @staticmethod
     def group_of(rel):
         parts = rel.split("/")
-        if len(parts) >= 3 and parts[0] == "skins":   # skins/<id>/...: um grupo por skin
-            return "skins/" + parts[1]
+        if len(parts) >= 3 and parts[0] in ("skins", "monsters"):   # skins/<id>/..., monsters/<id>/...: um grupo por skin ou custom
+            return parts[0] + "/" + parts[1]
         d, n = os.path.split(rel)
         pre = d + "/" if d else ""
         m = modkit.PNG_RE.match(n)
@@ -498,7 +504,7 @@ class App:
 
     @staticmethod
     def group_of_pat(pat):
-        if pat.replace("\\", "/").startswith("skins/"):   # refresh_work(focus=["skins/<id>"])
+        if pat.replace("\\", "/").startswith(("skins/", "monsters/")):   # refresh_work(focus=["skins/<id>"])
             return "/".join(pat.replace("\\", "/").split("/")[:2])
         stem, ext = os.path.splitext(pat.replace("\\", "/"))
         d, n = os.path.split(stem)
@@ -523,6 +529,13 @@ class App:
             if not data:
                 return "Skin: %s  (no skin.json in the mod)" % sid
             return "Skin: %s  (%s/%s, %s)" % (data.get("name") or sid, data.get("monster", "?"), data.get("id", sid), self.skin_base_text(data))
+        if key.startswith("monsters/"):
+            cid = key[9:]
+            data = self.monster_data(cid)
+            if not data:
+                return "Monster: %s  (no monster.json in the mod)" % cid
+            return "Monster: %s  (custom %s, base %s costume %s%s)" % (data.get("name") or cid, data.get("id", cid), data.get("base", "?"),
+                                                                       data.get("costume", 0), ", own look" if data.get("files") else "")
         n = key.split("/")[-1]
         for prefix, name, banks in MONSTERS + BOSSES:
             if n[:-1] == prefix and n[-1:].isdigit():
@@ -555,6 +568,7 @@ class App:
         state = modkit.load_state(work)["files"]
         self._customs = modkit.find_customs(self.mods.get())
         groups = {"skins/" + sid: [] for sid in modkit.list_skins(self.mods.get(), self.cur_mod())}   # skin sem PNG tambem aparece
+        groups.update({"monsters/" + cid: [] for cid in modkit.list_mod_monsters(self.mods.get(), self.cur_mod())})
         # chave -> [(rel, p, edited)]
         edited_total = total = 0
         for root, ds, files in os.walk(work):
@@ -572,7 +586,7 @@ class App:
                 groups.setdefault(self.group_of(rel), []).append((rel, p, edited))
         want = {self.group_of_pat(p) for p in focus} if focus else None
         first_new = None
-        for key in sorted(groups, key=lambda k: (not k.startswith("skins/"), k)):   # skins primeiro
+        for key in sorted(groups, key=lambda k: (not k.startswith("monsters/"), not k.startswith("skins/"), k)):   # customs e skins primeiro
             items = groups[key]
             gid = "grp:" + key
             if want is not None:
@@ -591,7 +605,7 @@ class App:
                          tags=("edited",) if edited else (), **kw)
             if want is not None and key in want and first_new is None:
                 first_new = gid
-        if first_new and first_new.startswith("grp:skins/"):   # skin: o grupo, para o painel de propriedades aparecer
+        if first_new and first_new.startswith(("grp:skins/", "grp:monsters/")):   # o grupo, para o painel de propriedades aparecer
             t.selection_set([first_new])
             t.see(first_new)
         elif first_new:   # seleciona a primeira textura, nao o grupo (um Remove logo depois nao pega o grupo inteiro)
@@ -657,16 +671,23 @@ class App:
     def show_preview(self):
         c = self.canvas
         c.delete("all")
-        sid = self.selected_skin()
-        if sid:   # grupo de uma skin: o painel de propriedades no lugar da imagem
+        sid, cid = self.selected_skin(), self.selected_monster()
+        if sid or cid:   # grupo de uma skin ou de um custom: o painel de propriedades no lugar da imagem
             if c.winfo_manager():
                 c.pack_forget()
             if not self.skin_panel.winfo_manager():
                 self.skin_panel.pack(fill="both", expand=True)
-            if sid != self._panel_sid:
-                self.fill_skin_panel(sid)
-            self.pv_label.configure(text="Skin %s: its PNGs are in the work folder (skins/%s); open the section to edit them. "
-                                         "\"Build mod\" sends the edited ones to the mod's skins/%s." % (sid, sid, sid))
+            if sid:
+                if "skins/" + sid != self._panel_sid:
+                    self.fill_skin_panel(sid)
+                self.pv_label.configure(text="Skin %s: its PNGs are in the work folder (skins/%s); open the section to edit them. "
+                                             "\"Build mod\" sends the edited ones to the mod's skins/%s." % (sid, sid, sid))
+            else:
+                if "monsters/" + cid != self._panel_sid:
+                    self.fill_monster_panel(cid)
+                self.pv_label.configure(text="Custom monster %s: its PNGs are in the work folder (monsters/%s/files); open the section "
+                                             "to edit them. \"Build mod\" sends the edited ones to the mod, where they are its own look "
+                                             "(only for it)." % (cid, cid))
             return
         if self.skin_panel.winfo_manager():
             self.skin_panel.pack_forget()
@@ -855,16 +876,24 @@ class App:
         allf = self.selected_files(groups=True)
         m = self.menu
         m.delete(0, "end")
-        sid, key = self.selected_skin(), self.selected_group()
+        sid, cid, key = self.selected_skin(), self.selected_monster(), self.selected_group()
         if sid:
             m.add_command(label="Duplicate skin...", command=lambda: self.duplicate_skin(sid))
             m.add_command(label="Delete skin", command=lambda: self.delete_skin(sid))
             if allf:
                 m.add_separator()
-        elif key and self.costume_of_group(key):
-            m.add_command(label="Turn into skin...", command=lambda: self.turn_into_skin(key))
+        elif cid:
+            m.add_command(label="New skin for this monster...", command=lambda: self.new_skin(preset=cid))
+            m.add_command(label="Duplicate monster...", command=lambda: self.duplicate_monster(cid))
+            m.add_command(label="Delete monster", command=lambda: self.delete_monster(cid))
+            if allf:
+                m.add_separator()
+        elif key and self.costume_of_group(key, bosses=True):
+            if self.costume_of_group(key):
+                m.add_command(label="Turn into skin...", command=lambda: self.turn_into_skin(key))
+            m.add_command(label="Turn into custom monster...", command=lambda: self.turn_into_monster(key))
             m.add_separator()
-        if sid and not allf:
+        if (sid or cid) and not allf:
             pass
         elif not allf:
             if not self.work():
@@ -1094,12 +1123,14 @@ class App:
         return key[6:] if key and key.startswith("skins/") else None
 
     @staticmethod
-    def costume_of_group(key):
-        """(nome do jogo, prefixo, traje) de um grupo de traje de monstro jogavel ("MON/SHOGUN3" -> ("ultra-v", "SHOGUN", 3)); None senao."""
+    def costume_of_group(key, bosses=False):
+        """(nome do jogo, prefixo, traje) de um grupo de traje de monstro jogavel ("MON/SHOGUN3" -> ("ultra-v", "SHOGUN", 3)); None senao.
+        bosses: tambem os chefes que um custom aceita de base ("MON/ASSBOSS1" -> ("assboss", "ASSBOSS", 1))."""
         d, _, n = key.rpartition("/")
         if d.upper() != "MON" or not n[-1:].isdigit() or int(n[-1]) > 3:
             return None
-        game = next((g for g, p in modkit.MONSTERS.items() if p == n[:-1].upper()), None)
+        names = dict(modkit.MONSTERS, **(modkit.CUSTOM_BASES if bosses else {}))
+        game = next((g for g, p in names.items() if p == n[:-1].upper()), None)
         return (game, n[:-1].upper(), int(n[-1])) if game else None
 
     # retratos dos trajes (miniaturas dos botoes de base): o .RTX vira PNG numa thread; a PhotoImage nasce na thread da janela
@@ -1230,9 +1261,9 @@ class App:
                 return sid
         return stem
 
-    def skin_dialog(self, title, on_ok, lock=None):
+    def skin_dialog(self, title, on_ok, lock=None, preset=None):
         """Dialogo de skin nova: Monster, Base costume, Name, Id, CPUs. lock = (nome do jogo, prefixo, traje): monstro e base
-        travados (Turn into skin). on_ok(chave, id, base ou None, nome, ai)."""
+        travados (Turn into skin). preset: id de um custom que ja vem escolhido. on_ok(chave, id, base ou None, nome, ai)."""
         d = tk.Toplevel(self.root, bg=BG)
         d.title(title)
         d.transient(self.root)
@@ -1351,6 +1382,8 @@ class App:
         sid.trace_add("write", on_id)
         if lock:
             mon.set(next((c[0] for c in choices if c[4] and c[1] == lock[0]), lock[0]))
+        elif preset:
+            mon.set(next((c[0] for c in choices if not c[4] and c[1] == preset), preset))
         else:
             mon.set(choices[0][0] if choices else "")
         d.bind("<Return>", lambda e: ok())
@@ -1362,7 +1395,7 @@ class App:
             pass
         return d
 
-    def new_skin(self):
+    def new_skin(self, preset=None):
         work, mod = self.work(), self.cur_mod()
         if not work:
             messagebox.showwarning("New skin", "Pick or create a mod first (\"Mod\" at the top).", parent=self.root)
@@ -1373,7 +1406,7 @@ class App:
                      lambda disc=self.disc.get(), mods=self.mods.get(): modkit.skin_new(disc, work, mods, mod, key, sid, base, name, ai),
                      lambda: self.refresh_work(focus=["skins/" + sid]))
 
-        self.skin_dialog("New skin", ok)
+        self.skin_dialog("New skin", ok, preset=preset)
 
     def turn_selected_into_skin(self):
         key = self.selected_group()
@@ -1432,7 +1465,7 @@ class App:
         p = self.skin_panel
         for w in p.winfo_children():
             w.destroy()
-        self._panel_sid = sid
+        self._panel_sid = "skins/" + sid
         data = self.skin_data(sid)
         ttk.Label(p, text="Skin %s" % sid, style="Head.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
         if not data:
@@ -1523,6 +1556,422 @@ class App:
             return
         self.stop_sound()
         self.run("Deleting skin %s..." % sid, lambda mods=self.mods.get(): modkit.skin_delete(mods, mod, work, sid), self.refresh_work)
+
+    # ------------------------------------------------------------ monstros custom (MODS.md, "Monstros custom")
+    # (texto da lista, base do monster.json): os dez jogaveis e os chefes que o port deixa jogar (modkit.CUSTOM_BASES)
+    BASES = [(n, next(g for g, p in modkit.MONSTERS.items() if p == pre)) for pre, n, _ in MONSTERS] + [
+        ("Goliath Prime (boss)", "assboss"), ("Jelly (final boss, 2nd form)", "jelly"), ("Cerebulon (final boss)", "final")]
+    BASE_HINTS = {
+        "assboss": "Boss: no climbing animations (it holds the last pose); as a CPU it loads but does not show up (its AI needs the "
+                   "points of its own level).",
+        "jelly": "Boss: no rage, does not grapple; its special is the shock (Triangle + Circle).",
+        "final": "Boss: does not pick up the special item.",
+    }
+    OWN_CAMERA = "(the base's own)"
+    BASE_RULES = "(the base's)"
+
+    def selected_monster(self):
+        """Id do custom cujo grupo esta escolhido (sozinho); None senao."""
+        key = self.selected_group()
+        return key[9:] if key and key.startswith("monsters/") else None
+
+    def monster_data(self, cid):
+        """monster.json do custom na pasta do mod ({} sem ele)."""
+        mod = self.cur_mod()
+        return modkit._json_obj(os.path.join(modkit.monster_dir(self.mods.get(), mod, cid), "monster.json")) if mod else {}
+
+    def monster_exists(self, cid):
+        mod = self.cur_mod()
+        return bool(mod) and (os.path.exists(modkit.monster_dir(self.mods.get(), mod, cid)) or
+                              os.path.exists(os.path.join(self.work(), "monsters", cid)))
+
+    def base_label(self, bname):
+        return next((t for t, b in self.BASES if b == bname), bname or "")
+
+    def camera_widgets(self, parent, row, cam_from, cam_scale):
+        """Linha Camera: lista (a do proprio tipo ou a de outro monstro) e a escala em %."""
+        ttk.Label(parent, text="Camera").grid(row=row, column=0, sticky="w", padx=(0, 8), pady=2)
+        f = ttk.Frame(parent)
+        f.grid(row=row, column=1, sticky="w", pady=2)
+        box = ttk.Combobox(f, textvariable=cam_from, values=[self.OWN_CAMERA] + [t for t, _ in self.BASES], width=28, state="readonly")
+        box.pack(side="left")
+        ttk.Label(f, text="  distance").pack(side="left")
+        sp = ttk.Spinbox(f, from_=10, to=1000, increment=10, textvariable=cam_scale, width=6)
+        sp.pack(side="left", padx=(4, 0))
+        ttk.Label(f, text="%").pack(side="left")
+        return box, sp
+
+    def camera_value(self, cam_from, cam_scale):
+        """False (a do tipo), (base, escala) ou None se a escala nao serve."""
+        if cam_from.get() == self.OWN_CAMERA:
+            return False
+        try:
+            sc = int(cam_scale.get())
+        except (ValueError, tk.TclError):
+            return None
+        b = next((b for t, b in self.BASES if t == cam_from.get()), None)
+        return (b, sc) if b and 10 <= sc <= 1000 else None
+
+    def monster_dialog(self, title, on_ok, lock=None):
+        """Dialogo de monstro custom novo: Base, Costume, Name, Id, Camera, Narrator, texturas proprias, CPUs. lock = (base,
+        prefixo, traje): base e traje travados (Turn into custom monster). on_ok(dict com cid, base, costume, name, ai, camera,
+        narrator, textures)."""
+        d = tk.Toplevel(self.root, bg=BG)
+        d.title(title)
+        d.transient(self.root)
+        d.resizable(False, False)
+        fr = ttk.Frame(d, padding=12)
+        fr.pack(fill="both", expand=True)
+        base, co, name, cid = tk.StringVar(), tk.IntVar(value=0), tk.StringVar(), tk.StringVar()
+        cam_from, cam_scale, narr = tk.StringVar(value=self.OWN_CAMERA), tk.StringVar(value="100"), tk.StringVar()
+        tex, ai = tk.BooleanVar(value=True), tk.BooleanVar(value=False)
+        st = {"base": None, "auto_id": True, "guard": False}
+        others = modkit.find_customs(self.mods.get())
+
+        ttk.Label(fr, text="Base type").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=2)
+        ttk.Combobox(fr, textvariable=base, values=[t for t, _ in self.BASES], width=40,
+                     state="disabled" if lock else "readonly").grid(row=0, column=1, sticky="ew", pady=2)
+        hint = ttk.Label(fr, text="", style="Dim.TLabel", wraplength=460, justify="left")
+        hint.grid(row=1, column=1, sticky="w")
+        ttk.Label(fr, text="Costume").grid(row=2, column=0, sticky="nw", padx=(0, 8), pady=(8, 2))
+        rb_fr = ttk.Frame(fr)
+        rb_fr.grid(row=2, column=1, sticky="w", pady=(8, 2))
+        ttk.Label(fr, text="Name").grid(row=3, column=0, sticky="w", padx=(0, 8), pady=2)
+        ttk.Entry(fr, textvariable=name, width=40).grid(row=3, column=1, sticky="ew", pady=2)
+        ttk.Label(fr, text="Id").grid(row=4, column=0, sticky="w", padx=(0, 8), pady=2)
+        ttk.Entry(fr, textvariable=cid, width=40).grid(row=4, column=1, sticky="ew", pady=2)
+        ttk.Label(fr, text="Folder name and what WOTM_MATCH takes: lowercase letters, digits and _, starting with a letter",
+                  style="Dim.TLabel").grid(row=5, column=1, sticky="w")
+        self.camera_widgets(fr, 6, cam_from, cam_scale)
+        ttk.Label(fr, text="Narrator").grid(row=7, column=0, sticky="w", padx=(0, 8), pady=2)
+        ttk.Combobox(fr, textvariable=narr, values=[""] + modkit.list_narrators(self.mods.get()), width=28).grid(
+            row=7, column=1, sticky="w", pady=2)
+        ttk.Label(fr, text="narrator/<name>.mp3 said when it is picked; empty = the base's", style="Dim.TLabel").grid(
+            row=8, column=1, sticky="w")
+        if not lock:
+            ttk.Checkbutton(fr, text="Own look: extract the costume's textures to edit (only this monster uses them)",
+                            variable=tex).grid(row=9, column=1, sticky="w", pady=(6, 0))
+        ttk.Checkbutton(fr, text="CPUs may pick this monster", variable=ai).grid(row=10, column=1, sticky="w", pady=(4, 0))
+        err = ttk.Label(fr, text="", style="Err.TLabel", wraplength=460, justify="left")
+        err.grid(row=11, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        bf = ttk.Frame(fr)
+        bf.grid(row=12, column=0, columnspan=2, sticky="e", pady=(10, 0))
+        btn_ok = ttk.Button(bf, text="OK", style="Accent.TButton")
+        btn_ok.pack(side="left")
+        ttk.Button(bf, text="Cancel", command=d.destroy).pack(side="left", padx=(6, 0))
+        fr.columnconfigure(1, weight=1)
+
+        def validate(*_):
+            msg = ""
+            e = modkit.custom_id_error(cid.get())
+            if not st["base"]:
+                msg = "Base type: pick one"
+            elif e:
+                msg = "Id: " + e
+            elif self.monster_exists(cid.get()):
+                msg = "Id: the mod already has a monster %r" % cid.get()
+            elif not name.get().strip():
+                msg = "Name: the selection shows it; it cannot be empty"
+            elif self.camera_value(cam_from, cam_scale) is None:
+                msg = "Camera: the distance is 10 to 1000 %"
+            note = ("note: mod %s also has a monster %r; the last mod in alphabetical order wins" % (others[cid.get()]["mod"], cid.get())
+                    if cid.get() in others else "")
+            err.configure(text=msg or note)
+            btn_ok.state(["disabled"] if msg else ["!disabled"])
+            return not msg
+
+        def on_base(*_):
+            b = next((b for t, b in self.BASES if t == base.get()), None)
+            if b == st["base"]:
+                return
+            st["base"] = b
+            prefix = modkit.base_prefix(b) if b else None
+            dco, dcam = modkit.BOSS_DEFAULTS.get(b, (0, None))
+            co.set(lock[2] if lock else dco)
+            for w in rb_fr.winfo_children():
+                w.destroy()
+            if prefix:
+                self.costume_radios(rb_fr, co, prefix, enabled={lock[2]} if lock else None)
+            cam_from.set(self.base_label(dcam[0]) if dcam else self.OWN_CAMERA)
+            cam_scale.set(str(dcam[1]) if dcam else "100")
+            hint.configure(text=self.BASE_HINTS.get(b, "Runs the code and the AI of %s. To change only its look, a skin is enough."
+                                                    % base.get()))
+            validate()
+
+        def on_name(*_):
+            if not st["guard"] and st["auto_id"]:
+                s = modkit.skin_slug(name.get())
+                st["guard"] = True
+                cid.set(("m_" + s if s[:1].isdigit() else s)[:32])
+                st["guard"] = False
+            validate()
+
+        def on_id(*_):
+            if not st["guard"]:
+                st["auto_id"] = False
+            validate()
+
+        def ok():
+            if not validate():
+                return
+            v = dict(cid=cid.get(), base=st["base"], costume=co.get(), name=name.get().strip().upper(), ai=ai.get(),
+                     camera=self.camera_value(cam_from, cam_scale), narrator=narr.get().strip().lower() or None,
+                     textures=bool(tex.get()) and not lock)
+            d.destroy()
+            on_ok(v)
+
+        btn_ok.configure(command=ok)
+        base.trace_add("write", on_base)
+        name.trace_add("write", on_name)
+        cid.trace_add("write", on_id)
+        for v in (cam_from, cam_scale):
+            v.trace_add("write", validate)
+        base.set(self.base_label(lock[0]) if lock else self.BASES[0][0])
+        n = next((i for i in range(1, 1000) if not self.monster_exists("monster_%d" % i)), 1)
+        name.set("MONSTER %d" % n)
+        d.bind("<Return>", lambda e: ok())
+        d.bind("<Escape>", lambda e: d.destroy())
+        self._monster_dlg = dict(d=d, base=base, co=co, name=name, cid=cid, cam_from=cam_from, cam_scale=cam_scale, narr=narr,
+                                 tex=tex, ai=ai, ok=ok, err=err, hint=hint)   # para testes
+        try:
+            d.grab_set()
+        except tk.TclError:
+            pass
+        return d
+
+    def new_monster(self):
+        work, mod = self.work(), self.cur_mod()
+        if not work:
+            messagebox.showwarning("New monster", "Pick or create a mod first (\"Mod\" at the top).", parent=self.root)
+            return
+
+        def ok(v):
+            self.run("Creating custom monster %s (base %s)..." % (v["cid"], v["base"]),
+                     lambda disc=self.disc.get(), mods=self.mods.get(): modkit.monster_new(
+                         disc, work, mods, mod, v["cid"], v["base"], v["costume"], v["name"], v["ai"], v["camera"], v["narrator"],
+                         v["textures"]),
+                     lambda: self.refresh_work(focus=["monsters/" + v["cid"]]))
+
+        self.monster_dialog("New custom monster", ok)
+
+    def turn_into_monster(self, key):
+        """Traje extraido (MON/LIZARD2, MON/ASSBOSS1) vira monstro custom: monster.json novo ("files": true) e os PNGs do grupo
+        (todos, com o estado) para monsters/<id>/files/."""
+        c = self.costume_of_group(key, bosses=True)
+        work, mod = self.work(), self.cur_mod()
+        if not c or not work:
+            return
+        d, stem = key.rsplit("/", 1)
+
+        def ok(v):
+            def fn(disc=self.disc.get(), mods=self.mods.get()):
+                modkit.monster_new(disc, work, mods, mod, v["cid"], v["base"], v["costume"], v["name"], v["ai"], v["camera"],
+                                   v["narrator"], textures=False, files=True)
+                modkit.skin_adopt(work, d, stem, None, to="monsters/%s/files" % v["cid"])
+
+            self.run("Turning %s into custom monster %s..." % (key, v["cid"]), fn,
+                     lambda: (self.refresh_work(focus=["monsters/" + v["cid"]]), self.offer_remove_packed(mod, d, stem)))
+
+        self.monster_dialog("Turn into custom monster", ok, lock=c)
+
+    def fill_monster_panel(self, cid):
+        """Painel de propriedades do custom (Name, Camera, Narrator, Rules, CPUs, retrato do HUD, modelo proprio) com Save, que
+        regrava o monster.json mantendo as outras chaves."""
+        p = self.skin_panel
+        for w in p.winfo_children():
+            w.destroy()
+        self._panel_sid = "monsters/" + cid
+        mods, mod = self.mods.get(), self.cur_mod()
+        data = self.monster_data(cid)
+        mdir = modkit.monster_dir(mods, mod, cid)
+        ttk.Label(p, text="Custom monster %s" % cid, style="Head.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+        if not data:
+            ttk.Label(p, text="No monster.json in %s" % mdir, style="Dim.TLabel", wraplength=360).grid(row=1, column=0, columnspan=2, sticky="w")
+            return
+        bname = modkit.base_name(str(data.get("base", "")))
+        ttk.Label(p, text="Base").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=2)
+        ttk.Label(p, text="%s, costume %s" % (self.base_label(bname) if bname else "%r (not accepted by the port)" % data.get("base"),
+                                              data.get("costume", 0))).grid(row=1, column=1, sticky="w")
+        name = tk.StringVar(value=data.get("name", ""))
+        ttk.Label(p, text="Name").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=2)
+        ttk.Entry(p, textvariable=name, width=32).grid(row=2, column=1, sticky="ew", pady=2)
+        cam = data.get("camera") if isinstance(data.get("camera"), dict) else {}
+        cb = modkit.base_name(str(cam.get("from", ""))) if cam else None
+        cam_from = tk.StringVar(value=self.base_label(cb) if cb else self.OWN_CAMERA)
+        cam_scale = tk.StringVar(value=str(cam.get("scale", 100)) if cam else "100")
+        self.camera_widgets(p, 3, cam_from, cam_scale)
+        narr = tk.StringVar(value=data.get("narrator", "") if isinstance(data.get("narrator"), str) else "")
+        ttk.Label(p, text="Narrator").grid(row=4, column=0, sticky="w", padx=(0, 8), pady=2)
+        ttk.Combobox(p, textvariable=narr, values=[""] + modkit.list_narrators(mods), width=28).grid(row=4, column=1, sticky="w", pady=2)
+        kind = tk.StringVar(value=data.get("kind") or self.BASE_RULES)
+        ttk.Label(p, text="Rules").grid(row=5, column=0, sticky="w", padx=(0, 8), pady=2)
+        ttk.Combobox(p, textvariable=kind, values=[self.BASE_RULES] + list(modkit.KINDS), width=28, state="readonly").grid(
+            row=5, column=1, sticky="w", pady=2)
+        ai = tk.BooleanVar(value=bool(data.get("ai")))
+        ttk.Checkbutton(p, text="CPUs may pick this monster", variable=ai).grid(row=6, column=1, sticky="w", pady=(4, 0))
+        # retrato do HUD
+        ttk.Label(p, text="HUD portrait").grid(row=7, column=0, sticky="nw", padx=(0, 8), pady=(8, 2))
+        pf = ttk.Frame(p)
+        pf.grid(row=7, column=1, sticky="w", pady=(8, 2))
+        por = data.get("portrait") if isinstance(data.get("portrait"), str) else ""
+        pimg = os.path.join(mdir, por) if por else ""
+        self._portrait_img = None
+        if pimg and os.path.isfile(pimg) and Image is not None:
+            try:
+                im = Image.open(pimg).convert("RGBA")
+                im.thumbnail((128, 64))
+                self._portrait_img = ImageTk.PhotoImage(im)
+            except Exception:
+                pass
+        ttk.Label(pf, image=self._portrait_img or "", text="" if self._portrait_img else (por + " (not found)" if por else "the costume's"),
+                  style="Dim.TLabel").pack(side="left")
+        ttk.Button(pf, text="Set...", command=lambda: self.set_portrait(cid)).pack(side="left", padx=(8, 0))
+        if por:
+            ttk.Button(pf, text="Remove", command=lambda: self.remove_portrait(cid)).pack(side="left", padx=(4, 0))
+        # aparencia: PNGs proprios e modelo proprio
+        ttk.Label(p, text="Look").grid(row=8, column=0, sticky="nw", padx=(0, 8), pady=(8, 2))
+        lf = ttk.Frame(p)
+        lf.grid(row=8, column=1, sticky="w", pady=(8, 2))
+        wfiles = os.path.join(self.work(), "monsters", cid, "files")
+        names = sorted(os.listdir(wfiles)) if os.path.isdir(wfiles) else []
+        npng = sum(1 for n in names if modkit.PNG_RE.match(n))
+        model = [n for n in names if os.path.splitext(n)[1].upper() in (".NGP", ".PTR", ".TEX", ".RTX")]
+        if not data.get("files"):
+            look = "the disc costume (no own files)"
+        else:
+            look = "%d texture(s) to edit in monsters/%s/files" % (npng, cid) + ("; own model: %s" % ", ".join(model) if model else "")
+        ttk.Label(lf, text=look, style="Dim.TLabel", wraplength=300, justify="left").pack(anchor="w")
+        ttk.Button(lf, text="Import model files...", command=lambda: self.import_model(cid)).pack(anchor="w", pady=(4, 0))
+        bf = ttk.Frame(p)
+        bf.grid(row=9, column=1, sticky="w", pady=(10, 0))
+        ttk.Button(bf, text="Save", style="Accent.TButton",
+                   command=lambda: self.save_monster_props(cid, name.get(), cam_from, cam_scale, narr.get(), kind.get(), ai.get())).pack(side="left")
+        ttk.Button(bf, text="New skin for it...", command=lambda: self.new_skin(preset=cid)).pack(side="left", padx=(6, 0))
+        p.columnconfigure(1, weight=1)
+        self._monster_panel_vars = dict(name=name, cam_from=cam_from, cam_scale=cam_scale, narr=narr, kind=kind, ai=ai)   # para testes
+
+    def reselect(self, key):
+        """Depois de mudar o monster.json/skin.json: o painel rele e o grupo continua escolhido."""
+        self._panel_sid = None
+        self.refresh_work()
+        gid = "grp:" + key
+        if self.work_tree.exists(gid):
+            self.work_tree.selection_set([gid])
+        self.show_preview()
+
+    def save_monster_props(self, cid, name, cam_from, cam_scale, narrator, kind, ai):
+        mod, mods = self.cur_mod(), self.mods.get()
+        data = self.monster_data(cid)
+        if not mod or not data:
+            return
+        if not name.strip():
+            messagebox.showwarning("Monster", "The name cannot be empty (the selection shows it).", parent=self.root)
+            return
+        cam = self.camera_value(cam_from, cam_scale)
+        if cam is None:
+            messagebox.showwarning("Monster", "Camera: the distance is 10 to 1000 %.", parent=self.root)
+            return
+        data["name"] = name.strip().upper()
+        if cam:
+            data["camera"] = {"from": cam[0], "scale": cam[1]}
+        else:
+            data.pop("camera", None)
+        for k, v in (("narrator", narrator.strip().lower()), ("kind", "" if kind == self.BASE_RULES else kind)):
+            if v:
+                data[k] = v
+            else:
+                data.pop(k, None)
+        data["ai"] = bool(ai)
+        try:
+            modkit.write_monster_json(mods, mod, cid, data)
+        except OSError as ex:
+            self.say("Could not save the monster: %s\n" % ex, "err")
+            return
+        self.say("Monster %s saved: %s\n" % (cid, json.dumps(data)))
+        self.reselect("monsters/" + cid)
+
+    def set_portrait(self, cid):
+        work, mod = self.work(), self.cur_mod()
+        if not work:
+            return
+        p = filedialog.askopenfilename(parent=self.root, title="HUD portrait of %s (2:1, e.g. 128x64 or 512x256)" % cid,
+                                       filetypes=[("Images", " ".join("*" + e for e in self.IMG_EXT)), ("All files", "*.*")])
+        if not p:
+            return
+        src = p
+        if not p.lower().endswith(".png"):   # outro formato: vira PNG
+            if Image is None:
+                messagebox.showwarning("HUD portrait", "Without Pillow (pip install pillow) only PNG is accepted.", parent=self.root)
+                return
+            try:
+                src = os.path.join(tempfile.mkdtemp(prefix="wotm_portrait_"), "portrait.png")
+                Image.open(p).convert("RGBA").save(src)
+            except Exception as ex:
+                self.say("Could not open %s: %s\n" % (p, ex), "err")
+                return
+        self.run("Setting the HUD portrait of %s..." % cid,
+                 lambda disc=self.disc.get(), mods=self.mods.get(): modkit.monster_portrait(disc, work, mods, mod, cid, src),
+                 lambda: self.reselect("monsters/" + cid))
+
+    def remove_portrait(self, cid):
+        mods, mod, work = self.mods.get(), self.cur_mod(), self.work()
+        data = self.monster_data(cid)
+        por = data.pop("portrait", None)
+        data.pop("portraitTex", None)
+        if not mod or not por:
+            return
+        modkit.write_monster_json(mods, mod, cid, data)
+        for f in (os.path.join(modkit.monster_dir(mods, mod, cid), por), os.path.join(work, "monsters", cid, por)):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+        st = modkit.load_state(work)
+        st["files"].pop("monsters/%s/%s" % (cid, por), None)
+        modkit.save_state(work, st)
+        self.say("Monster %s: HUD portrait removed (back to the costume's)\n" % cid)
+        self.reselect("monsters/" + cid)
+
+    def import_model(self, cid):
+        work, mod = self.work(), self.cur_mod()
+        if not work:
+            return
+        ps = filedialog.askopenfilenames(parent=self.root, title="Model of %s: .NGP and .PTR (and .TEX/.RTX, optional)" % cid,
+                                         filetypes=[("Model files", "*.NGP *.PTR *.TEX *.RTX *.ngp *.ptr *.tex *.rtx"), ("All files", "*.*")])
+        if not ps:
+            return
+        self.run("Importing the model of %s..." % cid,
+                 lambda mods=self.mods.get(): modkit.monster_model(work, mods, mod, cid, list(ps)),
+                 lambda: self.reselect("monsters/" + cid))
+
+    def duplicate_monster(self, cid):
+        work, mod = self.work(), self.cur_mod()
+        if not work:
+            return
+        new = cid + "_copy"
+        while True:
+            new = simpledialog.askstring("Duplicate monster", "Id of the copy of %s (lowercase letters, digits and _):" % cid,
+                                         initialvalue=new, parent=self.root)
+            if new is None:
+                return
+            new = new.strip()
+            e = modkit.custom_id_error(new) or ("the mod already has a monster %r" % new if self.monster_exists(new) else None)
+            if not e:
+                break
+            messagebox.showwarning("Duplicate monster", "\"%s\": %s." % (new, e), parent=self.root)
+        self.run("Duplicating monster %s as %s..." % (cid, new),
+                 lambda mods=self.mods.get(): modkit.monster_duplicate(mods, mod, work, cid, new),
+                 lambda: self.refresh_work(focus=["monsters/" + new]))
+
+    def delete_monster(self, cid):
+        work, mod = self.work(), self.cur_mod()
+        if not work or not messagebox.askyesno("Delete monster", "Delete custom monster %s?\n\nIts folder in the mod (%s) and its "
+                                               "files in the work folder are deleted, edited or not." %
+                                               (cid, modkit.monster_dir(self.mods.get(), mod, cid)), parent=self.root):
+            return
+        self.stop_sound()
+        self.run("Deleting monster %s..." % cid, lambda mods=self.mods.get(): modkit.monster_delete(mods, mod, work, cid),
+                 self.refresh_work)
 
     # ------------------------------------------------------------ mod
     def mod_names(self):

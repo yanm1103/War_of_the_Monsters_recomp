@@ -68,6 +68,20 @@ novo) e **Delete skin**. Com um grupo de traje de monstro jogável selecionado (
 no botão direito) cria a skin com esse monstro e traje e move os PNGs do grupo para a pasta dela, de modo que o traje original fica intocado no Build; se o mod já tem
 esses PNGs empacotados em `MON/`, a janela avisa e oferece apagá-los.
 
+**Monstros custom pela janela.** **New monster...** (ao lado de New skin) abre um diálogo: *Base type* (os dez jogáveis e os três
+chefes aceitos, com uma nota do que o chefe não tem), *Costume* (com os retratos; para o Goliath o padrão é o 1), *Name*, *Id* (sai do
+nome; não pode ser o nome de um jogável), *Camera* (a do próprio tipo ou a de outro monstro, com a distância em %; para o Goliath e o
+Jelly já vem a do Togera 200% e 300%), *Narrator* (os `narrator/*.mp3` que o port acha), "Own look" e "CPUs may pick this monster".
+Cria o `monster.json` em `mods/<mod>/monsters/<id>/` e, com "Own look", grava `"files": true` e extrai as texturas do traje para
+`monsters/<id>/files/` na pasta de trabalho: os PNGs editados vão no Build para a pasta `files/` do monstro e valem só para ele (o
+traje do disco fica intocado). Na lista, o monstro é um grupo no topo ("Monster: NAME (custom id, base X costume N)"); selecionado, a
+prévia vira o painel de propriedades: Name, Camera, Narrator, *Rules* (o `kind`), CPUs, *HUD portrait* (**Set...** copia a imagem para
+`portrait.png` e grava o `portraitTex` certo do `.RTX` do traje; **Remove** volta ao do traje) e *Look* (quantas texturas e o modelo
+próprio; **Import model files...** copia `.NGP` + `.PTR`, e `.TEX`/`.RTX` opcionais, para `files/`). **Save** regrava o `monster.json`
+mantendo as outras chaves. Botão direito no grupo: **New skin for this monster...**, **Duplicate monster...** e **Delete monster** (as
+skins dele ficam e o log avisa). Num grupo de traje extraído (jogável ou chefe, ex. "MON/ASSBOSS1"), o botão direito tem **Turn into
+custom monster...**, que move os PNGs do grupo para o monstro novo.
+
 ## O kit na linha de comando (`tools/modkit.py`)
 
 ```
@@ -77,6 +91,10 @@ python tools/modkit.py export my_mod SND/LIZARD_S.BNK VAG/CITYAMB.VPK
 python tools/modkit.py pack my_mod [--inject]             # leva o que mudou para mods/my_mod/
 python tools/modkit.py check [my_mod]                     # confere nomes, tamanhos e texIds dos mods e os conflitos entre eles
 python tools/modkit.py revert my_mod MON/lizard0_t0004.png   # volta um arquivo da pasta de trabalho ao original do disco
+python tools/modkit.py monster new my_mod fire_togera --base togera --costume 2 --name "FIRE TOGERA" [--ai]
+    [--camera togera:200 | --camera none] [--narrator togera] [--no-textures]   # monstro custom (seção "Monstros custom")
+python tools/modkit.py monster portrait my_mod fire_togera retrato.png   # retrato do HUD (2:1) e o portraitTex
+python tools/modkit.py monster model my_mod fire_togera X.NGP X.PTR [X.TEX] [X.RTX]   # modelo próprio para files/
 ```
 
 - Um mod é um projeto: a pasta de trabalho é `<mods>/_work/<mod>/`, com o `modkit.json` dela, e o `pack` de um mod nunca leva o que
@@ -225,6 +243,13 @@ jogo (outro prefixo em `MON/`) ainda não existe. O primeiro é o Goliath Prime 
   casa. Nas telas do jogo, na confirmação o cursor do jogo fica na coluna de onde o quadro saiu, que faz as vezes dele (a vaga dela
   não é tomada). Na de 3 e 4 (`customStep` no `wotm_padsel.inc`) a escolha é toda nossa: o tipo do custom vai ao `m_monsterSel` do
   quadro e o traje ao dele (jogadores 3 e 4 pelo `wotmMultiSetCostume`, CPUs no `m_costume[2 + c]`).
+- **Kit:** `modkit.py monster new <mod> <id> --base <tipo>` cria o `monster.json` (sem `--costume` e `--camera`, os padrões do tipo: o
+  Goliath no traje 1 e com a câmera do Togera 200%, o Jelly com a do Togera 300%) e, sem `--no-textures`, grava `"files": true` e
+  exporta as texturas do traje para `mods/_work/<mod>/monsters/<id>/files/`; o `pack` leva as editadas para a pasta `files/` do
+  monstro, onde viram o traje próprio dele (só PNGs bastam: o que a pasta não traz vem do `costume`). `monster portrait` copia o
+  retrato e acha o `portraitTex` (a última textura 128 × 64 do `.RTX` do traje); `monster model` põe `.NGP` + `.PTR` próprios em
+  `files/`. O `check` avisa de `base` não aceito, id inválido e pasta de `files` faltando. Na janela: **New monster...** (seção
+  "Interface").
 - **Launcher:** os customs aparecem em "Your monster", depois do Random (só para o jogador).
 - **O que o port faz pelo Goliath** (`native/runtime/wotm_custom.inc`): ele fica visível e controlável com IAs na luta (o
   `SetAIMonster` o desligava), toma dano delas (o `takeHit` só aceitava golpe do jogador 1), carrega o banco de som do chefe fora
