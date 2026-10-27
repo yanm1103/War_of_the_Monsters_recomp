@@ -27,12 +27,13 @@ Pistas para a próxima sessão, na ordem:
    a2 alvo).
 4. Torre: o log acusa `torre FALTANDO`. O `animationGetHandle` não acha as anims de giro e inclinação da instância principal nem
    por 11/12 nem por 290/291; ver no `mechamon.py` como as anims 11/12 do chefe ficaram (o `ANIM_MAP` as renomeia) e o que o
-   4º argumento do `animationGetHandle` é de fato. Sem ela o feixe visível aponta para cima.
+   4º argumento do `animationGetHandle` é de fato. Sem ela o feixe sai reto para a frente do Mecha e não dá para mirar (teste do dono).
 
 ## Memória usada no topo da RAM
 `PS2_RAM_SIZE-0x1400..-0x1000`: 2 Mechas × 0x1C0 (6 `_animHandle`, 2 `AnimBlend`, 1 `HurtHistory`) e 0x80 de rascunho para as
 chamadas (de, até, `_hdResult`, direção, ponto, faísca). Logo acima ficam os `kQuadDefs` do split4.
 
 ## Ainda por fazer depois do laser
-Equilíbrio (com o choque do Jelly ele venceu duas rodadas sobrando 164 de vida), som do laser (`Final_s.bnk` só no nível 11),
+- **Pular:** o Mecha não pula (o dono quer que pule). Ver o que trava o `StateJump` no Jelly (tipo 0x1C0) ou se faltam as anims de pulo no `ANIM_MAP` do `mechamon.py`.
+- Equilíbrio (com o choque do Jelly ele venceu duas rodadas sobrando 164 de vida), som do laser (`Final_s.bnk` só no nível 11),
 retícula, teste pela seleção (casa CUSTOM, `kFraming`, retrato) e docs (`MODS.md` seção Mecha, `MODELOS_3D.md`).

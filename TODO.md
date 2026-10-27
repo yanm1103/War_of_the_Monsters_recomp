@@ -21,7 +21,7 @@ Como funciona hoje: `docs/passos/MODS.md` ("Skins", "Monstros custom").
 
 ### 10. Chefes jogáveis
 - Como estão: `MODS.md`, "Monstros custom" (Goliath, Jelly e Cerebulon; mod `mods/Cerebulon/`). Plantboss não é viável.
-- **Mecha** (primeira fase do Cerebulon): na branch `wip/mecha` (monstro montado por `tools/mechamon.py`, escudo funcionando). O laser mirado pela câmera não acerta nada e a torre não gira; pistas em `docs/investigacoes/2026-10-27/mecha_progresso.md`.
+- **Mecha** (primeira fase do Cerebulon): na branch `wip/mecha` (monstro montado por `tools/mechamon.py`, escudo funcionando). O laser sai reto e não mira (a torre não gira), não dá dano nem pega prédio, e o Mecha não pula; pistas em `docs/investigacoes/2026-10-27/mecha_progresso.md`.
 - Seleção nativa: conferir o enquadramento do Jelly e do Cerebulon na casa CUSTOM (`wotm_savepics.hpp`, `kFraming`).
 
 ### 13. Campanha com até 4 jogadores
