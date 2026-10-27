@@ -11,23 +11,22 @@ Branch `wip/mecha`. O Mecha do Cerebulon entra como monstro custom com arquivos 
   Sem escudo o laser fica bloqueado no `transitionOK`.
 - Especial sempre disponível (`m_specialWeapon` = 1 antes do `transitionOK`); jogador dispara com Triângulo+Círculo.
 
-## Não funciona (teste do dono pelo menu)
-O laser novo (rajada fixa mirada pela câmera, `mechaLaser` em `wotm_custom.inc`) não deu dano e não interagiu com prédios. O disparo
-usa o `StateUltraTazer` só como roteiro de anims e tempo: na fase 0xA1 o original fica de fora e o nosso código faz o raio
-(`hdLosCSTest` da boca 0x80B até 4000 na direção da mira), `HitEvent` tipo 0 + `Interactives::dispatchHit` no monstro, empurrão,
-`HurtHistory` próprio + `dispatchHit` de 5,01 em prédio, faíscas (`particleCreateFx`). Especificação do laser do chefe em
-`mecha_laser.md` (mesma pasta).
+## Laser (segunda sessão do dia): consertado na luta IA x IA
+Causa do laser sem efeito e da torre "FALTANDO": a RAM do runtime tem 64 MB e o `mem()`/`cRd32` mascaravam o endereço com
+`0x01FFFFFF` (32 MB). A área do Mecha (`PS2_RAM_SIZE-0x1400`) caía 32 MB abaixo, no meio dos dados carregados: o jogo gravava os
+handles e o `_hdResult` no lugar certo e nós líamos zero (e escrevíamos a origem e o destino do raio, e o `memset` da vaga, em cima
+de dados da fase). O `mem()` agora mascara com `PS2_RAM_SIZE - 1`. Os seis handles são achados (escudo 0/1/2, laser, torre 290/291).
 
-Pistas para a próxima sessão, na ordem:
-1. Confirmar se o `mechaLaser` roda: não há log nele. Pôr uma linha por disparo (ponto de impacto, `_hdResult` hit/ids, alvo) e ver
-   se a fase 0xA1 chega (o `tazerOK` do jogador chama o original, que pode recusar por outro motivo).
-2. Se roda e o raio não acerta: conferir o `hdLosCSTest` (argumentos, o pulo pelo `m_id` em a3, se a boca 0x80B está no lugar certo
-   e não dentro do próprio casco) e a direção da câmera (`_cs` +0x60 pitch, +0x68 heading; 0 = +Y).
-3. Se acerta e não dá dano: conferir o `getInteractive` (o `m_kind` em +0 do retorno) e o `dispatchHit` (a0 dir, f12 dano, a1 atacante,
-   a2 alvo).
-4. Torre: o log acusa `torre FALTANDO`. O `animationGetHandle` não acha as anims de giro e inclinação da instância principal nem
-   por 11/12 nem por 290/291; ver no `mechamon.py` como as anims 11/12 do chefe ficaram (o `ANIM_MAP` as renomeia) e o que o
-   4º argumento do `animationGetHandle` é de fato. Sem ela o feixe sai reto para a frente do Mecha e não dá para mirar (teste do dono).
+Outras correções: a inclinação da torre usava o comprimento horizontal sem normalizar (ficava sempre 0,5); o acerto em monstro deixou o
+`getInteractive` + `dispatchHit` (não conferidos) e faz como o chefe: o slot com `m_id == id2` toma `takeDamage(0,4, false, Mecha)`
+direto, mais o empurrão.
+
+Medido (`WOTM_MATCH=mecha,1,1 WOTM_AIVSAI=1`, log por rajada no `escudo baixou`): rajada inteira no Congar = 180 quadros, −72 de vida;
+rajadas que passam por prédio somam 80 a 100 quadros em objetos. Nas fotos (`WOTM_SHOTS`) o feixe sai da torre girada até o alvo,
+com explosão no ponto. O Mecha venceu a rodada com 166 de vida.
+
+Falta conferir pelo dono, jogando: a mira pela câmera (o jogador; a IA mira o peito do inimigo mais perto) e se prédios caem.
+Equilíbrio: 72 por rajada é muito (a vida é 200); o chefe faz 0,5 por quadro mas a rajada dele pega menos tempo.
 
 ## Memória usada no topo da RAM
 `PS2_RAM_SIZE-0x1400..-0x1000`: 2 Mechas × 0x1C0 (6 `_animHandle`, 2 `AnimBlend`, 1 `HurtHistory`) e 0x80 de rascunho para as

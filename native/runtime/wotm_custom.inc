@@ -532,7 +532,7 @@ namespace wotm_custom
                        kDispatchHit = wotm::fn::dispatchHit__12InteractivesP8_fvectorfii, kGetInteractive = wotm::fn::getInteractive__12Interactivesi,
                        kCreditHit = wotm::fn::creditHit__11HurtHistoryif, kFx = wotm::fn::particleCreateFx__FP8_fvectorifPA3_ff;
     constexpr uint32_t kDupId = 0x1C, kSpecial = 0xF3, kTazerPhase = 0x40, kTazerFiring = 0xA1, kTazerTimer = 0x2C;
-    constexpr uint32_t kLocMuzzle = 0x3E50, kLocChest = 0x3E30, kCamView = 0x6CD8, kHeading = 0x68;
+    constexpr uint32_t kLocMuzzle = 0x3E50, kLocChest = 0x3E30, kCamView = 0x6CD8, kHeading = 0x68, kHealth = 0x44C;
     constexpr uint32_t kCamCs = 0xCF0;   // Camera::m_cs (kCameras/kCamStride: setPov)
     constexpr uint32_t kShieldCi = kJelly + 0x18, kLaserCi = kJelly + 0x19;   // ids das instancias no MECHA.NGP
     constexpr uint32_t kTurretYaw = 290, kTurretPitch = 291;   // anims da torre na instancia principal (as 11/12 do chefe, m_blend1/2)
@@ -554,6 +554,8 @@ namespace wotm_custom
         bool down = false, fired = false, wasTazer = false;
         uint32_t tick = 0, until = 0, raise = 0;  // quadros (chamadas do Monster::update) dele; quando o escudo sobe / termina de subir
         float yaw = 0.5f, pitch = 0.5f;           // percentuais dos blends da torre (0,5 = para a frente)
+        uint32_t hitMon = 0, hitObj = 0;          // quadros da rajada no monstro e em objetos (log)
+        float dealt = 0.f;                        // vida tirada do monstro na rajada (log)
     };
     Mecha g_mechas[kMaxMechas];
 
@@ -568,7 +570,9 @@ namespace wotm_custom
     uint32_t handle(int slot, int k) { return mechaBase(slot) + 0x10u * uint32_t(k); }
     uint32_t blend(int slot, int j) { return mechaBase(slot) + 0x60u + 0x68u * uint32_t(j); }
     uint32_t hurt(int slot) { return mechaBase(slot) + 0x130u; }
-    uint8_t *mem(uint8_t *rdram, uint32_t a) { return rdram + (a & 0x01FFFFFFu); }
+    // a RAM do runtime tem 64 MB (PS2_RAM_SIZE): a mascara de 32 MB do cRd32 jogaria a area do Mecha no meio dos dados da fase
+    uint8_t *mem(uint8_t *rdram, uint32_t a) { return rdram + (a & (PS2_RAM_SIZE - 1u)); }
+    uint32_t rdW(uint8_t *rdram, uint32_t a) { uint32_t v; std::memcpy(&v, mem(rdram, a), 4); return v; }
     void rdV(uint8_t *rdram, uint32_t a, float *v) { std::memcpy(v, mem(rdram, a), 12); }
     void wrV(uint8_t *rdram, uint32_t a, const float *v)
     {
@@ -626,8 +630,14 @@ namespace wotm_custom
         wotm_modes4::call(rdram, ctx, runtime, kGetHandle, {handle(slot, 3), kLaserCi, dup, 0u});
         wotm_modes4::call(rdram, ctx, runtime, kGetHandle, {handle(slot, 4), kJelly, dup, kTurretYaw});
         wotm_modes4::call(rdram, ctx, runtime, kGetHandle, {handle(slot, 5), kJelly, dup, kTurretPitch});
-        const bool ok = cRd32(rdram, handle(slot, 1)) && cRd32(rdram, handle(slot, 3)) && cRd32(rdram, handle(slot, 4));
+        const bool ok = rdW(rdram, handle(slot, 1)) && rdW(rdram, handle(slot, 3)) && rdW(rdram, handle(slot, 4));
         std::fprintf(stderr, "[custom] Mecha (dup %u): escudo, laser e torre %s\n", dup, ok ? "achados" : "FALTANDO (MECHA.NGP antigo?)");
+        for (int k = 0; k < 6 && !ok; ++k)
+        {
+            int16_t idx;
+            std::memcpy(&idx, mem(rdram, handle(slot, k) + 0xC), 2);
+            std::fprintf(stderr, "[custom] Mecha: handle %d ci %08X anim %d\n", k, rdW(rdram, handle(slot, k)), idx);
+        }
         wotm_modes4::call(rdram, ctx, runtime, kAnimStart, {handle(slot, 1), 1u});   // o escudo sobe na entrada, como no initAfter
         s.raise = s.tick + kShieldRaiseFields;
         callF(rdram, ctx, runtime, kAnimPercent, {handle(slot, 3), 1u}, 0.f);
@@ -675,7 +685,10 @@ namespace wotm_custom
             s.fired = false;
             s.raise = 0;
             s.until = now + kShieldDownFields;
-            std::fprintf(stderr, "[custom] Mecha: escudo baixou (%u quadros com dano cheio)\n", kShieldDownFields);
+            std::fprintf(stderr, "[custom] Mecha: escudo baixou (%u quadros com dano cheio); rajada: %u quadros no monstro (-%.1f de vida), %u em objetos\n",
+                         kShieldDownFields, s.hitMon, s.dealt, s.hitObj);
+            s.hitMon = s.hitObj = 0;
+            s.dealt = 0.f;
         }
         if (s.down && int32_t(now - s.until) >= 0)
         {
@@ -771,7 +784,7 @@ namespace wotm_custom
         float rel = std::atan2(dir[0], dir[1]) - body;
         while (rel > kPi) rel -= 2.f * kPi;
         while (rel < -kPi) rel += 2.f * kPi;
-        const float yaw = rel / (2.f * kPi) + 0.5f, pitch = 0.5f - std::atan2(dir[2], horiz) / kPi;
+        const float yaw = rel / (2.f * kPi) + 0.5f, pitch = 0.5f - std::atan2(dir[2], horiz / d) / kPi;
         s.yaw += (yaw - s.yaw) * 0.35f;
         s.pitch += (pitch - s.pitch) * 0.35f;
         callF(rdram, ctx, runtime, kBlendPercent, {blend(slot, 0)}, s.yaw);
@@ -791,24 +804,28 @@ namespace wotm_custom
             rdV(rdram, kSRes + 0x10, pt);
             len = std::sqrt((pt[0] - mouth[0]) * (pt[0] - mouth[0]) + (pt[1] - mouth[1]) * (pt[1] - mouth[1]) + (pt[2] - mouth[2]) * (pt[2] - mouth[2])) / kLaserLen;
             wrV(rdram, kSPt, pt);
-            const uint32_t ids = cRd32(rdram, kSRes + 4), id2 = ids & 0x7FFu, id1 = (ids >> 11) & 0x3FFFu;
+            const uint32_t ids = rdW(rdram, kSRes + 4), id2 = ids & 0x7FFu, id1 = (ids >> 11) & 0x3FFFu;
+            // monstro atingido: o do slot com m_id == id2 (o chefe compara o id2 com o m_id do jogador)
             uint32_t inter = 0;
-            if (id2)
-                callF(rdram, ctx, runtime, kGetInteractive, {id2}, 0.f, 0.f, &inter);
-            inter &= 0x1FFFFFFFu;
-            if (inter && inter != m && id1 >= 0x20u && id1 <= 0x400u && cRd32(rdram, inter) == 1u)
+            const uint32_t slots = std::min(16u, READ32(kGameObj + kNumSlots));
+            for (uint32_t i = 0; id2 && i < slots && !inter; ++i)
             {
-                uint32_t ev = 0;
-                callF(rdram, ctx, runtime, kHitCreate, {}, 0.f, 0.f, &ev);
-                if (ev)
+                const uint32_t o = kGameObj + kSlots + i * kSlotStride;
+                if (o != m && READ32(o + kCs) && (READ32(o + kId) & 0x7FFu) == id2)
+                    inter = o;
+            }
+            if (inter)
+            {
+                // como o chefe: takeDamage direto (sem HitEvent nem recuo), creditado ao Mecha, e o empurrao
+                if (!READ8(inter + kDead))
                 {
-                    wrW(rdram, ev + 0x0, kSPt);
-                    wrW(rdram, ev + 0x4, kSRes);
-                    wrW(rdram, ev + 0xC, 0);    // so dano
-                    wrW(rdram, ev + 0x10, 5);   // fonte: a do fogo
+                    float hp0, hp1;
+                    std::memcpy(&hp0, mem(rdram, inter + kHealth), 4);
+                    callF(rdram, ctx, runtime, kTakeDamage, {inter, 0u, m}, kLaserDamage);
+                    std::memcpy(&hp1, mem(rdram, inter + kHealth), 4);
+                    s.dealt += hp0 - hp1;
                 }
-                wrV(rdram, kSDir, dir);
-                callF(rdram, ctx, runtime, kDispatchHit, {kSDir, id, id2}, kLaserDamage);
+                ++s.hitMon;
                 const uint32_t tcs = cRd32(rdram, inter + kCs) & 0x1FFFFFFFu;
                 if (tcs && horiz > 0.01f)   // o empurrao do chefe: no chao, na direcao do laser
                 {
@@ -821,6 +838,7 @@ namespace wotm_custom
             }
             else if (id2)
             {
+                ++s.hitObj;
                 const float total = callF(rdram, ctx, runtime, kCreditHit, {hurt(slot), id2}, kBuildingCredit);
                 if (total > 5.f)
                 {
@@ -846,6 +864,9 @@ namespace wotm_custom
                 }
         }
         callF(rdram, ctx, runtime, kAnimPercent, {handle(slot, 3), 1u}, std::clamp(len, 0.01f, 1.f));
+        if (first)
+            std::fprintf(stderr, "[custom] Mecha laser: boca (%.0f %.0f %.0f) mira (%.0f %.0f %.0f) hit %u ids %08X len %.2f yaw %.2f pitch %.2f\n",
+                         mouth[0], mouth[1], mouth[2], aim[0], aim[1], aim[2], mem(rdram, kSRes)[0], rdW(rdram, kSRes + 4), len, s.yaw, s.pitch);
     }
 
     void tazerOK(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
