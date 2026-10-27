@@ -27,7 +27,9 @@ com explosão no ponto. O Mecha venceu a rodada com 166 de vida.
 
 ### Câmera da torre (pedido do dono: "muito ruim de mirar")
 Com o Mecha de um jogador no `StateUltraTazer` (preparar, disparar e desligar), `laserCam` (depois do `Cameras::Update` e da órbita,
-`wotm_overrides.cpp`) põe a vista dele 420 atrás do eixo do corpo e 260 acima da boca, olhando para a mira; entra e sai em 12
+`wotm_overrides.cpp`) põe a vista dele 220 acima da ponta do canhão (eixo do corpo + raio da boca, 348, na direção da mira),
+olhando para a mira: o corpo fica atrás (atrás do eixo, o próprio Mecha tapava a frente, no teste do dono), as garras aparecem
+embaixo e o feixe sai fino até a retícula (colada na boca, o feixe enchia a tela). A torre segue a mira a 0,6 por quadro. Entra e sai em 12
 quadros, misturada com a pose do jogo. `laserInput` (entrada do `interpretInputs`, antes da órbita) soma os dois analógicos e o
 mouse na mira (sensibilidade e eixo invertido da aba CAMERA) e os zera para o jogo e a órbita. A mira começa para onde a câmera
 olhava, 6 graus mais baixa; inclinação de −63 a +20 graus. Retícula no centro (`g_wotmMechaReticle`, desenhada no `wotm_live.inc`,

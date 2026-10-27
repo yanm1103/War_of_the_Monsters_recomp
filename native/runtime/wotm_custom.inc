@@ -562,7 +562,8 @@ namespace wotm_custom
         float yaw = 0.5f, pitch = 0.5f;           // percentuais dos blends da torre (0,5 = para a frente)
         float aimHead = 0.f, aimPitch = 0.f;      // mira do jogador durante o laser (camera da torre)
         float camW = 0.f;                         // peso da camera da torre (0 = a do jogo, 1 = a da torre)
-        bool aimInit = false;
+        bool aimInit = false, gunLogged = false;
+        float gunR = 0.f;                         // raio da boca em volta do eixo do corpo (camera da torre)
         uint32_t hitMon = 0, hitObj = 0;          // quadros da rajada no monstro e em objetos (log)
         float dealt = 0.f;                        // vida tirada do monstro na rajada (log)
     };
@@ -796,8 +797,8 @@ namespace wotm_custom
         while (rel > kPi) rel -= 2.f * kPi;
         while (rel < -kPi) rel += 2.f * kPi;
         const float yaw = rel / (2.f * kPi) + 0.5f, pitch = 0.5f - std::atan2(dir[2], horiz / d) / kPi;
-        s.yaw += (yaw - s.yaw) * 0.35f;
-        s.pitch += (pitch - s.pitch) * 0.35f;
+        s.yaw += (yaw - s.yaw) * 0.6f;
+        s.pitch += (pitch - s.pitch) * 0.6f;
         callF(rdram, ctx, runtime, kBlendPercent, {blend(slot, 0)}, s.yaw);
         callF(rdram, ctx, runtime, kBlendPercent, {blend(slot, 1)}, s.pitch);
 
@@ -976,10 +977,12 @@ namespace wotm_custom
         if (!target)
             WRITE8(m + kDead, dead);
     }
-    // Camera da torre: com o Mecha de um jogador no laser (StateUltraTazer, da preparacao ao fim), a vista dele vai para cima e um
-    // pouco atras da torre, olhando para a mira; o centro da tela e para onde o feixe vai (mechaAim). Os dois analogicos e o mouse
-    // giram a mira (sensibilidade e eixo invertido da aba CAMERA) e chegam zerados ao jogo e a orbita. Entra e sai em ~12 quadros.
-    constexpr float kLaserCamBack = 420.f, kLaserCamUp = 260.f, kLaserCamRate = 1.f / 12.f;
+    // Camera da torre: com o Mecha de um jogador no laser (StateUltraTazer, da preparacao ao fim), a vista dele vai para a frente da
+    // ponta do canhao (eixo do corpo + raio da boca + kLaserCamAhead, na direcao da mira) e um pouco acima da boca, olhando para a mira:
+    // o corpo fica atras da camera e o feixe sai logo abaixo dela; o centro da tela e para onde o feixe vai (mechaAim). Os dois
+    // analogicos e o mouse giram a mira (sensibilidade e eixo invertido da aba CAMERA) e chegam zerados ao jogo e a orbita. Entra e sai
+    // em ~12 quadros.
+    constexpr float kLaserCamAhead = 0.f, kLaserCamUp = 220.f, kLaserCamRate = 1.f / 12.f;
     constexpr float kAimYawRate = 0.03f, kAimPitchRate = 0.022f, kAimPitchMin = -1.1f, kAimPitchMax = 0.35f;
 
     int mechaOf(uint8_t *rdram, uint32_t m)
@@ -1086,9 +1089,17 @@ namespace wotm_custom
             laser.pitch = s.aimPitch;
             float ax[3][3];
             wotmFreeCamAxes(laser, ax[0], ax[1], ax[2]);
-            const float ch = std::cos(s.aimHead), sh = std::sin(s.aimHead);
-            laser.pos[0] = body[0] - sh * kLaserCamBack;
-            laser.pos[1] = body[1] - ch * kLaserCamBack;
+            // raio da boca em volta do eixo (suavizado: a boca gira com a torre)
+            const float gunR = std::sqrt((mouth[0] - body[0]) * (mouth[0] - body[0]) + (mouth[1] - body[1]) * (mouth[1] - body[1]));
+            s.gunR = s.gunR > 0.f ? s.gunR + (gunR - s.gunR) * 0.1f : gunR;
+            if (s.aimInit && !s.gunLogged)
+            {
+                s.gunLogged = true;
+                std::fprintf(stderr, "[custom] Mecha: boca a %.0f do eixo, %.0f acima do chao do corpo\n", gunR, mouth[2] - body[2]);
+            }
+            const float ch = std::cos(s.aimHead), sh = std::sin(s.aimHead), ahead = s.gunR + kLaserCamAhead;
+            laser.pos[0] = body[0] + sh * ahead;
+            laser.pos[1] = body[1] + ch * ahead;
             laser.pos[2] = mouth[2] + kLaserCamUp;
             // mistura com a pose do jogo (entrada e saida)
             const float w = s.camW * s.camW * (3.f - 2.f * s.camW);
