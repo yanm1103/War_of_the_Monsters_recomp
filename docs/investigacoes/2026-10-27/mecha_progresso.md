@@ -36,6 +36,13 @@ olhava, 6 graus mais baixa; inclinação de −63 a +20 graus. Retícula no cent
 só sem tela dividida). Como o `mechaAim` já mira pelo centro da câmera, o feixe vai para a retícula. Teste sem controle:
 `WOTM_MECHATEST=1` (dispara sempre, a mira varre); nas fotos o feixe sai debaixo da cúpula até a retícula.
 
+### Sons (o dono confirmou jogando)
+Os do chefe, pelo `FinalBossSound` (banco `Final_s.bnk`, já carregado para o Mecha): preparar para disparar (som 4) ao entrar no
+laser, o laço do laser (som 5, `updateMechLaser` a cada quadro da rajada, na boca), escudo descendo (2) e subindo (1 e 7). O `this`
+do `FinalBossSound` fica nos 12 bytes livres depois do `HurtHistory` da vaga (só o +4, o handle do laço, é lido). O monstro atingido
+toca sozinho o laço do impacto (som 0x1B) com `Monster+0x1A84 = 1` no quadro, como o chefe faz; o laço do laser e o do impacto são
+desligados à mão no fim da rajada e ao sair do laser (o desligamento por tempo do jogo usa o contador de fields, parado no port).
+
 Falta conferir pelo dono, jogando: a mira pela câmera (o jogador; a IA mira o peito do inimigo mais perto) e se prédios caem.
 Equilíbrio: 72 por rajada é muito (a vida é 200); o chefe faz 0,5 por quadro mas a rajada dele pega menos tempo.
 

@@ -548,6 +548,15 @@ namespace wotm_custom
     constexpr float kLaserDamage = 0.4f, kLaserPush = 6.f, kBuildingCredit = 0.3f;   // por quadro (o chefe: 0,5 / 5 / 0,16)
     constexpr float kPi = 3.14159265f;
     PS2Runtime::RecompiledFunction g_origMonsterUpdate = nullptr, g_origTakeDamage = nullptr;
+    // Sons do Mecha: os do chefe (FinalBossSound, banco Final_s.bnk, que o Mecha ja carrega como o Jelly). O laco do laser (som 5)
+    // segue a boca; o monstro atingido toca o laco do impacto sozinho com MonsterSound +0x8 (Monster +0x1A84) = 1 no quadro, como o
+    // chefe faz, e o desligamos no fim da rajada (o desligamento por tempo do jogo depende do contador de fields, parado no port)
+    constexpr uint32_t kSndReady = wotm::fn::playGetReadyToFireSound__14FinalBossSoundP8_fvector,
+                       kSndShieldUp = wotm::fn::playShieldPowerUpSound__14FinalBossSoundP8_fvector,
+                       kSndShieldDown = wotm::fn::playShieldPowerDownSound__14FinalBossSoundP8_fvector,
+                       kSndLaser = wotm::fn::updateMechLaser__14FinalBossSoundP8_fvector, kLoopStop = wotm::fn::terminateLoop__11LoopManagerPUi,
+                       kImpactStop = wotm::fn::stopMechaLaserImpactSound__12MonsterSound, kLoopManager = wotm::sym::gLoopManager;
+    constexpr uint32_t kMonSound = 0x1A7C, kLaserHitFlag = 0x1A84;
     // WOTM_MECHATEST=1: teste sem controle; o Mecha do jogador dispara sempre que pode e a mira da camera da torre varre sozinha
     bool mechaTest()
     {
@@ -564,6 +573,7 @@ namespace wotm_custom
         float camW = 0.f;                         // peso da camera da torre (0 = a do jogo, 1 = a da torre)
         bool aimInit = false, gunLogged = false;
         float gunR = 0.f;                         // raio da boca em volta do eixo do corpo (camera da torre)
+        uint32_t lastTarget = 0;                  // ultimo monstro atingido (para desligar o laco do impacto)
         uint32_t hitMon = 0, hitObj = 0;          // quadros da rajada no monstro e em objetos (log)
         float dealt = 0.f;                        // vida tirada do monstro na rajada (log)
     };
@@ -580,6 +590,8 @@ namespace wotm_custom
     uint32_t handle(int slot, int k) { return mechaBase(slot) + 0x10u * uint32_t(k); }
     uint32_t blend(int slot, int j) { return mechaBase(slot) + 0x60u + 0x68u * uint32_t(j); }
     uint32_t hurt(int slot) { return mechaBase(slot) + 0x130u; }
+    // FinalBossSound do Mecha (o this; so o +4, m_laserHandle, e usado pelo updateMechLaser) nos 12 bytes depois do HurtHistory
+    uint32_t sndObj(int slot) { return mechaBase(slot) + 0x1B4u; }
     // a RAM do runtime tem 64 MB (PS2_RAM_SIZE): a mascara de 32 MB do cRd32 jogaria a area do Mecha no meio dos dados da fase
     uint8_t *mem(uint8_t *rdram, uint32_t a) { return rdram + (a & (PS2_RAM_SIZE - 1u)); }
     uint32_t rdW(uint8_t *rdram, uint32_t a) { uint32_t v; std::memcpy(&v, mem(rdram, a), 4); return v; }
@@ -670,6 +682,29 @@ namespace wotm_custom
         return slot;
     }
 
+    // Um som de posicao do FinalBossSound (fn) no ponto p
+    void mechaSound(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, int slot, uint32_t fn, const float *p)
+    {
+        wrV(rdram, kSFx, p);
+        wotm_modes4::call(rdram, ctx, runtime, fn, {sndObj(slot), kSFx});
+    }
+    void mechaSoundAtBody(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, int slot, uint32_t fn)
+    {
+        float p[3];
+        rdV(rdram, (cRd32(rdram, g_mechas[slot].m + kCs) & 0x1FFFFFFFu) + kTrans, p);
+        mechaSound(rdram, ctx, runtime, slot, fn, p);
+    }
+    // Fim da rajada: o laco do laser e o do impacto no ultimo atingido
+    void stopLaserSound(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, int slot)
+    {
+        Mecha &s = g_mechas[slot];
+        if (rdW(rdram, sndObj(slot) + 4))
+            wotm_modes4::call(rdram, ctx, runtime, kLoopStop, {kLoopManager, sndObj(slot) + 4});
+        if (s.lastTarget)
+            wotm_modes4::call(rdram, ctx, runtime, kImpactStop, {s.lastTarget + kMonSound});
+        s.lastTarget = 0;
+    }
+
     void monsterUpdate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t m = ctx->pc == kMonsterUpdate ? GPR_U32(ctx, 4) : 0;
@@ -689,8 +724,13 @@ namespace wotm_custom
             callF(rdram, ctx, runtime, kBlendPercent, {blend(slot, 0)}, s.yaw);
             callF(rdram, ctx, runtime, kBlendPercent, {blend(slot, 1)}, s.pitch);
         }
+        if (!s.wasTazer && inTazer)
+            mechaSoundAtBody(rdram, ctx, runtime, slot, kSndReady);
+        if (s.wasTazer && !inTazer)
+            stopLaserSound(rdram, ctx, runtime, slot);
         if (s.wasTazer && !inTazer && s.fired)
         {
+            mechaSoundAtBody(rdram, ctx, runtime, slot, kSndShieldDown);
             callF(rdram, ctx, runtime, kAnimTrans, {handle(slot, 0), 1u, 1u}, 50.f);
             callF(rdram, ctx, runtime, kAnimPercent, {handle(slot, 3), 1u}, 0.f);
             s.down = true;
@@ -705,6 +745,7 @@ namespace wotm_custom
         if (s.down && int32_t(now - s.until) >= 0)
         {
             wotm_modes4::call(rdram, ctx, runtime, kAnimStart, {handle(slot, 1), 1u});
+            mechaSoundAtBody(rdram, ctx, runtime, slot, kSndShieldUp);
             s.down = false;
             s.raise = now + kShieldRaiseFields;
             std::fprintf(stderr, "[custom] Mecha: escudo religou\n");
@@ -838,6 +879,10 @@ namespace wotm_custom
                     s.dealt += hp0 - hp1;
                 }
                 ++s.hitMon;
+                wrW(rdram, inter + kLaserHitFlag, 1);   // o laco do impacto (MonsterSound::updateGeneralMonsterSounds)
+                if (s.lastTarget && s.lastTarget != inter)
+                    wotm_modes4::call(rdram, ctx, runtime, kImpactStop, {s.lastTarget + kMonSound});
+                s.lastTarget = inter;
                 const uint32_t tcs = cRd32(rdram, inter + kCs) & 0x1FFFFFFFu;
                 if (tcs && horiz > 0.01f)   // o empurrao do chefe: no chao, na direcao do laser
                 {
@@ -876,6 +921,7 @@ namespace wotm_custom
                 }
         }
         callF(rdram, ctx, runtime, kAnimPercent, {handle(slot, 3), 1u}, std::clamp(len, 0.01f, 1.f));
+        mechaSound(rdram, ctx, runtime, slot, kSndLaser, mouth);   // o laco do laser (comeca no 1o quadro, depois so volume e pan)
         if (first)
             std::fprintf(stderr, "[custom] Mecha laser: boca (%.0f %.0f %.0f) mira (%.0f %.0f %.0f) hit %u ids %08X len %.2f yaw %.2f pitch %.2f\n",
                          mouth[0], mouth[1], mouth[2], aim[0], aim[1], aim[2], mem(rdram, kSRes)[0], rdW(rdram, kSRes + 4), len, s.yaw, s.pitch);
@@ -959,6 +1005,7 @@ namespace wotm_custom
                 return;
             }
             callF(rdram, ctx, runtime, kAnimPercent, {handle(mecha, 3), 1u}, 0.f);
+            stopLaserSound(rdram, ctx, runtime, mecha);   // a rajada acabou (vai para a fase de desligar)
         }
         // O Mecha mira o inimigo mais perto sempre (o retail mira m_monsters[0], que pode ser ele mesmo)
         if (!m || READ32(m + kTypeBits) != kJelly || ((!isPlayerSlot(rdram, ctx, runtime, m) || READ32(m + kPlayerNum) == 2u) && mecha < 0))
