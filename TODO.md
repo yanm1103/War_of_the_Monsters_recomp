@@ -21,7 +21,11 @@ Como funciona hoje: `docs/passos/MODS.md` ("Skins", "Monstros custom").
 
 ### 10. Chefes jogáveis
 - Como estão: `MODS.md`, "Monstros custom" (Goliath, Jelly e Cerebulon; mod `mods/Cerebulon/`). Plantboss não é viável.
-- **Mecha** (primeira fase do Cerebulon): é peça da fase final (`FinalBoss::updateMecha`, hier 0x27A6..0x27A9), não `Monster`, como o Plantboss. Jogável só como monstro novo montado das peças (`tools/monglb.py --boss mecha` já as junta para o viewer). Decisão do dono.
+- **Mecha** (`MODS.md`, "Mecha"; diário em `docs/investigacoes/2026-10-27/mecha_progresso.md`), o que falta:
+  - Equilíbrio: a rajada inteira tira 72 de 200 de vida (`kLaserDamage` 0,4 por quadro em `wotm_custom.inc`); o dono decide o valor.
+  - Conferir jogando se os prédios caem com o laser (no log as rajadas somam quadros em objetos; nunca foi visto um cair).
+  - Câmera da torre: encostado num prédio ela entra na parede (sem colisão); retícula só sem tela dividida.
+  - Seleção: a casa CUSTOM (enquadramento em `kFraming`, `wotm_savepics.hpp`) e o retrato do HUD (cinza, sem `"portrait"`).
 - Seleção nativa: conferir o enquadramento do Jelly e do Cerebulon na casa CUSTOM (`wotm_savepics.hpp`, `kFraming`).
 
 ### 13. Campanha com até 4 jogadores
@@ -44,4 +48,5 @@ Como funciona hoje: `docs/passos/MODS.md` ("Skins", "Monstros custom").
 - Quadros dos jogadores da seleção nativa em 2D fora do telão (ficam melhor no telão).
 - Entrada no modo treino pelo launcher (a linha TRAINING do menu e `WOTM_TRAINING=1` bastam).
 - Netcode próprio (rollback): exigiria provar que a lógica dá sempre o mesmo resultado com os mesmos comandos.
+- Mecha pular.
 - Fazer o Goliath Prime ou outros bosses funcionarem por inteiro (CPU, colisão, animações que o ASSBOSS não tem): monstros custom são mods/experimentais.

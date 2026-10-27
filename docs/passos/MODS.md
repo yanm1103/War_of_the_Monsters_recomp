@@ -185,9 +185,9 @@ skin só com `skin.json` (`togera/demonio`, base 3) carrega o modelo do traje 3.
 ## Monstros custom (um monstro a mais na seleção)
 
 Monstros custom são experimentais: mods do dono para o próprio jogo, sem garantia de que tudo funcione (o Goliath não tem
-animações de escalar nem IA fora da fase dele). Um monstro custom é uma pasta em `mods/<mod>/monsters/<pasta>/` com um `monster.json`. Hoje ele usa o código, o modelo e os arquivos
-de um tipo do jogo (`base`); arquivos próprios (outro prefixo em `MON/`, um tipo livre do jogo) ficam para depois, e o formato reserva
-`files` para isso. O primeiro é o Goliath Prime (`mods/Goliath Prime/monsters/goliath/monster.json`, no repo):
+animações de escalar nem IA fora da fase dele). Um monstro custom é uma pasta em `mods/<mod>/monsters/<pasta>/` com um `monster.json`. Ele usa o código
+de um tipo do jogo (`base`) e o modelo e os arquivos desse tipo, ou arquivos próprios (`files`, abaixo; o Mecha). Um tipo livre do
+jogo (outro prefixo em `MON/`) ainda não existe. O primeiro é o Goliath Prime (`mods/Goliath Prime/monsters/goliath/monster.json`, no repo):
 
 ```json
 { "id": "goliath", "name": "GOLIATH PRIME", "base": "assboss", "costume": 1,
@@ -209,6 +209,10 @@ de um tipo do jogo (`base`); arquivos próprios (outro prefixo em `MON/`, um tip
   comum. A do `FINAL.CHR` já serve. O port lê a câmera do `.CHR` do `from` (de `mods/` ou do disco) e a põe no monstro a cada troca
   de POV (log `[custom] jelly: camera do RST/LIZARD.CHR, distancias x3.00 (POV 0: ...)`).
 - `narrator`: `narrator/<nome>.mp3` dito na confirmação (vazio = o do tipo).
+- `files`: arquivos próprios do modelo, numa subpasta do monstro (`true` = `files/`, ou o nome dela) com `<qualquer nome>.NGP` e
+  `.PTR` (e `.TEX`/`.RTX`, opcionais): viram um traje de mod só dele (como uma skin implícita, traje 4 a 99), que passa a ser o traje
+  padrão; o `costume` do JSON dá o que os arquivos não trazem (sons, o que faltar). Sem a pasta, o log avisa e fica o traje do disco.
+- `kind`: regras próprias do port para o monstro (`wotm_custom.inc`). Hoje só `"mecha"` (abaixo); vazio = as do tipo.
 - `ai`: se uma CPU pode usá-lo (padrão não); sem ele a seleção mostra "PLAYERS ONLY" no quadro da CPU. Com `"ai": true` a CPU pode
   escolhê-lo na casa CUSTOM da seleção; o launcher só oferece customs ao jogador. Um custom de base jogável luta como CPU
   (`WOTM_MATCH=1,moddedtogera,1`, com `"base": "togera"`: anda, ataca, solta fogo e perde a rodada como um Togera), e o Jelly e o
@@ -239,7 +243,7 @@ de um tipo do jogo (`base`); arquivos próprios (outro prefixo em `MON/`, um tip
 ### Cerebulon (o mod `mods/Cerebulon/`, no repo)
 As duas fases do chefe final que são `Monster`: `jelly` ("JELLY", base `jelly`, câmera do Togera 3x) e `cerebulon` ("CEREBULON",
 base `final`), os dois com `"ai": true` e o narrador `cerebulon`. A primeira fase, o Mecha, é peça da fase final
-(`FinalBoss::updateMecha`), não `Monster`, e não entra.
+(`FinalBoss::updateMecha`), não `Monster`: entra como monstro montado (mod `mods/Mecha/`, seção "Mecha" abaixo).
 - **O que o port faz por eles** (`wotm_custom.inc`): visíveis e controláveis com IAs (o `SetAIMonster` desligava os tipos 0x1C0 e
   0x1E0 e os contava como IA), visíveis também como CPU fora da aventura, banco de som `Final_s.bnk` fora da fase final e nome no
   HUD ("JELLY WINS", "CEREBULON CRUSHED").
@@ -260,6 +264,35 @@ base `final`), os dois com `"ai": true` e o narrador `cerebulon`. A primeira fas
 
 Exemplo: seleção da tela 6 (1 jogador contra CPU), CUSTOM → GOLIATH PRIME, a CPU recusada na casa,
 luta em Midtown Park com câmera, som e nome. Foto: `docs/screenshots/2026-10-23/2026-10-23_selecao_casa_custom_goliath.png`.
+
+### Mecha (o mod `mods/Mecha/`, no repo só o `monster.json`)
+O robô da primeira fase do chefe final, montado como monstro de base Jelly (`"base": "jelly"`, `"files": true`, `"kind": "mecha"`,
+câmera do Togera 3,5x, `"ai": true`, narrador `cerebulon`). Os arquivos do modelo são do jogo e não vão para o repo: cada um os
+gera do próprio disco com `python tools/mechamon.py mods/Mecha/monsters/mecha/files` (grava `MECHA.NGP`, `.PTR`, `.TEX`, `.RTX`;
+os quatro estão no `.gitignore`).
+- **O que o `mechamon.py` faz:** o `MON/JELLY0` é o molde (sombra, retícula, `COLL_GRID`), e a raiz 0 passa a apontar para a
+  instância do Mecha copiada do `LVL/CAPITOL.NGP`. A instância principal vira o tipo 0x1C0, o escudo 0x1D8 e o feixe 0x1D9. O
+  emissor do laser (0x27AA) vira o localizador 0x80B, e pontas das garras viram 0x802/0x803/0x808. As animações são renumeradas para
+  as que o `Monster` pede (`ANIM_MAP`: andar, recuo, o especial 160/161/162, morte 120; o giro e a inclinação da torre, 11 e 12 do
+  chefe, viram 290 e 291). As texturas do `CAPITOL.TEX` vão para o fim do `JELLY0.TEX`. Detalhes: `docs/investigacoes/2026-10-27/`
+  (`mecha_pecas_capitol.md`, `mecha_formato_monstro.md`, `mecha_carga_custom.md`).
+- **Escudo** (como o `FinalBoss::updateMecha`): começa ligado, e com ele o Mecha toma 1/4 do dano. Depois de cada disparo o escudo
+  baixa por 240 quadros (dano cheio, sem laser) e religa.
+- **Laser** (o único ataque especial; sempre disponível com o escudo ligado): **Triângulo + Círculo**. Usa o `StateUltraTazer` do
+  Jelly como roteiro de animação e tempo (preparar, 180 quadros de rajada, desligar). Na rajada o raio é o do chefe: da boca (0x80B)
+  até 4000 na direção da mira (`hdLosCSTest`). O monstro atingido toma 0,4 por quadro (`takeDamage` creditado ao Mecha) e é
+  empurrado; prédio e objeto acumulam num `HurtHistory` próprio e levam um golpe de 5,01 a cada 5 (`dispatchHit`); faíscas no ponto.
+  A torre gira e inclina para a mira (blends das animações 290/291), e o feixe se estica até o ponto.
+- **Mira:** o jogador mira pela **câmera da torre**. Durante o laser a vista dele fica 220 acima da ponta do canhão, olhando para a
+  mira, com uma retícula no centro (só sem tela dividida); o feixe vai para o centro da tela. Os dois analógicos e o mouse giram a
+  mira (sensibilidade e eixo invertido da aba CAMERA), e a câmera entra e sai em 12 quadros. A CPU mira o peito do inimigo mais perto.
+- **Sons:** os do chefe (`FinalBossSound`, `Final_s.bnk`): preparar, o laço do laser, o laço do impacto no monstro atingido
+  (`Monster+0x1A84`, como o chefe) e o escudo descendo e subindo. Os laços são desligados à mão no fim da rajada.
+- **Memória:** `PS2_RAM_SIZE-0x1400` a `-0x1000`, no topo dos 64 MB do runtime: 2 Mechas × 0x1C0 (6 `_animHandle`, 2 `AnimBlend`, o
+  `HurtHistory` e o `FinalBossSound`) e 0x80 de rascunho para as chamadas. Logo acima ficam os `kQuadDefs` do split4.
+- Não pula (decisão do dono). Teste sem controle: `WOTM_MATCH=mecha,1,1 WOTM_MECHATEST=1` (dispara sempre e a mira varre sozinha);
+  `WOTM_AIVSAI=1` para IA x IA. Log: `[custom] Mecha (dup 0): escudo, laser e torre achados`,
+  `[custom] Mecha: escudo baixou (...); rajada: 180 quadros no monstro (-72.0 de vida), 0 em objetos`.
 
 ## Fotos da seleção de fase
 `mods/<mod>/levelpics/<nome>.png` troca a foto das fases que o `SHELL.TEX` não tem (`training`, `lakepowell`, `tokyodeathmatch`) e
@@ -289,7 +322,7 @@ a da entrada RANDOM (`random`; sem ela, um mosaico das fotos do jogo). Proporç�
 
 - Arquivo de mod maior que o do disco (`.TEX`, `.RTX`, `.NGP`, `.BNK`): o jogo carrega em regiões de tamanho fixo e pode sobrescrever
   o que vem depois (o log e o `check` avisam). Com PNG isso não acontece: a textura do jogo não muda de tamanho.
-- Os monstros custom usam um tipo do jogo; monstros com arquivos próprios ainda não existem (`TODO.md`, item 8).
+- Os monstros custom usam o código de um tipo do jogo; um tipo novo ainda não existe (`TODO.md`, item 8).
 
 Exemplo (`WOTM_MATCH=3,1`, `3,1,2,5,1` e `1,3,1` com IA): a pele do Togera em PNG 4x (1024 × 1024 no lugar de 256)
 e o retrato 2x no HUD do jogador e na barra do inimigo; o kit faz export, edição, pack (PNG, `.VAG`, um som do `SHELL_S.BNK`),

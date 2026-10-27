@@ -85,6 +85,7 @@ std::atomic<bool> g_wotmCheatWin{false};
 #include "wotm_mouse.hpp"   // mouse na camera moderna (wotm_orbit.inc consome, a janela acumula)
 std::atomic<bool> g_wotmFreeCam{false};
 std::atomic<bool> g_wotmFreeCamPad{false};
+std::atomic<float> g_wotmMechaReticle{0.f};   // retícula da camera da torre do Mecha (wotm_custom.inc grava, wotm_live.inc desenha)
 std::mutex g_wotmFreeCamM;
 WotmFreeCamPose g_wotmFreeCamPose;
 
@@ -1442,7 +1443,10 @@ namespace
         orbit::pre(rdram);   // camera moderna (wotm_orbit.inc)
         g_origCamerasUpdateFree(rdram, ctx, runtime);
         if (ctx->pc == ra)
+        {
             orbit::post(rdram, ctx, runtime);
+            wotm_custom::laserCam(rdram);   // camera da torre do Mecha no laser (wotm_custom.inc)
+        }
         freeCamWrite(rdram);
     }
 
@@ -1684,6 +1688,8 @@ namespace
     {
         const uint32_t pf = GPR_U32(ctx, 4) & 0x1FFFFFFFu, gp = GPR_U32(ctx, 5) & 0x1FFFFFFFu;
         // camera moderna (wotm_orbit.inc): configuracao relativa a tela e analogico direito para a orbita, antes do lock-on ler o +0x16E4
+        if (ctx->pc == kInterpretInputs && ramOk(pf, kPadFlagsOwner + 4u))   // Mecha no laser: analogicos e mouse viram mira
+            wotm_custom::laserInput(rdram, FAST_READ32(pf + kPadFlagsOwner), gp);
         const int orbitSlot = ctx->pc == kInterpretInputs ? orbit::inputEnter(rdram, pf, gp) : -1;
         // troca de alvo pedida pelo teclado (Tab, R, rodinha; wotm_mouse.hpp): com alvo travado, com ou sem o lock-on alternado
         if (int ps = -1; ctx->pc == kInterpretInputs && ramOk(pf, kPadFlagsOwner + 4u) &&
