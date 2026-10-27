@@ -2115,8 +2115,6 @@ static void changeScreenHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runt
                 wotm_narrator::announceLevel(int(rd32(rdram, kShell + 0x2BB0)));
             extraCpus(rdram);
         }
-        else if (from == 20 && to == 1)   // Start no titulo
-            wotm_narrator::stopIntro();
     }
     g_origChangeScreen(rdram, ctx, runtime);
 }
@@ -2149,7 +2147,6 @@ static void waitStartHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime
             setManual(false);
         g_multi = 0;
         g_selOn = false;
-        wotm_narrator::announceIntro();   // a camera do titulo acabou de parar (so roda depois da transicao)
     }
     g_origWaitStart(rdram, ctx, runtime);
 }

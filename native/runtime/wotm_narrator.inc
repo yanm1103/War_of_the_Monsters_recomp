@@ -3,7 +3,7 @@
 // toca o MP3 com o nome dele, junto com o som de confirmar do jogo (nao no lugar).
 // Opcao NARRATOR da aba FEATURES do "Recompiled options" (WOTM_ANNOUNCER): 0 OFF, 1 GODZILLA SAVE THE EARTH (padrao, os MP3), 2 MONSTER
 // CRY: no lugar do nome do monstro, o grito dele (o som do cinema de entrada da luta, do banco do monstro; playMonsterCry no
-// wotm_snd.inc); monstro sem grito (Goliath Prime) fica em silencio; as fases e o titulo continuam com o MP3.
+// wotm_snd.inc); monstro sem grito (Goliath Prime) fica em silencio; as fases ficam mudas.
 //
 // Arquivos <nome>.mp3: monstros (congar, robo47, togera, ultrav, preytor, kineticlops, magmo, raptros, agamo, zorgulon,
 // goliathprime, cerebulon) e fases (levelName: midtownpark, gamblersgulch, rosdalecanyon, metrocity, ...), procurados nesta ordem: mods/<mod>/narrator/ (pasta mods/ de sempre: um mod pode trocar a voz), narrator/ ao lado do
@@ -92,10 +92,10 @@ static const char *levelName(int level)
     return level >= 0 && level < 28 ? kLevels[level] : nullptr;
 }
 
-// Toca o primeiro arquivo achado da lista (terminada em nullptr). Chamado da thread do EE.
+// Toca o primeiro arquivo achado da lista (terminada em nullptr), so na opcao GODZILLA SAVE THE EARTH. Chamado da thread do EE.
 static void play(const char *const *names)
 {
-    if (!wotm::settings::on(wotm::settings::Announcer) || !IsAudioDeviceReady())
+    if (wotm::settings::get(wotm::settings::Announcer) != 1 || !IsAudioDeviceReady())
         return;
     std::lock_guard<std::mutex> lk(g_m);
     Sound *s = nullptr;
@@ -141,30 +141,6 @@ static void announce(const std::string &name, int monster)
     const char *names[4] = {name.empty() ? nullptr : name.c_str(), nullptr, nullptr, nullptr};
     for (int i = 0, k = names[0] ? 1 : 0; t[i] && k < 3; ++i) names[k++] = t[i];
     play(names);
-}
-
-// introsound.mp3 na tela de "press start" (20), uma vez por abertura do jogo: na primeira chamada do screenWaitForStart, que o
-// uiMain so faz quando a transicao termina (animacao da camera e fade, betweenScreens 0). Voltar ao titulo depois nao repete.
-static void announceIntro()
-{
-    static bool done = false;
-    if (done)
-        return;
-    done = true;
-    static const char *const names[] = {"introsound", nullptr};
-    play(names);
-}
-
-// Start no titulo (changeScreen(20, 1)): corta o introsound se ele ainda estiver tocando
-static void stopIntro()
-{
-    std::lock_guard<std::mutex> lk(g_m);
-    const auto it = g_sounds.find("introsound");
-    if (it != g_sounds.end() && it->second.frameCount && IsSoundPlaying(it->second))
-    {
-        StopSound(it->second);
-        std::fprintf(stderr, "[narrador] introsound cortado pelo Start\n");
-    }
 }
 
 // Nome da fase (m_levelNum), na confirmacao da selecao de fase
