@@ -10,6 +10,10 @@ pasta de trabalho (<mods>/_work/<mod>/, com o modkit.json dela), e o pack de um 
   python tools/modkit.py revert my_mod MON/lizard0_t0004.png # volta um arquivo da pasta de trabalho ao original do disco
   python tools/modkit.py skin new my_mod togera green --base 1 --name "GREEN TOGERA"   # skin nova: skin.json + PNGs do traje base
   python tools/modkit.py skin new my_mod goliath gold        # skin de um monstro custom (id do monster.json)
+  python tools/modkit.py monster new my_mod fire_togera --base togera --costume 2 --name "FIRE TOGERA" --ai   # monstro custom
+  python tools/modkit.py monster new my_mod gold_goliath --base assboss       # de um chefe (traje e camera padrao do chefe)
+  python tools/modkit.py monster portrait my_mod fire_togera retrato.png       # retrato do HUD (2:1)
+  python tools/modkit.py monster model my_mod fire_togera X.NGP X.PTR          # modelo proprio (esqueleto do tipo base)
   python tools/modkit_gui.py                                 # o mesmo com interface (botao "Mod kit" do launcher)
 
 Opcoes: --disc <pasta> (disco extraido; padrao WOTM_DISC ou disc/ do repo), --mods <pasta> (padrao: <runtime>/discroot/mods, o
@@ -265,7 +269,7 @@ def export(disc, work, pats, dest=None):
 def source_of(disc, rel):
     """Arquivo do disco de onde saiu um arquivo da pasta de trabalho ("MON/lizard0_t0004.png" -> "MON/LIZARD0.TEX"); None se nao achou."""
     d, n = os.path.split(rel.replace("\\", "/"))
-    if d.startswith("skins/"):   # PNG de skin (skins/<id>/shogun3_t0010.png): saiu do traje base em MON/
+    if d.startswith(("skins/", "monsters/")):   # PNG de skin ou de custom (skins/<id>/, monsters/<id>/files/): saiu do traje base em MON/
         d = "MON"
     pre = d + "/" if d else ""
     m = PNG_RE.match(n)
@@ -383,7 +387,7 @@ def pack(disc, work, mods, mod, inject=False):
             out_rel = (d + "/" if d else "") + name
             shutil.copy2(p, os.path.join(dst, *out_rel.split("/")))
             print("texture %s -> %s/%s" % (n, mod, out_rel))
-            if inject and not d.startswith("skins/"):   # PNG de skin vale so para ela: nada a regravar no .TEX do disco
+            if inject and not d.startswith(("skins/", "monsters/")):   # PNG de skin ou custom vale so para ele
                 inject_png(disc, dst, stem, rtx, tid, p)
             continue
         if n.lower().endswith(".wav"):
@@ -436,7 +440,11 @@ MONSTERS = {"congar": "MONKEY", "robo-47": "ROBOT", "togera": "LIZARD", "ultra-v
 
 
 # Chefes que um monstro custom pode usar de base (kCustomBases em native/wotm_mods.hpp)
-CUSTOM_BASES = {"assboss": "ASSBOSS"}
+CUSTOM_BASES = {"assboss": "ASSBOSS", "jelly": "JELLY", "final": "FINAL"}
+# Para um custom novo: traje padrao e camera de cada chefe (MODS.md: a do ASSBOSS.CHR fica em cima do monstro, a do JELLY.CHR entre
+# as pernas; a do FINAL.CHR ja serve). Base jogavel: traje 0 e a camera do proprio tipo.
+BOSS_DEFAULTS = {"assboss": (1, ("togera", 200)), "jelly": (0, ("togera", 300)), "final": (0, None)}
+KINDS = ("mecha",)   # regras proprias do port ("kind" do monster.json, wotm_custom.inc)
 
 
 def norm(s):
@@ -454,6 +462,14 @@ def base_prefix(s):
     if g:
         return MONSTERS[g]
     return next((p for g, p in CUSTOM_BASES.items() if norm(s) in (norm(g), norm(p))), None)
+
+
+def base_name(s):
+    """Nome do base de um custom como o monster.json o grava ("togera", "assboss"); None se o port nao aceita."""
+    g = game_monster(s)
+    if g:
+        return g
+    return next((g for g, p in CUSTOM_BASES.items() if norm(s) in (norm(g), norm(p))), None)
 
 
 def mod_folders(mods):
@@ -541,6 +557,19 @@ def write_skin_json(mods, mod, sid, data):
         f.write("\n")
 
 
+def portrait_tex(disc, prefix, costume):
+    """texId do retrato do HUD no MON/<PREFIXO><traje>.RTX (a ultima textura 128x64, como o portrait_png); None se nao achou."""
+    src = disc_file(disc, "MON/%s%d.RTX" % (prefix, costume))
+    if not src:
+        return None
+    try:
+        pks = [p for p in tex.parse(tex.read_file(src)[0])["packets"] if not p.is_palette()]
+    except Exception:
+        return None
+    pks = [p for p in pks if (p.w, p.h) == (128, 64)] or pks
+    return pks[-1].texId if pks else None
+
+
 def portrait_png(disc, prefix, costume, out_png):
     """Grava em out_png o retrato do traje (a ultima textura 128x64 do MON/<PREFIXO><traje>.RTX), decodificado como o export
     (tex.cmd_export) faz, sem escrever nada no stdout (roda numa thread da interface). False se nao deu."""
@@ -615,11 +644,12 @@ def skin_delete(mods, mod, work, sid):
     print("skin %s deleted" % sid)
 
 
-def skin_adopt(work, d, stem, sid):
-    """Move para <work>/skins/<sid>/ os PNGs (e manifestos) de <work>/<d>/ que sairam de <STEM>.TEX/.RTX, com o sha1 do estado
-    junto (os editados continuam editados). O traje original fica intocado no proximo pack. Devolve quantos PNGs moveu."""
+def skin_adopt(work, d, stem, sid, to=None):
+    """Move para <work>/skins/<sid>/ (ou <work>/<to>/) os PNGs (e manifestos) de <work>/<d>/ que sairam de <STEM>.TEX/.RTX, com o
+    sha1 do estado junto (os editados continuam editados). O traje original fica intocado no proximo pack. Devolve quantos PNGs moveu."""
+    to = to or "skins/" + sid
     src = os.path.join(work, *d.split("/"))
-    dst = os.path.join(work, "skins", sid)
+    dst = os.path.join(work, *to.split("/"))
     os.makedirs(dst, exist_ok=True)
     st = load_state(work)
     n = 0
@@ -631,10 +661,10 @@ def skin_adopt(work, d, stem, sid):
         os.replace(os.path.join(src, name), os.path.join(dst, name))
         ent = st["files"].pop("%s/%s" % (d, name), None)
         if ent is not None:
-            st["files"]["skins/%s/%s" % (sid, name)] = ent
+            st["files"]["%s/%s" % (to, name)] = ent
         n += bool(m)
     save_state(work, st)
-    print("%d texture(s) of %s/%s moved to skins/%s" % (n, d, stem.upper(), sid))
+    print("%d texture(s) of %s/%s moved to %s" % (n, d, stem.upper(), to))
     return n
 
 
@@ -685,6 +715,204 @@ def skin_new(disc, work, mods, mod, monster, sid, base=None, name=None, ai=False
         return
     export(disc, work, ["MON/%s%d" % (prefix, costume)], dest="skins/" + sid)
     print("edit the PNGs in %s, then: modkit.py pack %s" % (os.path.join(work, "skins", sid), mod))
+
+
+# ---------------------------------------------------------------- monstros custom (MODS.md, "Monstros custom")
+
+def custom_id_error(cid):
+    """Mensagem (em ingles) se o id nao serve para um monstro custom; None se serve. Nome ou prefixo de um jogavel nao serve: a
+    skin e o WOTM_MATCH acham o do jogo antes (o de um chefe serve: o mod Cerebulon tem o custom "jelly")."""
+    if not CUSTOM_ID_RE.fullmatch(cid or ""):
+        return "the id takes only lowercase letters, digits and _ (1 to 32, starting with a letter)"
+    if game_monster(cid):
+        return "%r is a playable monster of the game; pick another id" % cid
+    return None
+
+
+def monster_dir(mods, mod, cid):
+    return os.path.join(mods, mod, "monsters", cid)
+
+
+def list_mod_monsters(mods, mod):
+    """{pasta: monster.json} dos monstros custom de mods/<mod>/monsters/ (pasta = id do monster_new)."""
+    d = os.path.join(mods, mod, "monsters")
+    out = {}
+    for n in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        js = os.path.join(d, n, "monster.json")
+        if os.path.isfile(js):
+            out[n] = _json_obj(js)
+    return out
+
+
+def write_monster_json(mods, mod, cid, data):
+    os.makedirs(monster_dir(mods, mod, cid), exist_ok=True)
+    with open(os.path.join(monster_dir(mods, mod, cid), "monster.json"), "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+
+
+def list_narrators(mods):
+    """Nomes de narrator/<nome>.mp3 que o port acha (o do repo e o ao lado da pasta de mods, como o wotm_narrator.inc)."""
+    out = set()
+    for d in (os.path.join(os.path.dirname(os.path.abspath(mods)), "narrator"), os.path.join(REPO, "narrator")):
+        for n in os.listdir(d) if os.path.isdir(d) else []:
+            if n.lower().endswith(".mp3"):
+                out.add(n[:-4].lower())
+    return sorted(out)
+
+
+def monster_new(disc, work, mods, mod, cid, base, costume=None, name=None, ai=False, camera=None, narrator=None, textures=True,
+                files=None):
+    """Cria mods/<mod>/monsters/<id>/monster.json. textures: exporta as texturas do traje do disco (base + costume) para
+    <work>/monsters/<id>/files/; o pack leva os PNGs editados para a pasta files/ do monstro, que vira o traje proprio dele ("files":
+    true; valem so para ele). files None = textures. costume None = o padrao do tipo (BOSS_DEFAULTS; jogavel 0). camera None = a
+    padrao do tipo, False = a do proprio tipo, (from, escala em %). work None = work_dir(mods, mod)."""
+    validate_mod_name(mod, "monster new")
+    if work is None:
+        work = work_dir(mods, mod)
+    if custom_id_error(cid):
+        raise SystemExit("monster new: " + custom_id_error(cid))
+    bname = base_name(base or "")
+    if not bname:
+        raise SystemExit("monster new: unknown base %r (one of: %s, %s)" % (base, ", ".join(MONSTERS), ", ".join(CUSTOM_BASES)))
+    prefix = base_prefix(bname)
+    dco, dcam = BOSS_DEFAULTS.get(bname, (0, None))
+    costume = dco if costume is None else costume
+    if costume not in range(4) or not disc_file(disc, "MON/%s%d.NGP" % (prefix, costume)):
+        raise SystemExit("monster new: the disc has no costume %s of %s (MON/%s%s.NGP)" % (costume, bname, prefix, costume))
+    camera = dcam if camera is None else camera
+    if camera:
+        if not base_name(camera[0]) or not 10 <= int(camera[1]) <= 1000:
+            raise SystemExit("monster new: camera is <monster>:<scale %%, 10 to 1000> (e.g. togera:200)")
+    files = textures if files is None else files
+    folder = monster_dir(mods, mod, cid)
+    js = os.path.join(folder, "monster.json")
+    if os.path.exists(js):
+        raise SystemExit("monster new: %s already exists" % js)
+    data = {"id": cid, "name": (name or cid).upper(), "base": bname, "costume": costume}
+    if files:
+        data["files"] = True
+        os.makedirs(os.path.join(folder, "files"), exist_ok=True)
+    if camera:
+        data["camera"] = {"from": base_name(camera[0]), "scale": int(camera[1])}
+    if narrator:
+        data["narrator"] = narrator.lower()
+    data["ai"] = bool(ai)
+    write_monster_json(mods, mod, cid, data)
+    print("custom monster %s (%s): %s" % (cid, data["name"], js))
+    print("base %s, costume %d%s" % (bname, costume, ", camera of %s x%.2f" % (data["camera"]["from"], data["camera"]["scale"] / 100.)
+                                      if camera else ""))
+    if textures:
+        export(disc, work, ["MON/%s%d" % (prefix, costume)], dest="monsters/%s/files" % cid)
+        print("edit the PNGs in %s, then: modkit.py pack %s" % (os.path.join(work, "monsters", cid, "files"), mod))
+    print("in the game: the CUSTOM box of the selection, or WOTM_MATCH=%s,1,1" % cid)
+
+
+def monster_portrait(disc, work, mods, mod, cid, png):
+    """Retrato do HUD: copia o PNG para monsters/<id>/portrait.png (no mod e na pasta de trabalho) e grava "portrait" e o
+    "portraitTex" (o texId do retrato no .RTX do traje do disco) no monster.json."""
+    js = os.path.join(monster_dir(mods, mod, cid), "monster.json")
+    data = _json_obj(js)
+    if not data:
+        raise SystemExit("portrait: no monster.json in %s" % monster_dir(mods, mod, cid))
+    if png_size(png) is None:
+        raise SystemExit("portrait: %s is not a PNG" % png)
+    prefix = base_prefix(str(data.get("base", "")))
+    co = data.get("costume", 0) if isinstance(data.get("costume"), int) else 0
+    tid = portrait_tex(disc, prefix, co) if prefix else None
+    if tid is None:
+        raise SystemExit("portrait: could not find the portrait texture in MON/%s%d.RTX" % (prefix, co))
+    w, h = png_size(png)
+    for d in (monster_dir(mods, mod, cid), os.path.join(work, "monsters", cid)):
+        os.makedirs(d, exist_ok=True)
+        dst = os.path.join(d, "portrait.png")
+        if os.path.abspath(dst) != os.path.abspath(png):
+            shutil.copyfile(png, dst)
+    st = load_state(work)
+    st["files"]["monsters/%s/portrait.png" % cid] = {"sha1": sha1(os.path.join(work, "monsters", cid, "portrait.png"))}
+    save_state(work, st)
+    data["portrait"] = "portrait.png"
+    data["portraitTex"] = tid
+    write_monster_json(mods, mod, cid, data)
+    print("portrait of %s: %dx%d (game 128x64), texture %d of %s%d.RTX" % (cid, w, h, tid, prefix, co))
+    if w * 64 != h * 128:
+        print("WARNING: the HUD portrait is 2:1 (128x64); %dx%d will look stretched" % (w, h))
+
+
+def monster_model(work, mods, mod, cid, paths):
+    """Modelo proprio: copia .NGP e .PTR (e .TEX/.RTX, opcionais) para <work>/monsters/<id>/files/ como editados (o pack os leva)
+    e liga "files" no monster.json. O .NGP precisa do esqueleto e das animacoes do tipo base."""
+    js = os.path.join(monster_dir(mods, mod, cid), "monster.json")
+    data = _json_obj(js)
+    if not data:
+        raise SystemExit("model: no monster.json in %s" % monster_dir(mods, mod, cid))
+    by_ext = {}
+    for p in paths:
+        ext = os.path.splitext(p)[1].upper()
+        if ext not in (".NGP", ".PTR", ".TEX", ".RTX"):
+            raise SystemExit("model: %s is not a .NGP, .PTR, .TEX or .RTX" % p)
+        if ext in by_ext:
+            raise SystemExit("model: two %s files (%s, %s)" % (ext, by_ext[ext], p))
+        by_ext[ext] = p
+    d = os.path.join(work, "monsters", cid, "files")
+    have = {os.path.splitext(n)[1].upper() for n in os.listdir(d)} if os.path.isdir(d) else set()
+    if (".NGP" in by_ext or ".NGP" in have) != (".PTR" in by_ext or ".PTR" in have):
+        raise SystemExit("model: .NGP and .PTR go together (the .PTR relocates the .NGP)")
+    os.makedirs(d, exist_ok=True)
+    st = load_state(work)
+    for ext, p in sorted(by_ext.items()):
+        for n in os.listdir(d):   # um arquivo de cada tipo: o novo substitui o anterior
+            if os.path.splitext(n)[1].upper() == ext:
+                os.remove(os.path.join(d, n))
+                st["files"].pop("monsters/%s/files/%s" % (cid, n), None)
+        n = os.path.basename(p)
+        shutil.copyfile(p, os.path.join(d, n))
+        st["files"]["monsters/%s/files/%s" % (cid, n)] = {"sha1": "", "imported": True}   # sha1 vazio: conta como editado
+        print("model file %s -> work folder monsters/%s/files/" % (n, cid))
+    save_state(work, st)
+    if not data.get("files"):
+        data["files"] = True
+        write_monster_json(mods, mod, cid, data)
+        print("monster.json of %s: \"files\": true" % cid)
+    print("build the mod (modkit.py pack %s) to send them to the mod" % mod)
+
+
+def monster_duplicate(mods, mod, work, cid, new):
+    """Copia o monstro cid para new: a pasta no mod (monster.json com o id novo), a pasta de trabalho e o estado."""
+    err = custom_id_error(new)
+    if err:
+        raise SystemExit("duplicate monster: " + err)
+    src, dst = monster_dir(mods, mod, cid), monster_dir(mods, mod, new)
+    if os.path.exists(dst) or os.path.exists(os.path.join(work, "monsters", new)):
+        raise SystemExit("duplicate monster: there is already a monster %r in the mod" % new)
+    shutil.copytree(src, dst)
+    data = _json_obj(os.path.join(dst, "monster.json"))
+    data["id"] = new
+    write_monster_json(mods, mod, new, data)
+    wsrc = os.path.join(work, "monsters", cid)
+    if os.path.isdir(wsrc):
+        shutil.copytree(wsrc, os.path.join(work, "monsters", new))
+    st = load_state(work)
+    pre = "monsters/%s/" % cid
+    for k, v in list(st["files"].items()):
+        if k.startswith(pre):
+            st["files"]["monsters/%s/%s" % (new, k[len(pre):])] = dict(v)
+    save_state(work, st)
+    print("monster %s copied to %s (%s)" % (cid, new, dst))
+
+
+def monster_delete(mods, mod, work, cid):
+    """Apaga o monstro custom: a pasta no mod, a pasta de trabalho e as chaves dele no estado. As skins dele ficam (avisa)."""
+    shutil.rmtree(monster_dir(mods, mod, cid), ignore_errors=True)
+    shutil.rmtree(os.path.join(work, "monsters", cid), ignore_errors=True)
+    st = load_state(work)
+    pre = "monsters/%s/" % cid
+    st["files"] = {k: v for k, v in st["files"].items() if not k.startswith(pre)}
+    save_state(work, st)
+    print("monster %s deleted" % cid)
+    left = [s for s, v in list_skins(mods, mod).items() if str(v.get("monster", "")).lower() == cid]
+    if left:
+        print("WARNING: skin(s) of %s left in the mod: %s (the game skips them)" % (cid, ", ".join(left)))
 
 
 def find_disc_ext(disc, d, stem, ext):
@@ -807,6 +1035,17 @@ def check(disc, mods, only=None):
                 mon = key[1].split("/")[0]
                 if key[0] == "skin" and mon not in MONSTERS and mon not in customs:
                     note += " WARNING: %r is not a playable monster nor the id of a custom monster; the game skips it" % mon
+                if key[0] == "custom":
+                    v = _json_obj(p)
+                    if not base_prefix(str(v.get("base", ""))):
+                        note += " WARNING: \"base\" %r is not a type the port accepts (%s, %s); the game skips it" % (
+                            v.get("base"), ", ".join(MONSTERS), ", ".join(CUSTOM_BASES))
+                        problems += 1
+                    elif not CUSTOM_ID_RE.fullmatch(mon):
+                        note += " WARNING: bad \"id\" (%s); the game skips it" % custom_id_error(mon)
+                        problems += 1
+                    elif v.get("files") and not os.path.isdir(os.path.join(os.path.dirname(p), v["files"] if isinstance(v["files"], str) else "files")):
+                        note += " WARNING: \"files\" folder missing; the game uses the disc costume"
             elif m:
                 stem, rtx, tid = m.group(1), bool(m.group(2)), int(m.group(3))
                 trel = find_texfile(disc, stem, ".RTX" if rtx else ".TEX")
@@ -856,16 +1095,18 @@ def check(disc, mods, only=None):
 def main(argv):
     opts, args, i = {}, [], 0
     while i < len(argv):
-        if argv[i] in ("--disc", "--mods", "--work", "--base", "--name"):
+        if argv[i] in ("--disc", "--mods", "--work", "--base", "--name", "--costume", "--camera", "--narrator"):
+            if i + 1 >= len(argv):
+                raise SystemExit("%s needs a value" % argv[i])
             opts[argv[i][2:]] = argv[i + 1]
             i += 2
-        elif argv[i] in ("--inject", "--ai"):
+        elif argv[i] in ("--inject", "--ai", "--no-textures"):
             opts[argv[i][2:]] = True
             i += 1
         else:
             args.append(argv[i])
             i += 1
-    if not args or args[0] not in ("export", "pack", "check", "revert", "skin"):
+    if not args or args[0] not in ("export", "pack", "check", "revert", "skin", "monster"):
         print(__doc__)
         return 1
     disc = opts.get("disc") or default_disc()
@@ -897,6 +1138,40 @@ def main(argv):
             except ValueError:
                 raise SystemExit("skin new: --base is a disc costume, 0 to 3")
         skin_new(disc, work_of("skin new", args[2]), mods, args[2], args[3], args[4], base, opts.get("name"), opts.get("ai", False))
+    elif args[0] == "monster":
+        use = ("monster new <mod> <id> --base <monster> [--costume N] [--name \"X\"] [--ai] [--camera togera:200 | --camera none] "
+               "[--narrator <name>] [--no-textures]\nmonster portrait <mod> <id> <png>\nmonster model <mod> <id> <.NGP> <.PTR> [.TEX] [.RTX]")
+        if len(args) < 4 or args[1] not in ("new", "portrait", "model"):
+            raise SystemExit(use)
+        w = work_of("monster " + args[1], args[2])
+        if args[1] == "new":
+            if len(args) != 4 or not opts.get("base"):
+                raise SystemExit(use)
+            co = opts.get("costume")
+            try:
+                co = None if co is None else int(co)
+            except ValueError:
+                raise SystemExit("monster new: --costume is a disc costume, 0 to 3")
+            cam = opts.get("camera")
+            if cam is not None:
+                if cam.lower() == "none":
+                    cam = False
+                else:
+                    f, _, sc = cam.partition(":")
+                    try:
+                        cam = (f, int(sc or "100"))
+                    except ValueError:
+                        raise SystemExit("monster new: --camera is <monster>:<scale %> (e.g. togera:200) or none")
+            monster_new(disc, w, mods, args[2], args[3], opts["base"], co, opts.get("name"), opts.get("ai", False), cam,
+                        opts.get("narrator"), not opts.get("no-textures", False))
+        elif args[1] == "portrait":
+            if len(args) != 5:
+                raise SystemExit(use)
+            monster_portrait(disc, w, mods, args[2], args[3], args[4])
+        else:
+            if len(args) < 5:
+                raise SystemExit(use)
+            monster_model(w, mods, args[2], args[3], args[4:])
     elif args[0] == "revert":
         if len(args) < 3:
             raise SystemExit("revert <mod> <files...>: the mod and files of its work folder (e.g. revert my_mod MON/lizard0_t0004.png)")

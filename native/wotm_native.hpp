@@ -1156,7 +1156,7 @@ public:
         for (int i = 1; i < n; ++i) {
             if (names[size_t(i)].empty()) continue;
             const bool ok = loadRtx(path("MON/" + names[size_t(i)] + ".RTX").c_str(), ram.u16(fs + 0x14C + 2 * (i - 1)), true,
-                                    ram.u16(fs + 0x168 + 2 * (i - 1)));   // maxTexAddr e maxResAddr do arquivo anterior
+                                    ram.u16(fs + 0x168 + 2 * (i - 1)), names[size_t(i)]);   // maxTexAddr e maxResAddr do arquivo anterior
             if (log) *log += " " + names[size_t(i)] + (ok ? "" : "(?)");
         }
         invalidate();
@@ -1165,10 +1165,12 @@ public:
     }
 
     // base: soma no DBP das paletas (base do arquivo); resBase: soma no DBP das imagens residentes (0 na fase e no menu; num monstro,
-    // fileStatus.maxResAddr do arquivo anterior, como no texmResRelocate).
-    bool loadRtx(const char *path, uint32_t base, bool append = false, uint32_t resBase = 0) {
+    // fileStatus.maxResAddr do arquivo anterior, como no texmResRelocate). name: o nome que o jogo carregou ("LIZARD4"); vazio = o do
+    // arquivo. Num traje de mod o caminho e o do traje base (LIZARD2.RTX) ou o do arquivo do mod (MECHA.RTX), e os PNGs da skin e o
+    // retrato do custom sao do nome do jogo.
+    bool loadRtx(const char *path, uint32_t base, bool append = false, uint32_t resBase = 0, const std::string &name = {}) {
         if (!append) { rtxPal.clear(); rtxImg.clear(); rtxImgSrc_.clear(); }
-        std::string stem = path;   // "LIZARD0": nome das imagens residentes de mod (texmods, <arquivo>_rtx_t<id>.png)
+        std::string stem = name.empty() ? std::string(path) : name;   // "LIZARD0": nome das imagens residentes de mod (texmods, <arquivo>_rtx_t<id>.png)
         stem = stem.substr(stem.find_last_of("/\\") + 1);
         stem = stem.substr(0, stem.find('.'));
         for (char &c : stem) c = char(std::toupper(static_cast<unsigned char>(c)));
