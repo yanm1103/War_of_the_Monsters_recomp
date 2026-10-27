@@ -548,12 +548,21 @@ namespace wotm_custom
     constexpr float kLaserDamage = 0.4f, kLaserPush = 6.f, kBuildingCredit = 0.3f;   // por quadro (o chefe: 0,5 / 5 / 0,16)
     constexpr float kPi = 3.14159265f;
     PS2Runtime::RecompiledFunction g_origMonsterUpdate = nullptr, g_origTakeDamage = nullptr;
+    // WOTM_MECHATEST=1: teste sem controle; o Mecha do jogador dispara sempre que pode e a mira da camera da torre varre sozinha
+    bool mechaTest()
+    {
+        static const bool on = [] { const char *e = std::getenv("WOTM_MECHATEST"); return e && *e && *e != '0'; }();
+        return on;
+    }
     struct Mecha
     {
         uint32_t m = 0, ep = 0;         // monstro e o no raiz dele (outro = outra carga: pega os handles de novo)
         bool down = false, fired = false, wasTazer = false;
         uint32_t tick = 0, until = 0, raise = 0;  // quadros (chamadas do Monster::update) dele; quando o escudo sobe / termina de subir
         float yaw = 0.5f, pitch = 0.5f;           // percentuais dos blends da torre (0,5 = para a frente)
+        float aimHead = 0.f, aimPitch = 0.f;      // mira do jogador durante o laser (camera da torre)
+        float camW = 0.f;                         // peso da camera da torre (0 = a do jogo, 1 = a da torre)
+        bool aimInit = false;
         uint32_t hitMon = 0, hitObj = 0;          // quadros da rajada no monstro e em objetos (log)
         float dealt = 0.f;                        // vida tirada do monstro na rajada (log)
     };
@@ -573,6 +582,8 @@ namespace wotm_custom
     // a RAM do runtime tem 64 MB (PS2_RAM_SIZE): a mascara de 32 MB do cRd32 jogaria a area do Mecha no meio dos dados da fase
     uint8_t *mem(uint8_t *rdram, uint32_t a) { return rdram + (a & (PS2_RAM_SIZE - 1u)); }
     uint32_t rdW(uint8_t *rdram, uint32_t a) { uint32_t v; std::memcpy(&v, mem(rdram, a), 4); return v; }
+    float rdF(uint8_t *rdram, uint32_t a) { float v; std::memcpy(&v, mem(rdram, a), 4); return v; }
+    void wrF(uint8_t *rdram, uint32_t a, float v) { std::memcpy(mem(rdram, a), &v, 4); }
     void rdV(uint8_t *rdram, uint32_t a, float *v) { std::memcpy(v, mem(rdram, a), 12); }
     void wrV(uint8_t *rdram, uint32_t a, const float *v)
     {
@@ -888,7 +899,7 @@ namespace wotm_custom
             if (player >= 0 && READ32(m + kPlayerNum) != 2u)   // jogador: Triangulo+Circulo, sem precisar de alvo (mira pela camera)
             {
                 const uint32_t b = wotm_modes4::call(rdram, ctx, runtime, kPadButtons, {uint32_t(player)});
-                if ((b & (kBtnTriangle | kBtnCircle)) != (kBtnTriangle | kBtnCircle))
+                if ((b & (kBtnTriangle | kBtnCircle)) != (kBtnTriangle | kBtnCircle) && !mechaTest())
                 {
                     ret(ctx, 0);
                     return;
@@ -965,6 +976,148 @@ namespace wotm_custom
         if (!target)
             WRITE8(m + kDead, dead);
     }
+    // Camera da torre: com o Mecha de um jogador no laser (StateUltraTazer, da preparacao ao fim), a vista dele vai para cima e um
+    // pouco atras da torre, olhando para a mira; o centro da tela e para onde o feixe vai (mechaAim). Os dois analogicos e o mouse
+    // giram a mira (sensibilidade e eixo invertido da aba CAMERA) e chegam zerados ao jogo e a orbita. Entra e sai em ~12 quadros.
+    constexpr float kLaserCamBack = 420.f, kLaserCamUp = 260.f, kLaserCamRate = 1.f / 12.f;
+    constexpr float kAimYawRate = 0.03f, kAimPitchRate = 0.022f, kAimPitchMin = -1.1f, kAimPitchMax = 0.35f;
+
+    int mechaOf(uint8_t *rdram, uint32_t m)
+    {
+        for (int i = 0; i < kMaxMechas; ++i)
+            if (m && g_mechas[i].m == m && isMecha(rdram, m))
+                return i;
+        return -1;
+    }
+    int playerIndex(uint8_t *rdram, uint32_t m)
+    {
+        for (uint32_t i = 0; m && i < 4; ++i)
+            if (rdW(rdram, kGameObj + kMonsters + 4 * i) == m)
+                return int(i);
+        return -1;
+    }
+    bool laserAiming(uint8_t *rdram, uint32_t m)
+    {
+        return rdW(rdram, m + kCurState) == m + kTazer && rdW(rdram, m + kPlayerNum) != 2u && playerIndex(rdram, m) >= 0;
+    }
+
+    // Entrada do PadFlags::interpretInputs (gp = GamePad): no laser, analogicos (0xC..0xF esquerdo, 0x10..0x13 direito) e mouse
+    // viram mira
+    void laserInput(uint8_t *rdram, uint32_t owner, uint32_t gp)
+    {
+        const uint32_t m = owner & 0x1FFFFFFFu;
+        const int i = mechaOf(rdram, m);
+        if (i < 0 || !laserAiming(rdram, m) || gp < 0x1000u || gp + 0x14u > PS2_RAM_SIZE)
+            return;
+        Mecha &s = g_mechas[i];
+        uint8_t *b = rdram + gp;
+        auto axis = [](float x, float y, float &ox, float &oy) {
+            const float mag = std::sqrt(x * x + y * y), k = mag > 0.2f ? std::min(1.f, (mag - 0.2f) / 0.8f) / mag : 0.f;
+            ox = x * k;
+            oy = y * k;
+        };
+        float lx, ly, rx, ry;
+        axis((float(b[0xD]) - float(b[0xC])) / 255.f, (float(b[0xE]) - float(b[0xF])) / 255.f, lx, ly);
+        axis((float(b[0x11]) - float(b[0x10])) / 255.f, (float(b[0x12]) - float(b[0x13])) / 255.f, rx, ry);
+        std::memset(b + 0xC, 0, 8);
+        float sx = std::clamp(lx + rx, -1.f, 1.f), sy = std::clamp(ly + ry, -1.f, 1.f);
+        if (mechaTest())
+        {
+            static uint32_t t = 0;
+            ++t;
+            sx = 0.7f * std::sin(float(t) * 0.02f);
+            sy = 0.4f * std::sin(float(t) * 0.013f);
+        }
+        const float sens = float(std::clamp(wotm::settings::get(wotm::settings::CamSens), 1, 10)) * 0.2f;
+        const float inv = wotm::settings::on(wotm::settings::CamInvertY) ? -1.f : 1.f;
+        s.aimHead += sx * kAimYawRate * sens;
+        s.aimPitch += sy * kAimPitchRate * sens * inv;
+        if (playerIndex(rdram, m) == wotm::mouse::g_kbPlayer.load(std::memory_order_relaxed))
+        {
+            float mx = 0.f, my = 0.f;
+            if (rdW(rdram, wotm::sym::isPaused) == 0u)
+                wotm::mouse::want();
+            wotm::mouse::take(mx, my);
+            s.aimHead += mx * 0.0025f * sens;
+            s.aimPitch -= my * 0.0025f * sens * inv;   // a orbita: para cima (my < 0) olha para cima
+        }
+        while (s.aimHead > kPi) s.aimHead -= 2.f * kPi;
+        while (s.aimHead < -kPi) s.aimHead += 2.f * kPi;
+        s.aimPitch = std::clamp(s.aimPitch, kAimPitchMin, kAimPitchMax);
+    }
+
+    // Depois do Cameras::Update (e da orbita): a pose da camera da torre, misturada com a do jogo pelo camW
+    void laserCam(uint8_t *rdram)
+    {
+        float reticle = 0.f;
+        struct Publish   // a retícula do quadro, em qualquer saida
+        {
+            float &r;
+            ~Publish() { g_wotmMechaReticle.store(r, std::memory_order_relaxed); }
+        } publish{reticle};
+        for (int i = 0; i < kMaxMechas; ++i)
+        {
+            Mecha &s = g_mechas[i];
+            const uint32_t m = s.m;
+            if (!m || !isMecha(rdram, m))
+                continue;
+            const uint32_t view = rdW(rdram, m + kCamView), mcs = rdW(rdram, m + kCs) & 0x1FFFFFFFu;
+            const uint32_t c = kCameras + kCamStride * view, cs = view < 4u ? rdW(rdram, c + kCamCs) & 0x1FFFFFFFu : 0u;
+            const bool on = laserAiming(rdram, m) && cs >= 0x1000u && mcs >= 0x1000u && (rdW(rdram, c + kCamMonster) & 0x1FFFFFFFu) == m;
+            if (on && !s.aimInit)   // comeca olhando para onde a camera do jogo olhava, um pouco para baixo
+            {
+                const float fx = rdF(rdram, cs + 0x30), fy = rdF(rdram, cs + 0x34), fz = rdF(rdram, cs + 0x38);
+                s.aimHead = std::atan2(fx, fy);
+                s.aimPitch = std::clamp(std::atan2(fz, std::sqrt(fx * fx + fy * fy)) - 0.1f, kAimPitchMin, kAimPitchMax);
+                s.aimInit = true;
+                std::fprintf(stderr, "[custom] Mecha: camera da torre (mira %.0f graus, %.0f para baixo)\n", s.aimHead * 57.3f, -s.aimPitch * 57.3f);
+            }
+            if (!on)
+                s.aimInit = false;
+            s.camW = std::clamp(s.camW + (on ? kLaserCamRate : -kLaserCamRate), 0.f, 1.f);
+            if (s.camW <= 0.f || cs < 0x1000u || mcs < 0x1000u)
+                continue;
+            // pivo: o eixo do corpo na altura da boca (a boca gira com a torre e balancaria a camera)
+            float body[3], mouth[3];
+            rdV(rdram, mcs + kTrans, body);
+            rdV(rdram, m + kLocMuzzle, mouth);
+            WotmFreeCamPose laser;
+            laser.heading = s.aimHead;
+            laser.pitch = s.aimPitch;
+            float ax[3][3];
+            wotmFreeCamAxes(laser, ax[0], ax[1], ax[2]);
+            const float ch = std::cos(s.aimHead), sh = std::sin(s.aimHead);
+            laser.pos[0] = body[0] - sh * kLaserCamBack;
+            laser.pos[1] = body[1] - ch * kLaserCamBack;
+            laser.pos[2] = mouth[2] + kLaserCamUp;
+            // mistura com a pose do jogo (entrada e saida)
+            const float w = s.camW * s.camW * (3.f - 2.f * s.camW);
+            reticle = std::max(reticle, std::clamp((w - 0.6f) / 0.4f, 0.f, 1.f));
+            WotmFreeCamPose p;
+            const float gfx = rdF(rdram, cs + 0x30), gfy = rdF(rdram, cs + 0x34), gfz = rdF(rdram, cs + 0x38);
+            const float gHead = std::atan2(gfx, gfy), gPitch = std::atan2(gfz, std::sqrt(gfx * gfx + gfy * gfy));
+            float dh = laser.heading - gHead;
+            while (dh > kPi) dh -= 2.f * kPi;
+            while (dh < -kPi) dh += 2.f * kPi;
+            p.heading = gHead + dh * w;
+            p.pitch = gPitch + (laser.pitch - gPitch) * w;
+            for (int k = 0; k < 3; ++k)
+                p.pos[k] = rdF(rdram, cs + 0x10 + 4 * k) + (laser.pos[k] - rdF(rdram, cs + 0x10 + 4 * k)) * w;
+            wotmFreeCamAxes(p, ax[0], ax[1], ax[2]);
+            for (int k = 0; k < 3; ++k)
+            {
+                wrF(rdram, cs + 0x10 + 4 * k, p.pos[k]);
+                for (int r = 0; r < 3; ++r)
+                    wrF(rdram, cs + 0x20 + 0x10 * r + 4 * k, ax[r][k]);
+            }
+            for (int r = 0; r < 3; ++r)
+                wrF(rdram, cs + 0x20 + 0x10 * r + 0xC, 0.f);
+            wrF(rdram, cs + 0x60, p.pitch);
+            wrF(rdram, cs + 0x64, 0.f);
+            wrF(rdram, cs + 0x68, p.heading);
+        }
+    }
+
     // O choque gasta o especial (o StateUltraTazer::update zera o m_specialWeapon), e o PowerUps::TakeHit nao deixa os tipos
     // 0x1C0/0x1E0 pegarem o item de especial (na fase final o roteiro e quem o liga). Com o Jelly jogador, durante a chamada o tipo
     // vale o do Togera (0x60): pega o item como um monstro comum. A funcao so le o tipo nesses testes (vida, stamina, especial).

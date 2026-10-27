@@ -25,6 +25,15 @@ Medido (`WOTM_MATCH=mecha,1,1 WOTM_AIVSAI=1`, log por rajada no `escudo baixou`)
 rajadas que passam por prédio somam 80 a 100 quadros em objetos. Nas fotos (`WOTM_SHOTS`) o feixe sai da torre girada até o alvo,
 com explosão no ponto. O Mecha venceu a rodada com 166 de vida.
 
+### Câmera da torre (pedido do dono: "muito ruim de mirar")
+Com o Mecha de um jogador no `StateUltraTazer` (preparar, disparar e desligar), `laserCam` (depois do `Cameras::Update` e da órbita,
+`wotm_overrides.cpp`) põe a vista dele 420 atrás do eixo do corpo e 260 acima da boca, olhando para a mira; entra e sai em 12
+quadros, misturada com a pose do jogo. `laserInput` (entrada do `interpretInputs`, antes da órbita) soma os dois analógicos e o
+mouse na mira (sensibilidade e eixo invertido da aba CAMERA) e os zera para o jogo e a órbita. A mira começa para onde a câmera
+olhava, 6 graus mais baixa; inclinação de −63 a +20 graus. Retícula no centro (`g_wotmMechaReticle`, desenhada no `wotm_live.inc`,
+só sem tela dividida). Como o `mechaAim` já mira pelo centro da câmera, o feixe vai para a retícula. Teste sem controle:
+`WOTM_MECHATEST=1` (dispara sempre, a mira varre); nas fotos o feixe sai debaixo da cúpula até a retícula.
+
 Falta conferir pelo dono, jogando: a mira pela câmera (o jogador; a IA mira o peito do inimigo mais perto) e se prédios caem.
 Equilíbrio: 72 por rajada é muito (a vida é 200); o chefe faz 0,5 por quadro mas a rajada dele pega menos tempo.
 

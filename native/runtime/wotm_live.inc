@@ -269,6 +269,7 @@ static void wotmBootPresent(uint32_t eePc, uint64_t vsync)
 #include "wotm_cheats.h"   // menu de debug (F1)
 #include <filesystem>
 #include "wotm_freecam.inc"   // camera livre de debug (F5)
+extern std::atomic<float> g_wotmMechaReticle;   // wotm_overrides.cpp: peso da camera da torre do Mecha (0 = sem retícula)
 #include "wotm_prompts.inc"   // icones de botao 2D (Kenney) no lugar dos 3D do jogo
 #include "wotm_trainview.inc"   // modo treino: volumes, esferas dos golpes, painel de dano e numeros do HUD
 #define WOTM_HAVE_NATIVE 1
@@ -2056,6 +2057,23 @@ static bool wotmDrawNative(const uint8_t *rdram)
         S.scene.drawScreenRects(static_cast<float>(RW), static_cast<float>(RH));   // os demais fades, por cima de tudo
         if (!split && !photoHide)
             drawDamagePopups(S.scene, c3, RW, RH);   // numeros de dano (mod WOTM_DAMAGEPOP; vazio sem ele)
+        if (const float rw = g_wotmMechaReticle.load(std::memory_order_relaxed); !split && !photoHide && rw > 0.f)
+        {
+            // retícula da camera da torre do Mecha (wotm_custom.inc, laserCam): o centro da tela e para onde o laser vai
+            const float cx = RW * 0.5f, cy = RH * 0.5f, r = RH * 0.022f, g = r * 0.45f, t = std::max(2.f, RH / 540.f);
+            const Color col = {255, 90, 40, static_cast<unsigned char>(220.f * rw)}, dark = {0, 0, 0, static_cast<unsigned char>(140.f * rw)};
+            for (int pass = 0; pass < 2; ++pass)
+            {
+                const Color c = pass ? col : dark;
+                const float th = pass ? t : t + 2.f;
+                DrawRing({cx, cy}, r - th * 0.5f, r + th * 0.5f, 0.f, 360.f, 48, c);
+                DrawLineEx({cx - r - g * 2.f, cy}, {cx - r + g, cy}, th, c);
+                DrawLineEx({cx + r - g, cy}, {cx + r + g * 2.f, cy}, th, c);
+                DrawLineEx({cx, cy - r - g * 2.f}, {cx, cy - r + g}, th, c);
+                DrawLineEx({cx, cy + r - g}, {cx, cy + r + g * 2.f}, th, c);
+            }
+            DrawCircleV({cx, cy}, t, col);
+        }
         if (!photoHide)
             wotm_trainview::drawPanel(S.scene, ram, fontTex0, RW, RH);   // modo treino: painel de dano (vazio desligado)
         EndTextureMode();
