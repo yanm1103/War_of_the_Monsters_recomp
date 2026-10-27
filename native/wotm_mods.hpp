@@ -58,15 +58,18 @@ inline const MonsterInfo *customBase(const std::string &s) {
 }
 
 // Monstro custom (mods/<mod>/monsters/<pasta>/monster.json; MODS.md, "Monstros custom"): um monstro novo na selecao (casa
-// CUSTOM), que hoje usa o codigo, o modelo e os arquivos de um tipo do jogo (`base`). Arquivos proprios (outro prefixo, tipo
-// livre) ficam para depois; o formato ja reserva "files".
+// CUSTOM), que usa o codigo de um tipo do jogo (`base`) e o modelo e os arquivos dele, ou os proprios ("files": uma subpasta com
+// .NGP+.PTR(+.TEX/.RTX), que vira um traje de mod so dele, como uma skin implicita).
 struct Custom {
     std::string id;             // "goliath" (WOTM_MATCH=goliath, o save)
     std::string name;           // o que a selecao e a tela mostram ("GOLIATH")
     int type = 0;               // tipo do jogo (13 = assboss)
     std::string typeName;       // "assboss"
     std::string prefix;         // "ASSBOSS"
-    int costume = 0;            // traje do disco
+    int costume = 0;            // traje padrao: o do disco (0..3) ou, com "files", o traje de mod dos arquivos proprios (4..99)
+    int diskCostume = 0;        // traje do disco do "costume" do JSON: base das skins dele e o que os arquivos proprios nao trazem
+    std::filesystem::path files;   // pasta dos arquivos proprios ("files"); vazia = os do tipo
+    std::string kind;           // regras proprias do port ("kind": "mecha" = escudo e laser, wotm_custom.inc); vazio = as do tipo
     std::string cameraFrom;     // MonsterLongNames do .CHR da camera ("lizard"); vazio = a do proprio tipo
     float cameraScale = 1.f;    // distancias da camera emprestada
     std::string narrator;       // narrator/<nome>.mp3 (vazio = o do tipo)
@@ -88,6 +91,7 @@ struct Skin {
     int base = 0;               // traje do disco que da o que falta (e os sons do traje)
     bool ai = false;            // as IAs sorteadas podem usar
     int index = 0;              // traje no jogo (4..99), so nesta execucao
+    bool own = false;           // os arquivos proprios de um custom ("files"): e o traje padrao dele, nao uma skin da lista
     std::string mod;
     std::filesystem::path dir;
 };
@@ -156,6 +160,16 @@ public:
         }
         scanCustoms(mods);   // antes das skins: uma skin pode ser de um custom
         scanSkins(mods);
+        for (Custom &c : m_customs) {   // "files": o traje padrao passa a ser o dos arquivos proprios
+            if (c.files.empty()) continue;
+            const auto k = std::find_if(m_skins.begin(), m_skins.end(), [&](const Skin &s) { return s.own && s.custom == c.id; });
+            if (k == m_skins.end()) {
+                std::fprintf(stderr, "[mods] monstro %s: \"files\" nao entrou (veja acima); usando o traje %d do disco\n", c.id.c_str(), c.diskCostume);
+                c.files.clear();
+                continue;
+            }
+            c.costume = k->index;
+        }
         // Faixas de setores na ordem dos nomes (estavel entre execucoes), com um setor de folga entre arquivos
         uint32_t next = kFirstLsn;
         for (auto &[rel, f] : m_files) {
@@ -206,7 +220,7 @@ public:
     std::vector<int> customCostumes(const Custom &c) const {
         std::vector<int> v{c.costume};
         for (const Skin &k : m_skins)
-            if (k.custom == c.id) v.push_back(k.index);
+            if (k.custom == c.id && !k.own) v.push_back(k.index);
         return v;
     }
     const Skin *skinByIndex(int monster, int index) const {
@@ -330,7 +344,7 @@ private:
                 const json::Value *nm = v.get("name");
                 k.name = nm && nm->type == json::Value::Str && !nm->s.empty() ? nm->s : k.id;
                 const json::Value *base = v.get("base");
-                k.base = base ? int(base->asInt(0)) : cu ? cu->costume : 0;
+                k.base = base ? int(base->asInt(0)) : cu ? cu->diskCostume : 0;
                 if (k.base < 0 || k.base > 3) {
                     std::fprintf(stderr, "[mods] skin %s: \"base\" %d fora de 0..3, usando 0\n", where.c_str(), k.base);
                     k.base = 0;
@@ -344,6 +358,23 @@ private:
                     std::fprintf(stderr, "[mods] skin %s/%s: %s vence %s\n", k.monsterName.c_str(), k.id.c_str(), k.mod.c_str(), slot.mod.c_str());
                 slot = k;
             }
+        }
+        for (const Custom &cu : m_customs) {   // "files" de um custom: skin implicita com o id dele
+            if (cu.files.empty()) continue;
+            Skin k;
+            k.monster = cu.type;
+            k.monsterName = k.custom = k.id = cu.id;
+            k.prefix = cu.prefix;
+            k.name = cu.name;
+            k.base = cu.diskCostume;
+            k.ai = cu.ai;
+            k.own = true;
+            k.mod = cu.mod;
+            k.dir = cu.files;
+            Skin &slot = byKey[k.monsterName + "/" + k.id];
+            if (!slot.id.empty())
+                std::fprintf(stderr, "[mods] monstro %s: os arquivos de \"files\" vencem a skin %s/%s de %s\n", cu.id.c_str(), k.monsterName.c_str(), k.id.c_str(), slot.mod.c_str());
+            slot = k;
         }
         for (auto &[name, k] : byKey) m_skins.push_back(k);
         std::stable_sort(m_skins.begin(), m_skins.end(), [](const Skin &a, const Skin &b) {
@@ -446,6 +477,15 @@ private:
                 const json::Value *co = v.get("costume");
                 c.costume = co ? int(co->asInt(0)) : 0;
                 if (c.costume < 0 || c.costume > 3) c.costume = 0;
+                c.diskCostume = c.costume;
+                // "files": subpasta com .NGP+.PTR(+.TEX/.RTX) proprios (true = "files"); scanSkins a registra como traje de mod
+                if (const json::Value *fi = v.get("files"); fi && (fi->type == json::Value::Str ? !fi->s.empty() : fi->asBool(false))) {
+                    const fs::path p = child(s, fi->type == json::Value::Str ? fi->s : std::string("files"));
+                    if (p.empty() || !fs::is_directory(p, ec))
+                        std::fprintf(stderr, "[mods] monstro %s: pasta de \"files\" nao achada; usando o traje %d do disco\n", where.c_str(), c.costume);
+                    else
+                        c.files = p;
+                }
                 if (const json::Value *cam = v.get("camera"); cam && cam->type == json::Value::Obj) {
                     if (const json::Value *f = cam->get("from"); f && f->type == json::Value::Str)
                         if (const MonsterInfo *b = customBase(lower(f->s))) c.cameraFrom = kLongNames[b->type];
@@ -453,6 +493,7 @@ private:
                         c.cameraScale = float(sc->i) / 100.f;
                 }
                 if (const json::Value *na = v.get("narrator"); na && na->type == json::Value::Str) c.narrator = lower(na->s);
+                if (const json::Value *ki = v.get("kind"); ki && ki->type == json::Value::Str) c.kind = lower(ki->s);
                 // "portrait": PNG do retrato do HUD (na pasta do monstro ou na raiz do mod), no lugar da imagem <PREFIXO><traje>.RTX
                 // de texId "portraitTex" (padrao: o do ASSBOSS1, 6; a ultima entrada do .RTX, 128x64)
                 if (const json::Value *po = v.get("portrait"); po && po->type == json::Value::Str && !po->s.empty()) {

@@ -1,0 +1,11 @@
+{
+  "id": "mecha",
+  "name": "MECHA",
+  "base": "jelly",
+  "costume": 0,
+  "files": true,
+  "kind": "mecha",
+  "camera": { "from": "togera", "scale": 350 },
+  "narrator": "cerebulon",
+  "ai": true
+}
