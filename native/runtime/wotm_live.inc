@@ -953,6 +953,7 @@ bool wotmScreenPolyBox(const uint8_t *rdram, int src, int x, int y, uint32_t pd,
     return true;
 }
 static int g_barView = 0;   // vista da barra em montagem (wotmHealthIconShift)
+static bool g_barHud = false;   // retangulos do HUD nativo de um jogador (wotmBarHud, wotmPlayerHud)
 // Teto de retangulos de barra por quadro: ~25 por inimigo (moldura, celulas, retrato, faixas) e ate 3 inimigos por vista; com as 4
 // vistas dos quadrantes os 512 de antes acabavam antes da vista 3, que ficava sem barras
 constexpr size_t kMaxPendingBars = 2048;
@@ -961,6 +962,7 @@ void wotmBarRect(float x0, float y0, float x1, float y1, uint8_t r, uint8_t g, u
     if (wotm_live::g_pendingBars.size() < kMaxPendingBars)
     {
         wotm::ScreenRect s{x0, y0, x1, y1, r, g, b, a, false, static_cast<int8_t>(g_barView)};
+        s.hud = g_barHud;
         s.anchor = static_cast<int16_t>(wotm_live::g_barAnchor);
         wotm_live::g_pendingBars.push_back(s);
     }
@@ -983,12 +985,15 @@ void wotmHudAnchor(const uint8_t *rdram, float cx, float cy, const float *world,
 void wotmHudAnchorEnd() { wotm_live::g_barAnchor = -1; }
 // Vista dos retangulos de barra que vem a seguir (HUD nativo dos jogadores 3 e 4, wotmPlayerHud)
 void wotmBarView(int view) { g_barView = std::clamp(view, 0, 3); }
+// Os retangulos que vem a seguir sao do HUD nativo de um jogador (on) ou barras sobre os inimigos
+void wotmBarHud(bool on) { g_barHud = on; }
 // Retangulo com textura residente do .RTX (retrato do inimigo): tex0 da imagem e o trecho (u0, v0)-(u1, v1) em texels
 void wotmBarTex(float x0, float y0, float x1, float y1, uint64_t tex0, float u0, float v0, float u1, float v1)
 {
     if (wotm_live::g_pendingBars.size() < kMaxPendingBars)
     {
         wotm::ScreenRect s{x0, y0, x1, y1, 255, 255, 255, 0x80, false, static_cast<int8_t>(g_barView)};   // tinta branca, opaco
+        s.hud = g_barHud;
         s.anchor = static_cast<int16_t>(wotm_live::g_barAnchor);
         s.tex0 = tex0;
         s.u0 = u0;
@@ -1010,6 +1015,7 @@ float wotmHealthIconShift(const uint8_t *rdram, float rx)
 {
     const wotm::Ram ram{rdram, PS2_RAM_SIZE};
     g_barView = static_cast<int>(std::min<uint32_t>(ram.u32(wotm::sym::viewCurView), 3u));
+    g_barHud = false;
     const wotm::ViewCtx vc = wotm::readViewCtx(ram, g_barView);
     const float wide = std::max(1.f, wotm_live::capture().wide.load(std::memory_order_relaxed));
     if (!std::isfinite(rx)) return 0.f;
@@ -2337,6 +2343,7 @@ float wotmHealthIconShift(const uint8_t *, float) { return 0.f; }
 void wotmHudAnchor(const uint8_t *, float, float, const float *, bool) {}
 void wotmHudAnchorEnd() {}
 void wotmBarView(int) {}
+void wotmBarHud(bool) {}
 void wotmShellFade(const uint8_t *, int, uint32_t, uint32_t, uint32_t, int, int, int, bool) {}
 void wotmShellFadeStep() {}
 void wotmShellFadeStepDone() {}

@@ -116,12 +116,14 @@ Hook g_updateInputs{fn::updateInputs__2Ai}, g_opponents{fn::updateOpponentList__
 uint32_t g_allies[4] = {};
 int g_numAllies = 0;   // > 0: dentro do updateInputs de um jogador
 bool g_inSides = false;
+bool g_sidesEnv = false;   // WOTM_AIVSAI no ambiente; sem ele, so com bots escolhidos no menu (wotm_menucpus::g_botMask)
 
 // Chama a original com os lados da aventura vistos pelo monstro self (allies: preenche g_allies quando self e jogador)
 void runAsSides(Hook &h, uint32_t self, bool allies, uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
     const uint32_t n = std::min<uint32_t>(rd32(rdram, kNumPlayers), 4u);
-    if (ctx->pc != h.addr || rd32(rdram, kMode) != 1u || !n || g_inSides)
+    if (ctx->pc != h.addr || rd32(rdram, kMode) != 1u || !n || g_inSides ||
+        !(g_sidesEnv || wotm_menucpus::g_botMask.load(std::memory_order_relaxed)))
     {
         h.orig(rdram, ctx, runtime);
         return;
@@ -234,6 +236,8 @@ void counterExitHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 void install(PS2Runtime &runtime)
 {
     if (const char *e = std::getenv("WOTM_AIVSAI"); e && *e && *e != '0')
+        g_sidesEnv = true;
+    // sempre: os bots da escolha de controles (wotm_padsel.inc) ligam os lados na hora; sem bots, a original direto
     {
         if ((g_opponents.orig = runtime.lookupFunction(g_opponents.addr)) && (g_updateInputs.orig = runtime.lookupFunction(g_updateInputs.addr)))
         {

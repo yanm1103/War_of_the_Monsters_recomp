@@ -70,6 +70,7 @@ void wotmBarTex(float x0, float y0, float x1, float y1, uint64_t tex0, float u0,
 void wotmHudAnchor(const uint8_t *rdram, float cx, float cy, const float *world, bool bars);   // wotm_live.inc: icone de vida (modo foto)
 void wotmHudAnchorEnd();
 void wotmBarView(int view);   // wotm_live.inc: vista dos retangulos de barra que vem a seguir
+void wotmBarHud(bool on);   // wotm_live.inc: os retangulos que vem a seguir sao do HUD nativo de um jogador (por cima das barras)
 void wotmPlayerHud(uint8_t *rdram, uint32_t m, int view, float ox, float oy, float sx, float sy, bool mirror);   // HUD nativo de um jogador
 float wotmHealthIconShift(const uint8_t *rdram, float rx);   // wotm_live.inc: x da barra com o limite da vista widescreen
 void wotmDamagePopup(const uint8_t *rdram, const float p[3], float amount, int kind);   // wotm_live.inc: numero de dano (0 golpe, 1 arremesso, 2 especial)
@@ -235,11 +236,13 @@ namespace
     int g_matchPlayers = 1;
     int g_matchMode = 0, g_matchContinues = 2;   // WOTM_MODE=<modo>[:<continues>] (6 eliminacao, 7 dodgeball, 8 big shot, 9 crush)
     unsigned g_matchCount = 0;
-    // WOTM_AIVSAI: "1" = todos os jogadores sob a IA; lista "2,3,4" = so esses (bots nos slots dos jogadores, o resto humano)
-    bool g_aiVsAi = false;
-    unsigned g_aiVsAiMask = 0;   // bit i: jogador i + 1 sob a IA
-    bool aiVsAiSlot(int slot) { return slot >= 0 && slot < 4 && (g_aiVsAiMask >> slot & 1u); }
-    bool aiVsAiAll() { return g_aiVsAiMask == 0xFu; }
+    // WOTM_AIVSAI: "1" = todos os jogadores sob a IA; lista "2,3,4" = so esses (bots nos slots dos jogadores, o resto humano).
+    // Os bots da escolha de controles (wotm_menucpus::g_botMask, wotm_padsel.inc) entram na mesma mascara enquanto valem.
+    bool g_aiVsAi = false;       // WOTM_AIVSAI no ambiente
+    unsigned g_aiVsAiMask = 0;   // bit i: jogador i + 1 sob a IA (ambiente)
+    unsigned aiVsAiMask() { return g_aiVsAiMask | wotm_menucpus::g_botMask.load(std::memory_order_relaxed); }
+    bool aiVsAiSlot(int slot) { return slot >= 0 && slot < 4 && (aiVsAiMask() >> slot & 1u); }
+    bool aiVsAiAll() { return aiVsAiMask() == 0xFu; }
 
     // WOTM_LIVES=1..9 (teste: sair sem vidas logo); 0 = sem a variavel (vidas do jogo)
     uint32_t livesOverride()
@@ -453,9 +456,15 @@ namespace
 
     // Com a lista (WOTM_AIVSAI=2,3,4) so o slot marcado vai ao aiInit: o SetPlayerMonster grava o m_monsters[i] antes do playerInit,
     // e os renascimentos (wotm_coop.inc, wotm_split4.inc) chamam o playerInit com o monstro ja no slot
+    // Sempre instalado (os bots do menu ligam na hora): sem jogador sob a IA, ou retomada no meio da original, e a original.
     void playerInitAsAi(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
-        if (!aiVsAiAll() && ctx->pc == kPlayerInit)
+        if (ctx->pc != kPlayerInit || !aiVsAiMask())
+        {
+            g_origPlayerInit(rdram, ctx, runtime);
+            return;
+        }
+        if (!aiVsAiAll())
         {
             const uint32_t m = GPR_U32(ctx, 4) & 0x1FFFFFFFu;
             int slot = -1;
@@ -476,7 +485,7 @@ namespace
     {
         uint32_t flipped[4];
         int n = 0;
-        if (ctx->pc == kSetAIMonster)
+        if (ctx->pc == kSetAIMonster && aiVsAiMask())
         {
             const int32_t players = static_cast<int32_t>(READ32(kShell + 0x2BB4));
             for (int32_t i = 0; i < players && i < 4; ++i)
@@ -505,7 +514,7 @@ namespace
     {
         uint32_t flipped[4];
         int n = 0;
-        const int32_t players = static_cast<int32_t>(READ32(kShell + 0x2BB4));
+        const int32_t players = aiVsAiMask() ? static_cast<int32_t>(READ32(kShell + 0x2BB4)) : 0;   // sem jogador sob a IA: a original
         for (int32_t i = 0; i < players && i < 4; ++i)
         {
             const uint32_t m = READ32(kGame + 0x120380 + 4 * i);   // m_monsters[i]
@@ -599,7 +608,8 @@ namespace
             g_ffa2Before = std::min(READ32(kFfa2Cursor), uint32_t(kMax));   // o cursor que ficou de outro numero de jogadores
             WRITE32(kFfa2Cursor, g_ffa2Before);
             g_ffa2Pending = true;
-            g_ffa2Game = players == 2 ? kGame : 0;   // o maior numero que o jogo confirma por si
+            // o maior numero que o jogo confirma por si; com bot de jogador (2 com bot vao a selecao do telao, como 3 e 4) nenhum
+            g_ffa2Game = players == 2 && !wotm_menucpus::g_botMask.load(std::memory_order_relaxed) ? kGame : 0;
             g_ffa2Fake = g_ffa2Before > uint32_t(g_ffa2Game) && g_ffa2Before <= uint32_t(kMax);
             if (g_ffa2Fake)
                 WRITE32(kFfa2Cursor, uint32_t(g_ffa2Game));
@@ -2381,6 +2391,8 @@ void wotmPlayerHud(uint8_t *rdram, uint32_t m, int view, float ox, float oy, flo
         return;
     wotmBarView(view);
     wotmHudAnchorEnd();
+    wotmBarHud(true);
+    struct HudOff { ~HudOff() { wotmBarHud(false); } } hudOff;   // em todas as saidas
     struct Cell { float x0, y0, x1, y1; };
     const auto map = [&](float x0, float y0, float x1, float y1) {
         if (mirror)
@@ -2824,21 +2836,25 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
         runtime.registerFunction(wotm::fn::InitPlayerLives__5Shell, &initPlayerLivesFixed);
         std::fprintf(stderr, "[wotm] %u vida(s) por jogador (WOTM_LIVES)\n", livesOverride());
     }
-    if (g_aiVsAiMask && (g_aiInit = runtime.lookupFunction(kAiInit)) && (g_origSetAIMonster = runtime.lookupFunction(kSetAIMonster)) &&
+    // Sempre instalados: sem WOTM_AIVSAI so agem com bots escolhidos no menu (wotm_menucpus::g_botMask)
+    if ((g_aiInit = runtime.lookupFunction(kAiInit)) && (g_origSetAIMonster = runtime.lookupFunction(kSetAIMonster)) &&
         (g_origPlayerInit = runtime.lookupFunction(kPlayerInit)))
     {
-        g_aiVsAi = true;
+        g_aiVsAi = g_aiVsAiMask != 0;
         runtime.registerFunction(kPlayerInit, &playerInitAsAi);
         runtime.registerFunction(kSetAIMonster, &setAIMonsterCounted);
         if ((g_origStartPoint = runtime.lookupFunction(kGameGetStartPoint)))
             runtime.registerFunction(kGameGetStartPoint, &startPointAsHumans);
         if ((g_origCamerasUpdate = runtime.lookupFunction(kCamerasUpdate)))
             runtime.registerFunction(kCamerasUpdate, &camerasUpdateAsHumans);
-        std::fprintf(stderr, "[wotm] jogadores sob a IA (WOTM_AIVSAI):");
-        for (int i = 0; i < 4; ++i)
-            if (aiVsAiSlot(i))
-                std::fprintf(stderr, " %d", i + 1);
-        std::fprintf(stderr, "%s\n", aiVsAiAll() ? " (todos)" : "");
+        if (g_aiVsAi)
+        {
+            std::fprintf(stderr, "[wotm] jogadores sob a IA (WOTM_AIVSAI):");
+            for (int i = 0; i < 4; ++i)
+                if (aiVsAiSlot(i))
+                    std::fprintf(stderr, " %d", i + 1);
+            std::fprintf(stderr, "%s\n", aiVsAiAll() ? " (todos)" : "");
+        }
     }
     if ((g_origFfaOptions1P = runtime.lookupFunction(kFfaOptions1P)))
         runtime.registerFunction(kFfaOptions1P, &ffaOptions1PWithZero);

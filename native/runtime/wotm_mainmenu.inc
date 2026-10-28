@@ -517,7 +517,7 @@ static void readPanel(bool out[kPanelActs])
         }
         // roteiro de teste (acoes do wotm_padsel.inc)
         const double now = GetTime();
-        static constexpr int kFromScript[kActions] = {PLeft, PRight, POk, PBack, -1, PUp, PDown, PPrev, PNext, PPreview};
+        static constexpr int kFromScript[kActions] = {PLeft, PRight, POk, PBack, -1, PUp, PDown, PPrev, PNext, PPreview, -1};
         for (const ScriptStep &sc : g_script)
             if (sc.dev == d && now >= sc.t0 && now < sc.t0 + sc.dur && kFromScript[sc.act] >= 0) a[kFromScript[sc.act]] = true;
         for (int k = 0; k < kPanelActs; ++k) out[k] |= a[k];
