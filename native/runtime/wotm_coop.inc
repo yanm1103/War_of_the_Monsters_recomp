@@ -19,6 +19,7 @@
 //     metades, 3 no layout de 3. O HUD (posicao das barras, icones dos outros jogadores) e o pick-up verde (enableHighlights) veem os
 //     m_monsters nessa ordem durante a chamada.
 //   - Fase 1: sem as caixas de dica nem os power-ups de tutorial.
+//   - Toquio e a cratera do 3-Mile: o fim, a abducao e a ida ao ponto fixo valem para o primeiro que continua e levam os outros.
 //   - Pontos: TokenManager::grandTotal chamado pelo EvaluateOnePlayerStoryStatus (pontos da fase, battle tokens) devolve os tokens do
 //     jogador 1 vezes 1,2 (2 jogadores), 1,3 (3) ou 1,4 (4).
 //   - Shell::InitPlayers (comeco da fase, retry, etapa de chefe): todos de volta a fase.
@@ -905,6 +906,74 @@ void tazerUpdHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     }
 }
 
+// Toquio (fase 9): o tokyoUpdate so encerra a fase com as duas IAs fora e o m_monsters[0] fora da morte (+0xE8), e o cinema do fim
+// (roteiro 0x2266) abduz so ele (quadros 260 a 630 da animacao do disco: sobe, gira, some no 600). Durante a chamada o
+// m_monsters[0] vale o lider: o primeiro jogador vivo, fixo depois que o fim comeca. No cinema, os outros que continuam fazem a
+// mesma subida que o lider fez no quadro (mesmo z, giro, matriz) e somem com ele; o cleanUpForMovie vale para todos. Linha
+// [coop] Toquio.
+constexpr uint32_t kTokyoEnd = 0x006F8CF4u;   // static do tokyoUpdate (sem nome no ELF): o fim da fase comecou
+Hook g_tokyoUpd{fn::tokyoUpdate__Fv};
+int g_tokyoLead = -1;
+
+void tokyoUpdHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    const uint32_t ra = GPR_U32(ctx, 31);
+    const int n = ctx->pc == g_tokyoUpd.addr && rd32(rdram, kGameMode) == 1u ? players(rdram) : 0;
+    if (!n)
+    {
+        g_tokyoUpd.orig(rdram, ctx, runtime);
+        return;
+    }
+    const bool ending = rd32(rdram, kTokyoEnd) != 0u;
+    if (!ending || g_tokyoLead < 0 || g_tokyoLead >= n)
+    {
+        int lead = -1;
+        for (int i = 0; i < n && lead < 0; ++i)
+            if (alive(rdram, i))
+                lead = i;
+        if (lead != g_tokyoLead && lead >= 0)
+            std::fprintf(stderr, "[coop] Toquio: lider jogador %d\n", lead + 1);
+        g_tokyoLead = lead;
+    }
+    const uint32_t p1 = rd32(rdram, kMonsters), lead = g_tokyoLead >= 0 ? monster(rdram, g_tokyoLead) : 0u;
+    const uint32_t leadCs = lead ? rd32(rdram, lead + kCs) & 0x1FFFFFFFu : 0u;
+    const float z0 = leadCs ? rdF(rdram, leadCs + 0x18) : 0.f, roll0 = leadCs ? rdF(rdram, leadCs + 0x68) : 0.f;
+    const uint8_t draw0 = leadCs ? rd8(rdram, leadCs + 0xC) : 0u;
+    if (lead)
+        wr32(rdram, kMonsters, lead);
+    g_tokyoUpd.orig(rdram, ctx, runtime);
+    if (lead)
+        wotmFinishGuestCall(rdram, ctx, runtime, ra);
+    wr32(rdram, kMonsters, p1);
+    if (!lead || !rd32(rdram, kTokyoEnd))
+        return;
+    if (!ending)
+        std::fprintf(stderr, "[coop] Toquio: fim da fase com o jogador %d\n", g_tokyoLead + 1);
+    const bool rise = rdF(rdram, leadCs + 0x68) != roll0, hide = draw0 && !rd8(rdram, leadCs + 0xC);
+    const float dz = rdF(rdram, leadCs + 0x18) - z0;
+    for (int i = 0; i < n; ++i)
+    {
+        const uint32_t m = monster(rdram, i);
+        if (!m || i == g_tokyoLead || g_out[i])
+            continue;
+        const uint32_t cs = rd32(rdram, m + kCs) & 0x1FFFFFFFu;
+        if (cs >= 0x1000u && rise)   // o passo da abducao do retail (tokyoUpdate, quadros 260 a 630)
+        {
+            wrF(rdram, cs + 0x18, rdF(rdram, cs + 0x18) + dz);
+            const uint32_t vt = rd32(rdram, m + 0x10) & 0x1FFFFFFFu;
+            const int16_t adj = static_cast<int16_t>(rd32(rdram, vt + 0x20) & 0xFFFFu);
+            if (const uint32_t r = call(rdram, ctx, runtime, rd32(rdram, vt + 0x24), {m + static_cast<uint32_t>(int32_t(adj))}) & 0x1FFFFFFFu)
+                wr32(rdram, r + 8, 0u);
+            wrF(rdram, cs + 0x68, rdF(rdram, cs + 0x68) + 0.01f);
+            call(rdram, ctx, runtime, fn::mathfRotMatrixRPH__FPA3_fP8_fvector, {cs + 0x20, cs + 0x60});
+            wr32(rdram, m + 0x18, 0u);
+        }
+        if (cs >= 0x1000u && hide)
+            wotm_modes4::wr8(rdram, cs + 0xC, 0u);
+        call(rdram, ctx, runtime, fn::cleanUpForMovie__7Monster, {m});
+    }
+}
+
 // ------------------------------------------------------------------ largada
 
 constexpr uint32_t kVec = PS2_RAM_SIZE - 0x3C0;   // _fvector para o setTrans e a normal do hdHatTest (os do split4 e do modes4 ficam em -0x400 e -0x3E0)
@@ -1010,6 +1079,72 @@ int anchorFor(uint8_t *rdram, int who, int n)
     return -1;
 }
 
+// Cratera do 3-Mile (fase 6): quando a contagem acaba, o threeMileUpdateCountDown liga o craterSwitched, baixa a agua e leva so o
+// m_monsters[0] ao ponto fixo da cratera (setTrans, giro em cs+0x68 e o +0x1E8 em 500); os outros jogadores ficavam onde estavam e
+// podiam cair no buraco. Durante a chamada o m_monsters[0] vale o primeiro que continua (cinemaLead); na troca, os outros vao para o
+// lado dele, com o mesmo giro e o mesmo +0x1E8 (sem chao conferido, o normal na troca: a 150 por casa na altura dele, e caem ate o
+// fundo como ele). Linha [coop] cratera.
+Hook g_craterCount{fn::threeMileUpdateCountDown__Fv};
+int cinemaLead(uint8_t *rdram, int n);
+
+void craterCountHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    const uint32_t ra = GPR_U32(ctx, 31);
+    const int n = ctx->pc == g_craterCount.addr && rd32(rdram, kGameMode) == 1u ? players(rdram) : 0;
+    if (!n)
+    {
+        g_craterCount.orig(rdram, ctx, runtime);
+        return;
+    }
+    const bool before = rd32(rdram, wotm::sym::craterSwitched) != 0u;
+    const int lead = cinemaLead(rdram, n);
+    const uint32_t p1 = rd32(rdram, kMonsters), lm = monster(rdram, lead);
+    if (lead > 0)
+        wr32(rdram, kMonsters, lm);
+    g_craterCount.orig(rdram, ctx, runtime);
+    if (lead > 0)
+    {
+        wotmFinishGuestCall(rdram, ctx, runtime, ra);
+        wr32(rdram, kMonsters, p1);
+    }
+    if (before || !rd32(rdram, wotm::sym::craterSwitched))
+        return;
+    const uint32_t lcs = rd32(rdram, lm + kCs) & 0x1FFFFFFFu;
+    if (lcs < 0x1000u)
+        return;
+    const float ax = rdF(rdram, lcs + 0x10), ay = rdF(rdram, lcs + 0x14), az = rdF(rdram, lcs + 0x18), yaw = rdF(rdram, lcs + 0x68);
+    const uint32_t fall = rd32(rdram, lm + 0x1E8);
+    // lado: a linha 0 da matriz do lider refeita com o giro novo (como o tokyoUpdate faz depois de mexer no cs+0x68)
+    call(rdram, ctx, runtime, fn::mathfRotMatrixRPH__FPA3_fP8_fvector, {lcs + 0x20, lcs + 0x60});
+    float rx, ry;
+    sideOf(rdram, lcs + 0x20, rx, ry);
+    for (int k = 0; k < n; ++k)
+    {
+        const uint32_t m = monster(rdram, k);
+        if (!m || k == lead || g_out[k])
+            continue;
+        const uint32_t cs = rd32(rdram, m + kCs) & 0x1FFFFFFFu;
+        if (cs < 0x1000u)
+            continue;
+        const bool ok = placeBeside(rdram, ctx, runtime, m, k, ax, ay, az, rx, ry, 0u);
+        if (!ok)   // o chao da cratera ainda nao responde ao hdHatTest na troca: na altura do lider, que cai ate o fundo como ele
+        {
+            const float off = kSide * float(k == 2 ? -1 : k == 3 ? 2 : 1);
+            wrF(rdram, kVec, ax + rx * off);
+            wrF(rdram, kVec + 4, ay + ry * off);
+            wrF(rdram, kVec + 8, az);
+            wrF(rdram, kVec + 12, 0.f);
+            call(rdram, ctx, runtime, fn::setTrans__7MonsterR8_fvector, {m, kVec});
+            call(rdram, ctx, runtime, fn::hdReparentCsGrid__FP3_cs, {cs});
+        }
+        wrF(rdram, cs + 0x68, yaw);
+        call(rdram, ctx, runtime, fn::mathfRotMatrixRPH__FPA3_fP8_fvector, {cs + 0x20, cs + 0x60});
+        wr32(rdram, m + 0x1E8, fall);
+        std::fprintf(stderr, "[coop] cratera: jogador %d ao lado do %d%s\n", k + 1, lead + 1, ok ? "" : " (sem chao conferido)");
+    }
+}
+
+
 
 // Largada: os jogadores 2 a 4 ao lado do aliado-ancora (o P1, ou o primeiro que continua; quem renasce: revive), virados
 // para o mesmo lado. Sem casa com chao ali, ou o P1 na largada: o ponto da fase e, se cair em cima de outro (lista 0 de um ponto, ou
@@ -1097,23 +1232,40 @@ void startPointHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 // doSetPlayerPos(pos, mat, act): o roteiro poe o m_monsters[idx] (ou uma IA) em pos com o giro mat. Com o P1 (idx 0), os outros
 // jogadores vao ao lado dele, virados para o mesmo lado, e aparecem na cena.
 Hook g_setPlayerPos{fn::doSetPlayerPos__FP8_fvectorRA3_A3_fP12ActPlayerPos}, g_triggerAnim{fn::triggerAnimation__FP11DelayActionP7ActAnim};
+// Quem faz o papel do P1 no roteiro: ele, ou, com ele fora da fase, o primeiro que continua (m_monsters[0] trocado durante a chamada)
+int cinemaLead(uint8_t *rdram, int n)
+{
+    for (int k = 0; k < n; ++k)
+        if (!g_out[k] && monster(rdram, k))
+            return k;
+    return 0;
+}
 void setPlayerPosHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
     const int n = ctx->pc == g_setPlayerPos.addr ? players(rdram) : 0;
     const uint32_t pos = GPR_U32(ctx, 4) & 0x1FFFFFFFu, mat = GPR_U32(ctx, 5) & 0x1FFFFFFFu, act = GPR_U32(ctx, 6) & 0x1FFFFFFFu,
                    ra = GPR_U32(ctx, 31);
     const bool p1 = n && (rd32(rdram, act + 8) & 0x1FFFFu) == 0u;   // idx 0 e o bit da IA em 0
+    const int lead = p1 ? cinemaLead(rdram, n) : 0;
+    const uint32_t saved = rd32(rdram, kMonsters);
+    if (lead > 0)
+        wr32(rdram, kMonsters, monster(rdram, lead));
     g_setPlayerPos.orig(rdram, ctx, runtime);
+    if (lead > 0)
+    {
+        wotmFinishGuestCall(rdram, ctx, runtime, ra);
+        wr32(rdram, kMonsters, saved);
+    }
     if (!p1 || ctx->pc != ra)
         return;
     const float ax = rdF(rdram, pos), ay = rdF(rdram, pos + 4), az = rdF(rdram, pos + 8);
     float rx, ry;
     sideOf(rdram, mat, rx, ry);
     for (int k = 1; k < n; ++k)
-        if (const uint32_t m = monster(rdram, k); m && !g_out[k])
+        if (const uint32_t m = monster(rdram, k); m && !g_out[k] && k != lead)
         {
             const bool ok = placeBeside(rdram, ctx, runtime, m, k, ax, ay, az, rx, ry, mat);
-            std::fprintf(stderr, "[coop] cinema: jogador %d ao lado do 1%s\n", k + 1, ok ? "" : " (sem casa com chao)");
+            std::fprintf(stderr, "[coop] cinema: jogador %d ao lado do %d%s\n", k + 1, std::max(lead, 0) + 1, ok ? "" : " (sem casa com chao)");
         }
 }
 
@@ -1126,12 +1278,21 @@ void triggerAnimHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     const uint32_t act = GPR_U32(ctx, 5) & 0x1FFFFFFFu, ra = GPR_U32(ctx, 31);
     const uint32_t flags = n ? rd32(rdram, act + 0xC) : 0u;
     const bool p1 = n && (flags & 0x1800u) == 0x800u && rd32(rdram, act + 8) == 0u;
+    const int lead = p1 ? cinemaLead(rdram, n) : 0;
+    const uint32_t saved = rd32(rdram, kMonsters);
+    if (lead > 0)
+        wr32(rdram, kMonsters, monster(rdram, lead));
     g_triggerAnim.orig(rdram, ctx, runtime);
+    if (lead > 0)
+    {
+        wotmFinishGuestCall(rdram, ctx, runtime, ra);
+        wr32(rdram, kMonsters, saved);
+    }
     if (!p1 || ctx->pc != ra)
         return;
     const uint32_t slot = flags >> 16;
     for (int k = 1; k < n; ++k)
-        if (const uint32_t m = monster(rdram, k); m && !g_out[k])
+        if (const uint32_t m = monster(rdram, k); m && !g_out[k] && k != lead)
         {
             const uint32_t h = m + kAnims + 0x10u * slot;
             if (!rd32(rdram, h))   // sem _animCharInstance
@@ -1139,7 +1300,7 @@ void triggerAnimHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             std::memcpy(rdram + kHandle, rdram + h, 0x10);
             callF(rdram, ctx, runtime, fn::animationSetSpeed__FG11_animHandlef, {kHandle}, {1.f});
             callF(rdram, ctx, runtime, fn::animationTransitionInto__FR11_animHandlefii, {h, 1u, 1u}, {200.f});
-            std::fprintf(stderr, "[coop] cinema: animacao %u do jogador 1 tambem no %d\n", slot, k + 1);
+            std::fprintf(stderr, "[coop] cinema: animacao %u do jogador %d tambem no %d\n", slot, lead + 1, k + 1);
         }
 }
 
@@ -1650,6 +1811,7 @@ void install(PS2Runtime &runtime)
         {&g_bossHit, &bossHitHook}, {&g_genesis, &genesisHook}, {&g_playMovie, &playMovieHook},
         {&g_plantUpd, &plantUpdHook}, {&g_plantCam, &plantCamHook}, {&g_rootWake, &rootWakeHook}, {&g_rootUpd, &rootUpdHook},
         {&g_baseHit, &baseHitHook}, {&g_baseUpd, &baseUpdHook}, {&g_finalUpd, &finalUpdHook}, {&g_tazerUpd, &tazerUpdHook},
+        {&g_tokyoUpd, &tokyoUpdHook}, {&g_craterCount, &craterCountHook},
     };
     for (const H &h : hooks)
         if (!(h.h->orig = runtime.lookupFunction(h.h->addr)))

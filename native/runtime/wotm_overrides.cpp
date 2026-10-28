@@ -847,12 +847,19 @@ namespace
             {
                 const int32_t ais = static_cast<int32_t>(READ32(kGame + 0x1203E0));   // m_numAIs
                 int killed = 0;
+                uint32_t by = m;   // o golpe vem do primeiro jogador vivo: na campanha co-op o P1 pode ter saido da fase
+                for (int32_t p = 0, np = std::min<int32_t>(static_cast<int32_t>(READ32(kShell + 0x2BB4)), 4); p < np; ++p)
+                    if (const uint32_t pm = READ32(kGame + 0x120380 + 4 * p); pm && !READ8(pm + 0xE8))
+                    {
+                        by = pm;
+                        break;
+                    }
                 for (int32_t i = 0; i < ais && i < 4; ++i)
                 {
                     const uint32_t ai = READ32(kGame + 0x120390 + 4 * i);   // m_monsters[4 + i]
                     if (ai && !READ8(ai + 0xE8))                           // m_dead
                     {
-                        callTakeDamage(rdram, ctx, runtime, ai, 100000.0f, m);
+                        callTakeDamage(rdram, ctx, runtime, ai, 100000.0f, by);
                         ++killed;
                     }
                 }

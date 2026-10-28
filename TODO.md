@@ -19,7 +19,6 @@ Como funciona hoje: `docs/passos/MODS.md` ("Skins", "Monstros custom").
 O que existe: `docs/passos/NATIVO.md`, "Campanha com até 4 jogadores" (entrada, tela, vidas, largada, tokens). Contexto e endereços do que falta: `docs/investigacoes/2026-10-27/campanha4.md`. Decisões do dono:
 - **Em teste:** tela com quem sobra (metades com 2, layout de 3, tela cheia), pick-up verde e HUD dos inimigos na vista de quem continua.
 - **Chefes:** alvo sorteado entre os jogadores vivos, sem vida extra. Em teste o Capitólio (Mecha e jelly, `[coop] Cerebulon` no log). Aberto: a vibração do laser vai sempre ao controle 0.
-- **3-Mile e Tóquio:** a cratera leva todos os jogadores ao ponto fixo (hoje só o P1; os outros podem cair no buraco); o fim de Tóquio exige algum jogador vivo, não o P1.
 - **Cinemas:** `cleanUpForMovie` em todos, qualquer controle pula e câmeras 2 e 3 refeitas no `endCinema`.
 - **Final:** em teste o filme de cada herói da party antes dos créditos (`[coop] final` no log).
 - **Save:** chave `coop` no `save.json` (o `adventureToJson` a preserva); carregar um save co-op passa pela escolha de controles e vai à fase.

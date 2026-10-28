@@ -75,7 +75,7 @@ Ligado por padrão, no laço de apresentação (`ps2_runtime.cpp`, ao lado do `P
 Na luta (só onde o desenho nativo roda), **F1** abre e fecha o menu; com ele aberto, **1** invencível, **2** stamina (normal, cheia, fúria = 130), **3** especial sempre pronto, **4** CLOAK, **5** modo deus (`m_godMode` do próprio jogo, +0xE9: sem dano, vida, stamina e especial cheios; mais, por nós, sem reação a golpe), **6** vencer a luta, **7** alvo do derrubar (todos os jogadores, P1..P4), **8** derrubar (disparo único: cada jogador vivo do alvo leva um `takeDamage` maior que a vida, pelo caminho normal de morte, e perde uma vida; serve para testar perda de vidas e saídas na campanha co-op). Setas e Enter são do pad, por isso os números. Fechado, um lembrete laranja mostra o que está ligado. A janela só escreve `g_wotmCheats` (`native/wotm_cheats.h`); quem aplica é a thread do EE, na entrada de `Monster::update` de cada jogador (`m_monsters[0 .. m_numPlayers-1]`, `wotm_overrides.cpp`), antes da lógica do quadro dele.
 - **Invencível:** `Monster::takeDamage` volta na entrada quando a vítima é jogador, inclusive com o dano forçado. O golpe ainda empurra (a reação é de outro caminho); só a vida não cai.
 - **Modo deus sem reação:** no jogador, `Monster::takeHit` (entrada virtual de todo golpe), `knockBack` e `takeAdditiveRecoil` voltam na entrada, e o `enterNewState` recusa os estados de reação (Recoil, KnockBack, Grappled, BeingSlammed, BeingThrown, Impaled, Stunned, Shocked, BigTakeHit, Countered), como o jogo faz no modo 7. Prédio que cai em cima ainda mata (fica assim, decisão do dono). O agarrão funciona no multiplayer com os dois jogadores com deus. Conhecido e aceito: com os dois agarrando no mesmo quadro, um deles pode ficar congelado depois de ser jogado longe; desligar o deus e levar um golpe o devolve ao normal.
-- **Vencer a luta:** `takeDamage(100000, force, jogador)` em cada IA viva (`m_monsters[4 + i]`, `i < m_numAIs`); o jogo segue o fluxo dele (morte, vitória, contagem de rodadas). Com chefes que não são `Monster` comum, o efeito não é conhecido.
+- **Vencer a luta:** `takeDamage(100000, force, jogador)` em cada IA viva, com o golpe vindo do primeiro jogador fora da morte (na campanha co-op o P1 pode ter saído da fase, e o golpe dele não derruba) (`m_monsters[4 + i]`, `i < m_numAIs`); o jogo segue o fluxo dele (morte, vitória, contagem de rodadas). Com chefes que não são `Monster` comum, o efeito não é conhecido.
 - **`WOTM_CHEATS=inv,stam|furia,esp,cloak,deus,vencer=N`** liga desde o início; `vencer=N` repete o "vencer" a cada N segundos de jogo (lote, avançar sozinho). Exemplo para lote: `WOTM_MATCH=3,1,1 WOTM_AIVSAI=1 WOTM_CHEATS=inv,esp,vencer=25`.
 
 ## Runtime: modo treino (TRAINING no menu, `WOTM_TRAINING`)
@@ -549,7 +549,17 @@ retail fica como era.
 - **Cinemas com os jogadores:** quando o roteiro põe o P1 num lugar (`doSetPlayerPos`, monstro 0), os outros vão para o lado dele do
   mesmo jeito, com o giro da cena. A animação do roteiro no P1 (`triggerAnimation` com `ACTANIM_PLAYER` e monstro 0) toca também nos
   outros, no mesmo slot do `m_anims` deles (`animationSetSpeed` 1 e `animationTransitionInto` 200, como no P1). As aberturas que só
-  mostram a IA da fase (a da fase 1 é a captura do Congar) continuam sem os jogadores.
+  mostram a IA da fase (a da fase 1 é a captura do Congar) continuam sem os jogadores. Com o P1 fora da fase, o papel dele no
+  roteiro é do primeiro jogador que continua (`m_monsters[0]` trocado durante o `doSetPlayerPos` e o `triggerAnimation`).
+- **Tóquio:** o `tokyoUpdate` encerra a fase com as duas IAs fora e o `m_monsters[0]` fora da morte (+0xE8), e o cinema do fim
+  (roteiro 0x2266) abduz só ele: sobe, gira e some entre os quadros 260 e 630 da animação do disco. Durante a chamada o
+  `m_monsters[0]` vale o líder, o primeiro jogador vivo, fixo depois que o fim começa (o static em 0x6F8CF4 do `tokyoUpdate`). No
+  cinema, os outros que continuam fazem a mesma subida que o líder fez no quadro (z, giro, matriz) e somem com ele; o
+  `cleanUpForMovie` vale para todos. Log `[coop] Toquio`.
+- **Cratera do 3-Mile:** quando a contagem acaba, o `threeMileUpdateCountDown` liga o `craterSwitched` e leva só o `m_monsters[0]`
+  ao ponto fixo da cratera (setTrans, giro em cs+0x68, +0x1E8 em 500). Durante a chamada o `m_monsters[0]` vale o primeiro jogador
+  que continua; na troca, os outros vão para o lado dele com o mesmo giro e o mesmo +0x1E8. O chão da cratera ainda não responde ao
+  `hdHatTest` nesse quadro: sem chão embaixo, ficam a 150 por casa na altura dele e caem até o fundo como ele. Log `[coop] cratera`.
 - **Barra do chefe:** o `Hud::drawBossHealthBar` põe a barra (o `_cs` em +0xFC do HUD; só o HUD 0 tem uma com nó) a (0, 170, -91)
   da câmera 0, com a largura da tela cheia. Na tela dividida, fora da vista unificada, cada HUD a monta na câmera da própria vista
   (o `_cs` da câmera 0 trocado durante a chamada), e a barra vai para onde a chamada a pôs, com a distância até a câmera dobrada
