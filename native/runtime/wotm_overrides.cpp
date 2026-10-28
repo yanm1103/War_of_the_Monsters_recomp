@@ -69,6 +69,8 @@ void wotmBarRect(float x0, float y0, float x1, float y1, uint8_t r, uint8_t g, u
 void wotmBarTex(float x0, float y0, float x1, float y1, uint64_t tex0, float u0, float v0, float u1, float v1);   // wotm_live.inc: retrato
 void wotmHudAnchor(const uint8_t *rdram, float cx, float cy, const float *world, bool bars);   // wotm_live.inc: icone de vida (modo foto)
 void wotmHudAnchorEnd();
+void wotmBarView(int view);   // wotm_live.inc: vista dos retangulos de barra que vem a seguir
+void wotmPlayerHud(uint8_t *rdram, uint32_t m, int view, float ox, float oy, float sx, float sy, bool mirror);   // HUD nativo de um jogador
 float wotmHealthIconShift(const uint8_t *rdram, float rx);   // wotm_live.inc: x da barra com o limite da vista widescreen
 void wotmDamagePopup(const uint8_t *rdram, const float p[3], float amount, int kind);   // wotm_live.inc: numero de dano (0 golpe, 1 arremesso, 2 especial)
 void wotmPadSelInstall(PS2Runtime &runtime);   // wotm_padsel.inc: escolha de lados do 2 jogadores no telao do menu
@@ -2353,6 +2355,101 @@ namespace
         }
         g_barDone = true;
         ctx->pc = ra;   // o quadrado do icone nao e montado
+    }
+
+    // Faixas de cor no sentido da largura (barra em pe)
+    template <size_t N>
+    void gradBarV(float x0, float y0, float x1, float y1, const uint8_t (&prof)[N][3])
+    {
+        if (y1 <= y0)
+            return;
+        const float w = (x1 - x0) / static_cast<float>(N);
+        for (size_t i = 0; i < N; ++i)
+            wotmBarRect(x0 + w * i, y0, x0 + w * (i + 1), y1, prof[i][0], prof[i][1], prof[i][2], 0x80);
+    }
+}
+
+// HUD de um jogador desenhado pela camada nativa (jogadores 3 e 4 da tela em quadrantes, wotm_split4.inc, hudUpdate), no desenho do
+// HUD do jogo: retrato (a cara da furia com m_boostFull) e, a direita, a vida (com o dano recente em vermelho) e o botao do especial;
+// embaixo do retrato, a stamina em pe, de baixo para cima (o que passa do maximo em rosa; com a furia cheia pisca). As caixas sao as
+// do HUD do P1 em tela cheia (wotm_training::hud, 640 x 224) levadas a (ox + x * sx, oy + y * sy), espelhadas (mirror: retrato a
+// direita, como o HUD do P2) antes da escala. `view` e a vista dos retangulos (a metade ou a faixa da janela em que saem).
+void wotmPlayerHud(uint8_t *rdram, uint32_t m, int view, float ox, float oy, float sx, float sy, bool mirror)
+{
+    namespace h = wotm_training::hud;
+    if (!ramOk(m, kMonsterStamina + 0x24u))
+        return;
+    wotmBarView(view);
+    wotmHudAnchorEnd();
+    struct Cell { float x0, y0, x1, y1; };
+    const auto map = [&](float x0, float y0, float x1, float y1) {
+        if (mirror)
+        {
+            const float t = 640.f - x0;
+            x0 = 640.f - x1;
+            x1 = t;
+        }
+        return Cell{ox + x0 * sx, oy + y0 * sy, ox + x1 * sx, oy + y1 * sy};
+    };
+    const auto cell = [&](const h::Box &b) { return map(b.x0, b.y0, b.x1, b.y1); };
+    // contorno de cada caixa: preto, cinza e preto, cada um com ~1,3 x 0,6 unidades da tela cheia
+    const float tx = 1.3f * sx, ty = 0.6f * sy;
+    const Cell boxes[4] = {cell(h::kPortrait), cell(h::kHealth), cell(h::kSpecial), cell(h::kStamina)};
+    for (const Cell &c : boxes)
+    {
+        barRing(c.x0 - 2.f * tx, c.y0 - 2.f * ty, c.x1 + 2.f * tx, c.y1 + 2.f * ty, tx, ty, 0);
+        barRing(c.x0 - tx, c.y0 - ty, c.x1 + tx, c.y1 + ty, tx, ty, 94);
+        barRing(c.x0, c.y0, c.x1, c.y1, tx, ty, 0);
+        wotmBarRect(c.x0, c.y0, c.x1, c.y1, 0, 0, 0, 0x50);   // vazio: o fundo escurecido
+    }
+    const float health = barFrac(rdram, m + kMonsterHealth, m + kMonsterMaxHealth);
+    const float energy = barFrac(rdram, m + kMonsterStamina + 0x10u, m + kMonsterStamina);
+    const bool exhausted = FAST_READ32(m + kMonsterStamina + 0x20u) != 0u;
+    const bool fury = static_cast<int8_t>(FAST_READ8(m + 0xF4u)) != 0;   // m_boostFull
+    const bool special = FAST_READ8(m + 0xF3u) != 0 && FAST_READ32((FAST_READ32(wotm::sym::game) & 0x1FFFFFFFu) + 0x1203C8u) != 9u;   // Monster::isSpecialAvailable
+    const float lag = barLag(m, health);
+    if (const uint64_t t = monsterPortrait(rdram, m))
+    {
+        const Cell &p = boxes[0];
+        wotmBarTex(p.x0, p.y0, p.x1, p.y1, t, fury ? 64.f : 0.f, 64.f, fury ? 128.f : 64.f, 0.f);
+    }
+    // vida: cheia a partir do lado do retrato
+    const float hw = h::kHealth.x1 - h::kHealth.x0;
+    {
+        const Cell l = map(h::kHealth.x0 + hw * health, h::kHealth.y0, h::kHealth.x0 + hw * lag, h::kHealth.y1);
+        if (lag > health)
+            gradBar(l.x0, l.y0, l.x1, l.y1, kLagProf);
+        const Cell f = map(h::kHealth.x0, h::kHealth.y0, h::kHealth.x0 + hw * health, h::kHealth.y1);
+        if (health > 0.f)
+            gradBar(f.x0, f.y0, f.x1, f.y1, kHealthProf);
+    }
+    if (special)
+        gradBar(boxes[2].x0, boxes[2].y0, boxes[2].x1, boxes[2].y1, kSpecialProf);
+    // stamina: de baixo para cima
+    const float sh = h::kStamina.y1 - h::kStamina.y0;
+    const auto stamina = [&](float frac) { return map(h::kStamina.x0, h::kStamina.y1 - sh * frac, h::kStamina.x1, h::kStamina.y1); };
+    if (exhausted)
+    {
+        const Cell c = stamina(energy);
+        gradBarV(c.x0, c.y0, c.x1, c.y1, kExhaustedProf);
+        return;
+    }
+    const Cell e = stamina(energy);
+    gradBarV(e.x0, e.y0, e.x1, e.y1, kEnergyProf);
+    float cur, max, top;
+    std::memcpy(&max, rdram + m + kMonsterStamina, 4);
+    std::memcpy(&top, rdram + m + kMonsterStamina + 0x8u, 4);
+    std::memcpy(&cur, rdram + m + kMonsterStamina + 0x10u, 4);
+    const float over = top > max && std::isfinite(cur) ? std::clamp((cur - max) / (top - max), 0.f, 1.f) : 0.f;
+    if (fury)
+    {
+        const Cell c = stamina(1.f);
+        gradBarV(c.x0, c.y0, c.x1, c.y1, FAST_READ32(wotm::sym::g_frame) % kFuryBlinkPeriod < kFuryBlinkOn ? kOverProf : kFuryDimProf);
+    }
+    else if (over > 0.f)
+    {
+        const Cell c = stamina(over);
+        gradBarV(c.x0, c.y0, c.x1, c.y1, kOverProf);
     }
 }
 

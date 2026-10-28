@@ -981,6 +981,8 @@ void wotmHudAnchor(const uint8_t *rdram, float cx, float cy, const float *world,
     wotm_live::g_pendingAnchors.push_back(h);
 }
 void wotmHudAnchorEnd() { wotm_live::g_barAnchor = -1; }
+// Vista dos retangulos de barra que vem a seguir (HUD nativo dos jogadores 3 e 4, wotmPlayerHud)
+void wotmBarView(int view) { g_barView = std::clamp(view, 0, 3); }
 // Retangulo com textura residente do .RTX (retrato do inimigo): tex0 da imagem e o trecho (u0, v0)-(u1, v1) em texels
 void wotmBarTex(float x0, float y0, float x1, float y1, uint64_t tex0, float u0, float v0, float u1, float v1)
 {
@@ -2334,6 +2336,7 @@ void wotmBarTex(float, float, float, float, uint64_t, float, float, float, float
 float wotmHealthIconShift(const uint8_t *, float) { return 0.f; }
 void wotmHudAnchor(const uint8_t *, float, float, const float *, bool) {}
 void wotmHudAnchorEnd() {}
+void wotmBarView(int) {}
 void wotmShellFade(const uint8_t *, int, uint32_t, uint32_t, uint32_t, int, int, int, bool) {}
 void wotmShellFadeStep() {}
 void wotmShellFadeStepDone() {}

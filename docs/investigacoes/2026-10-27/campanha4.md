@@ -26,9 +26,10 @@ tokens, sem tutorial. Aqui fica o resto: o que falta, com os endereços (`native
   `m_monsters[0 .. m_numMonsters)` com `m_playerNum != 0` que não é o dono do HUD, e quem saiu continuava na lista. Sem captura
   do bug; se continuar, pedir uma.
 
-**Aberto:** usar a vida baixa no P1 bagunça o HUD do P3 com o P1 ainda vivo (3 jogadores). Suspeita: o HUD 2 é cópia do HUD 0 e as
-animações da coluna são compartilhadas (`hudUse`/`hudAnimSave` do `wotm_split4.inc`); o ícone de vida baixa do P1 no HUD do P3 pode
-ser só o ícone de parceiro do retail. Precisa de captura.
+**HUD dos jogadores 3 e 4 misturado com os de cima** (o dono, 2026-10-28: "a HUD dos jogadores 3 e 4 ainda se embaralha com as dos
+outros 2 de cima"): a cópia do HUD da coluna dividia o `_cs` da barra e as animações com o HUD de cima. O HUD das vistas 2 e 3 passou
+a ser nativo (`wotmPlayerHud`; `NATIVO.md`, "HUD" da tela dividida de 3 e 4). Conferido com 4 bots na fase 1 (quadrantes e, depois
+da saída do P4, a faixa de baixo dos 3) e no versus de 4 ("WINS 0" nas vistas de baixo). Falta o teste do dono.
 
 ## 2. Chefes: alvo sorteado entre os jogadores vivos
 

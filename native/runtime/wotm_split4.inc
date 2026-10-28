@@ -25,8 +25,8 @@
 //     Os trajes dos jogadores 3 e 4 nao tem lugar no Shell: ficam em g_extraCostume, e o SetPlayerMonster os recebe no lugar do
 //     m_costume[1] que o InitPlayers manda a todo jogador depois do 1.
 //   - Motion blur: o buffer de pacotes do MotionBlurAA so tem lugar para 2 vistas; o init fica com 2 e as vistas 2 e 3 sem borrao.
-//   - HUD: o Hud::initAfter e o Hud::update saem logo com indice >= 2. O HUD 2/3 vira uma copia do HUD da mesma coluna e roda o
-//     update como ele, com monstro, camera e barra da propria vista (hudInitAfter, hudUpdate).
+//   - HUD: o Hud::initAfter e o Hud::update saem logo com indice >= 2. O HUD 2/3 vira uma copia do HUD da mesma coluna (as mensagens
+//     dele tem onde morar); o update dele nao roda e o HUD das vistas 2 e 3 sai pela camada nativa (hudInitAfter, hudUpdate).
 //   - Camera no POV 3 (estacionada): as cameras 2 e 3 nao tinham posicao de estacionar e iam para a origem (no inicio e na morte).
 //   - Fim de rodada do modo 3: o retail so renasce com 1 ou 0 vivos (2 jogadores); aqui cada morto renasce como o que e. A meta de
 //     vitorias abre o dialogo 5 (modal) como cauda do Evaluate, com o ra de quem o chamou.
@@ -39,7 +39,6 @@
 //     (wotmPadSetPortBase, wotm_pad.inc). Decidido na instalacao: o inputInit roda no boot.
 
 void wotmPadSetPortBase(int base);   // wotm_pad.inc: o scePadRead em curso le os dispositivos da porta + base
-float wotmScreenWide();              // wotm_live.inc: largura da janela sobre a da tela 4:3 do jogo
 
 #include "wotm_training.h"   // modo treino: HUD do boneco (trainingHud)
 
@@ -76,7 +75,6 @@ namespace wotm_split4
     bool g_cinemaFull = false;      // cinema em tela cheia (cinemaViews)
     int g_coopViews = 0;            // campanha co-op com jogadores fora (wotm_coop.inc): vistas com quem continua (1 a 3; 0 = a da largada)
     unsigned g_hudCalls[4] = {};    // diagnostico (WOTM_SPLITLOG): Hud::update de cada HUD desde a ultima linha
-    unsigned g_hudPaused = 0;       // diagnostico (WOTM_SPLITLOG): updates do HUD 2/3 pausados no meio desde a ultima linha
     int g_loadExtra = 0;            // jogadores 3 e 4 no caminho das IAs (do LoadLevelFiles ao InitPlayers)
     uint32_t g_extraCostume[2] = {0, 0};   // trajes dos jogadores 3 e 4 (o Shell nao tem lugar para eles)
 
@@ -339,8 +337,7 @@ namespace wotm_split4
                              FAST_READ32(kMonsters + 4u * uint32_t(v)), static_cast<int32_t>(FAST_READ32(camera(v) + kCamPov)), cs, vcs,
                              rdF(rdram, (vcs & 0x1FFFFFFFu) + 0x10), rdF(rdram, (vcs & 0x1FFFFFFFu) + 0x14), rdF(rdram, (vcs & 0x1FFFFFFFu) + 0x18));
             }
-            std::fprintf(stderr, " hud.update %u/%u/%u/%u (pausados %u)\n", g_hudCalls[0], g_hudCalls[1], g_hudCalls[2], g_hudCalls[3], g_hudPaused);
-            g_hudPaused = 0;
+            std::fprintf(stderr, " hud.update %u/%u/%u/%u\n", g_hudCalls[0], g_hudCalls[1], g_hudCalls[2], g_hudCalls[3]);
             for (unsigned &n : g_hudCalls)
                 n = 0;
         }
@@ -490,8 +487,7 @@ namespace wotm_split4
     // as duas vistas mostravam a camada de cima (a furia do jogador 3 na barra do 1 e vice-versa). O no da copia fica marcado ativo
     // (nunca entra na lista); o toTime dele vai para o no da coluna antes da avaliacao, e o do no da coluna entra no estado por HUD.
     constexpr uint32_t kHudHandles = 0x130, kHudHandleN = 13, kCtlState = 0x14, kCtlStateLen = 0x20, kCtlSize = 0x3C;
-    constexpr uint32_t kHudRageActive = 0x268 + 0x8 + 0x4, kHudRageTime = 0x268 + 0x8 + 0x30, kAnimTimeLen = 0x10;
-    constexpr uint32_t kUpdateAnims = wotm::fn::UpdateAnimations__10AnimPlayer;
+    constexpr uint32_t kHudRageTime = 0x268 + 0x8 + 0x30, kAnimTimeLen = 0x10;
     struct HudAnimState
     {
         uint32_t ci[4] = {};
@@ -501,7 +497,6 @@ namespace wotm_split4
     };
     HudAnimState g_hudAnim[4];
     uint32_t g_hudLive[2] = {0, 1};   // HUD cujo estado esta na RAM, por coluna
-    PS2Runtime::RecompiledFunction g_updateAnims = nullptr;
 
     uint32_t ciOk(uint8_t *rdram, uint32_t ci)
     {
@@ -620,16 +615,6 @@ namespace wotm_split4
         g_hudLive[0] = 0;
         g_hudLive[1] = 1;
     }
-    // Avalia as instancias da coluna com o estado em uso (o animationRunGlobal so roda depois do hier da vista 0)
-    void hudEvaluate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t hud)
-    {
-        uint32_t ci[4] = {};
-        const int n = hudInstances(rdram, hud, ci);
-        for (int i = 0; i < n; ++i)
-            if (const CiFields f = ciFields(rdram, ci[i]); f.player && !(FAST_READ32(ci[i] + 0x1C) & 1u))   // lazyEvaluate
-                callGuest(g_updateAnims, kUpdateAnims, rdram, ctx, runtime, f.player);
-    }
-
     // Modo treino (wotm_training.h) na luta de 1 jogador: o HUD do boneco e o HUD 1 do proprio jogo (o do jogador 2, espelhado a
     // direita, que o banco do HUD ja traz e o initAfter ja ligou). Na saida do Hud::update do HUD 0, o update do HUD 1 com o
     // m_viewSlot[1] trocado pelo slot do boneco (o primeiro m_monsters[i >= 1] vivo) durante a chamada. Fora da vista unificada e no modo de entrada do
@@ -670,56 +655,6 @@ namespace wotm_split4
         FAST_WRITE32(camera(1) + kCamCs, savedCs);
     }
 
-    // Barra do HUD na faixa de baixo dos 3 jogadores (vista 2, 640 x 112). O Hud::update poe o _cs da barra na frente da camera com um
-    // deslocamento fixo nos eixos dela (direita, frente, cima: HUD +0x100), feito para a projecao do quadrante; com o foco da faixa
-    // (kStripFov) e a largura dela a barra saia maior, no meio e cortada em cima. Aqui ela vai para a profundidade vezes fs / fq (o
-    // tamanho na tela volta ao do quadrante) e 160 pixels do GS vezes a largura widescreen para a esquerda (a faixa 4:3 da janela
-    // inteira comeca 160 * (wide - 1) pixels do GS depois da do quadrante): fica onde estaria no quadrante da esquerda.
-    // A barra e a mesma do HUD 0 (hudInitAfter), que o update dele refaz antes do hier da vista 0; g_stripBarPos evita somar duas vezes
-    // se o update nao a reposicionou.
-    float g_stripBarPos[3] = {};
-    void stripHudBar(uint8_t *rdram, uint32_t bar)
-    {
-        const uint32_t cs = FAST_READ32(camera(2) + kCamCs) & 0x1FFFFFFFu;
-        const float fq = rdF(rdram, kQuadDefs), fs = rdF(rdram, kQuadDefs + 2u * kDefSize);
-        if (!bar || cs < 0x1000u || cs + 0x50u > PS2_RAM_SIZE || !(fq > 1.f) || !(fs > 1.f))
-            return;
-        float p[3], t[3], ax[3][3];
-        for (uint32_t i = 0; i < 3; ++i)
-        {
-            p[i] = rdF(rdram, bar + 0x10u + 4u * i);
-            t[i] = rdF(rdram, cs + 0x10u + 4u * i);
-            for (uint32_t r = 0; r < 3; ++r)
-                ax[r][i] = rdF(rdram, cs + 0x20u + 0x10u * r + 4u * i);
-        }
-        if (std::memcmp(p, g_stripBarPos, sizeof p) == 0)
-            return;
-        float l[3] = {};   // direita, frente, cima
-        for (int r = 0; r < 3; ++r)
-            for (int i = 0; i < 3; ++i)
-                l[r] += ax[r][i] * (p[i] - t[i]);
-        if (!(l[1] > 0.f))
-            return;
-        const float right = l[0] - 160.f * wotmScreenWide() / fq * l[1], depth = l[1] * fs / fq;
-        for (int i = 0; i < 3; ++i)
-        {
-            g_stripBarPos[i] = t[i] + ax[0][i] * right + ax[1][i] * depth + ax[2][i] * l[2];
-            wrF(rdram, bar + 0x10u + 4u * uint32_t(i), g_stripBarPos[i]);
-        }
-    }
-
-    // Update do HUD 2/3 pausado no meio (a fatia de tempo do escalonador acabou dentro dele): a troca do indice, do m_viewSlot, do _cs
-    // da camera e da barra fica valendo ate a retomada terminar (pc no ra). Desfeita na saida da primeira chamada, o resto do update
-    // rodava com o indice 2: o updateMessage escreve o "WINS" do HUD 0 com fontSpritePrintXY e o dos outros com
-    // fontSpritePrintRightXY, entao o do jogador 3 pulava para a direita por um quadro (o do 4 ja e do lado direito).
-    struct HudPending
-    {
-        bool on = false;
-        uint32_t ra = 0, self = 0, me = 0, saved[4] = {};
-    } g_hudPending;
-
-    void hudUpdateDone(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t self, uint32_t me, const uint32_t saved[4]);
-
     // Modo treino: o update do HUD 0 pausado no meio (a fatia de tempo acabou dentro dele). A retomada nao passa por este gancho e,
     // no fim dela, o HUD 0 apaga a barra do HUD 1: o do boneco (trainingHud) fica para trainingHudLate, antes da captura do quadro.
     // Sem isso a barra do boneco sumia nesses quadros (piscava).
@@ -734,95 +669,110 @@ namespace wotm_split4
         trainingHud(rdram, ctx, runtime);
     }
 
-    void hudUpdate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    // HUD dos jogadores 3 e 4 (HUD 2 e 3) desenhado pela camada nativa (wotmPlayerHud, wotm_overrides.cpp). O Hud::update do retail
+    // sai logo com indice >= 2, e a copia do HUD da coluna (hudInitAfter) divide com ele o _cs da barra e as instancias das animacoes:
+    // rodar o update dela misturava os HUDs de cima e de baixo. Aqui o update do HUD 2/3 nao roda: a barra da coluna fica apagada no
+    // hier desta vista (o update do HUD de cima a acende de novo no quadro seguinte, antes do hier dele), as mensagens saem pelo
+    // updateMessage dele (com o indice da coluna, o lado do texto) e o "WINS n" do versus como o Hud::update o escreve. O HUD vai
+    // para o canto de cima da vista a meia escala (o tamanho dos HUDs de cima no quadrante); na faixa de baixo dos 3 jogadores, no
+    // mesmo lugar da janela que o da vista 0.
+    constexpr uint32_t kUpdateMessage = wotm::fn::updateMessage__3Hud;
+    PS2Runtime::RecompiledFunction g_updateMessage = nullptr;
+    constexpr uint32_t kHudWinsBuf = kQuadDefs + 4u * kDefSize;   // texto do "WINS n" (acima dos 4 ViewDef dos quadrantes)
+
+    // Chamada de uma funcao do jogo pelo endereco, com ate 5 argumentos inteiros (a0..t0); devolve o v0
+    uint32_t callGuestN(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t addr, std::initializer_list<uint32_t> args)
     {
-        if (g_hudPending.on && ctx->pc != kHudUpdate)
-        {
-            // retomada do update pausado
-            const HudPending pend = g_hudPending;
-            g_origHudUpdate(rdram, ctx, runtime);
-            if (ctx->pc == pend.ra)
-            {
-                g_hudPending.on = false;
-                hudUpdateDone(rdram, ctx, runtime, pend.self, pend.me, pend.saved);
-            }
-            return;
-        }
-        const uint32_t self = GPR_U32(ctx, 4) & 0x1FFFFFFFu;
-        const bool split = ctx->pc == kHudUpdate && g_views && splitPlayers(rdram) && self >= kGame && (self - kGame) % kHudStride == 0 &&
-                           (self - kGame) / kHudStride < 4u;
-        if (!split)
-        {
-            const uint32_t ra = GPR_U32(ctx, 31);
-            const bool entry = ctx->pc == kHudUpdate;
-            g_origHudUpdate(rdram, ctx, runtime);
-            if (entry && self == kGame)
-            {
-                g_trainPending = ctx->pc != ra;
-                if (!g_trainPending)
-                    trainingHud(rdram, ctx, runtime);
-            }
-            return;
-        }
-        if (g_hudPending.on)
-        {
-            // outro update comecou sem a retomada do pausado terminar: desfaz a troca dele antes
-            g_hudPending.on = false;
-            hudUpdateDone(rdram, ctx, runtime, g_hudPending.self, g_hudPending.me, g_hudPending.saved);
-        }
-        const uint32_t me = (self - kGame) / kHudStride, p = me & 1u, hudP = kGame + kHudStride * p;
-        const uint32_t ra = GPR_U32(ctx, 31);
-        ++g_hudCalls[me];
-        hudUse(rdram, me);
-        uint32_t saved[4] = {};
-        if (me >= 2u)
-        {
-            saved[0] = FAST_READ32(self);
-            saved[1] = FAST_READ32(kViewSlot + 4u * p);
-            saved[2] = FAST_READ32(camera(int(p)) + kCamCs);
-            saved[3] = FAST_READ32(hudP + kHudBarCs);
-            FAST_WRITE32(self, p);
-            FAST_WRITE32(kViewSlot + 4u * p, FAST_READ32(kViewSlot + 4u * me));
-            FAST_WRITE32(camera(int(p)) + kCamCs, FAST_READ32(camera(int(me)) + kCamCs));
-            FAST_WRITE32(hudP + kHudBarCs, FAST_READ32(self + kHudBarCs));
-            FAST_WRITE8(self + kHudRageActive, 1);   // sem rampIn: o no da coluna e o unico na lista ativa
-        }
-        g_origHudUpdate(rdram, ctx, runtime);
-        if (ctx->pc != ra)
-        {
-            ++g_hudPaused;
-            g_hudPending.on = true;
-            g_hudPending.ra = ra;
-            g_hudPending.self = self;
-            g_hudPending.me = me;
-            std::memcpy(g_hudPending.saved, saved, sizeof saved);
-            return;
-        }
-        hudUpdateDone(rdram, ctx, runtime, self, me, saved);
+        const PS2Runtime::RecompiledFunction fn = runtime->lookupFunction(addr);
+        if (!fn)
+            return 0u;
+        const R5900Context saved = *ctx;
+        int r = 4;
+        for (uint32_t a : args)
+            ctx->r[r++] = _mm_set_epi64x(0, static_cast<int64_t>(static_cast<int32_t>(a)));
+        ctx->r[31] = _mm_set_epi64x(0, 0);
+        ctx->pc = addr;
+        fn(rdram, ctx, runtime);
+        wotmFinishGuestCall(rdram, ctx, runtime);
+        const uint32_t v0 = GPR_U32(ctx, 2);
+        *ctx = saved;
+        return v0;
     }
 
-    void hudUpdateDone(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t self, uint32_t me, const uint32_t saved[4])
+    void nativeHud(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t self, uint32_t me)
     {
-        const uint32_t p = me & 1u, hudP = kGame + kHudStride * p;
-        if (me >= 2u)
-        {
-            FAST_WRITE32(self, saved[0]);
-            FAST_WRITE32(kViewSlot + 4u * p, saved[1]);
-            FAST_WRITE32(camera(int(p)) + kCamCs, saved[2]);
-            FAST_WRITE32(hudP + kHudBarCs, saved[3]);
-            std::memcpy(rdram + hudP + kHudRageTime, rdram + self + kHudRageTime, kAnimTimeLen);
-            hudEvaluate(rdram, ctx, runtime, hudP);
-        }
-        // a barra deste HUD fica como o jogo a deixou; as outras (por _cs: a do HUD 2 e 3 e a mesma do 0 e 1) apagam
-        const uint32_t own = hudBar(rdram, me);
-        const uint8_t on = own ? FAST_READ8(own + 0xC) : 0;
+        const uint32_t p = me & 1u;
         for (uint32_t i = 0; i < 4u; ++i)
-            if (const uint32_t b = hudBar(rdram, i); b && b != own)
+            if (const uint32_t b = hudBar(rdram, i))
                 FAST_WRITE8(b + 0xC, 0);
-        if (own)
-            FAST_WRITE8(own + 0xC, on);
-        if (me == 2u && (g_coopViews ? g_coopViews : g_views) == 3 && !g_cinemaFull && !FAST_READ32(kUnified))
-            stripHudBar(rdram, own);
+        if (FAST_READ32(kUnified) || g_cinemaFull || !FAST_READ32(wotm::sym::gHudEnable) || FAST_READ32(wotm::sym::x_3Hud_m_letterbox + 0x2Cu))
+            return;
+        const uint32_t slot = FAST_READ32(kViewSlot + 4u * me);
+        if (slot >= 16u)
+            return;
+        const uint32_t m = kSlots + kSlotStride * slot;
+        const uint32_t def = FAST_READ32(kViewInfo + 0x14u * me + 4u) & 0x1FFFFFFFu;
+        if (def < 0x1000u || def + 0x10u > PS2_RAM_SIZE)
+            return;
+        const float y0 = FAST_READ16(def + 0xE), sy = float(FAST_READ16(def + 6)) / 224.f;
+        const bool strip = me == 2u && (g_coopViews ? g_coopViews : g_views) == 3;
+        // na faixa (640 de largura, foco kStripFov) o x das barras sai a 1/4 da janela + (x - 320) * 2/3 da escala do quadrante: o
+        // canto da vista 0 (x/2 no quadrante) fica em 80 + 3/4 x
+        if (strip)
+            wotmPlayerHud(rdram, m, int(me), 80.f, y0, 0.75f, sy, false);
+        else
+            wotmPlayerHud(rdram, m, int(me), 320.f * float(p), y0, 0.5f, sy, p != 0u);
+
+        // mensagens (combos, energia ganha, vidas): o updateMessage le o lado do texto no indice
+        FAST_WRITE32(self, p);
+        callGuest(g_updateMessage, kUpdateMessage, rdram, ctx, runtime, self);
+        FAST_WRITE32(self, me);
+
+        // "WINS n" (Hud::update, modos 2 a 6, depois de 60 fields): cinza, letra 0x140 x 0xA0, a esquerda (indice 0) ou a direita
+        const uint32_t mode = FAST_READ32(kGameMode);
+        if (mode < 2u || mode > 6u)
+            return;
+        if (static_cast<int32_t>(callGuestN(rdram, ctx, runtime, wotm::fn::timerGetFieldCount__Fv, {})) < 0x3D)
+            return;
+        constexpr uint32_t kMonsterWins = 0x3C;
+        const int n = std::snprintf(reinterpret_cast<char *>(rdram + kHudWinsBuf), 16, "WINS %d", static_cast<int32_t>(FAST_READ32(m + kMonsterWins)));
+        if (n <= 0)
+            return;
+        // tela 1 do viewGetScreenDisplay fora da vista unificada: x 0x20 / 0x118; senao 0x23 / 0x258 (y 0xC8 nos dois)
+        const bool narrow = callGuestN(rdram, ctx, runtime, wotm::fn::viewGetScreenDisplay__Fv, {}) == 1u;
+        callGuestN(rdram, ctx, runtime, wotm::fn::fontSetColor__Fiiiii, {0u, 0x5Au, 0x5Au, 0x5Au, 0x80u});
+        callGuestN(rdram, ctx, runtime, wotm::fn::fontSetCharSizesInSubPixels__Fiiiii,
+                   {0u, 0x140u, 0xA0u, static_cast<uint32_t>(-0x11), static_cast<uint32_t>(-0x15)});
+        if (p == 0u)
+            callGuestN(rdram, ctx, runtime, wotm::fn::fontSpritePrintXY__FiiiPc, {0u, narrow ? 0x20u : 0x23u, 0xC8u, kHudWinsBuf});
+        else
+            callGuestN(rdram, ctx, runtime, wotm::fn::fontSpritePrintRightXY__FiiiPc, {0u, narrow ? 0x118u : 0x258u, 0xC8u, kHudWinsBuf});
+        callGuestN(rdram, ctx, runtime, wotm::fn::fontSetDefaultColor__Fi, {0u});
+        callGuestN(rdram, ctx, runtime, wotm::fn::fontSetDefaultSize__Fi, {0u});
+    }
+
+    void hudUpdate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t self = GPR_U32(ctx, 4) & 0x1FFFFFFFu;
+        const bool entry = ctx->pc == kHudUpdate;
+        const uint32_t me = self >= kGame && (self - kGame) % kHudStride == 0 ? (self - kGame) / kHudStride : 4u;
+        if (entry && me < 4u)
+            ++g_hudCalls[me];
+        if (entry && me >= 2u && me < 4u && g_views && splitPlayers(rdram))
+        {
+            const uint32_t ra = GPR_U32(ctx, 31);
+            nativeHud(rdram, ctx, runtime, self, me);
+            ctx->pc = ra;
+            return;
+        }
+        const uint32_t ra = GPR_U32(ctx, 31);
+        g_origHudUpdate(rdram, ctx, runtime);
+        if (entry && self == kGame)
+        {
+            g_trainPending = ctx->pc != ra;
+            if (!g_trainPending)
+                trainingHud(rdram, ctx, runtime);
+        }
     }
 
     // Hud::initAfter(i) tambem nao faz nada com i >= 2 (sem _cs da barra nem animacoes; o no do HUD em +0xE4 so existe nos HUDs 0 e
@@ -847,24 +797,29 @@ namespace wotm_split4
         FAST_WRITE32(self, i);
     }
 
-    // Monster::updateBoostAndRage: com a furia cheia o monstro seguido por camera comeca o flash (h180) do HUD m_cameraView. Durante a
-    // logica (gameUpdate) a RAM tem o estado das animacoes do HUD da coluna; o monstro dos HUDs 2 e 3 usa o dele na chamada.
-    constexpr uint32_t kBoostRage = wotm::fn::updateBoostAndRage__7Monster;
-    PS2Runtime::RecompiledFunction g_origBoostRage = nullptr;
-    void boostAndRage(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    // Monster::updateBoostAndRage (furia cheia: flash h180) e Monster::blowUpMonster (morte: h1D0) comecam uma animacao do HUD
+    // m_cameraView do monstro seguido por camera. Os handles do HUD 2/3 sao os do HUD da coluna: o monstro das vistas 2 e 3 usa na
+    // chamada o estado guardado dele (hudUse), e o HUD de cima nao pisca nem toca a morte do jogador de baixo. O HUD nativo das
+    // vistas 2 e 3 nao le essas animacoes.
+    constexpr uint32_t kBoostRage = wotm::fn::updateBoostAndRage__7Monster, kBlowUp = wotm::fn::blowUpMonster__7MonsterP7Monster;
+    PS2Runtime::RecompiledFunction g_origBoostRage = nullptr, g_origBlowUp = nullptr;
+    void lowerHudCall(PS2Runtime::RecompiledFunction orig, uint32_t addr, uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t m = GPR_U32(ctx, 4) & 0x1FFFFFFFu;
-        const uint32_t view = ctx->pc == kBoostRage && m >= 0x1000u && m + kCameraView + 4u <= PS2_RAM_SIZE ? FAST_READ32(m + kCameraView) : 0u;
+        const uint32_t view = ctx->pc == addr && m >= 0x1000u && m + kCameraView + 4u <= PS2_RAM_SIZE ? FAST_READ32(m + kCameraView) : 0u;
         if (view < 2u || view >= 4u || !g_views || !splitPlayers(rdram))
         {
-            g_origBoostRage(rdram, ctx, runtime);
+            orig(rdram, ctx, runtime);
             return;
         }
-        const uint32_t before = g_hudLive[view & 1u];
+        const uint32_t before = g_hudLive[view & 1u], ra = GPR_U32(ctx, 31);
         hudUse(rdram, view);
-        g_origBoostRage(rdram, ctx, runtime);
+        orig(rdram, ctx, runtime);
+        wotmFinishGuestCall(rdram, ctx, runtime, ra);
         hudUse(rdram, before);
     }
+    void boostAndRage(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { lowerHudCall(g_origBoostRage, kBoostRage, rdram, ctx, runtime); }
+    void blowUpMonster(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { lowerHudCall(g_origBlowUp, kBlowUp, rdram, ctx, runtime); }
 
     // Fim de rodada do modo 3 (Shell::EvaluateGameStatus -> EvaluateMultiPlayerBattleStatusNoAI ou ...AI, com r = 1 quando alguem
     // morre, 3 quando saem). O NoAI do retail so trata "sobrou 1 vivo" e "nenhum vivo": com 3 ou 4 jogadores uma morte deixa 2 ou 3
@@ -1163,9 +1118,10 @@ namespace wotm_split4
         g_origBlurInit = runtime.lookupFunction(kBlurInit);
         g_origBlurDraw = runtime.lookupFunction(kBlurDraw);
         g_origBoostRage = runtime.lookupFunction(kBoostRage);
+        g_origBlowUp = runtime.lookupFunction(kBlowUp);
         g_origThrowPreempt = runtime.lookupFunction(kThrowPreempt);
         g_origLeaveUnified = runtime.lookupFunction(kLeaveUnified);
-        g_updateAnims = runtime.lookupFunction(kUpdateAnims);
+        g_updateMessage = runtime.lookupFunction(kUpdateMessage);
         g_origPortOpen = runtime.lookupFunction(wotm::fn::scePadPortOpen);
         g_origPortClose = runtime.lookupFunction(wotm::fn::scePadPortClose);
         bool padsOk = g_origPortOpen && g_origPortClose;
@@ -1173,7 +1129,7 @@ namespace wotm_split4
             padsOk = padsOk && (g_padOrig[i] = runtime.lookupFunction(kPadSlotFns[i])) != nullptr;
         if (!g_viewCreate || !g_viewSetFov || !g_follow || !g_setPov || !g_origReestablish || !g_origGrapple || !g_origOkToUnify ||
             !g_origResetLevel || !g_origInitCamera || !g_origLoadLevelFiles || !g_origInitPlayers || !g_origSetPlayer || !g_origHudUpdate || !g_origStartPoint || !g_origHudInitAfter || !g_origEvalNoAI || !g_origEvalAI ||
-            !g_origBlurInit || !g_origBlurDraw || !g_origBoostRage || !g_origThrowPreempt || !g_origLeaveUnified || !g_updateAnims || !padsOk)
+            !g_origBlurInit || !g_origBlurDraw || !g_origBoostRage || !g_origBlowUp || !g_origThrowPreempt || !g_origLeaveUnified || !g_updateMessage || !padsOk)
         {
             std::fprintf(stderr, "[split] tela dividida de %d desligada: funcao do jogo ou scePad* sem funcao no runtime\n", n);
             return;
@@ -1196,6 +1152,7 @@ namespace wotm_split4
         runtime.registerFunction(kBlurInit, &blurInit);
         runtime.registerFunction(kBlurDraw, &blurDraw);
         runtime.registerFunction(kBoostRage, &boostAndRage);
+        runtime.registerFunction(kBlowUp, &blowUpMonster);
         runtime.registerFunction(kThrowPreempt, &throwPreemption);
         runtime.registerFunction(kLeaveUnified, &leaveUnified);
         runtime.registerFunction(wotm::fn::scePadPortOpen, &portOpen);

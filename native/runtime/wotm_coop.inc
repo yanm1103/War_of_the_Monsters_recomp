@@ -779,9 +779,8 @@ void okToUnifyHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     // Vista 0 de volta a camera 0 (fora da vista unificada). Com todos mortos o jogo junta a tela (a vista 0 empresta o _cs da 2), e
     // um viewCreate da vista 0 nesse meio tempo (a carga do retry) grava ownCs = cs emprestado: ao sair da vista unificada, o
     // viewGrappleConfig devolvia a vista 0 a camera 2 (parada, POV 3) e o P1 sumia da metade dele
-    // (nao com um update de HUD 2/3 pausado: a troca dele poe o _cs da camera 2 ou 3 na camera 0 ate a retomada)
     if (ctx->pc == g_okToUnify.addr && players(rdram) > 1 && !rd32(rdram, wotm::sym::gUseUnifiedView) &&
-        !rd32(rdram, wotm::sym::moviePlaying) && !wotm_split4::g_hudPending.on)
+        !rd32(rdram, wotm::sym::moviePlaying))
     {
         const uint32_t vi = wotm::sym::viewInfo, cs0 = rd32(rdram, wotm_split4::camera(0) + wotm_split4::kCamCs);
         if (cs0 && (rd32(rdram, vi + 0x10) != cs0 || rd32(rdram, vi) != cs0))
@@ -1565,8 +1564,7 @@ void dbgTick(uint8_t *rdram)
         return;
     if (++g_fightFrames == 60)
         dbgSchedule("comeco da luta", 0);
-    // com um update de HUD 2/3 pausado, a troca dele (indice, m_viewSlot, _cs da camera) ainda vale: o dump espera a retomada
-    if (g_dumpAt && g_fightFrames >= g_dumpAt && !wotm_split4::g_hudPending.on)
+    if (g_dumpAt && g_fightFrames >= g_dumpAt)
     {
         g_dumpAt = 0;
         dbgDump(rdram, g_dumpTag);
