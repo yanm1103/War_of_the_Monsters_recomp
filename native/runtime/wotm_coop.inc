@@ -52,6 +52,10 @@ int players(uint8_t *rdram)
 }
 
 bool g_out[4] = {};
+bool g_dbgLog = false;                                // diagnostico (WOTM_COOPLOG), no fim do arquivo
+void dbgSchedule(const char *tag, uint32_t frames);
+void dbgTick(uint8_t *rdram);
+uint32_t dbgRd16(uint8_t *rdram, uint32_t a) { return uint32_t(rdram[a & 0x1FFFFFFFu]) | uint32_t(rdram[(a + 1) & 0x1FFFFFFFu]) << 8; }
 
 int inFight(int n, int except)
 {
@@ -106,6 +110,12 @@ void applyLayout(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         wr32(rdram, vi + 0x14u * uint32_t(v) + 8, layoutViewport(v));
         wotm_split4::applyDef(rdram, ctx, runtime, uint32_t(v), layoutDef(v));
+        if (g_dbgLog)
+        {
+            const uint32_t d = layoutDef(v);
+            std::fprintf(stderr, "[cooplog] applyDef vista %d def %x: planos0 %.2f/%.2f/%.2f %.2f/%.2f/%.2f pc %x\n", v, d, rdF(rdram, d + 0x30),
+                         rdF(rdram, d + 0x34), rdF(rdram, d + 0x38), rdF(rdram, d + 0x40), rdF(rdram, d + 0x44), rdF(rdram, d + 0x48), ctx->pc);
+        }
     }
 }
 
@@ -140,6 +150,9 @@ void eliminate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, int i, in
     for (int v = 0; v < r; ++v)
         std::fprintf(stderr, " %d=jogador %d", v, map[v] + 1);
     std::fprintf(stderr, "\n");
+    char tag[48];
+    std::snprintf(tag, sizeof tag, "depois da saida do P%d", i + 1);
+    dbgSchedule(tag, 90);
 }
 
 bool placeBeside(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, int who, float ax, float ay, float az, float rx,
@@ -750,6 +763,8 @@ void highlightsHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 void okToUnifyHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
     hudRestore(rdram);
+    if (ctx->pc == g_okToUnify.addr)
+        dbgTick(rdram);
     const int n = ctx->pc == g_okToUnify.addr ? players(rdram) : 0;
     if (n != 2)
     {
@@ -785,6 +800,7 @@ float hatTest(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t p
     ctx->f[13] = 4096.f;
     ctx->pc = fn::hdHatTest__FP8_fvectorT0fbf;
     f(rdram, ctx, runtime);
+    wotmFinishGuestCall(rdram, ctx, runtime);
     const float d = ctx->f[0];
     *ctx = saved;
     return d;
@@ -806,6 +822,7 @@ float callF(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t add
     ctx->r[31] = _mm_set_epi64x(0, 0);
     ctx->pc = addr;
     f(rdram, ctx, runtime);
+    wotmFinishGuestCall(rdram, ctx, runtime);
     const float f0 = ctx->f[0];
     *ctx = saved;
     return f0;
@@ -1238,10 +1255,240 @@ void playMovieHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     g_playMovie.orig(rdram, ctx, runtime);
 }
 
+// ------------------------------------------------------------------ diagnostico (WOTM_COOPLOG, WOTM_COOPKILL)
+
+// WOTM_COOPLOG=1: depois de cada saida (e no comeco da luta), linhas [cooplog] com o estado das vistas: viewInfo (cs, def, viewport,
+// ownCs), a camera de cada vista (monstro, POV, cs), cada jogador (cs, drawMe, m_cameraView, m_playerNum, vida) e cada barra de HUD
+// (+0xF4: drawMe e posicao). Posicao de um ponto numa vista: (direita, frente, cima) nos eixos do _cs da vista, a tela aproximada
+// sx, sy (-1..1 = dentro da vista; distancia de tela do ViewDef sobre a meia largura/altura) e o teste de frustum do jogo
+// (viewInFOV com extensao 0 contra os planos do worldCtx da vista, os do ultimo viewUpdate): "fov 0" com sx, sy dentro = corte errado.
+// WOTM_COOPKILL=<ordem>[@<segundos>] (ex.: 213@6): derruba os jogadores nessa ordem (1 a 4), um a cada N segundos de luta fora de
+// cinema (padrao 6), pelo mesmo pedido da tecla 8 do menu F1 (g_wotmCheatKill); liga o WOTM_COOPLOG.
+struct DbgPt
+{
+    float r = 0, f = 0, u = 0, sx = 0, sy = 0;
+    int fov = -1;
+};
+DbgPt dbgPoint(uint8_t *rdram, int v, const float p[3])
+{
+    DbgPt d;
+    const uint32_t vi = wotm::sym::viewInfo + 0x14u * uint32_t(v), cs = rd32(rdram, vi) & 0x1FFFFFFFu, def = rd32(rdram, vi + 4) & 0x1FFFFFFFu;
+    if (cs < 0x1000u || def < 0x1000u)
+        return d;
+    float l[3] = {};
+    for (uint32_t r = 0; r < 3; ++r)
+        for (uint32_t k = 0; k < 3; ++k)
+            l[r] += rdF(rdram, cs + 0x20u + 0x10u * r + 4u * k) * (p[k] - rdF(rdram, cs + 0x10u + 4u * k));
+    d.r = l[0], d.f = l[1], d.u = l[2];
+    const float fov = rdF(rdram, def), aspect = rdF(rdram, def + 0x20);
+    const float hw = float(dbgRd16(rdram, def + 4) >> 1), hh = float(dbgRd16(rdram, def + 6)) * 0.5f;
+    if (d.f > 1.f && hw > 0.f && hh > 0.f)
+    {
+        d.sx = fov * d.r / d.f / hw;
+        d.sy = fov * aspect * d.u / d.f / hh;
+    }
+    const uint32_t w = wotm::sym::worldCtx + 0x1F0u * uint32_t(v) + 0xF0u;   // fovNormsTP[2][4][4]
+    d.fov = 1;
+    for (uint32_t i = 0; i < 2 && d.fov; ++i)
+        for (uint32_t j = 0; j < 3; ++j)
+        {
+            const uint32_t n = w + 0x40u * i + 0x10u * j;
+            const float dot = rdF(rdram, n) * p[0] + rdF(rdram, n + 4) * p[1] + rdF(rdram, n + 8) * p[2];
+            if (dot < rdF(rdram, w + 0x40u * i + 0x30u + 4u * j))
+            {
+                d.fov = 0;
+                break;
+            }
+        }
+    return d;
+}
+
+int dbgPlayerOf(uint8_t *rdram, uint32_t m)
+{
+    m &= 0x1FFFFFFFu;
+    for (int i = 0; i < 4 && m; ++i)
+        if (monster(rdram, i) == m)
+            return i + 1;
+    return 0;
+}
+
+void dbgDump(uint8_t *rdram, const char *tag)
+{
+    const int n = players(rdram), nv = std::min<int>(int(rd32(rdram, wotm::sym::viewNumViews)), 4);
+    std::fprintf(stderr, "[cooplog] %s: g_frame %u, vistas %d (g_views %d:", tag, rd32(rdram, wotm::sym::g_frame), nv, g_views);
+    for (int v = 0; v < g_views; ++v)
+        std::fprintf(stderr, " %d=P%d", v, g_map[v] + 1);
+    std::fprintf(stderr, "), unificada %u, cinema %d\n", rd32(rdram, wotm::sym::gUseUnifiedView), int(wotm_split4::g_cinemaFull));
+    for (int v = 0; v < 4; ++v)
+    {
+        const uint32_t vi = wotm::sym::viewInfo + 0x14u * uint32_t(v), cam = wotm_split4::camera(v);
+        const uint32_t vcs = rd32(rdram, vi) & 0x1FFFFFFFu, ccs = rd32(rdram, cam + kCamCs) & 0x1FFFFFFFu;
+        int owner = -1;   // camera cujo _cs a vista usa
+        for (int c = 0; c < 4 && owner < 0; ++c)
+            if (vcs && (rd32(rdram, wotm_split4::camera(c) + kCamCs) & 0x1FFFFFFFu) == vcs)
+                owner = c;
+        const uint32_t def = rd32(rdram, vi + 4) & 0x1FFFFFFFu;
+        std::fprintf(stderr, "[cooplog]   vista %d%s: cs %x (camera %d) own %x def %x (w %u h %u fov %.0f cx %d cy %d) vp %d | camera %d: P%d pov %d cs %x\n", v,
+                     v < nv ? "" : " (fora)", vcs, owner, rd32(rdram, vi + 0x10) & 0x1FFFFFFFu, def, def ? dbgRd16(rdram, def + 4) : 0u,
+                     def ? dbgRd16(rdram, def + 6) : 0u, def ? rdF(rdram, def) : 0.f, def ? int32_t(rd32(rdram, def + 0x18)) : 0,
+                     def ? int32_t(rd32(rdram, def + 0x1C)) : 0, int32_t(rd32(rdram, vi + 8)), v,
+                     dbgPlayerOf(rdram, rd32(rdram, cam + wotm_split4::kCamMonster)), int32_t(rd32(rdram, cam + wotm_split4::kCamPov)), ccs);
+        if (v < nv && vcs)
+        {   // o que o ultimo viewUpdate(v) gravou: olho (-eo) contra o _cs da vista, e os planos (normal e limiar) no worldCtx
+            const uint32_t w = wotm::sym::worldCtx + 0x1F0u * uint32_t(v);
+            std::fprintf(stderr, "[cooplog]     worldCtx %d: olho (%.0f,%.0f,%.0f) cs (%.0f,%.0f,%.0f); planos", v, -rdF(rdram, w + 0x20), -rdF(rdram, w + 0x24),
+                         -rdF(rdram, w + 0x28), rdF(rdram, vcs + 0x10), rdF(rdram, vcs + 0x14), rdF(rdram, vcs + 0x18));
+            for (uint32_t i = 0; i < 2; ++i)
+                for (uint32_t j = 0; j < 3; ++j)
+                {
+                    const uint32_t nn = w + 0xF0u + 0x40u * i + 0x10u * j;
+                    std::fprintf(stderr, " [%.2f %.2f %.2f >= %.0f]", rdF(rdram, nn), rdF(rdram, nn + 4), rdF(rdram, nn + 8), rdF(rdram, w + 0xF0u + 0x40u * i + 0x30u + 4u * j));
+                }
+            std::fprintf(stderr, "; def planos");
+            for (uint32_t k = 0; k < 8; ++k)
+                std::fprintf(stderr, " %.2f/%.2f/%.2f", rdF(rdram, def + 0x30 + 0x10 * k), rdF(rdram, def + 0x34 + 0x10 * k), rdF(rdram, def + 0x38 + 0x10 * k));
+            std::fprintf(stderr, "\n");
+        }
+    }
+    for (int i = 0; i < n; ++i)
+    {
+        const uint32_t m = monster(rdram, i), cs = m ? rd32(rdram, m + kCs) & 0x1FFFFFFFu : 0u;
+        if (!cs)
+            continue;
+        const float p[3] = {rdF(rdram, cs + 0x10), rdF(rdram, cs + 0x14), rdF(rdram, cs + 0x18)};
+        std::fprintf(stderr, "[cooplog]   P%d: cs %x drawMe %u cameraView %d playerNum %d vida %.0f fora %d em (%.0f,%.0f,%.0f)", i + 1, cs,
+                     rdram[cs + 0xC], int32_t(rd32(rdram, m + kCameraView)), int32_t(rd32(rdram, m + kPlayerNum)), rdF(rdram, m + kHealth),
+                     int(g_out[i]), p[0], p[1], p[2]);
+        for (int v = 0; v < nv; ++v)
+        {
+            const DbgPt d = dbgPoint(rdram, v, p);
+            std::fprintf(stderr, " | v%d f %.0f tela (%.2f,%.2f) fov %d", v, d.f, d.sx, d.sy, d.fov);
+        }
+        std::fprintf(stderr, "\n");
+    }
+    for (int h = 0; h < 4; ++h)
+    {
+        const uint32_t hud = kGame + kHudStride * uint32_t(h), bar = rd32(rdram, hud + 0xF4) & 0x1FFFFFFFu;
+        if (bar < 0x1000u || bar + 0x60u > PS2_RAM_SIZE)
+            continue;
+        const float p[3] = {rdF(rdram, bar + 0x10), rdF(rdram, bar + 0x14), rdF(rdram, bar + 0x18)};
+        const int v = int32_t(rd32(rdram, hud));
+        std::fprintf(stderr, "[cooplog]   HUD %d (vista %d, viewSlot %u -> P%d): barra %x drawMe %u", h, v, rd32(rdram, kViewSlot + 4u * uint32_t(h)),
+                     dbgPlayerOf(rdram, kSlots + kSlotStride * rd32(rdram, kViewSlot + 4u * uint32_t(h))), bar, rdram[bar + 0xC]);
+        if (v >= 0 && v < nv)
+        {
+            const DbgPt d = dbgPoint(rdram, v, p);
+            std::fprintf(stderr, " | na vista %d: (dir %.1f, frente %.1f, cima %.1f) tela (%.2f,%.2f) fov %d", v, d.r, d.f, d.u, d.sx, d.sy, d.fov);
+        }
+        std::fprintf(stderr, "\n");
+    }
+}
+
+
+std::string g_killOrder;
+int g_killSecs = 6, g_killNext = 0;
+uint32_t g_fightFrames = 0, g_lastFrame = 0, g_dumpAt = 0, g_killAt = 0;
+char g_dumpTag[48] = {};
+
+void dbgSchedule(const char *tag, uint32_t frames)
+{
+    if (!g_dbgLog)
+        return;
+    std::snprintf(g_dumpTag, sizeof g_dumpTag, "%s", tag);
+    g_dumpAt = g_fightFrames + frames;
+}
+
+// Por quadro (comeco do rtMain, okToUnify): conta os quadros de luta fora de cinema, dispara as mortes do roteiro e os dumps
+void dbgTick(uint8_t *rdram)
+{
+    if (!g_dbgLog || !players(rdram))
+        return;
+    const uint32_t f = rd32(rdram, wotm::sym::g_frame);
+    if (f == g_lastFrame)
+        return;
+    const bool fight = !rd32(rdram, wotm::sym::moviePlaying) && !rd32(rdram, wotm::sym::gUseUnifiedView) && rd32(rdram, kInSession);
+    g_lastFrame = f;
+    if (!fight)
+        return;
+    if (++g_fightFrames == 60)
+        dbgSchedule("comeco da luta", 0);
+    // com um update de HUD 2/3 pausado, a troca dele (indice, m_viewSlot, _cs da camera) ainda vale: o dump espera a retomada
+    if (g_dumpAt && g_fightFrames >= g_dumpAt && !wotm_split4::g_hudPending.on)
+    {
+        g_dumpAt = 0;
+        dbgDump(rdram, g_dumpTag);
+    }
+    if (!g_killOrder.empty())
+    {   // roteiro: so sai quem o roteiro derruba (a vida dos outros jogadores fica cheia; o inv nao pega toda morte)
+        const int n = players(rdram);
+        for (int i = 0; i < n; ++i)
+        {
+            const uint32_t m = monster(rdram, i);
+            if (m && !g_out[i] && g_killOrder.find(char('1' + i)) >= size_t(g_killNext) && rdF(rdram, m + kHealth) > 0.f)
+                wrF(rdram, m + kHealth, rdF(rdram, m + 0x448));   // vida maxima
+        }
+        // e a das IAs inimigas: os bots nao terminam a fase antes do fim do roteiro
+        for (int i = 0, ais = static_cast<int32_t>(rd32(rdram, kNumAIs)); i < ais && i < 4; ++i)
+            if (const uint32_t m = monster(rdram, 4 + i); m && rdF(rdram, m + kHealth) > 0.f)
+                wrF(rdram, m + kHealth, rdF(rdram, m + 0x448));
+    }
+    if (g_killNext < int(g_killOrder.size()) && g_fightFrames >= uint32_t(g_killSecs) * 60u * uint32_t(g_killNext + 1))
+    {
+        const int who = g_killOrder[size_t(g_killNext++)] - '1';
+        if (who >= 0 && who < 4)
+        {
+            g_wotmCheatKill = 1u << who;
+            std::fprintf(stderr, "[cooplog] roteiro: derruba o P%d (passo %d de %zu)\n", who + 1, g_killNext, g_killOrder.size());
+            char tag[48];
+            std::snprintf(tag, sizeof tag, "passo %d (P%d derrubado)", g_killNext, who + 1);
+            dbgSchedule(tag, 150);
+        }
+    }
+}
+
+// Com o log: quem marca a morte de um monstro (setDead, StateDeath::transitionInto, volume de morte), com o quadro e o ra
+Hook g_dbgSetDead{fn::setDead__7Monsterb}, g_dbgDeathInto{fn::transitionInto__10StateDeath},
+    g_dbgDeathVol{fn::doDeathVolume__FP7MonsterP11TriggerHead}, g_dbgEnter{fn::enterNewState__7MonsterP12MonsterState};
+void dbgDeathHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    const uint32_t pc = ctx->pc, a0 = GPR_U32(ctx, 4) & 0x1FFFFFFFu, a1 = GPR_U32(ctx, 5), ra = GPR_U32(ctx, 31);
+    const Hook &h = pc == g_dbgSetDead.addr ? g_dbgSetDead : pc == g_dbgDeathInto.addr ? g_dbgDeathInto : pc == g_dbgEnter.addr ? g_dbgEnter : g_dbgDeathVol;
+    const char *what = pc == g_dbgSetDead.addr ? "setDead" : pc == g_dbgDeathInto.addr ? "StateDeath::transitionInto" :
+                       pc == g_dbgEnter.addr ? "enterNewState(morte)" : "doDeathVolume";
+    bool log = pc != g_dbgSetDead.addr || (a1 & 0xFFu);
+    if (pc == g_dbgEnter.addr)
+    {   // so a entrada no estado de morte (vtable do StateDeath nos primeiros campos do estado)
+        log = false;
+        const uint32_t st = a1 & 0x1FFFFFFFu;
+        for (uint32_t o = 0; o < 0x40u && st >= 0x1000u && st + o + 4u <= PS2_RAM_SIZE && !log; o += 4u)
+            log = rd32(rdram, st + o) == wotm::sym::x_vt_10StateDeath;
+    }
+    int slot = -1;
+    for (int i = 0; i < 9 && slot < 0; ++i)
+        if (const uint32_t m = monster(rdram, i); m && a0 >= m && a0 < m + 0x11000u)
+            slot = i;
+    if (log)
+        std::fprintf(stderr, "[cooplog] %s: monstro %d (a0 %x a1 %x) ra %x g_frame %u\n", what, slot, a0, a1, ra,
+                     rd32(rdram, wotm::sym::g_frame));
+    h.orig(rdram, ctx, runtime);
+}
+
 void install(PS2Runtime &runtime)
 {
     if (!wotm_split4::g_players)
         return;
+    if (const char *e = std::getenv("WOTM_COOPKILL"); e && *e)
+    {
+        for (const char *p = e; *p && *p != '@'; ++p)
+            if (*p >= '1' && *p <= '4')
+                g_killOrder += *p;
+        if (const char *at = std::strchr(e, '@'))
+            g_killSecs = std::clamp(std::atoi(at + 1), 2, 120);
+        g_dbgLog = true;
+        std::fprintf(stderr, "[cooplog] roteiro de mortes: %s, uma a cada %d s de luta\n", g_killOrder.c_str(), g_killSecs);
+    }
+    if (const char *e = std::getenv("WOTM_COOPLOG"); e && *e && *e != '0')
+        g_dbgLog = true;
     struct H { Hook *h; PS2Runtime::RecompiledFunction fn; };
     const H hooks[] = {
         {&g_reestablish, &reestablishHook}, {&g_okToUnify, &okToUnifyHook}, {&g_startPoint, &startPointHook}, {&g_resolve, &resolveHook},
@@ -1261,6 +1508,10 @@ void install(PS2Runtime &runtime)
         }
     for (const H &h : hooks)
         runtime.registerFunction(h.h->addr, h.fn);
+    if (g_dbgLog)
+        for (Hook *h : {&g_dbgSetDead, &g_dbgDeathInto, &g_dbgDeathVol, &g_dbgEnter})
+            if ((h->orig = runtime.lookupFunction(h->addr)))
+                runtime.registerFunction(h->addr, &dbgDeathHook);
     std::fprintf(stderr, "[coop] campanha de 2 a 4 jogadores\n");
 }
 } // namespace wotm_coop

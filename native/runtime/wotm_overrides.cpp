@@ -76,10 +76,11 @@ void wotmMainMenuInstall(PS2Runtime &runtime);   // wotm_mainmenu.inc: menu prin
 
 // Trapacas de debug: a janela (menu F1, wotm_live.inc) escreve, a thread do EE (monsterUpdateCheats) le. Bits em wotm_cheats.h.
 #include "wotm_cheats.h"
+#include "wotm_guestcall.h"   // termina as chamadas a codigo do jogo feitas de dentro de ganchos
 #include "wotm_settings.hpp"   // opcoes ao vivo (painel "recompiled options" e launcher)
 std::atomic<uint32_t> g_wotmCheats{0};
 std::atomic<bool> g_wotmCheatWin{false};
-std::atomic<uint32_t> g_wotmCheatLowHp{0};
+std::atomic<uint32_t> g_wotmCheatKill{0};
 
 // Camera livre de debug (F5): a janela (wotm_freecam.inc) move a pose, a thread do EE a poe no _cs da vista 0 (freeCamWrite).
 #include "wotm_freecam.h"
@@ -237,6 +238,26 @@ namespace
     bool aiVsAiSlot(int slot) { return slot >= 0 && slot < 4 && (g_aiVsAiMask >> slot & 1u); }
     bool aiVsAiAll() { return g_aiVsAiMask == 0xFu; }
 
+    // WOTM_LIVES=1..9 (teste: sair sem vidas logo); 0 = sem a variavel (vidas do jogo)
+    uint32_t livesOverride()
+    {
+        static const uint32_t s_lives = [] {
+            const char *e = std::getenv("WOTM_LIVES");
+            const int n = e ? std::atoi(e) : 0;
+            return uint32_t(n >= 1 && n <= 9 ? n : 0);
+        }();
+        return s_lives;
+    }
+
+    // Shell::InitPlayerLives (folha: m_lives[0..3] = NUM_LIVES[m_mode], no comeco do jogo) com o WOTM_LIVES: grava N
+    void initPlayerLivesFixed(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        (void)runtime;
+        for (uint32_t i = 0; i < 4; ++i)
+            WRITE32(kShell + 0x2BBC + 4 * i, livesOverride());
+        ctx->pc = GPR_U32(ctx, 31);
+    }
+
     void userintMainDirect(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t storyLevel = READ32(kShell + 0x2BB0);   // fase que a historia deixou (aventura, WOTM_MODE=1)
@@ -280,7 +301,7 @@ namespace
         WRITE32(kShell + 0x2BB8, static_cast<uint32_t>(g_matchAIs));     // m_numAIs
         for (uint32_t i = 0; i < 4; ++i)
             if (g_matchMode != 1 || !g_matchCount)
-                WRITE32(kShell + 0x2BBC + 4 * i, 3);   // m_lives (na aventura, so na primeira partida)
+                WRITE32(kShell + 0x2BBC + 4 * i, livesOverride() ? livesOverride() : 3u);   // m_lives (na aventura, so na primeira partida)
         // m_mode: free for all de 1 jogador (2) ou batalha multijogador (3: o TheGame::gameReestablishViews cria as duas vistas da tela
         // dividida nos modos 3, 6 e 7; com o 2 a luta ficava numa vista so e as cenas de cinema, que alternam a divisao, a ligavam)
         // WOTM_MODE (com 2 ou mais jogadores): eliminacao (6, continues em m_elimination e nos dois m_continues, monstros do comeco
@@ -624,7 +645,29 @@ namespace
         ctx->f[12] = damage;
         ctx->pc = kTakeDamage;
         g_origTakeDamage(rdram, ctx, runtime);
+        wotmFinishGuestCall(rdram, ctx, runtime);
         *ctx = saved;
+    }
+
+    // Derruba o jogador i (m_monsters[i], 0..3) vivo com um takeDamage do tamanho da vida; a fonte e a primeira IA viva (ou ele mesmo).
+    // Devolve 1 se derrubou.
+    int killPlayer(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, int i)
+    {
+        const int32_t players = static_cast<int32_t>(READ32(kShell + 0x2BB4));   // m_numPlayers
+        const uint32_t p = i >= 0 && i < 4 && i < std::max(players, 1) ? READ32(kGame + 0x120380 + 4 * i) & 0x1FFFFFFFu : 0u;
+        float hp;
+        const uint32_t hw = p ? READ32(p + 0x44C) : 0u;
+        std::memcpy(&hp, &hw, 4);
+        if (!p || READ8(p + 0xE8) || !(hp > 0.f))   // m_dead
+            return 0;
+        uint32_t src = p;
+        const int32_t ais = static_cast<int32_t>(READ32(kGame + 0x1203E0));   // m_numAIs
+        for (int32_t k = 0; k < ais && k < 12 && src == p; ++k)
+            if (const uint32_t ai = READ32(kGame + 0x120390 + 4 * k) & 0x1FFFFFFFu; ai && !READ8(ai + 0xE8))
+                src = ai;
+        if (g_origTakeDamage)
+            callTakeDamage(rdram, ctx, runtime, p, hp + 1000.f, src);
+        return 1;
     }
 
     void takeDamageCheat(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -782,30 +825,13 @@ namespace
                 }
                 std::fprintf(stderr, "[debug] vencer a luta: %d IA(s) derrubada(s) de %d\n", killed, ais);
             }
-            if (const uint32_t mask = g_wotmCheatLowHp.exchange(0))
-            {   // vida baixa (tecla 8 do menu F1): o primeiro jogador atualizado no quadro aplica em todos os da mascara
-                int32_t players = static_cast<int32_t>(READ32(kShell + 0x2BB4));   // m_numPlayers
-                if (players < 1 || players > 4)
-                    players = 1;
+            if (const uint32_t mask = g_wotmCheatKill.exchange(0))
+            {   // matar (tecla 8 do menu F1, WOTM_COOPKILL): o primeiro jogador atualizado no quadro aplica em todos os da mascara
                 int done = 0;
-                for (int32_t i = 0; i < players; ++i)
-                {
-                    const uint32_t p = READ32(kGame + 0x120380 + 4 * i);   // m_monsters[i]
-                    if (!(mask & (1u << i)) || !p || READ8(p + 0xE8))     // m_dead
-                        continue;
-                    float maxHp, hp;
-                    const uint32_t mw = READ32(p + 0x448), hw = READ32(p + 0x44C);   // vida maxima, vida atual
-                    std::memcpy(&maxHp, &mw, 4);
-                    std::memcpy(&hp, &hw, 4);
-                    const float low = std::max(1.0f, maxHp * 0.05f);
-                    if (!(hp > low))
-                        continue;   // ja abaixo: nao sobe a vida
-                    uint32_t lw;
-                    std::memcpy(&lw, &low, 4);
-                    WRITE32(p + 0x44C, lw);
-                    ++done;
-                }
-                std::fprintf(stderr, "[debug] vida baixa: mascara 0x%x, %d jogador(es) em 5%%\n", mask, done);
+                for (int32_t i = 0; i < 4; ++i)
+                    if (mask & (1u << i))
+                        done += killPlayer(rdram, ctx, runtime, i);
+                std::fprintf(stderr, "[debug] matar: mascara 0x%x, %d jogador(es) derrubado(s)\n", mask, done);
             }
         }
         g_origMonsterUpdate(rdram, ctx, runtime);
@@ -2674,6 +2700,11 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
                 if (*p >= '1' && *p <= '4')
                     g_aiVsAiMask |= 1u << (*p - '1');
         }
+    }
+    if (livesOverride())
+    {
+        runtime.registerFunction(wotm::fn::InitPlayerLives__5Shell, &initPlayerLivesFixed);
+        std::fprintf(stderr, "[wotm] %u vida(s) por jogador (WOTM_LIVES)\n", livesOverride());
     }
     if (g_aiVsAiMask && (g_aiInit = runtime.lookupFunction(kAiInit)) && (g_origSetAIMonster = runtime.lookupFunction(kSetAIMonster)) &&
         (g_origPlayerInit = runtime.lookupFunction(kPlayerInit)))

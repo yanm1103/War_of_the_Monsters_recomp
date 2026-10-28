@@ -828,6 +828,7 @@ namespace wotm_save
         ctx->r[31] = _mm_set_epi64x(0, 0);
         ctx->pc = fn;
         f(rdram, ctx, rt);
+        wotmFinishGuestCall(rdram, ctx, rt);
         *ctx = saved;
     }
 

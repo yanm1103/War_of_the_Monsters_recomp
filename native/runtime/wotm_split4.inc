@@ -100,6 +100,7 @@ namespace wotm_split4
         ctx->f[13] = f13;
         ctx->pc = addr;
         fn(rdram, ctx, runtime);
+        wotmFinishGuestCall(rdram, ctx, runtime);
         *ctx = saved;
     }
 

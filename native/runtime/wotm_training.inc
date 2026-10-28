@@ -801,6 +801,7 @@ namespace wotm_train
         ctx->r[31] = _mm_set_epi64x(0, 0);
         ctx->pc = wotm::fn::animationGetCurrentPercent__FG11_animHandle;
         f(rdram, ctx, runtime);
+        wotmFinishGuestCall(rdram, ctx, runtime);
         const float pct = ctx->f[0];
         *ctx = saved;
         return std::isfinite(pct) ? pct : -1.f;
@@ -1318,6 +1319,7 @@ namespace wotm_train
         ctx->r[31] = _mm_set_epi64x(0, 0);
         ctx->pc = fn;
         f(rdram, ctx, rt);
+        wotmFinishGuestCall(rdram, ctx, rt);
         *ctx = saved;
     }
     void cinemaUpdate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)

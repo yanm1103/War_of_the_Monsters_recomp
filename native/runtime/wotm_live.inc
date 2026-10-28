@@ -255,6 +255,7 @@ static void wotmBootPresent(uint32_t eePc, uint64_t vsync)
 }
 
 // Som nativo (native/wotm_snd.hpp), sempre ligado (wotmSndInstall, chamado do main.cpp)
+#include "wotm_guestcall.h"   // termina as chamadas a codigo do jogo feitas de dentro de ganchos
 #include "wotm_snd.inc"
 
 // Controles e teclado por jogador (mapa porta -> dispositivos do ps2_pad.cpp), sempre ligado
@@ -2193,7 +2194,7 @@ static bool wotmDrawNative(const uint8_t *rdram)
     {   // menu de debug (F1 abre/fecha; com ele aberto, 1..8 alternam ou disparam). Setas e Enter sao do pad (ps2_pad.cpp): nao servem aqui.
         // So escreve g_wotmCheats; quem aplica e a thread do EE (monsterUpdateCheats, wotm_overrides.cpp).
         static bool open = false;
-        static int lowHpWho = 0;   // alvo da tecla 8: 0 todos os jogadores, 1..4 so P1..P4 (a tecla 7 alterna)
+        static int killWho = 1;    // alvo da tecla 8: 0 todos os jogadores, 1..4 so P1..P4 (a tecla 7 alterna)
         if (IsKeyPressed(KEY_F1))
             open = !open;
         uint32_t c = g_wotmCheats.load(std::memory_order_relaxed);
@@ -2207,8 +2208,8 @@ static bool wotmDrawNative(const uint8_t *rdram)
             if (IsKeyPressed(KEY_FOUR)) n ^= kCheatCloak;
             if (IsKeyPressed(KEY_FIVE)) n ^= kCheatGod;
             if (IsKeyPressed(KEY_SIX)) g_wotmCheatWin = true;
-            if (IsKeyPressed(KEY_SEVEN)) lowHpWho = (lowHpWho + 1) % 5;
-            if (IsKeyPressed(KEY_EIGHT)) g_wotmCheatLowHp = lowHpWho ? (1u << (lowHpWho - 1)) : 0xFu;
+            if (IsKeyPressed(KEY_SEVEN)) killWho = (killWho + 1) % 5;
+            if (IsKeyPressed(KEY_EIGHT)) g_wotmCheatKill = killWho ? (1u << (killWho - 1)) : 0xFu;
             if (n != c)
             {
                 g_wotmCheats = n;
@@ -2231,8 +2232,8 @@ static bool wotmDrawNative(const uint8_t *rdram)
             std::snprintf(lines[nl++], 64, "5  Game's god mode   %s", (c & kCheatGod) ? "ON" : "-");
             std::snprintf(lines[nl++], 64, "6  Win the fight (knocks out the AIs)");
             static const char *const whoName[5] = {"all players", "P1", "P2", "P3", "P4"};
-            std::snprintf(lines[nl++], 64, "7  Low HP target     %s", whoName[lowHpWho]);
-            std::snprintf(lines[nl++], 64, "8  Low HP (5%% of max, no kill)");
+            std::snprintf(lines[nl++], 64, "7  Kill target       %s", whoName[killWho]);
+            std::snprintf(lines[nl++], 64, "8  Kill (loses a life)");
             int w = 0;
             for (int i = 0; i < nl; ++i)
                 w = std::max(w, MeasureText(lines[i], fs));

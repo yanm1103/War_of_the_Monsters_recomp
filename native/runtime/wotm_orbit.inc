@@ -226,6 +226,7 @@ namespace
                 ctx->r[31] = _mm_set_epi64x(0, 0);
                 ctx->pc = fn;
                 fp(rdram, ctx, rt);
+                wotmFinishGuestCall(rdram, ctx, rt);
                 const bool back = ctx->pc == 0u;
                 v0 = GPR_U32(ctx, 2);
                 f0 = ctx->f[0];

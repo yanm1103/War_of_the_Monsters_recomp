@@ -622,6 +622,7 @@ namespace wotm_custom
         ctx->r[31] = _mm_set_epi64x(0, 0);
         ctx->pc = addr;
         f(rdram, ctx, runtime);
+        wotmFinishGuestCall(rdram, ctx, runtime);
         const float f0 = ctx->f[0];
         if (v0)
             *v0 = GPR_U32(ctx, 2);

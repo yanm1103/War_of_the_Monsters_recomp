@@ -277,6 +277,7 @@ static void callGuest(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt, uint32_
     ctx->r[31] = _mm_set_epi64x(0, 0);
     ctx->pc = fn;
     f(rdram, ctx, rt);
+    wotmFinishGuestCall(rdram, ctx, rt);
     *ctx = saved;
 }
 static void sfx(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt, int sound)   // ShellSound::playShellSFXSound (2/4 cursor, 6 voltar, 8 ok)
@@ -1711,6 +1712,7 @@ static float transitionProgress(uint8_t *rdram, R5900Context *ctx, PS2Runtime *r
         ctx->r[31] = _mm_set_epi64x(0, 0);
         ctx->pc = fn;
         f(rdram, ctx, rt);
+        wotmFinishGuestCall(rdram, ctx, rt);
     };
     call(wotm::fn::animationGetCurrentPercent__FG11_animHandle, fp);
     const float pct = ctx->f[0];
