@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <thread>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -393,6 +394,26 @@ namespace
             WRITE32(kShell + 0x2BD0, 1);
             ctx->pc = GPR_U32(ctx, 31);
             return;
+        }
+        // WOTM_COOPRETRY=1 (teste do retry sem teclado): no fim de jogo (dialogo 1) um X sintetico aos 4 s e aos 8 s, pelo mesmo
+        // pedido do clique do mouse nos menus (wotm_mouse.hpp, requestCross; a tela vale como tela do jogo com mouse por um instante)
+        static const bool s_retry = [] { const char *e = std::getenv("WOTM_COOPRETRY"); return e && *e == '1'; }();
+        if (s_retry && ctx->pc == wotm::fn::displayDialog__Fi && GPR_U32(ctx, 4) == 1u)
+        {
+            std::fprintf(stderr, "[partida] fim de jogo: X sintetico em 4 s (WOTM_COOPRETRY)\n");
+            std::thread([] {
+                for (int k = 0; k < 2; ++k)
+                {
+                    std::this_thread::sleep_for(std::chrono::seconds(4));
+                    for (int i = 0; i < 6; ++i)
+                    {
+                        wotm::mouse::gameMenu();
+                        if (i == 0)
+                            wotm::mouse::requestCross(2);
+                        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+                    }
+                }
+            }).detach();
         }
         g_origDialogAdventure(rdram, ctx, runtime);
     }

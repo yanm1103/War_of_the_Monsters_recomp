@@ -562,7 +562,10 @@ retail fica como era.
   (r = 1), o morto com vidas renasce ali mesmo (`playerInit`, aviso de vidas no HUD da vista dele), sem voltar ao Shell nem esmaecer a
   tela; na última vida, com outro jogador na fase, sai até o fim dela (monstro e sombra escondidos). O último volta ao Shell
   (`rtReturnToShell` 1) e cai no diálogo 1 (game over do retail), chamado como cauda. O `InitPlayers` (começo da fase, retry, etapa
-  de chefe) traz todos de volta e refaz a tela da largada.
+  de chefe) traz todos de volta e refaz a tela da largada; pausado no meio pelo escalonador, essa parte fica para o primeiro
+  `SetOkToUnify`. Com todos mortos o jogo junta a tela (a vista 0 empresta o `_cs` da 2), e o `viewCreate` da carga do retry grava
+  esse `_cs` como câmera própria da vista 0: fora da vista unificada, a cada quadro a vista 0 volta à câmera 0 (linha
+  `[coop] vista 0: camera`).
 - **Vitória** (fases sem roteiro de fim: todas menos 3, 6, 9, 10 e 11): com as IAs fora, a pose é do primeiro jogador vivo.
 - **Pontos:** o `TokenManager::grandTotal` chamado pelo `EvaluateOnePlayerStoryStatus` devolve os tokens do jogador 1 vezes 1,2 (2
   jogadores), 1,3 (3) ou 1,4 (4).
@@ -574,6 +577,12 @@ retail fica como era.
   qualquer jogador perto da ponta. O tapa da base pega quem bateu nela. Na mordida de quem não está na vista 0, as câmeras 0 e a dele
   trocam de lugar durante o `InitPlantBossCamera`, e a volta do POV 3 é feita quando a cabeça o solta. Na abertura e no fim, o
   `cleanUpForMovie` vale para todos. Log `[coop] planta`.
+- **Capitólio (Cerebulon):** o `FinalBoss::updateMecha` grava o alvo (`m_monster7C`) a partir do `m_monsters[0]` e só mira ele
+  (torre, laser, passo); a jelly (`updateJelly` e o `StateUltraTazer::update` dela) persegue e choca o mesmo alvo. Durante o update
+  do chefe e o choque da jelly, `m_monsters[0]` e `m_monster7C` valem o alvo, sorteado entre os jogadores vivos ao começar cada passo
+  (Mecha no estado 2, jelly de volta ao 1) e quando o alvo morre ou sai, menos no disparo e no choque, que o próprio jogo encerra com
+  o alvo morto. Nos cinemas do chefe não há troca e o `cleanUpForMovie` vale para todos. A vibração do laser continua no controle 0.
+  Log `[coop] Cerebulon` a cada sorteio.
 - **Final:** o `Shell::GenesisMovie` enfileira o filme do herói do P1 (`_p`, depois `_g`, depois os créditos, `nextMovie` 19). O
   gancho guarda o `_p` de cada parceiro (mesma tabela, pelo monstro sem a variante; herói sem filme ou com filme repetido fica de fora),
   e o `playMovie` troca os créditos pelo próximo da fila: P1, P2, P3, P4, créditos. Log `[coop] final`.
@@ -689,6 +698,7 @@ O `python tools/wotm_env.py` compara a tabela com o código (lista o que falta e
 | `WOTM_LIVES=<1 a 9>` | vidas de cada jogador no começo do jogo (`m_lives`): o `Shell::InitPlayerLives`, que grava `NUM_LIVES[m_mode]`, grava N, e a partida direta também (sem a variável, 3). Com 1, quem morre sai na hora: teste da tela com quem sobra na campanha co-op |
 | `WOTM_COOPLOG=1` | log da troca de tela do co-op (`wotm_coop.inc`): planos de cada `applyDef` e, 90 quadros depois de cada saída, um dump `[cooplog]` com vistas, câmeras, `worldCtx` (olho e planos), cada jogador (posição, `drawMe`, posição na tela e teste do frustum por vista) e cada barra de vida (vista, posição na tela); cada entrada no estado de morte, com o quadro e o `ra` (`enterNewState`, `StateDeath::transitionInto`, `setDead`) |
 | `WOTM_COOPKILL=<ordem>[@<segundos>]` | roteiro de saídas (ex.: `231@5`): na luta, derruba os jogadores na ordem dada, um a cada N segundos (padrão 6), mantém cheia a vida dos que ainda não saíram e liga o `WOTM_COOPLOG`. Com `WOTM_LIVES=1`, testa cada ordem de saída; `tools/coop_mortes.ps1` roda uma lista de ordens e tira foto da janela a cada dump |
+| `WOTM_COOPRETRY=1` | teste do retry sem teclado: no fim de jogo da partida direta (diálogo 1), um X sintético aos 4 s e aos 8 s (o pedido do clique do mouse nos menus). Com `WOTM_COOPKILL` derrubando todos, o co-op loga um dump `[cooplog] depois do retry` |
 | `WOTM_SETTINGS=0` | ignora o `settings.ini` (nem lê nem grava; `lote.ps1` e `corpus.ps1` a ligam). Sem ela, o `settings.ini` ao lado do `save.json` (`wotm_settings.hpp`) guarda as opções que o painel "Recompiled options" muda ao vivo (o launcher não as tem): `WOTM_RES`, `WOTM_ASPECT` (`dynamic` ou da lista), `WOTM_FULLSCREEN`, `WOTM_HZ`, `WOTM_VSYNC`, `WOTM_LOCKTOGGLE`, `WOTM_ENEMYBARS`, `WOTM_DAMAGEPOP`, `WOTM_KBSEPARATE`, `WOTM_PROMPTS`, `WOTM_MENUCONFIRM`, `WOTM_CAMERA`, `WOTM_CAMRECENTER`, `WOTM_CLOSECAM`, `WOTM_CAMSENS`, `WOTM_CAMINVERT`, `WOTM_RENDERSCALE`, `WOTM_MSAA`, `WOTM_TEXFILTER`, `WOTM_ANNOUNCER`, `WOTM_SKIPINTRO`, `WOTM_VIBRATION`, `WOTM_INTERP`, e o mapa de teclas e botões (`KB_LAYOUT=2`, teclas de um layout anterior são ignoradas e o arquivo regravado; `KB_<botão>=TECLA[,TECLA]` com teclas, `MOUSE_LEFT`..`MOUSE_EXTRA`, `WHEEL_UP`/`WHEEL_DOWN` e as ações só do teclado `LOCK`, `BLOCK`, `STRAFE_LEFT`/`RIGHT`, `TARGET_NEXT`/`PREV`, `TRIANGLE_CIRCLE`, `CROSS_SQUARE`, `WALK`, `PAD_<botão>=BOTÃO` do jogador 1 e `PAD2_`..`PAD4_` dos outros, só no arquivo). Na abertura: padrão, depois o arquivo, depois as variáveis definidas (por cima do arquivo) |
 | `WOTM_SAVEJSON=0` | desliga o save em JSON (`wotm_save.inc`, "Save em JSON"): o jogo grava e lê só os binários de `mc0/`/`mc1/`, como antes. Sem ela, o `save.json` ao lado da pasta do cartão (opções e destraves uma vez, `saves` com 20 slots: 0 a 9 no cartão 1, 10 a 19 no 2) é a cópia que vale |
 | `WOTM_SAVEICON_TEST=1` | mostra o ícone de salvamento (`wotm_saveicon.hpp`, item 6) a cada 3 s, sem gravar nada (para conferir o desenho) |

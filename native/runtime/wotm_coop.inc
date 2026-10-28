@@ -55,6 +55,12 @@ bool g_out[4] = {};
 bool g_dbgLog = false;                                // diagnostico (WOTM_COOPLOG), no fim do arquivo
 void dbgSchedule(const char *tag, uint32_t frames);
 void dbgTick(uint8_t *rdram);
+// O que o initPlayersHook deixou para depois do InitPlayers (pausado no meio: initPlayersAfter no okToUnifyHook)
+struct InitAfter
+{
+    bool on = false, remapped = false, was[4] = {};
+} g_initAfter;
+void initPlayersAfter(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, const bool was[4], bool remapped);
 uint32_t dbgRd16(uint8_t *rdram, uint32_t a) { return uint32_t(rdram[a & 0x1FFFFFFFu]) | uint32_t(rdram[(a + 1) & 0x1FFFFFFFu]) << 8; }
 
 int inFight(int n, int except)
@@ -763,8 +769,28 @@ void highlightsHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 void okToUnifyHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
     hudRestore(rdram);
+    if (ctx->pc == g_okToUnify.addr && g_initAfter.on)
+    {
+        g_initAfter.on = false;
+        initPlayersAfter(rdram, ctx, runtime, g_initAfter.was, g_initAfter.remapped);
+    }
     if (ctx->pc == g_okToUnify.addr)
         dbgTick(rdram);
+    // Vista 0 de volta a camera 0 (fora da vista unificada). Com todos mortos o jogo junta a tela (a vista 0 empresta o _cs da 2), e
+    // um viewCreate da vista 0 nesse meio tempo (a carga do retry) grava ownCs = cs emprestado: ao sair da vista unificada, o
+    // viewGrappleConfig devolvia a vista 0 a camera 2 (parada, POV 3) e o P1 sumia da metade dele
+    // (nao com um update de HUD 2/3 pausado: a troca dele poe o _cs da camera 2 ou 3 na camera 0 ate a retomada)
+    if (ctx->pc == g_okToUnify.addr && players(rdram) > 1 && !rd32(rdram, wotm::sym::gUseUnifiedView) &&
+        !rd32(rdram, wotm::sym::moviePlaying) && !wotm_split4::g_hudPending.on)
+    {
+        const uint32_t vi = wotm::sym::viewInfo, cs0 = rd32(rdram, wotm_split4::camera(0) + wotm_split4::kCamCs);
+        if (cs0 && (rd32(rdram, vi + 0x10) != cs0 || rd32(rdram, vi) != cs0))
+        {
+            std::fprintf(stderr, "[coop] vista 0: camera %x (propria %x) -> %x, a da camera 0\n", rd32(rdram, vi), rd32(rdram, vi + 0x10), cs0);
+            wr32(rdram, vi + 0x10, cs0);
+            wr32(rdram, vi, cs0);
+        }
+    }
     const int n = ctx->pc == g_okToUnify.addr ? players(rdram) : 0;
     if (n != 2)
     {
@@ -779,6 +805,105 @@ void okToUnifyHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         wr32(rdram, kSlots + kSlotStride * i + kCamUnify, 0u);
     applyLayout(rdram, ctx, runtime);
     ctx->pc = GPR_U32(ctx, 31);
+}
+
+// Capitolio (fase 11, o Cerebulon): o FinalBoss::updateMecha grava m_monster7C = m_monsters[0] no estado 1 e mira so ele (torre,
+// laser, passo em y); o updateJelly e o StateUltraTazer::update da jelly (m_monster74) perseguem e chocam o m_monster7C /
+// m_monsters[0]. Alvo sorteado entre os jogadores vivos ao entrar no passo (Mecha: estado 2, vindo do 1 ou do 8; jelly: estado 1,
+// vindo da poca) e quando o alvo morre ou sai (menos no disparo do Mecha e no choque da jelly, que o proprio jogo encerra com o alvo
+// morto). Durante o update do chefe e o choque da jelly, m_monsters[0] e m_monster7C valem o alvo; nos cinemas (Mecha 0 e 9, jelly
+// 5, fase 3) nao ha troca e o cleanUpForMovie do retail vale para todos. Linha [coop] Cerebulon a cada sorteio.
+constexpr uint32_t kFinal = wotm::sym::finalBoss, kFinalActive = kFinal + 0x18, kFinalPhase = kFinal + 0x1C, kFinalState = kFinal + 0x20,
+                   kFinalTimer = kFinal + 0x28, kFinalJelly = kFinal + 0x74, kFinalTarget = kFinal + 0x7C;
+Hook g_finalUpd{fn::update__9FinalBoss}, g_tazerUpd{fn::update__15StateUltraTazer};
+int g_finalTarget = -1;
+uint32_t g_finalStep = ~0u;   // fase * 16 + estado na entrada do update anterior
+
+bool finalCoop(uint8_t *rdram)
+{
+    return rd32(rdram, kGameMode) == 1u && rd32(rdram, kFinalActive) && players(rdram) > 1;
+}
+// Cinema do chefe: o retail chama cleanUpForMovie no P1 (no m_monster7C na fase 3)
+bool finalMovie(uint8_t *rdram)
+{
+    const uint32_t ph = rd32(rdram, kFinalPhase), st = rd32(rdram, kFinalState);
+    return ph >= 3u || (ph == 0u && (st == 9u || (st == 0u && static_cast<int32_t>(rd32(rdram, kFinalTimer)) > 0))) || (ph == 1u && st == 5u);
+}
+void finalReroll(uint8_t *rdram, const char *why)
+{
+    static uint32_t s = 0x6C8E9CF5u;
+    int live[4], k = 0;
+    for (int i = 0, n = std::min(players(rdram), 4); i < n; ++i)
+        if (alive(rdram, i))
+            live[k++] = i;
+    if (!k)
+        return;
+    s ^= s << 13, s ^= s >> 17, s ^= s << 5;
+    const int t = live[s % uint32_t(k)];
+    static int s_logs = 0;
+    if (s_logs++ < 64)
+        std::fprintf(stderr, "[coop] Cerebulon: alvo jogador %d (%s, fase %u estado %u)\n", t + 1, why, rd32(rdram, kFinalPhase),
+                     rd32(rdram, kFinalState));
+    g_finalTarget = t;
+}
+
+void finalUpdHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    const uint32_t ra = GPR_U32(ctx, 31);
+    if (ctx->pc != g_finalUpd.addr || !finalCoop(rdram))
+    {
+        g_finalUpd.orig(rdram, ctx, runtime);
+        return;
+    }
+    const int n = players(rdram);
+    const uint32_t ph = rd32(rdram, kFinalPhase), st = rd32(rdram, kFinalState), step = ph * 16u + st;
+    const bool movie = finalMovie(rdram);
+    if (!movie && ph <= 1u)
+    {
+        const bool busy = (ph == 0u && st == 4u) || (ph == 1u && st == 2u);   // disparo / choque: o jogo encerra com o alvo morto
+        if (g_finalTarget < 0 || g_finalTarget >= n)
+            finalReroll(rdram, "inicio");
+        else if (step != g_finalStep && ((ph == 0u && st == 2u) || (ph == 1u && st == 1u)))
+            finalReroll(rdram, "ciclo");
+        else if (!busy && !alive(rdram, g_finalTarget))
+            finalReroll(rdram, "alvo caiu");
+    }
+    const uint32_t p1 = rd32(rdram, kMonsters), t = !movie && ph <= 1u && g_finalTarget >= 0 ? monster(rdram, g_finalTarget) : 0u;
+    if (t)
+    {
+        wr32(rdram, kMonsters, t);
+        if (ph == 1u || st >= 2u)   // no estado 1 o proprio Mecha grava m_monsters[0]
+            wr32(rdram, kFinalTarget, t);
+    }
+    g_finalUpd.orig(rdram, ctx, runtime);
+    if (t)
+        wotmFinishGuestCall(rdram, ctx, runtime, ra);   // a troca vale ate o fim, mesmo com o update pausado no meio
+    wr32(rdram, kMonsters, p1);
+    g_finalStep = step;
+    if (movie)
+    {
+        const uint32_t done = rd32(rdram, kFinalPhase) >= 3u ? rd32(rdram, kFinalTarget) & 0x1FFFFFFFu : p1 & 0x1FFFFFFFu;
+        for (int i = 0; i < n; ++i)
+            if (const uint32_t m = monster(rdram, i); m && m != done && !g_out[i])
+                call(rdram, ctx, runtime, fn::cleanUpForMovie__7Monster, {m});
+    }
+}
+
+// O choque da jelly do chefe (StateUltraTazer, dono = finalBoss.m_monster74) mira m_monsters[0]: durante ele, o m_monster7C
+void tazerUpdHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    const uint32_t ra = GPR_U32(ctx, 31), owner = rd32(rdram, (GPR_U32(ctx, 4) & 0x1FFFFFFFu) + kStateOwner) & 0x1FFFFFFFu;
+    const uint32_t jelly = rd32(rdram, kFinalJelly) & 0x1FFFFFFFu, target = rd32(rdram, kFinalTarget) & 0x1FFFFFFFu;
+    const bool on = ctx->pc == g_tazerUpd.addr && jelly && owner == jelly && target && finalCoop(rdram);
+    const uint32_t p1 = rd32(rdram, kMonsters);
+    if (on)
+        wr32(rdram, kMonsters, target);
+    g_tazerUpd.orig(rdram, ctx, runtime);
+    if (on)
+    {
+        wotmFinishGuestCall(rdram, ctx, runtime, ra);
+        wr32(rdram, kMonsters, p1);
+    }
 }
 
 // ------------------------------------------------------------------ largada
@@ -1133,22 +1258,12 @@ void grandTotalHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     std::fprintf(stderr, "[coop] tokens do jogador 1: %d x %.1f = %d\n", t, 1.0 + 0.1 * n, out);
 }
 
-void initPlayersHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+// Depois do InitPlayers (quem saiu volta a aparecer; no retry, cameras e tela da largada). Com o InitPlayers pausado no meio pelo
+// escalonador (o retry no Capitolio), a retomada nao passa pelo gancho: fica pendente para o primeiro SetOkToUnify (okToUnifyHook)
+void initPlayersAfter(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, const bool was[4], bool remapped)
 {
-    const uint32_t ra = ctx->pc == g_initPlayers.addr ? GPR_U32(ctx, 31) : 0u;
-    hudRestore(rdram);
-    bool was[4];
-    std::copy(g_out, g_out + 4, was);
-    std::fill(g_out, g_out + 4, false);
-    const bool remapped = g_views != 0;
-    if (remapped)
-        for (int v = 0; v < 4; ++v)
-            wr32(rdram, kViewSlot + 4u * uint32_t(v), g_viewSlotSaved[v]);
-    g_views = 0;
-    wotm_split4::g_coopViews = 0;
-    g_initPlayers.orig(rdram, ctx, runtime);
     const int n = players(rdram);
-    if (!ra || ctx->pc != ra || !n)
+    if (!n)
         return;
     for (int i = 0; i < n; ++i)
         if (const uint32_t m = monster(rdram, i); m && (was[i] || remapped))
@@ -1169,10 +1284,48 @@ void initPlayersHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         ctx->r[31] = _mm_set_epi64x(0, static_cast<int64_t>(fn::EvaluateTwoPlayerCoopStatus__5Shelli));
         ctx->pc = fn::gameReestablishViews__7TheGame;
         runtime->lookupFunction(fn::gameReestablishViews__7TheGame)(rdram, ctx, runtime);
+        wotmFinishGuestCall(rdram, ctx, runtime, fn::EvaluateTwoPlayerCoopStatus__5Shelli);   // ate voltar ao ra (pausa no meio)
         *ctx = saved;
+        dbgSchedule("depois do retry", 120);
     }
     std::fprintf(stderr, "[coop] fase %u com %d jogadores (%d vidas cada)\n", rd32(rdram, kShell + 0x2BB0), n,
                  static_cast<int32_t>(rd32(rdram, kLives)));
+}
+
+void initPlayersHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    const uint32_t ra = ctx->pc == g_initPlayers.addr ? GPR_U32(ctx, 31) : 0u;
+    hudRestore(rdram);
+    if (!ra)
+    {
+        g_initPlayers.orig(rdram, ctx, runtime);
+        return;
+    }
+    InitAfter a;
+    a.on = true;
+    std::copy(g_out, g_out + 4, a.was);
+    if (g_initAfter.on)   // o anterior ainda pendente: o que ele ia refazer continua valendo
+    {
+        for (int i = 0; i < 4; ++i)
+            a.was[i] = a.was[i] || g_initAfter.was[i];
+        a.remapped = g_initAfter.remapped;
+    }
+    std::fill(g_out, g_out + 4, false);
+    a.remapped = a.remapped || g_views != 0;
+    if (g_views)
+        for (int v = 0; v < 4; ++v)
+            wr32(rdram, kViewSlot + 4u * uint32_t(v), g_viewSlotSaved[v]);
+    g_views = 0;
+    wotm_split4::g_coopViews = 0;
+    g_initAfter = a;
+    g_initPlayers.orig(rdram, ctx, runtime);
+    if (ctx->pc != ra)
+    {
+        std::fprintf(stderr, "[coop] InitPlayers pausado no meio: cameras e tela no proximo quadro de luta\n");
+        return;
+    }
+    g_initAfter.on = false;
+    initPlayersAfter(rdram, ctx, runtime, a.was, a.remapped);
 }
 
 // ------------------------------------------------------------------ sem tutorial na fase 1 (aventura de 1 a 4 jogadores)
@@ -1498,7 +1651,7 @@ void install(PS2Runtime &runtime)
         {&g_assBoss, &assBossHook}, {&g_spinUpd, &spinUpdHook}, {&g_spinHit, &spinHitHook}, {&g_cannon, &cannonHook}, {&g_bossState, &bossStateHook},
         {&g_bossHit, &bossHitHook}, {&g_genesis, &genesisHook}, {&g_playMovie, &playMovieHook},
         {&g_plantUpd, &plantUpdHook}, {&g_plantCam, &plantCamHook}, {&g_rootWake, &rootWakeHook}, {&g_rootUpd, &rootUpdHook},
-        {&g_baseHit, &baseHitHook}, {&g_baseUpd, &baseUpdHook},
+        {&g_baseHit, &baseHitHook}, {&g_baseUpd, &baseUpdHook}, {&g_finalUpd, &finalUpdHook}, {&g_tazerUpd, &tazerUpdHook},
     };
     for (const H &h : hooks)
         if (!(h.h->orig = runtime.lookupFunction(h.h->addr)))

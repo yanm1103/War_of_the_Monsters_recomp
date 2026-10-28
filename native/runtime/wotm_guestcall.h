@@ -8,9 +8,11 @@
 #include <cstdint>
 #include <cstdio>
 
-inline void wotmFinishGuestCall(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+// until: o ra da chamada (0 nos helpers que chamam com ra 0; o ra do chamador num gancho que troca estado durante a chamada do
+// original e o desfaz depois, para a troca valer ate o fim mesmo com a funcao pausada no meio)
+inline void wotmFinishGuestCall(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t until = 0u)
 {
-    for (uint32_t n = 0; ctx->pc != 0u; ++n)
+    for (uint32_t n = 0; ctx->pc != until; ++n)
     {
         const PS2Runtime::RecompiledFunction f = n < 1000000u ? runtime->lookupFunction(ctx->pc) : nullptr;
         if (!f)

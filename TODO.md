@@ -18,7 +18,7 @@ Como funciona hoje: `docs/passos/MODS.md` ("Skins", "Monstros custom").
 ### 13. Campanha com até 4 jogadores
 O que existe: `docs/passos/NATIVO.md`, "Campanha com até 4 jogadores" (entrada, tela, vidas, largada, tokens). Contexto e endereços do que falta: `docs/investigacoes/2026-10-27/campanha4.md`. Decisões do dono:
 - **Em teste:** tela com quem sobra (metades com 2, layout de 3, tela cheia), pick-up verde e HUD dos inimigos na vista de quem continua. Aberto: com 3, a vida baixa no P1 bagunça o HUD do P3 (falta captura).
-- **Chefes:** alvo sorteado entre os jogadores vivos, sem vida extra: Mecha e jelly pelo `m_monster7C` (investigação, seção 2). Em teste a planta (`[coop] planta` no log).
+- **Chefes:** alvo sorteado entre os jogadores vivos, sem vida extra. Em teste o Capitólio (Mecha e jelly, `[coop] Cerebulon` no log). Aberto: a vibração do laser vai sempre ao controle 0.
 - **3-Mile e Tóquio:** a cratera leva todos os jogadores ao ponto fixo (hoje só o P1; os outros podem cair no buraco); o fim de Tóquio exige algum jogador vivo, não o P1.
 - **Cinemas:** `cleanUpForMovie` em todos, qualquer controle pula e câmeras 2 e 3 refeitas no `endCinema`.
 - **Final:** em teste o filme de cada herói da party antes dos créditos (`[coop] final` no log).
