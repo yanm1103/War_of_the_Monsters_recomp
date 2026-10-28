@@ -231,7 +231,11 @@ namespace
     int g_matchPlayers = 1;
     int g_matchMode = 0, g_matchContinues = 2;   // WOTM_MODE=<modo>[:<continues>] (6 eliminacao, 7 dodgeball, 8 big shot, 9 crush)
     unsigned g_matchCount = 0;
+    // WOTM_AIVSAI: "1" = todos os jogadores sob a IA; lista "2,3,4" = so esses (bots nos slots dos jogadores, o resto humano)
     bool g_aiVsAi = false;
+    unsigned g_aiVsAiMask = 0;   // bit i: jogador i + 1 sob a IA
+    bool aiVsAiSlot(int slot) { return slot >= 0 && slot < 4 && (g_aiVsAiMask >> slot & 1u); }
+    bool aiVsAiAll() { return g_aiVsAiMask == 0xFu; }
 
     void userintMainDirect(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
@@ -343,9 +347,9 @@ namespace
                     wotm_split4::g_extraCostume[i - 2] = 0;
             }
         }
-        std::fprintf(stderr, "[partida] %u: monstro %d:%d (jogador%s)", ++g_matchCount, g_matchMonsters[0], costumes[0], g_aiVsAi ? " sob IA" : "");
+        std::fprintf(stderr, "[partida] %u: monstro %d:%d (jogador%s)", ++g_matchCount, g_matchMonsters[0], costumes[0], aiVsAiSlot(0) ? " sob IA" : "");
         for (int i = 1; i < g_matchPlayers; ++i)
-            std::fprintf(stderr, " e %d:%d (jogador %d)", g_matchMonsters[i], costumes[i], i + 1);
+            std::fprintf(stderr, " e %d:%d (jogador %d%s)", g_matchMonsters[i], costumes[i], i + 1, aiVsAiSlot(i) ? " sob IA" : "");
         std::fprintf(stderr, " %s", g_matchAIs ? "contra" : (g_matchPlayers > 1 ? "sem IA" : "sozinho"));
         for (int i = g_matchPlayers; i < g_matchPlayers + g_matchAIs; ++i)
             std::fprintf(stderr, " %d:%d", g_matchMonsters[i], costumes[i]);
@@ -401,10 +405,25 @@ namespace
     // seria lido alem da ultima IA: bancos de som, pickups) e, na fase 2 da aventura, desliga todo Robo-47 com m_playerNum 2 (o da IA so
     // entra depois do Togera): o jogador de Robo-47 sumia. Durante ele os jogadores voltam a 1.
     constexpr uint32_t kPlayerInit = wotm::fn::playerInit__7Monster, kAiInit = wotm::fn::aiInit__7Monster, kSetAIMonster = wotm::fn::SetAIMonster__7TheGameiiii;
-    PS2Runtime::RecompiledFunction g_aiInit = nullptr, g_origSetAIMonster = nullptr;
+    PS2Runtime::RecompiledFunction g_aiInit = nullptr, g_origSetAIMonster = nullptr, g_origPlayerInit = nullptr;
 
+    // Com a lista (WOTM_AIVSAI=2,3,4) so o slot marcado vai ao aiInit: o SetPlayerMonster grava o m_monsters[i] antes do playerInit,
+    // e os renascimentos (wotm_coop.inc, wotm_split4.inc) chamam o playerInit com o monstro ja no slot
     void playerInitAsAi(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
+        if (!aiVsAiAll() && ctx->pc == kPlayerInit)
+        {
+            const uint32_t m = GPR_U32(ctx, 4) & 0x1FFFFFFFu;
+            int slot = -1;
+            for (int i = 0; i < 4 && slot < 0; ++i)
+                if (m && (READ32(kGame + 0x120380 + 4 * i) & 0x1FFFFFFFu) == m)   // m_monsters[i]
+                    slot = i;
+            if (!aiVsAiSlot(slot))
+            {
+                g_origPlayerInit(rdram, ctx, runtime);
+                return;
+            }
+        }
         ctx->pc = kAiInit;
         g_aiInit(rdram, ctx, runtime);
     }
@@ -2645,8 +2664,19 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
         else
             std::fprintf(stderr, "[wotm] WOTM_MATCH invalido (\"%s\"; use <monstro>[:<figurino 0-3>][,<IA>[:<figurino>]...ate 7],<fase>)\n", e);
     }
-    if (std::getenv("WOTM_AIVSAI") && (g_aiInit = runtime.lookupFunction(kAiInit)) &&
-        (g_origSetAIMonster = runtime.lookupFunction(kSetAIMonster)))
+    if (const char *e = std::getenv("WOTM_AIVSAI"); e && *e && std::strcmp(e, "0") != 0)
+    {
+        g_aiVsAiMask = 0xFu;   // "1" = todos os jogadores
+        if (std::strchr(e, ','))   // lista: "2,3,4" = esses jogadores; "1," = so o jogador 1
+        {
+            g_aiVsAiMask = 0;
+            for (const char *p = e; *p; ++p)
+                if (*p >= '1' && *p <= '4')
+                    g_aiVsAiMask |= 1u << (*p - '1');
+        }
+    }
+    if (g_aiVsAiMask && (g_aiInit = runtime.lookupFunction(kAiInit)) && (g_origSetAIMonster = runtime.lookupFunction(kSetAIMonster)) &&
+        (g_origPlayerInit = runtime.lookupFunction(kPlayerInit)))
     {
         g_aiVsAi = true;
         runtime.registerFunction(kPlayerInit, &playerInitAsAi);
@@ -2655,7 +2685,11 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
             runtime.registerFunction(kGameGetStartPoint, &startPointAsHumans);
         if ((g_origCamerasUpdate = runtime.lookupFunction(kCamerasUpdate)))
             runtime.registerFunction(kCamerasUpdate, &camerasUpdateAsHumans);
-        std::fprintf(stderr, "[wotm] jogador controlado pela IA (WOTM_AIVSAI)\n");
+        std::fprintf(stderr, "[wotm] jogadores sob a IA (WOTM_AIVSAI):");
+        for (int i = 0; i < 4; ++i)
+            if (aiVsAiSlot(i))
+                std::fprintf(stderr, " %d", i + 1);
+        std::fprintf(stderr, "%s\n", aiVsAiAll() ? " (todos)" : "");
     }
     if ((g_origFfaOptions1P = runtime.lookupFunction(kFfaOptions1P)))
         runtime.registerFunction(kFfaOptions1P, &ffaOptions1PWithZero);
