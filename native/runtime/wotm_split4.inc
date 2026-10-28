@@ -74,6 +74,7 @@ namespace wotm_split4
     int g_views = 0;                // vistas em quadrante montadas (0 = nenhuma: tela cheia ou metades do retail)
     bool g_wasUnified = false;      // a vista unificada (vitoria) estava ligada no quadro anterior
     bool g_cinemaFull = false;      // cinema em tela cheia (cinemaViews)
+    int g_coopViews = 0;            // campanha co-op com jogadores fora (wotm_coop.inc): vistas com quem continua (1 a 3; 0 = a da largada)
     unsigned g_hudCalls[4] = {};    // diagnostico (WOTM_SPLITLOG): Hud::update de cada HUD desde a ultima linha
     unsigned g_hudPaused = 0;       // diagnostico (WOTM_SPLITLOG): updates do HUD 2/3 pausados no meio desde a ultima linha
     int g_loadExtra = 0;            // jogadores 3 e 4 no caminho das IAs (do LoadLevelFiles ao InitPlayers)
@@ -102,11 +103,12 @@ namespace wotm_split4
         *ctx = saved;
     }
 
-    // Jogadores da tela em quadrantes agora (0 = nao vale): 3 ou 4 no Shell, num dos modos com tela dividida (3, 6 e 7)
+    // Jogadores da tela em quadrantes agora (0 = nao vale): 3 ou 4 no Shell, num dos modos com tela dividida (3, 6 e 7) ou na campanha
+    // co-op (modo 1, wotm_coop.inc)
     int splitPlayers(uint8_t *rdram)
     {
         const int32_t n = static_cast<int32_t>(FAST_READ32(kNumPlayers)), mode = static_cast<int32_t>(FAST_READ32(kGameMode));
-        return g_players && n >= 3 && n <= 4 && (mode == 3 || mode == 6 || mode == 7) ? n : 0;
+        return g_players && n >= 3 && n <= 4 && (mode == 1 || mode == 3 || mode == 6 || mode == 7) ? n : 0;
     }
 
     constexpr float kStripFov = 2.f / 3.f;   // distancia de tela da faixa de 640 x 112 (3 jogadores), em fracao da tela cheia
@@ -147,6 +149,8 @@ namespace wotm_split4
     // Cameras 2 e 3 de volta aos jogadores 3 e 4, no POV 0 (a vitoria as deixou no vencedor, POV 7)
     void refollow(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
+        if (g_coopViews)
+            return;   // co-op com jogadores fora: o wotm_coop.inc poe cada camera no jogador da vista
         for (int v = 2; v < g_views; ++v)
         {
             const uint32_t m = FAST_READ32(kMonsters + 4u * uint32_t(v));
@@ -304,9 +308,10 @@ namespace wotm_split4
         g_origGrapple(rdram, ctx, runtime);
         if (ra && ctx->pc == ra && g_views && !FAST_READ32(kUnified) && splitPlayers(rdram))
         {
-            if (g_cinemaFull)
+            // co-op com 2 vistas: o original ja devolveu a vista 0 a metade da viewport dela
+            if (g_cinemaFull || g_coopViews == 1)
                 applyDef(rdram, ctx, runtime, 0u, kViewDef);
-            else
+            else if (g_coopViews != 2)
                 applyQuad(rdram, ctx, runtime, 0u);
         }
     }
@@ -815,7 +820,7 @@ namespace wotm_split4
                 FAST_WRITE8(b + 0xC, 0);
         if (own)
             FAST_WRITE8(own + 0xC, on);
-        if (me == 2u && g_views == 3 && !g_cinemaFull && !FAST_READ32(kUnified))
+        if (me == 2u && (g_coopViews ? g_coopViews : g_views) == 3 && !g_cinemaFull && !FAST_READ32(kUnified))
             stripHudBar(rdram, own);
     }
 
@@ -1010,7 +1015,9 @@ namespace wotm_split4
             if ((FAST_READ32(kMonsters + 4u * uint32_t(i)) & 0x1FFFFFFFu) == m)
                 who = i;
         const int32_t humanPoints = static_cast<int32_t>(FAST_READ32(kPointTypes + 16u + 4u));   // lista 1
-        const bool asAi = ra && who >= humanPoints && who < 4 && splitPlayers(rdram) && FAST_READ32(m + kPlayerNum) == 1u;
+        // campanha co-op (modo 1): a lista 2 e a das IAs; o wotm_coop.inc poe os jogadores ao lado do 1
+        const bool coop = FAST_READ32(kGameMode) == 1u;
+        const bool asAi = ra && !coop && who >= humanPoints && who < 4 && splitPlayers(rdram) && FAST_READ32(m + kPlayerNum) == 1u;
         if (asAi)
             FAST_WRITE32(m + kPlayerNum, 2u);
         g_origStartPoint(rdram, ctx, runtime);
@@ -1020,7 +1027,7 @@ namespace wotm_split4
         // ponto de outro (todos ocupados: fica o ultimo tentado). Dois monstros no mesmo lugar: o empurrao entre eles dava NaN na posicao
         // (a camera do jogador ia junto). Monstro a menos de 120 de outro: de novo como o primeiro nascimento de uma IA (lista 2, os
         // cantos, com o mesmo teste de ponto livre).
-        if (ra && ctx->pc == ra && who >= 0 && splitPlayers(rdram))
+        if (ra && ctx->pc == ra && who >= 0 && !coop && splitPlayers(rdram))
         {
             const uint32_t cs = FAST_READ32(m + 0xC) & 0x1FFFFFFFu;
             bool near = false;

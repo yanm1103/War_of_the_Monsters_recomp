@@ -13,3 +13,6 @@ constexpr uint32_t kCheatGod = 1u << 5;           // m_godMode do proprio jogo
 
 extern std::atomic<uint32_t> g_wotmCheats;
 extern std::atomic<bool> g_wotmCheatWin;          // pedido de "vencer a luta" (consumido no quadro seguinte)
+// Pedido de "vida baixa": mascara de jogadores (bit i = m_monsters[i], i 0..3; 0 = nenhum pedido). Consumido no quadro seguinte:
+// a vida de cada jogador vivo da mascara vira 5% da maxima (minimo 1).
+extern std::atomic<uint32_t> g_wotmCheatLowHp;

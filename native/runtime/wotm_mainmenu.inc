@@ -41,7 +41,7 @@ namespace wotm_mainmenu
 using wotm_padsel::rd32;
 constexpr uint32_t kShell = wotm::sym::shellInfo;
 constexpr int kMaxRows = 7;
-constexpr int kOptionsRow = -1, kQuitRow = -2, kTrainingRow = -3;   // itens que nao sao do jogo (item < 0)
+constexpr int kOptionsRow = -1, kQuitRow = -2, kTrainingRow = -3, kAdventureRow = -4;   // itens que nao sao do jogo (item < 0)
 constexpr int kFreeForAll = 2;   // tela 2: o item do jogo que o "training" escolhe
 
 struct Row { int item; const char *label; };
@@ -57,7 +57,7 @@ constexpr ScreenDef kScreens[] = {
      {{1, "SINGLE PLAYER"}, {2, "MULTIPLAYER"}, {3, "OPTIONS"}, {kOptionsRow, "RECOMPILED OPTIONS"}, {4, "LOAD GAME"}, {5, "UNLOCKS"},
       {kQuitRow, "QUIT GAME"}}},
     {2, 0, 4, {{1, "ADVENTURE"}, {2, "FREE-FOR-ALL"}, {3, "ENDURANCE"}, {kTrainingRow, "TRAINING"}}},
-    {5, wotm::sym::numSelectables_2857, 3, {{1, "FREE-FOR-ALL"}, {2, "ELIMINATION"}, {3, "MINIGAMES"}}},
+    {5, wotm::sym::numSelectables_2857, 4, {{kAdventureRow, "ADVENTURE"}, {1, "FREE-FOR-ALL"}, {2, "ELIMINATION"}, {3, "MINIGAMES"}}},
 };
 static const ScreenDef *screenDef(uint32_t s)
 {
@@ -103,8 +103,8 @@ static Hover g_pauseHover;
 
 // Thread do EE
 static const bool g_enabled = [] { const char *e = std::getenv("WOTM_TEXTMENU"); return !(e && e[0] == '0'); }();
-static int g_extraRow = 0;         // telas 1 e 2: cursor num item nosso (kOptionsRow, kQuitRow, kTrainingRow) ou 0 (no currentSelection)
-static bool hasExtra(int screen) { return screen == 1 || screen == 2; }
+static int g_extraRow = 0;         // telas 1, 2 e 5: cursor num item nosso (kOptionsRow, kQuitRow, kTrainingRow, kAdventureRow) ou 0 (no currentSelection)
+static bool hasExtra(int screen) { return screen == 1 || screen == 2 || screen == 5; }
 static bool g_open = false;        // painel "recompiled options" aberto
 static float g_panel = 0.f;
 static int g_suppress = 0;         // quadros sem entrada do jogo depois de fechar o painel (o triangulo ainda apertado)
@@ -1115,8 +1115,8 @@ static void getInputHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     }
     const ScreenDef &d = *screenDef(cur);
     if (cur == 1)
-    {   // de volta ao menu principal: o "training" da tela 2 ficou para tras
-        if (g_extraRow == kTrainingRow)
+    {   // de volta ao menu principal: o "training" da tela 2 e o "adventure" da 5 ficaram para tras
+        if (g_extraRow == kTrainingRow || g_extraRow == kAdventureRow)
             g_extraRow = 0;
         wotm_training::menuDisarm("menu principal");
     }
@@ -1182,6 +1182,11 @@ static void getInputHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             wotm_padsel::wr32(rdram, curSelAddr(d.screen), static_cast<uint32_t>(kFreeForAll));
         wotm_padsel::sfx(rdram, ctx, runtime, code == 1 ? 2 : 4);
         out = 0;
+    }
+    else if (code == 6 && cur == 5 && g_extraRow == kAdventureRow)
+    {   // X no "adventure" da lista multijogador: a campanha com os jogadores escolhidos (wotm_padsel.inc)
+        wotm_padsel::adventureStart(rdram, ctx, runtime);
+        out = 0;   // o jogo nao ve o X (com o currentSelection dele seria outro modo)
     }
     else if (code == 6 && cur == 2)
     {   // X num modo de 1 jogador: o "training" segue como o free-for-all (o currentSelection ja e o dele) com o modo treino ligado

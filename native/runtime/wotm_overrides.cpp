@@ -79,6 +79,7 @@ void wotmMainMenuInstall(PS2Runtime &runtime);   // wotm_mainmenu.inc: menu prin
 #include "wotm_settings.hpp"   // opcoes ao vivo (painel "recompiled options" e launcher)
 std::atomic<uint32_t> g_wotmCheats{0};
 std::atomic<bool> g_wotmCheatWin{false};
+std::atomic<uint32_t> g_wotmCheatLowHp{0};
 
 // Camera livre de debug (F5): a janela (wotm_freecam.inc) move a pose, a thread do EE a poe no _cs da vista 0 (freeCamWrite).
 #include "wotm_freecam.h"
@@ -97,6 +98,8 @@ WotmFreeCamPose g_wotmFreeCamPose;
 #include "wotm_split4.inc"
 // Eliminacao e minigames com 3 e 4 jogadores (por cima dos ganchos do wotm_split4.inc)
 #include "wotm_modes4.inc"
+// Campanha com 2 a 4 jogadores (TODO 13; por cima dos ganchos do wotm_split4.inc e do wotm_modes4.inc)
+#include "wotm_coop.inc"
 // Pasta mods/ que sobrepoe arquivos do disco (MODS.md): fileCdSearchFile e sceCdRead.
 #include "wotm_mods.inc"
 // Skins de mod na luta (item 8): sons do traje base e IAs sorteadas com skin
@@ -105,6 +108,8 @@ WotmFreeCamPose g_wotmFreeCamPose;
 #include "wotm_custom.inc"
 // Modo treino (item 9): esferas dos golpes, dano exato e boneco (WOTM_TRAINING, menu F2)
 #include "wotm_training.inc"
+// Log das acoes da IA (WOTM_AILOG)
+#include "wotm_ai.inc"
 
 namespace
 {
@@ -230,6 +235,7 @@ namespace
 
     void userintMainDirect(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
+        const uint32_t storyLevel = READ32(kShell + 0x2BB0);   // fase que a historia deixou (aventura, WOTM_MODE=1)
         for (uint32_t i = 0; i < 16; ++i)
             WRITE32(kShell + 0x2938 + 4 * i, 0);                         // m_monsterSel (4 jogadores + ate 12 IAs, ate 0x2978)
         for (uint32_t i = 0; i < 12; ++i)
@@ -269,16 +275,50 @@ namespace
         WRITE32(kShell + 0x2BB4, static_cast<uint32_t>(g_matchPlayers));  // m_numPlayers
         WRITE32(kShell + 0x2BB8, static_cast<uint32_t>(g_matchAIs));     // m_numAIs
         for (uint32_t i = 0; i < 4; ++i)
-            WRITE32(kShell + 0x2BBC + 4 * i, 3);                         // m_lives
+            if (g_matchMode != 1 || !g_matchCount)
+                WRITE32(kShell + 0x2BBC + 4 * i, 3);   // m_lives (na aventura, so na primeira partida)
         // m_mode: free for all de 1 jogador (2) ou batalha multijogador (3: o TheGame::gameReestablishViews cria as duas vistas da tela
         // dividida nos modos 3, 6 e 7; com o 2 a luta ficava numa vista so e as cenas de cinema, que alternam a divisao, a ligavam)
         // WOTM_MODE (com 2 ou mais jogadores): eliminacao (6, continues em m_elimination e nos dois m_continues, monstros do comeco
         // usados como a selecao do retail os deixa) ou um minigame (7 dodgeball, 8 big shot, 9 crush; a fase e a 25, 26 ou 27)
-        const uint32_t mode = g_matchPlayers > 1 && g_matchMode ? uint32_t(g_matchMode) : g_matchPlayers > 1 ? 3u : 2u;
+        const uint32_t mode = g_matchMode == 1 || (g_matchPlayers > 1 && g_matchMode) ? uint32_t(g_matchMode) : g_matchPlayers > 1 ? 3u : 2u;
         WRITE32(kShell + 0x2C10, mode);
         WRITE32(kShell + 0x2B54, mode);                                   // m_battleMode
         WRITE32(kGame + 0x1203C8, mode);                                  // TheGame::m_gameMode
-        if (mode == 6u)
+        if (mode == 1u)
+        {
+            // Aventura (WOTM_MODE=1; com WOTM_PLAYERS, a campanha co-op do wotm_coop.inc): a fase da WOTM_MATCH na primeira partida; nas
+            // seguintes, a que a historia deixou no m_levelNum (fase seguinte, etapa de chefe ou a mesma), com vidas e pontos dela. As
+            // IAs sao as da fase (como a saida da selecao da campanha, adventureAis do wotm_padsel.inc); as da WOTM_MATCH nao valem.
+            static int s_level = -1;
+            const uint32_t level = s_level < 0 ? static_cast<uint32_t>(g_matchLevel) : storyLevel;
+            if (s_level < 0)
+            {
+                WRITE32(kShell + 0x2B2C, 0);   // pontos acumulados
+                WRITE32(kShell + 0x2C18, 0);   // veio de um save
+            }
+            s_level = static_cast<int>(level);
+            WRITE32(kShell + 0x2BB0, level);
+            for (uint32_t i = 4; i < 16; ++i)
+                WRITE32(kShell + 0x2938 + 4 * i, 0);
+            const uint32_t n = std::min(level < 17u ? READ32(kShell + 0x29E0 + 4 * level) : 0u, 4u);
+            for (uint32_t i = 0; i < n; ++i)
+            {
+                WRITE32(kShell + 0x2938 + 4 * (4 + i), READ32(wotm::sym::levelMonsters + 48 * level + 4 * i));
+                WRITE32(kShell + 0x2BE0 + 4 * (2 + i), READ32(wotm::sym::levelMonsterModels + 16 * level + 4 * i));
+            }
+            WRITE32(kShell + 0x2BB8, n);
+            WRITE32(wotm::sym::continueDecoding, 0);
+            g_matchAIs = static_cast<int>(n);
+            for (int i = 0; i < static_cast<int>(n); ++i)
+            {
+                const uint32_t sel = READ32(kShell + 0x2938 + 4 * (4 + i));
+                g_matchMonsters[g_matchPlayers + i] = static_cast<int>(sel >> 5);
+                costumes[g_matchPlayers + i] = static_cast<int>(READ32(kShell + 0x2BE0 + 4 * (2 + i)));
+            }
+            g_matchLevel = static_cast<int>(level);
+        }
+        else if (mode == 6u)
         {
             WRITE32(kShell + 0x2B48, static_cast<uint32_t>(g_matchContinues));   // m_elimination
             WRITE32(kShell + 0x2B40, static_cast<uint32_t>(g_matchContinues));   // m_continues[0..1]
@@ -316,6 +356,22 @@ namespace
 
     void uiMainSkipped(uint8_t *, R5900Context *ctx, PS2Runtime *) { ctx->pc = GPR_U32(ctx, 31); }
 
+    // Aventura direta (WOTM_MODE=1): sem o "salvar?" da vitoria (displayDialog 2). O EvaluateOnePlayerStoryStatus ja passou a
+    // historia para a fase seguinte antes dele; pular equivale a "nao salvar" e a partida seguinte segue sozinha.
+    PS2Runtime::RecompiledFunction g_origDialogAdventure = nullptr;
+    void dialogAdventure(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (ctx->pc == wotm::fn::displayDialog__Fi && GPR_U32(ctx, 4) == 2u)
+        {
+            std::fprintf(stderr, "[partida] aventura: sem o dialogo de salvar, a seguir a fase %u\n", READ32(kShell + 0x2BB0));
+            WRITE32(kShell + 0x2BCC, 0);   // m_inSession 0 e m_inMenus 1, como o wonLevelOverlay os deixa: o main carrega a fase seguinte
+            WRITE32(kShell + 0x2BD0, 1);
+            ctx->pc = GPR_U32(ctx, 31);
+            return;
+        }
+        g_origDialogAdventure(rdram, ctx, runtime);
+    }
+
     void evaluateGameStatusLogged(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         if (ctx->pc == kEvaluateGameStatus)
@@ -341,8 +397,9 @@ namespace
     // WOTM_AIVSAI=1: o jogador tambem e controlado pela IA do jogo. Monster::playerInit (0x165F10) salta para Monster::aiInit
     // (0x166038) com os mesmos registradores, como um `j`: m_playerNum fica 2 e Monster::update le as entradas de Ai::updateInputs.
     // Camera e HUD seguem no jogador (SetPlayerMonster). Retomada no meio cai direto no aiInit (o salto nao volta para ca).
-    // TheGame::SetAIMonster (0x137B10) recalcula m_numAIs (0x1203E0) contando os slots com m_playerNum 2, o que agora inclui o
-    // jogador; m_monsters[4 + i] seria lido alem da ultima IA (bancos de som, pickups). Depois dele, tira da conta os jogadores.
+    // TheGame::SetAIMonster (0x137B10) recalcula m_numAIs (0x1203E0) contando os slots com m_playerNum 2 (com o jogador, m_monsters[4 + i]
+    // seria lido alem da ultima IA: bancos de som, pickups) e, na fase 2 da aventura, desliga todo Robo-47 com m_playerNum 2 (o da IA so
+    // entra depois do Togera): o jogador de Robo-47 sumia. Durante ele os jogadores voltam a 1.
     constexpr uint32_t kPlayerInit = wotm::fn::playerInit__7Monster, kAiInit = wotm::fn::aiInit__7Monster, kSetAIMonster = wotm::fn::SetAIMonster__7TheGameiiii;
     PS2Runtime::RecompiledFunction g_aiInit = nullptr, g_origSetAIMonster = nullptr;
 
@@ -354,19 +411,24 @@ namespace
 
     void setAIMonsterCounted(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
-        const bool entry = ctx->pc == kSetAIMonster;
-        g_origSetAIMonster(rdram, ctx, runtime);
-        if (!entry)
-            return;
-        const int32_t players = static_cast<int32_t>(READ32(kShell + 0x2BB4));
-        int32_t n = static_cast<int32_t>(READ32(kGame + 0x1203E0));
-        for (int32_t i = 0; i < players && i < 4; ++i)
+        uint32_t flipped[4];
+        int n = 0;
+        if (ctx->pc == kSetAIMonster)
         {
-            const uint32_t m = READ32(kGame + 0x120380 + 4 * i);   // m_monsters[i]
-            if (m && READ32(m + 0x18) == 2u)                       // m_playerNum
-                --n;
+            const int32_t players = static_cast<int32_t>(READ32(kShell + 0x2BB4));
+            for (int32_t i = 0; i < players && i < 4; ++i)
+            {
+                const uint32_t m = READ32(kGame + 0x120380 + 4 * i);   // m_monsters[i]
+                if (m && READ32(m + 0x18) == 2u)                       // m_playerNum
+                {
+                    WRITE32(m + 0x18, 1u);
+                    flipped[n++] = m;
+                }
+            }
         }
-        WRITE32(kGame + 0x1203E0, static_cast<uint32_t>(n < 0 ? 0 : n));
+        g_origSetAIMonster(rdram, ctx, runtime);
+        while (n > 0)
+            WRITE32(flipped[--n] + 0x18, 2u);
     }
 
     // Fora do controle, o jogo ainda trata os slots de jogador como humanos onde o m_playerNum decide algo que nao e entrada:
@@ -700,6 +762,31 @@ namespace
                     }
                 }
                 std::fprintf(stderr, "[debug] vencer a luta: %d IA(s) derrubada(s) de %d\n", killed, ais);
+            }
+            if (const uint32_t mask = g_wotmCheatLowHp.exchange(0))
+            {   // vida baixa (tecla 8 do menu F1): o primeiro jogador atualizado no quadro aplica em todos os da mascara
+                int32_t players = static_cast<int32_t>(READ32(kShell + 0x2BB4));   // m_numPlayers
+                if (players < 1 || players > 4)
+                    players = 1;
+                int done = 0;
+                for (int32_t i = 0; i < players; ++i)
+                {
+                    const uint32_t p = READ32(kGame + 0x120380 + 4 * i);   // m_monsters[i]
+                    if (!(mask & (1u << i)) || !p || READ8(p + 0xE8))     // m_dead
+                        continue;
+                    float maxHp, hp;
+                    const uint32_t mw = READ32(p + 0x448), hw = READ32(p + 0x44C);   // vida maxima, vida atual
+                    std::memcpy(&maxHp, &mw, 4);
+                    std::memcpy(&hp, &hw, 4);
+                    const float low = std::max(1.0f, maxHp * 0.05f);
+                    if (!(hp > low))
+                        continue;   // ja abaixo: nao sobe a vida
+                    uint32_t lw;
+                    std::memcpy(&lw, &low, 4);
+                    WRITE32(p + 0x44C, lw);
+                    ++done;
+                }
+                std::fprintf(stderr, "[debug] vida baixa: mascara 0x%x, %d jogador(es) em 5%%\n", mask, done);
             }
         }
         g_origMonsterUpdate(rdram, ctx, runtime);
@@ -1563,8 +1650,10 @@ namespace
     LockToggle *lockToggleFor(uint8_t *rdram, uint32_t pf, int *slot)
     {
         const uint32_t owner = FAST_READ32(pf + kPadFlagsOwner);
-        if (!isPlayerMonster(rdram, owner, slot))
-            return nullptr;   // IA (o m_playerNum dela tambem nao e 0)
+        // So jogador humano (m_playerNum 1). A IA (2, tambem o jogador sob o WOTM_AIVSAI) mira com L1+R1 (Ai::targetPin): remapeada,
+        // o L1 virava defesa e o R1 travava e soltava, e ela ficava defendendo e dando counter sem parar
+        if (!isPlayerMonster(rdram, owner, slot) || FAST_READ32(owner + 0x18u) != 1u)
+            return nullptr;
         LockToggle *t = lockToggleFind(pf, true);
         if (t && t->owner != owner)
         {
@@ -2445,6 +2534,8 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
     }
     wotm_split4::install(runtime);   // antes dos ganchos do scePadRead (camera livre, lock-on): eles embrulham o dela
     wotm_modes4::install(runtime);   // embrulha o fim de rodada e o InitPlayers do split4; o takeDamage das trapacas embrulha o dele
+    wotm_ai::install(runtime);
+    wotm_coop::install(runtime);     // embrulha as vistas, a largada, o InitPlayers e o fim de rodada do split4 e do modes4
     if ((g_origPolyBuild = runtime.lookupFunction(kPolyBuildPrim)))
         runtime.registerFunction(kPolyBuildPrim, &polyBuildPrimTapped);
     if ((g_origHier = runtime.lookupFunction(kHier)))
@@ -2523,7 +2614,7 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
         if (const char *md = std::getenv("WOTM_MODE"))   // "<modo>[:<continues>]" (wotm_modes4.inc)
         {
             const int m = std::atoi(md);
-            g_matchMode = m >= 6 && m <= 9 ? m : 0;
+            g_matchMode = m == 1 || (m >= 6 && m <= 9) ? m : 0;
             if (const char *k = std::strchr(md, ':'))
                 g_matchContinues = std::clamp(std::atoi(k + 1), 0, 9);
         }
@@ -2670,6 +2761,8 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
     extern void wotmVu0UcodeInstall(PS2Runtime &);   // wotm_live.inc: microcodigo do VU0 sem VIF0 no executavel do jogo
     wotmVu0UcodeInstall(runtime);
     wotmSkinsInstall(runtime);   // por ultimo: embrulha os ganchos do SetPlayerMonster/SetAIMonster (split4, WOTM_AIVSAI)
+    if (g_matchMode == 1 && g_matchLevel >= 0 && (g_origDialogAdventure = runtime.lookupFunction(wotm::fn::displayDialog__Fi)))
+        runtime.registerFunction(wotm::fn::displayDialog__Fi, &dialogAdventure);   // depois do da pausa (wotm_pausemenu.inc)
     wotmCustomInstall(runtime);  // depois das skins: embrulha o SetAIMonster delas
     wotmTrainingInstall(runtime);   // por ultimo: o gancho mais de fora do update/takeHit/takeDamage (ve o dano que as trapacas deixam)
     if (g_minRate > 0)

@@ -786,9 +786,11 @@ void wotmThreeMileFlash(const uint8_t *rdram)
         return;
     const wotm::Ram ram{rdram, PS2_RAM_SIZE};
     const uint32_t a = ram.u32(wotm::sym::threeMileFlashAlpha);
-    wotm::ScreenRect r{};
-    if (a && wotm::viewFadeRect(ram, int32_t(ram.u32(wotm::sym::viewCurView)), 0xFF, 0xFF, 0xFF, a, r))
-        wotm_live::pushRect(r, 1);
+    // o retail desenha so na vista corrente (a 0: o threeMileUpdateCountDown roda uma vez por quadro); aqui em todas as vistas
+    const int views = std::clamp(int32_t(ram.u32(wotm::sym::viewNumViews)), 1, 4);
+    for (int v = 0; v < views && a; ++v)
+        if (wotm::ScreenRect r{}; wotm::viewFadeRect(ram, v, 0xFF, 0xFF, 0xFF, a, r))
+            wotm_live::pushRect(r, 1);
 }
 // Saida do TheGame::updateFadeOut / updateFadeOutAndIn: o nivel do fade (+0x120450, ja atualizado) em cada vista; da vista 1 em
 // diante so sem filme e sem vista unificada, como o laco deles.
@@ -1291,7 +1293,8 @@ bool wotmPaused();                // wotm_foto.inc: a thread do EE esta segura p
 // O relogio dos numeros so anda enquanto o jogo roda os Monster::update: na pausa da luta (o menu nao liga o isPaused), nos dialogos
 // e no F7 eles param no ar e seguem de onde estavam na volta. No menu de pausa e nos dialogos ficam escondidos (cobririam a lista);
 // no F7 continuam a vista, para a foto.
-static void drawDamagePopups(wotm::Scene &scene, const Camera3D &cam, int rw, int rh)
+// Na tela dividida, uma chamada por vista: a camera dela e o retangulo dela na janela (vw); o tamanho segue a janela inteira.
+static void drawDamagePopups(wotm::Scene &scene, const Camera3D &cam, int rw, int rh, Rectangle vw)
 {
     const bool frozen = wotmDamageIdleSeconds() > 0.1;
     using namespace wotm_live;
@@ -1324,7 +1327,11 @@ static void drawDamagePopups(wotm::Scene &scene, const Camera3D &cam, int rw, in
         const float f[3] = {cam.target.x - cam.position.x, cam.target.y - cam.position.y, cam.target.z - cam.position.z};
         if (v[0] * f[0] + v[1] * f[1] + v[2] * f[2] <= 0.f)
             continue;
-        const Vector2 s = GetWorldToScreenEx(Vector3{d.p[0], d.p[1], d.p[2]}, cam, rw, rh);
+        Vector2 s = GetWorldToScreenEx(Vector3{d.p[0], d.p[1], d.p[2]}, cam, int(vw.width), int(vw.height));
+        if (s.x < 0.f || s.y < 0.f || s.x > vw.width || s.y > vw.height)
+            continue;
+        s.x += vw.x;
+        s.y += vw.y;
         const float age = float(now - d.t0), k = age / float(kLife);
         // entra grande e assenta (0,15 s), sobe ~7% da altura, some no ultimo terco
         const float pop = age < 0.15f ? 1.f + 0.6f * (1.f - age / 0.15f) : 1.f;
@@ -1763,6 +1770,7 @@ static bool wotmDrawNative(const uint8_t *rdram)
             barsMix = S.snap.screenRects;
             polysMix = S.snap.screenPolys;
         }
+        Camera3D popCam[4]{};   // camera de cada vista (numeros de dano na tela dividida)
         auto drawView = [&](RenderTexture2D &vrt, const wotm::GameCamera &vc) {
             wotm::ProfScope psView(wotm::DrawProf::RView);
             const int W = viewW(static_cast<int>(&vrt - S.vrts));
@@ -1789,6 +1797,7 @@ static bool wotmDrawNative(const uint8_t *rdram)
             vc3.up = {vc.up[0], vc.up[1], vc.up[2]};
             vc3.fovy = vc.fovy;
             vc3.projection = CAMERA_PERSPECTIVE;
+            popCam[&vrt - S.vrts] = vc3;
             BeginMode3D(vc3);
             wotm_live::g_stage = "draw (vista)";
             {
@@ -2055,8 +2064,14 @@ static bool wotmDrawNative(const uint8_t *rdram)
         }
         wotm_legend::draw(S.scene, ram, fontTex0, RW, RH);   // legenda e dica dos menus nativos e do modo foto
         S.scene.drawScreenRects(static_cast<float>(RW), static_cast<float>(RH));   // os demais fades, por cima de tudo
-        if (!split && !photoHide)
-            drawDamagePopups(S.scene, c3, RW, RH);   // numeros de dano (mod WOTM_DAMAGEPOP; vazio sem ele)
+        if (!photoHide && !split)   // numeros de dano (mod WOTM_DAMAGEPOP; vazio sem ele)
+            drawDamagePopups(S.scene, c3, RW, RH, Rectangle{0.f, 0.f, static_cast<float>(RW), static_cast<float>(RH)});
+        else if (!photoHide)
+            for (int v = 0; v < (quad ? 4 : 2); ++v)
+                if (viewOk[v])
+                    drawDamagePopups(S.scene, popCam[v], RW, RH,
+                                     Rectangle{static_cast<float>((v & 1) * (RW - VW)), static_cast<float>((v >> 1) * (RH - VH)),
+                                               static_cast<float>(viewW(v)), static_cast<float>(VH)});
         if (const float rw = g_wotmMechaReticle.load(std::memory_order_relaxed); !split && !photoHide && rw > 0.f)
         {
             // retícula da camera da torre do Mecha (wotm_custom.inc, laserCam): o centro da tela e para onde o laser vai
@@ -2175,9 +2190,10 @@ static bool wotmDrawNative(const uint8_t *rdram)
         }
     }
 
-    {   // menu de debug (F1 abre/fecha; com ele aberto, 1..6 alternam). Setas e Enter sao do pad (ps2_pad.cpp): nao servem aqui.
+    {   // menu de debug (F1 abre/fecha; com ele aberto, 1..8 alternam ou disparam). Setas e Enter sao do pad (ps2_pad.cpp): nao servem aqui.
         // So escreve g_wotmCheats; quem aplica e a thread do EE (monsterUpdateCheats, wotm_overrides.cpp).
         static bool open = false;
+        static int lowHpWho = 0;   // alvo da tecla 8: 0 todos os jogadores, 1..4 so P1..P4 (a tecla 7 alterna)
         if (IsKeyPressed(KEY_F1))
             open = !open;
         uint32_t c = g_wotmCheats.load(std::memory_order_relaxed);
@@ -2191,6 +2207,8 @@ static bool wotmDrawNative(const uint8_t *rdram)
             if (IsKeyPressed(KEY_FOUR)) n ^= kCheatCloak;
             if (IsKeyPressed(KEY_FIVE)) n ^= kCheatGod;
             if (IsKeyPressed(KEY_SIX)) g_wotmCheatWin = true;
+            if (IsKeyPressed(KEY_SEVEN)) lowHpWho = (lowHpWho + 1) % 5;
+            if (IsKeyPressed(KEY_EIGHT)) g_wotmCheatLowHp = lowHpWho ? (1u << (lowHpWho - 1)) : 0xFu;
             if (n != c)
             {
                 g_wotmCheats = n;
@@ -2203,7 +2221,7 @@ static bool wotmDrawNative(const uint8_t *rdram)
         const int fs = 20, x = 10, top = 40;
         if (open)
         {
-            char lines[8][64];
+            char lines[12][64];
             int nl = 0;
             std::snprintf(lines[nl++], 64, "DEBUG (F1 closes)");
             std::snprintf(lines[nl++], 64, "1  Invincible        %s", (c & kCheatInvincible) ? "ON" : "-");
@@ -2212,6 +2230,9 @@ static bool wotmDrawNative(const uint8_t *rdram)
             std::snprintf(lines[nl++], 64, "4  Cloak (invisible) %s", (c & kCheatCloak) ? "ON" : "-");
             std::snprintf(lines[nl++], 64, "5  Game's god mode   %s", (c & kCheatGod) ? "ON" : "-");
             std::snprintf(lines[nl++], 64, "6  Win the fight (knocks out the AIs)");
+            static const char *const whoName[5] = {"all players", "P1", "P2", "P3", "P4"};
+            std::snprintf(lines[nl++], 64, "7  Low HP target     %s", whoName[lowHpWho]);
+            std::snprintf(lines[nl++], 64, "8  Low HP (5%% of max, no kill)");
             int w = 0;
             for (int i = 0; i < nl; ++i)
                 w = std::max(w, MeasureText(lines[i], fs));

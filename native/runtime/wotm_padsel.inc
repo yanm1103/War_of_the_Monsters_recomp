@@ -2068,6 +2068,55 @@ static void extraCpus(uint8_t *rdram)
     wr32(rdram, kNumAIs, uint32_t(want));
 }
 
+// Campanha co-op (wotm_coop.inc): o m_mode 1 do Shell com 2 a 4 jogadores
+static bool coopMenu(const uint8_t *rdram)
+{
+    const uint32_t n = rd32(rdram, kNumPlayers);
+    return rd32(rdram, kMode) == 1u && n >= 2u && n <= 4u;
+}
+
+// X no ADVENTURE da lista multijogador (wotm_mainmenu.inc): a campanha da fase 1 com os jogadores da escolha de controles. Como o item 1
+// da tela 2 (m_mode 1, fase 1, pontos e "veio de um save" zerados) e, como o free for all, a selecao de monstros (tela 6: a do retail
+// com 2, a nossa com 3 e 4) com a animacao 2 da camera; sem as telas 13 e 15 (CPUs e regras), o que elas fariam vai aqui (monstros
+// das CPUs e o switch da coluna da CPU 2+ zerados, resetSelectables). A saida da selecao vai a carga (changeScreenHook).
+static bool adventureStart(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    if (g_phase != Off || rd32(rdram, wotm::sym::betweenScreens) != 0)
+        return false;
+    wr32(rdram, kMode, 1u);
+    wr32(rdram, kShell + 0x2BB0, 1u);   // m_levelNum
+    wr32(rdram, kNumAIs, 0u);           // as IAs da fase entram na saida da selecao
+    wr32(rdram, kShell + 0x2B2C, 0u);   // pontos acumulados
+    wr32(rdram, kShell + 0x2C18, 0u);   // veio de um save
+    for (uint32_t i = 4; i < 12; ++i)
+        wr32(rdram, kMonsterSel + 4u * i, 0u);
+    if (const uint32_t sw = rd32(rdram, kShell + 0x1E0))
+        callGuest(rdram, ctx, runtime, wotm::fn::hierSetSwitch__FP11_hierswitchi, sw, 0u);
+    if (const uint32_t sw = rd32(rdram, kSw5CC))
+        callGuest(rdram, ctx, runtime, wotm::fn::hierSetSwitch__FP11_hierswitchi, sw, 0u);
+    callGuest(rdram, ctx, runtime, wotm::fn::resetSelectables__Fv, 0u);
+    changeScreen(rdram, ctx, runtime, 5, 6, 1, 2);
+    callGuest(rdram, ctx, runtime, wotm::fn::initSelectSwitches__Fv, 0u);
+    sfx(rdram, ctx, runtime, 8);
+    std::fprintf(stderr, "[padsel] campanha de %d jogadores: selecao de monstros\n", g_multi ? g_multi : 2);
+    return true;
+}
+
+// Saida da selecao da campanha co-op: as IAs da fase (o selectFinish dos 3 e 4 zera m_monsterSel[N..12)), como a tela 3 faz
+static void adventureAis(uint8_t *rdram)
+{
+    const uint32_t level = rd32(rdram, kShell + 0x2BB0);
+    const uint32_t n = level < 17u ? rd32(rdram, kShell + 0x29E0 + 4u * level) : 0u;
+    for (uint32_t i = 0; i < n && i < 4u; ++i)
+    {
+        wr32(rdram, kMonsterSel + 4u * (4u + i), rd32(rdram, wotm::sym::levelMonsters + 48u * level + 4u * i));
+        wr32(rdram, kCostume + 4u * (2u + i), rd32(rdram, wotm::sym::levelMonsterModels + 16u * level + 4u * i));
+    }
+    wr32(rdram, kNumAIs, std::min(n, 4u));
+    wr32(rdram, wotm::sym::continueDecoding, 0u);
+    std::fprintf(stderr, "[padsel] campanha de %u jogadores: fase %u com %u IAs\n", rd32(rdram, kNumPlayers), level, std::min(n, 4u));
+}
+
 // changeScreen(de, para, sentido, animacao, ...): no multijogador a volta da tela 15 (que iria a 13, as CPUs) vem para a escolha
 // de controles (5), com a camera de volta ao telao, e a volta desta (prevScreen 15) vai ao menu principal
 static void changeScreenHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -2077,7 +2126,21 @@ static void changeScreenHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runt
         const int32_t from = static_cast<int32_t>(GPR_U32(ctx, 4)), to = static_cast<int32_t>(GPR_U32(ctx, 5)),
                       dir = static_cast<int32_t>(GPR_U32(ctx, 6));
         const uint32_t base = rd32(rdram, kMode) == 2u ? 3u : rd32(rdram, kNumPlayers) == 2u ? 2u : 0u;
-        if (to == 12 || to == 13)
+        if (from == 6 && coopMenu(rdram))
+        {
+            if (to == 8 && dir > 0)
+            {   // campanha co-op: sem selecao de fase, a carga da fase 1 com as IAs dela (como a tela 3 do retail)
+                adventureAis(rdram);
+                ctx->r[5] = _mm_set_epi64x(0, 0x63);
+                ctx->r[7] = _mm_set_epi64x(0, 0);
+            }
+            else if (dir < 0)
+            {   // volta da selecao: a lista multijogador, com a camera de volta ao telao
+                ctx->r[5] = _mm_set_epi64x(0, 5);
+                ctx->r[7] = _mm_set_epi64x(0, 2);
+            }
+        }
+        else if (to == 12 || to == 13)
             wotm_menucpus::g_want.store(0);   // as telas 12 e 13 escolhem de novo
         else if ((to == 15 || to == 19) && base && !g_multi && rd32(rdram, kNumAIs) > base)
             wr32(rdram, kNumAIs, base);   // volta da luta com mais CPUs: o retail so conhece 3 (1 jogador) ou 2 (2) nessas telas
