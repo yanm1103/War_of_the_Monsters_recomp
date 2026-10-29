@@ -598,7 +598,8 @@ retail fica como era.
   (torre, laser, passo); a jelly (`updateJelly` e o `StateUltraTazer::update` dela) persegue e choca o mesmo alvo. Durante o update
   do chefe e o choque da jelly, `m_monsters[0]` e `m_monster7C` valem o alvo, sorteado entre os jogadores vivos ao começar cada passo
   (Mecha no estado 2, jelly de volta ao 1) e quando o alvo morre ou sai, menos no disparo e no choque, que o próprio jogo encerra com
-  o alvo morto. Nos cinemas do chefe não há troca e o `cleanUpForMovie` vale para todos. A vibração do laser continua no controle 0.
+  o alvo morto. Nos cinemas do chefe não há troca e o `cleanUpForMovie` vale para todos. A vibração do laser (o `inputSetActuator(0, ...)` do `updateMecha`, depois
+  do dano) vai ao controle do alvo (`inputGetPlayerPad`).
   Log `[coop] Cerebulon` a cada sorteio.
 - **Final:** o `Shell::GenesisMovie` enfileira o filme do herói do P1 (`_p`, depois `_g`, depois os créditos, `nextMovie` 19). O
   gancho guarda o `_p` de cada parceiro (mesma tabela, pelo monstro sem a variante; herói sem filme ou com filme repetido fica de fora),

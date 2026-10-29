@@ -973,6 +973,23 @@ void tokyoUpdHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     }
 }
 
+// Vibracao do laser do Mecha: depois do takeDamage no alvo, o updateMecha chama inputSetActuator(0, ...), sempre o controle do P1;
+// nessa chamada (pelo retorno) vai ao controle do alvo sorteado (inputGetPlayerPad). Linha [coop] Cerebulon: vibracao.
+constexpr uint32_t kLaserRumbleRa = fn::updateMecha__9FinalBoss + 0xD3C;
+Hook g_actuator{fn::inputSetActuator__FiP12ActuatorData};
+void actuatorHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    if (ctx->pc == g_actuator.addr && GPR_U32(ctx, 31) == kLaserRumbleRa && GPR_U32(ctx, 4) == 0u && g_finalTarget > 0 && finalCoop(rdram))
+    {
+        const uint32_t pad = call(rdram, ctx, runtime, fn::inputGetPlayerPad__Fi, {uint32_t(g_finalTarget)});
+        ctx->r[4] = _mm_set_epi64x(0, static_cast<int64_t>(static_cast<int32_t>(pad)));
+        static int s_logs = 0;
+        if (s_logs++ < 8)
+            std::fprintf(stderr, "[coop] Cerebulon: vibracao do laser no controle %u (jogador %d)\n", pad, g_finalTarget + 1);
+    }
+    g_actuator.orig(rdram, ctx, runtime);
+}
+
 // ------------------------------------------------------------------ largada
 
 constexpr uint32_t kVec = PS2_RAM_SIZE - 0x3C0;   // _fvector para o setTrans e a normal do hdHatTest (os do split4 e do modes4 ficam em -0x400 e -0x3E0)
@@ -1870,7 +1887,7 @@ void install(PS2Runtime &runtime)
         {&g_plantUpd, &plantUpdHook}, {&g_plantCam, &plantCamHook}, {&g_rootWake, &rootWakeHook}, {&g_rootUpd, &rootUpdHook},
         {&g_baseHit, &baseHitHook}, {&g_baseUpd, &baseUpdHook}, {&g_finalUpd, &finalUpdHook}, {&g_tazerUpd, &tazerUpdHook},
         {&g_tokyoUpd, &tokyoUpdHook}, {&g_craterCount, &craterCountHook}, {&g_updCinema, &updCinemaHook}, {&g_endCinema, &endCinemaHook},
-        {&g_cleanUp, &cleanUpHook},
+        {&g_cleanUp, &cleanUpHook}, {&g_actuator, &actuatorHook},
     };
     for (const H &h : hooks)
         if (!(h.h->orig = runtime.lookupFunction(h.h->addr)))

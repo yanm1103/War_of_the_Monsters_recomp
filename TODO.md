@@ -18,7 +18,7 @@ Como funciona hoje: `docs/passos/MODS.md` ("Skins", "Monstros custom").
 ### 13. Campanha com até 4 jogadores
 O que existe: `docs/passos/NATIVO.md`, "Campanha com até 4 jogadores" (entrada, tela, vidas, largada, tokens). Contexto e endereços do que falta: `docs/investigacoes/2026-10-27/campanha4.md`. Decisões do dono:
 - **Em teste:** tela com quem sobra (metades com 2, layout de 3, tela cheia), pick-up verde e HUD dos inimigos na vista de quem continua.
-- **Chefes:** alvo sorteado entre os jogadores vivos, sem vida extra. Em teste o Capitólio (Mecha e jelly, `[coop] Cerebulon` no log). Aberto: a vibração do laser vai sempre ao controle 0.
+- **Chefes:** alvo sorteado entre os jogadores vivos, sem vida extra. Em teste o Capitólio (Mecha e jelly, `[coop] Cerebulon` no log).
 - **Final:** em teste o filme de cada herói da party antes dos créditos (`[coop] final` no log).
 - **Save:** chave `coop` no `save.json` (o `adventureToJson` a preserva); carregar um save co-op passa pela escolha de controles e vai à fase.
 - **Carga e depois:** medir `texInfo[1000]` e VRAM das `.RTX` com 4 jogadores + 4 IAs (Canyon); barrar CUSTOM de tipo chefe na seleção; entrar e sair do grupo entre fases.
