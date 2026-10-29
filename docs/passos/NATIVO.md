@@ -374,7 +374,8 @@ Compara, por objeto e em números, o que o microcódigo do VU1 mandaria ao GS co
   32 MB e congela). A linha `[wotm] carga da fase` diz quanto sobra até o fim da RAM, e `N de 1000 texIds` avisa perto do teto do
   `texInfo`. A linha `VRAM residente até ..., cache de texturas com N KB` dá o fim das `.RTX` (`startVramAddr`) e o espaço do cache
   das `.TEX` até o `lastVramTexAddr`. O `wotm.exe` desenha da RAM e não depende do cache. No Canyon com 4 jogadores e 4 IAs: 238
-  texIds, 2134 KB de cache e 20,8 MB livres na RAM; com 1 jogador: 196 texIds e 2164 KB.
+  texIds, 2134 KB de cache e 20,8 MB livres na RAM; com 1 jogador: 196 texIds e 2164 KB. No Capitólio com 4 jogadores (jelly e
+  Mecha): 293 texIds, 2121 KB e 22,6 MB.
 - Instantâneos de 32 MB continuam abrindo: o replay aceita RAM menor que a do build e zera o resto.
 
 ## Save em JSON (`wotm_save.inc`, `wotm_json.hpp`)
@@ -393,6 +394,13 @@ Formato dos binários do cartão: `docs/FORMATOS.md`, "Save do memory card". `WO
 - **Traje da aventura por nome:** o slot guarda `"costume": "ultra-v/roxo"`; uma `resolveCostume` só serve o `jsonToAdventure`, a
   lista de saves e o monstro 3D. Skin ausente: traje 0, log e "skin missing" na lista; gravar a mesma aventura devolve o nome ao JSON
   (esquecido quando uma tela de seleção de monstro abre). O `adventureToJson` deixa como está o slot que diz o mesmo que o binário.
+- **Aventura co-op:** gravada com 2 a 4 jogadores, o slot ganha `"coop": [{"monster", "variant", "lives", "costume"}, ...]` com os
+  jogadores 2..N (`m_monsterSel[i]`, `m_lives[i]`, `m_costume[1]` e os trajes 3 e 4 do `wotm_split4.inc`); os campos de cima são o
+  jogador 1, e o binário guarda só ele (um PCSX2 vê uma aventura de 1 jogador). A lista de saves mostra "N players" na linha das
+  vidas. Carregar um slot co-op (`wotmCoopLoadArm`, `wotm_padsel.inc`): a carga do `updateStoryModeLoad` (`changeScreen(9, 0x63)`)
+  vira `changeScreen(9, 5, -1, 9)`, a escolha de controles (tela 5, câmera de volta ao telão) com "SAVED ADVENTURE FOR N PLAYERS", e
+  o Start só segue com N jogadores (bots valem). Na confirmação entram os jogadores 2..N do slot, as IAs da fase (`adventureAis`) e
+  `changeScreen(5, 0x63)`; triângulo de quem está fora volta ao menu principal.
 - **Migração:** sem JSON, o primeiro `stdInit` o cria a partir dos cartões; com JSON sem os slots de um cartão que tem aventuras, elas
   são importadas. JSON que não abre é avisado no log, os cartões ficam como estão, e antes de o jogo reescrevê-lo o arquivo do usuário
   vai para `save.json.bad`. A gravação é por arquivo temporário e troca. O `[wotm] save: no jogo, N tokens, dificuldade D` no fim de

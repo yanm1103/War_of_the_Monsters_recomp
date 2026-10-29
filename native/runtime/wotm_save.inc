@@ -30,6 +30,9 @@
 
 // Cada gravacao do save.json soma 1 (thread do EE); o icone de salvamento (native/wotm_saveicon.hpp, thread da janela) le.
 std::atomic<uint32_t> g_wotmSaveCount{0};
+uint32_t wotmMultiCostume(int player);   // wotm_split4.inc: traje dos jogadores 3 e 4
+// wotm_padsel.inc: save co-op carregado (n jogadores, os 2..n em sel/costume/lives) espera a escolha de controles; n 0 desarma
+void wotmCoopLoadArm(int n, const uint32_t *sel, const uint32_t *costume, const uint32_t *lives);
 
 namespace wotm_save
 {
@@ -839,6 +842,10 @@ namespace wotm_save
         uint32_t level = 0, sel = 0, lives = 0, score = 0, costume = 0;
         std::string skin;           // skin de mod do slot ("togera/green"), achada ou nao
         bool skinMissing = false;   // a skin nao existe nesta sessao: carrega com o traje 0
+        // campanha co-op (chave "coop" do slot): jogadores 2..players; os campos de cima sao o jogador 1 (o que o binario guarda)
+        int players = 1;
+        uint32_t coopSel[3] = {}, coopCostume[3] = {}, coopLives[3] = {};
+        std::string coopSkin[3];   // skin de mod de cada um, como `skin`
     };
     struct Modal
     {
@@ -882,6 +889,20 @@ namespace wotm_save
                 r.score = savesIntOf(s, "score");
                 const Costume c = resolveCostume(r.sel >> 5, s.get("costume"), false);
                 r.costume = c.index, r.skin = c.skin, r.skinMissing = c.missing;
+                if (const Value *co = s.get("coop"); co && co->type == Value::Arr)
+                    for (size_t k = 0; k < co->arr.size() && r.players < 4; ++k)
+                    {
+                        const Value &p = co->arr[k];
+                        if (p.type != Value::Obj)
+                            continue;
+                        const int i = r.players - 1;
+                        const Value *pv = p.get("variant");
+                        r.coopSel[i] = (indexOf(kMonsters, p.get("monster"), 0) << 5) | (pv ? static_cast<uint32_t>(pv->asInt()) & 31 : 0);
+                        const Costume pc = resolveCostume(r.coopSel[i] >> 5, p.get("costume"), false);
+                        r.coopCostume[i] = pc.index, r.coopSkin[i] = pc.skin;
+                        r.coopLives[i] = p.get("lives") ? savesIntOf(p, "lives") : r.lives;
+                        ++r.players;
+                    }
             }
             m.rows.push_back(r);
         }
@@ -900,6 +921,18 @@ namespace wotm_save
         r.lives = ramU32(rdram, sh + 0x2BBC);
         r.score = ramU32(rdram, sh + 0x2B28) + ramU32(rdram, sh + 0x2B2C);
         r.costume = ramU32(rdram, sh + 0x2BE0);
+        // campanha co-op: modo 1 com 2 a 4 jogadores (m_monsterSel[i], m_costume[1] e os trajes 3 e 4 do split4, m_lives[i])
+        const uint32_t n = ramU32(rdram, sh + 0x2BB4);
+        if (ramU32(rdram, sh + 0x2C10) == 1u && n >= 2u && n <= 4u)
+        {
+            r.players = static_cast<int>(n);
+            for (uint32_t i = 1; i < n; ++i)
+            {
+                r.coopSel[i - 1] = ramU32(rdram, sh + 0x2938 + 4 * i);
+                r.coopCostume[i - 1] = i == 1 ? ramU32(rdram, sh + 0x2BE4) : wotmMultiCostume(static_cast<int>(i));
+                r.coopLives[i - 1] = ramU32(rdram, sh + 0x2BBC + 4 * i);
+            }
+        }
         return r;
     }
 
@@ -1039,7 +1072,9 @@ namespace wotm_save
                 pics.push_back({wotm::savepics::kMonster, mon | (show->costume & 0xFF) << 8 | modelBase(mon, show->costume) << 16, mcx - mw * 0.5f, my1 - mh, mcx + mw * 0.5f, my1, a});
             }
             text(rdram, ctx, rt, "Score " + std::to_string(show->score), kLeftX, Y(140), fText);
-            text(rdram, ctx, rt, std::to_string(show->lives) + (show->lives == 1 ? " life" : " lives") + (show->skinMissing ? "  -  skin missing" : ""),
+            text(rdram, ctx, rt, std::to_string(show->lives) + (show->lives == 1 ? " life" : " lives") +
+                                     (show->players > 1 ? "  -  " + std::to_string(show->players) + " players" : std::string()) +
+                                     (show->skinMissing ? "  -  skin missing" : ""),
                  kLeftX, Y(154), fText);
             text(rdram, ctx, rt, "Adventure progress", kLeftX, Y(168), fText);
             text(rdram, ctx, rt, std::to_string(levelsDone(*show)) + " of " + std::to_string(kStoryLevels) + " levels", kLeftX, Y(182), fText);
@@ -1096,7 +1131,10 @@ namespace wotm_save
         if (r.skinMissing)
             std::fprintf(stderr, "[wotm] save: traje %s nao achado (mod ausente?); usando traje 0\n", r.skin.c_str());
         guestCall(rdram, ctx, rt, wotm::fn::setSaveData__9MonsterMcR13_SaveGameDatai, {kSlotBuf, 0});
-        std::fprintf(stderr, "[wotm] save: aventura do slot %d carregada (%s)\n", r.slot + 1, rowTitle(rdram, r).c_str());
+        // co-op: o setSaveData deixa 1 jogador; os outros entram depois da escolha de controles (wotm_padsel.inc)
+        wotmCoopLoadArm(r.players > 1 ? r.players : 0, r.coopSel, r.coopCostume, r.coopLives);
+        std::fprintf(stderr, "[wotm] save: aventura do slot %d carregada (%s, %d jogador%s)\n", r.slot + 1, rowTitle(rdram, r).c_str(),
+                     r.players, r.players > 1 ? "es" : "");
     }
 
     // Gravar: o slot vai direto para o save.json (o resto do arquivo fica)
@@ -1126,6 +1164,20 @@ namespace wotm_save
         s.at("lives") = Value::integer(r.lives);
         s.at("score") = Value::integer(r.score);
         s.at("costume") = savedCostume(r.sel >> 5, r.costume);
+        if (r.players > 1)
+        {
+            Value &co = s.at("coop");
+            co = Value::array();
+            for (int i = 0; i + 1 < r.players; ++i)
+            {
+                Value p = Value::object();
+                p.at("monster") = nameOf(kMonsters, r.coopSel[i] >> 5);
+                p.at("variant") = Value::integer(r.coopSel[i] & 31);
+                p.at("lives") = Value::integer(r.coopLives[i]);
+                p.at("costume") = costumeValue(r.coopSel[i] >> 5, r.coopCostume[i]);
+                co.arr.push_back(std::move(p));
+            }
+        }
         saves.arr[static_cast<size_t>(slot)] = s;
         const std::string why = "aventura no slot " + std::to_string(slot + 1) + " (" + rowTitle(rdram, r) + ")";
         saveJson(j, why.c_str());

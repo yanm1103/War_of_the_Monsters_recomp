@@ -220,7 +220,8 @@ jogo (outro prefixo em `MON/`) ainda não existe. O primeiro é o Goliath Prime 
   dele (`Ai::updateAssBoss`) precisa dos pontos da fase dele, e como CPU (`WOTM_MATCH=3,goliath,1`) carrega mas não aparece na luta.
 - **Na seleção** (telas 3, 6, 7, 18 e 19 e a de 3 e 4 jogadores, fora da eliminação): a casa CUSTOM da barra de monstros. X abre a lista dos customs dentro do quadro do
   jogador (nome, mod, quantas skins; no quadro de CPU, "PLAYERS ONLY" nos sem `"ai"`): cima e baixo percorrem, X escolhe, triângulo
-  fecha. Escolhido, o quadro mostra o monstro como os do jogo: cima e baixo trocam de traje (o `costume` do `monster.json` e as
+  fecha. Na aventura (de 1 a 4 jogadores) o X não escolhe custom de tipo chefe (Goliath, Jelly, Cerebulon e o Mecha, de base Jelly):
+  os chefes das fases dela são desses tipos (`customAllowed`). Escolhido, o quadro mostra o monstro como os do jogo: cima e baixo trocam de traje (o `costume` do `monster.json` e as
   skins do custom, em dourado), X confirma, triângulo volta para a casa fechada. Com a lista aberta, esquerda e direita não saem da
   casa. Nas telas do jogo, na confirmação o cursor do jogo fica na coluna de onde o quadro saiu, que faz as vezes dele (a vaga dela
   não é tomada). Na de 3 e 4 (`customStep` no `wotm_padsel.inc`) a escolha é toda nossa: o tipo do custom vai ao `m_monsterSel` do

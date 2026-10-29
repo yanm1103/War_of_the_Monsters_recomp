@@ -97,6 +97,7 @@ struct View
     bool bot[kMaxPlayers + 1] = {};   // numero de jogador com bot (escolha de controles)
     int count = 0;          // dispositivos presentes
     int players = 0;        // jogadores distintos escolhidos
+    int coopLoad = 0;       // save co-op carregado: jogadores que ele exige (0 = escolha livre)
     uint32_t screenObj = 0;
     uint32_t mgObj[24] = {}, mgUsed[2] = {};   // tela 7: objetos dos retratos grandes e o em uso de cada jogador (publish)
     // selecao
@@ -143,6 +144,12 @@ static bool g_prev[kDevs][kActions] = {};
 static bool g_primed = false;
 static int g_inject = 0;   // codigo para o proximo screenGetInput (5 = voltar)
 static int g_multi = 0;    // 3 ou 4 (ou 2 com bot): jogadores da partida multijogador escolhida, selecao do telao (0 = 1 ou 2 jogadores, retail)
+// Save co-op carregado (wotm_save.inc, wotmCoopLoadArm): a carga (9 -> 0x63) vira a escolha de controles (5), que exige n jogadores e
+// dali vai a carga com os jogadores 2..n do slot (sel/costume/lives). n 0: nenhum.
+struct CoopLoad { int n = 0; uint32_t sel[3] = {}, costume[3] = {}, lives[3] = {}; };
+static CoopLoad g_coopLoad;
+static bool g_coopGo = false;   // Start aceito: a carga na saida do screenGameModes2P
+static void adventureAis(uint8_t *rdram);
 static PS2Runtime::RecompiledFunction g_origTransition = nullptr, g_origModes2P = nullptr, g_origGetInput = nullptr, g_origMain = nullptr,
                                       g_origWaitStart = nullptr, g_origSelect2P = nullptr, g_origChangeScreen = nullptr;
 static uint32_t g_transRa = 0, g_modesRa = 0, g_selectRa = 0, g_mainRa = 0, g_select1Ra = 0, g_soloInRa = 0;
@@ -494,6 +501,7 @@ static void configStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     if (back)
     {
         g_phase = Leaving;
+        g_coopLoad = CoopLoad{};   // save co-op: desistiu da carga
         g_inject = 5;   // o screenGameModes2P faz o resto (som, m_numPlayers 0, changeScreen de volta)
         std::fprintf(stderr, "[padsel] voltar ao menu principal\n");
         return;
@@ -523,6 +531,12 @@ static void configStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             }
     int map[kMaxPlayers + 1];
     const int n = distinctPlayers(map);
+    if (confirm && n >= 2 && g_coopLoad.n && n != g_coopLoad.n)
+    {
+        sfx(rdram, ctx, runtime, 6);   // save co-op: tantos jogadores quantos o save tem
+        std::fprintf(stderr, "[padsel] save co-op de %d jogadores: %d escolhidos\n", g_coopLoad.n, n);
+        confirm = false;
+    }
     if (confirm && n >= 2)   // o Start vem de um dispositivo dentro: sempre ha um humano
     {
         setManual(true, map);
@@ -534,6 +548,13 @@ static void configStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         // a lista de modos do retail aparece com 2, 3 ou 4; com 3 e 4, ou com bot, as selecoes de monstros sao as nossas (o bot nao
         // tem controle para a selecao do jogo: um humano escolhe o monstro dele, como o das CPUs)
         g_multi = n >= 3 || g_bots ? n : 0;
+        if (g_coopLoad.n)
+        {   // save co-op: a carga vai na saida do screenGameModes2P (coopLoadGo); aqui o changeScreen ligaria o screenFirstPass e o
+            // first pass dele, no mesmo quadro, zeraria as IAs
+            g_coopGo = true;
+            g_phase = Leaving;
+            return;
+        }
         g_phase = Reveal;
         g_reveal = 0.f;
         if (g_multi)
@@ -663,6 +684,12 @@ static const wotm::mods::Custom *customAt(int k)
 {
     const auto &cs = wotm::mods::Registry::get().customs();
     return cs.empty() || k < 0 ? nullptr : &cs[size_t(k) % cs.size()];
+}
+// O custom pode ser confirmado neste quadro: num quadro de CPU, so os com "ai" (a IA de um chefe precisa da fase dele); na aventura
+// (m_mode 1), nenhum de tipo chefe (13 a 15: Goliath, jelly, Cerebulon), que sao os chefes das fases dela
+static bool customAllowed(const wotm::mods::Custom *cu, bool cpu, bool adventure)
+{
+    return cu && !(cpu && !cu->ai) && !(adventure && cu->type >= 13 && cu->type <= 15);
 }
 
 // Eliminacao de 3 e 4: cada monstro com um jogador so. Durante a escolha vale o "pronto" dos outros quadros; na saida o traje 0 das
@@ -843,7 +870,7 @@ static int mouseStep(int cur)
 // Toque na casa CUSTOM de um quadro da selecao de 3 e 4, em tres passos como nas telas 3 e 6 (customDecide): fechada, X abre a
 // lista (cima/baixo, X escolhe, triangulo fecha); escolhido, cima/baixo trocam de traje (o do monster.json e as skins dele), X
 // confirma e triangulo volta para a casa fechada. `cpu`: quadro de CPU (so os customs com "ai"). Devolve o som (0: nada feito).
-static int customStep(Pick &k, const bool *e, bool cpu)
+static int customStep(Pick &k, const bool *e, bool cpu, bool adventure)
 {
     const int nc = customCount();
     if (nc <= 0)
@@ -863,7 +890,7 @@ static int customStep(Pick &k, const bool *e, bool cpu)
             return 6;
         }
         const wotm::mods::Custom *cu = customAt(k.customHl);
-        if (!e[Ok] || !cu || (cpu && !cu->ai))   // a IA de um chefe precisa da fase dele
+        if (!e[Ok] || !customAllowed(cu, cpu, adventure))
             return 0;
         k.list = false;
         k.custom = k.customHl % nc + 1;
@@ -973,7 +1000,7 @@ static void selectStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         }
         if (k.col == kCellCustom)
         {
-            if (const int s = customStep(k, e, cpuPanel(q[at])))
+            if (const int s = customStep(k, e, cpuPanel(q[at]), rd32(rdram, kMode) == 1u))
                 sound = s;
             else if (e[Back] && !k.custom && !k.list)
                 back = true;   // casa fechada: o triangulo volta de tela, como nas colunas
@@ -1424,7 +1451,7 @@ static uint32_t customDecide(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runt
             return 0;
         }
         const wotm::mods::Custom *cu = customAt(g_soloCustom[who]);
-        if (!cu || (p.ai && !cu->ai))   // quadro de CPU: so os customs com "ai" (a IA de um chefe precisa da fase dele)
+        if (!customAllowed(cu, p.ai, rd32(rdram, kMode) == 1u))
             return 0;
         g_soloList[who] = false;
         g_soloChosen[who] = g_soloCustom[who] % nc + 1;
@@ -1678,6 +1705,7 @@ static void publish(uint8_t *rdram)
         v.count += v.present[d];
     }
     v.players = distinctPlayers(nullptr);
+    v.coopLoad = g_coopLoad.n;
     std::copy(g_bot, g_bot + kMaxPlayers + 1, v.bot);
     v.screenObj = rd32(rdram, kMovieScreen) & 0x1FFFFFFFu;
     // minigames de 2 (tela 7, no fliperama, sem o telao): os retratos grandes dos dois jogadores (switches Shell+0x1EC e +0x1F0, um
@@ -1828,7 +1856,7 @@ static void transitionHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtim
     {
         const int cur = static_cast<int>(rd32(rdram, wotm::sym::currScreen)), last = static_cast<int>(rd32(rdram, wotm::sym::lastScreen));
         // a volta das telas seguintes (13, 15, 11, 14) mostra a lista de modos, com os mesmos jogadores
-        if (rd32(rdram, wotm::sym::screenFirstPass) && cur == 5 && last == 1)
+        if (rd32(rdram, wotm::sym::screenFirstPass) && cur == 5 && (last == 1 || (last == 9 && g_coopLoad.n)))
         {
             g_phase = Config;
             g_primed = false;
@@ -1904,6 +1932,26 @@ static void modes2PHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     if (!g_modesPending || ctx->pc != g_modesRa)
         return;
     g_modesPending = false;
+    if (g_coopGo && g_coopLoad.n)
+    {   // save co-op: os jogadores 2..n do slot (o setSaveData ja pos o 1, a fase, o modo 1 e a marca de save), as IAs da fase e a carga
+        const CoopLoad c = g_coopLoad;
+        g_coopLoad = CoopLoad{};
+        g_coopGo = false;
+        wr32(rdram, kNumPlayers, uint32_t(c.n));
+        for (int i = 1; i < c.n; ++i)
+        {
+            wr32(rdram, kMonsterSel + 4u * uint32_t(i), c.sel[i - 1]);
+            wr32(rdram, kShell + 0x2BBC + 4u * uint32_t(i), c.lives[i - 1]);   // m_lives[i]
+            if (i == 1)
+                wr32(rdram, kCostume + 4u, c.costume[0]);
+            else
+                wotmMultiSetCostume(i, c.costume[i - 1]);
+        }
+        adventureAis(rdram);
+        changeScreen(rdram, ctx, runtime, 5, 0x63, 1, 0);
+        std::fprintf(stderr, "[padsel] save co-op: %d jogadores, carga da fase %u\n", c.n, rd32(rdram, kShell + 0x2BB0));
+    }
+    g_coopGo = false;
     if (g_phase == Config || g_phase == Leaving)
         setItemsAlpha(rdram, 5, 0.f);
     else if (g_phase == Reveal)
@@ -2224,7 +2272,15 @@ static void changeScreenHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runt
         const int32_t from = static_cast<int32_t>(GPR_U32(ctx, 4)), to = static_cast<int32_t>(GPR_U32(ctx, 5)),
                       dir = static_cast<int32_t>(GPR_U32(ctx, 6));
         const uint32_t base = rd32(rdram, kMode) == 2u ? 3u : rd32(rdram, kNumPlayers) == 2u ? 2u : 0u;
-        if (from == 6 && coopMenu(rdram))
+        if (from == 9 && to == 0x63 && g_coopLoad.n)
+        {   // save co-op carregado: a escolha de controles antes da carga, com a camera de volta ao telao (a da volta da tela 9)
+            wr32(rdram, kNumPlayers, uint32_t(g_coopLoad.n));
+            ctx->r[5] = _mm_set_epi64x(0, 5);
+            ctx->r[6] = _mm_set_epi64x(0, -1);
+            ctx->r[7] = _mm_set_epi64x(0, 9);
+            std::fprintf(stderr, "[padsel] save co-op de %d jogadores: escolha de controles\n", g_coopLoad.n);
+        }
+        else if (from == 6 && coopMenu(rdram))
         {
             if (to == 8 && dir > 0)
             {   // campanha co-op: sem selecao de fase, a carga da fase 1 com as IAs dela (como a tela 3 do retail)
@@ -2288,6 +2344,7 @@ static void mainHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         if (wotm_pad::g_manual.load(std::memory_order_relaxed))
             setManual(false);
         g_multi = 0;
+        g_coopLoad = CoopLoad{};
         g_selOn = false;
         wotm_training::menuDisarm("menu principal");   // a luta de treino acabou (ou a escolha voltou ate aqui)
         wotm_training::restoreDifficulty(rdram, wotm::sym::shellGame + wotm_training::kDifficulty);
@@ -2307,6 +2364,7 @@ static void waitStartHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime
         if (wotm_pad::g_manual.load(std::memory_order_relaxed))
             setManual(false);
         g_multi = 0;
+        g_coopLoad = CoopLoad{};
         g_selOn = false;
     }
     g_origWaitStart(rdram, ctx, runtime);
@@ -2531,6 +2589,13 @@ static void drawJoin(const View &v, std::vector<wotm::TextQuad> &quads, const wo
         text(quads, ram, tex0, kW, kH, label, x, ty + s * 1.05f, fitText(label, s * 0.5f, colW * 0.9f), Color{0x80, 0x7A, 0x6C, 0x80}, 1.f);
     }
     g_posInit = true;
+    if (v.coopLoad)   // save co-op: a carga so segue com tantos jogadores quantos o save tem
+    {
+        char need[40];
+        std::snprintf(need, sizeof need, "SAVED ADVENTURE FOR %d PLAYERS", v.coopLoad);
+        text(quads, ram, tex0, kW, kH, need, W * 0.5f, H * 0.93f, fitText(need, H * 0.05f, W * 0.9f),
+             v.players == v.coopLoad ? Color{0x80, 0x7A, 0x6C, 0x80} : gsColor(kPlayerColors[0], 0.5f), 1.f);
+    }
     // botoes: na legenda de baixo, no lugar da do jogo (wotm_legend.inc), com os do mapa (readDevice)
     namespace st = wotm::settings;
     using wotm_legend::bind;
@@ -2544,7 +2609,7 @@ static void drawJoin(const View &v, std::vector<wotm::TextQuad> &quads, const wo
         else
             wotm_legend::post({{bind(st::BCross), {}, "JOIN"}, back}, v.alpha);
     }
-    else if (v.players >= 2)
+    else if (v.players >= 2 && (!v.coopLoad || v.players == v.coopLoad))
     {
         const wotm_legend::Item go{bind(st::BStart), {}, "CONTINUE"};
         if (bots) wotm_legend::post({go, swap, addCpu, dropCpu, back}, v.alpha);
@@ -4146,6 +4211,18 @@ static void drawOnTelao(wotm::Scene &scene, const wotm::Ram &ram, const Camera3D
                 0.002f * (pl.x1 - pl.x0));
 }
 } // namespace wotm_padsel
+
+// wotm_save.inc (loadRow, thread do EE): save co-op carregado; n 0 desarma
+void wotmCoopLoadArm(int n, const uint32_t *sel, const uint32_t *costume, const uint32_t *lives)
+{
+    using namespace wotm_padsel;
+    g_coopLoad = CoopLoad{};
+    if (n < 2 || n > kMaxPlayers)
+        return;
+    g_coopLoad.n = n;
+    for (int i = 0; i + 1 < n; ++i)
+        g_coopLoad.sel[i] = sel[i], g_coopLoad.costume[i] = costume[i], g_coopLoad.lives[i] = lives[i];
+}
 
 void wotmPadSelInstall(PS2Runtime &runtime)
 {

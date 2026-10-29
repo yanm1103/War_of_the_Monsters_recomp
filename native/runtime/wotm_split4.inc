@@ -1169,3 +1169,7 @@ void wotmMultiSetCostume(int player, uint32_t costume)
     if (player >= 2 && player < 4)
         wotm_split4::g_extraCostume[player - 2] = costume;
 }
+uint32_t wotmMultiCostume(int player)
+{
+    return player >= 2 && player < 4 ? wotm_split4::g_extraCostume[player - 2] : 0u;
+}
