@@ -6,7 +6,7 @@ O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado s
 | # | Item | Depende de | Custo |
 |---|---|---|---|
 | 8 | Mods que adicionam monstros (as skins já existem) | — | médio/alto |
-| 14 | Primeiro release (binário pronto) | 13 | médio |
+| 14 | Primeiro release (binário pronto) | — | médio |
 
 ### 8. Mods que adicionam monstros
 Como funciona hoje: `docs/passos/MODS.md` ("Skins", "Monstros custom").
@@ -15,7 +15,7 @@ Como funciona hoje: `docs/passos/MODS.md` ("Skins", "Monstros custom").
 - **Aviso do buffer do `.PTR` para skin com `.PTR` próprio:** o log de carga já mostra os texIds e a VRAM. Falta o buffer de 0x30D40 do `.PTR` (`0f091a4:docs/investigacoes/2026-10-23/skins_mod_carga.md`, item 8).
 
 ### 14. Primeiro release (binário pronto)
-Decisão do dono: zip com o `wotm.exe` pronto (contém o código traduzido do jogo; vai só nos Releases do GitHub, nunca no repo), lançado depois do item 13.
+Decisão do dono: zip com o `wotm.exe` pronto (contém o código traduzido do jogo; vai só nos Releases do GitHub, nunca no repo). Levantamento do que falta e ordem sugerida: `docs/investigacoes/2026-10-29/release.md`.
 - **Primeira execução:** o launcher pede a ISO, confere o SHA1 do `SCUS_971.97` (`tools/setup_runtime.ps1` já faz) e grava `discroot\SCUS_971.97`; o resto vem da ISO (`PS2X_CD_IMAGE`). Nada do disco no zip.
 - **Build de release:** o `wotm.exe` com LTCG (o `build_dev` é sem), sem `ps2EntryRunner.exe`, sem variáveis de diagnóstico ligadas; `mods/` do repo dentro do zip.
 - **Pacote:** script em `tools/` que monta o zip (exe, DLLs do SDL2/FFmpeg/raylib, launcher, `mods/`), com as licenças de terceiros e o GPL-3.0 (apontar o código-fonte: este repo + `tools/runtime_patch/`).
