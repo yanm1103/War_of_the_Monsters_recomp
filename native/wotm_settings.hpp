@@ -73,6 +73,12 @@ inline constexpr float kAspectRatio[] = {0.f, 4.f / 3.f, 16.f / 9.f, 16.f / 10.f
 inline constexpr int kAspects = 6;
 
 inline std::atomic<int> g_val[kKeys] = {720, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 5, 0, 100, 0, 0, 1, 0, 1, 1};
+// Primeira execucao de um jogador (sem settings.ini, com o arquivo ligado): por cima do kDefault, que segue valendo para os testes
+// (lote e corpus rodam com WOTM_SETTINGS=0), tela cheia sem borda, lock-on alternado, barras dos inimigos, narrador com o grito do
+// monstro e a resolucao do monitor (Res fica pendente ate a janela existir: resolveFirstRunRes, wotm_live.inc). Decisao do dono.
+struct FirstRun { Key key; int value; };
+inline constexpr FirstRun kFirstRun[] = {{Display, 1}, {LockToggle, 1}, {EnemyBars, 1}, {Announcer, 2}};
+inline std::atomic<bool> g_resFromMonitor{false};
 inline std::filesystem::path g_path;   // vazio: sem arquivo (WOTM_SETTINGS=0 ou antes do load)
 inline std::mutex g_fileMutex;
 inline bool g_pathPending = false;   // o load achou teclas de um layout anterior: regrava o arquivo no fim do load
@@ -404,9 +410,17 @@ inline void load(const std::filesystem::path &dir)
         int fromFile = 0, fromEnv = 0, kbLayout = 0;
         uint32_t fileKb[kBinds] = {};
         bool kbSeen[kBinds] = {};
+        bool firstRun = false;
         if (useFile)
         {
             g_path = dir / "settings.ini";
+            std::error_code ec;
+            if (!std::filesystem::exists(g_path, ec))
+            {
+                firstRun = true;
+                for (const FirstRun &d : kFirstRun)
+                    g_val[d.key].store(d.value);
+            }
             std::ifstream f(g_path);
             std::string line;
             while (f && std::getline(f, line))
@@ -452,9 +466,16 @@ inline void load(const std::filesystem::path &dir)
             }
         }
         fromEnv = applyEnv();
-        std::fprintf(stderr, "[settings] %s: %d do arquivo, %d do ambiente\n", useFile ? g_path.string().c_str() : "arquivo ignorado (WOTM_SETTINGS=0)",
-                     fromFile, fromEnv);
-        if (g_pathPending)
+        std::fprintf(stderr, "[settings] %s: %d do arquivo, %d do ambiente%s\n", useFile ? g_path.string().c_str() : "arquivo ignorado (WOTM_SETTINGS=0)",
+                     fromFile, fromEnv, firstRun ? "; primeira execucao: padroes de jogador" : "");
+        if (firstRun)
+        {
+            if (!std::getenv(kEnv[Res]))
+                g_resFromMonitor.store(true);   // grava o arquivo quando a janela souber o monitor
+            else
+                save();
+        }
+        else if (g_pathPending)
             save();
     });
 }

@@ -555,6 +555,16 @@ static void initWindowAspect()
     }
     if (!g_localCollect && !g_hideFps)   // replay (--vu1cmp): sem janela de verdade, fica como esta
         initPresentRate();
+    // primeira execucao de um jogador (wotm_settings.hpp, kFirstRun): a resolucao e a altura do monitor onde a janela abriu; grava o
+    // settings.ini com os padroes de jogador
+    if (wotm::settings::g_resFromMonitor.exchange(false))
+    {
+        const int mon = GetCurrentMonitor(), mh = GetMonitorHeight(mon);
+        const int res = mh > 0 ? std::clamp(mh, 224, 4320) : 720;
+        wotm::settings::set(wotm::settings::Res, res);
+        g_appliedVideo[wotm::settings::Res] = res;   // ja vale: o applyVideoSettings nao refaz nada por isso
+        std::fprintf(stderr, "[settings] primeira execucao: resolucao %d (monitor %d, %dx%d)\n", res, mon, GetMonitorWidth(mon), mh);
+    }
     const int disp = wotm::settings::get(wotm::settings::Display);
     if (disp == 2)
         g_fullscreenKind = 2;
