@@ -167,16 +167,8 @@ inline std::map<uint32_t, uint32_t> packetIds(const std::vector<uint8_t> &d) {
     return out;
 }
 
-// Arquivo do disco descompactado (zip com o magic "IE\3\4", como no Scene::loadRtx). Vazio se nao abriu.
-inline std::vector<uint8_t> readUnzipped(const std::string &path) {
-    std::vector<uint8_t> raw;
-    if (FILE *f = std::fopen(path.c_str(), "rb")) {
-        std::fseek(f, 0, SEEK_END);
-        raw.resize(size_t(std::max(0L, std::ftell(f))));
-        std::fseek(f, 0, SEEK_SET);
-        if (std::fread(raw.data(), 1, raw.size(), f) != raw.size()) raw.clear();
-        std::fclose(f);
-    }
+// Arquivo do disco descompactado (zip com o magic "IE\3\4", como no Scene::loadRtx); sem o magic, o proprio arquivo
+inline std::vector<uint8_t> unzip(std::vector<uint8_t> raw) {
     static const uint8_t kMagic[4] = {'I', 'E', 3, 4};
     if (raw.size() < 34 || std::memcmp(raw.data(), kMagic, 4) != 0) return raw;
     uint32_t csize = 0;

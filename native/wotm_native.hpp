@@ -32,6 +32,7 @@
 #include "wotm_gs.hpp"
 #include "wotm_mods.hpp"   // paletas dos .RTX: mods/ vence o disco (loadResources)
 #include "wotm_texmods.hpp"   // texturas de mod em PNG (textureId, residentTexture)
+#include "wotm_disc.hpp"      // readDisc: pasta do disco extraido ou a ISO
 
 namespace wotm {
 
@@ -1054,12 +1055,6 @@ public:
     std::string discRoot_;                              // raiz do disco extraido, com a barra (loadResources)
     std::map<std::string, std::map<uint32_t, uint32_t>> texPackets_;   // ARQUIVO -> deslocamento do pacote no .TEX -> texId do disco
 
-    // Caminho do disco ("MON/LIZARD0.RTX"): o arquivo de mods/ (wotm_mods.hpp) se houver, senao o da raiz
-    std::string discPath(const std::string &rel) const {
-        std::string p = mods::Registry::get().hostPath(rel);
-        return p.empty() ? discRoot_ + mods::Registry::get().aliasOf(rel) : p;   // traje de mod: o arquivo do traje base
-    }
-
     // PNG de mod no lugar da textura do objeto (texId do texInfo global + TEX0). Residentes (T8H/4HL/4HH): pelo DBP, como o
     // decodeResident. As outras: o pacote de upload em texInfo[texId] esta dentro do .TEX carregado em fileStatus.texAddr[i]; o
     // deslocamento nele da o texId do disco (o pacote na RAM ja tem o id relocado). O nome do arquivo i e fileStatus.names[i].
@@ -1099,7 +1094,8 @@ public:
                 if (pk == texPackets_.end()) {
                     std::vector<uint8_t> d;
                     for (const char *dir : {"LVL/", "MON/", "SHELL/", ""}) {
-                        d = texmods::readUnzipped(discPath(*dir ? dir + file : stem + "/" + file));
+                        std::vector<uint8_t> raw;
+                        if (readDisc(*dir ? dir + file : stem + "/" + file, raw)) d = texmods::unzip(std::move(raw));
                         if (!d.empty()) break;
                     }
                     pk = texPackets_.emplace(file, texmods::packetIds(d)).first;
@@ -1148,18 +1144,17 @@ public:
             if (const char *d = std::getenv("WOTM_DISC")) root = d;
         std::string sep = root.empty() || root.back() == '/' || root.back() == '\\' ? "" : "/";
         discRoot_ = root + sep;
-        auto path = [&](const std::string &rel) { return discPath(rel); };
         rtxPal.clear(); rtxImg.clear(); rtxImgSrc_.clear();
         const uint32_t base0 = ram.u32(addr::tempVramTexAddr) >> 6;
-        bool lvl = loadRtx(path("LVL/" + names[0] + ".RTX").c_str(), base0);
+        bool lvl = loadRtxDisc("LVL/" + names[0] + ".RTX", base0);
         // O menu (SHELL) mora em SHELL/SHELL.RTX, nao em LVL/.
-        if (!lvl) lvl = loadRtx(path(names[0] + "/" + names[0] + ".RTX").c_str(), base0);
-        if (!lvl) lvl = loadRtx(path("SHELL/" + names[0] + ".RTX").c_str(), base0);   // LOAD, UI, SHELL2, PRESHELL
+        if (!lvl) lvl = loadRtxDisc(names[0] + "/" + names[0] + ".RTX", base0);
+        if (!lvl) lvl = loadRtxDisc("SHELL/" + names[0] + ".RTX", base0);   // LOAD, UI, SHELL2, PRESHELL
         if (log) *log = names[0] + (lvl ? "" : " (nao achado)");
         for (int i = 1; i < n; ++i) {
             if (names[size_t(i)].empty()) continue;
-            const bool ok = loadRtx(path("MON/" + names[size_t(i)] + ".RTX").c_str(), ram.u16(fs + 0x14C + 2 * (i - 1)), true,
-                                    ram.u16(fs + 0x168 + 2 * (i - 1)), names[size_t(i)]);   // maxTexAddr e maxResAddr do arquivo anterior
+            const bool ok = loadRtxDisc("MON/" + names[size_t(i)] + ".RTX", ram.u16(fs + 0x14C + 2 * (i - 1)), true,
+                                        ram.u16(fs + 0x168 + 2 * (i - 1)), names[size_t(i)]);   // maxTexAddr e maxResAddr do arquivo anterior
             if (log) *log += " " + names[size_t(i)] + (ok ? "" : "(?)");
         }
         invalidate();
@@ -1172,11 +1167,6 @@ public:
     // arquivo. Num traje de mod o caminho e o do traje base (LIZARD2.RTX) ou o do arquivo do mod (MECHA.RTX), e os PNGs da skin e o
     // retrato do custom sao do nome do jogo.
     bool loadRtx(const char *path, uint32_t base, bool append = false, uint32_t resBase = 0, const std::string &name = {}) {
-        if (!append) { rtxPal.clear(); rtxImg.clear(); rtxImgSrc_.clear(); }
-        std::string stem = name.empty() ? std::string(path) : name;   // "LIZARD0": nome das imagens residentes de mod (texmods, <arquivo>_rtx_t<id>.png)
-        stem = stem.substr(stem.find_last_of("/\\") + 1);
-        stem = stem.substr(0, stem.find('.'));
-        for (char &c : stem) c = char(std::toupper(static_cast<unsigned char>(c)));
         std::vector<uint8_t> raw;
         if (FILE *f = std::fopen(path, "rb")) {
             std::fseek(f, 0, SEEK_END);
@@ -1185,6 +1175,28 @@ public:
             if (std::fread(raw.data(), 1, raw.size(), f) != raw.size()) raw.clear();
             std::fclose(f);
         }
+        return loadRtxData(raw, path, base, append, resBase, name);
+    }
+    // Arquivo relativo do disco ("MON/LIZARD0.RTX"): mods/, a pasta do disco extraido ou a ISO (readDisc)
+    bool loadRtxDisc(const std::string &rel, uint32_t base, bool append = false, uint32_t resBase = 0, const std::string &name = {}) {
+        std::vector<uint8_t> raw;
+        readDisc(rel, raw);
+        return loadRtxData(raw, rel, base, append, resBase, name);
+    }
+    // Arquivo do disco: mods/ vence; depois a pasta do disco extraido (discRoot_, vazio = diretorio atual); depois a ISO
+    // (WOTM_ISO, senao PS2X_CD_IMAGE: o pacote do release so tem a ISO)
+    bool readDisc(const std::string &rel, std::vector<uint8_t> &out) const {
+        const char *iso = std::getenv("WOTM_ISO");
+        if (!iso) iso = std::getenv("PS2X_CD_IMAGE");
+        return disc::readFile(discRoot_.empty() ? std::filesystem::path(".") : std::filesystem::path(discRoot_), iso ? iso : "", rel, out);
+    }
+    bool loadRtxData(const std::vector<uint8_t> &raw, const std::string &path, uint32_t base, bool append, uint32_t resBase,
+                     const std::string &name) {
+        if (!append) { rtxPal.clear(); rtxImg.clear(); rtxImgSrc_.clear(); }
+        std::string stem = name.empty() ? path : name;   // "LIZARD0": nome das imagens residentes de mod (texmods, <arquivo>_rtx_t<id>.png)
+        stem = stem.substr(stem.find_last_of("/\\") + 1);
+        stem = stem.substr(0, stem.find('.'));
+        for (char &c : stem) c = char(std::toupper(static_cast<unsigned char>(c)));
         if (raw.size() < 34) return false;
         std::vector<uint8_t> data;
         static const uint8_t kMagic[4] = {'I', 'E', 3, 4};
