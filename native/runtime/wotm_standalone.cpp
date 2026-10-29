@@ -292,7 +292,7 @@ bool setup(const fs::path &data, const fs::path &elf, fs::path &iso, bool elfOk)
 {
     std::error_code ec;
     std::wstring why = !elfOk ? L"First run: this port needs your own copy of War of the Monsters for PlayStation 2 (NTSC-U, SCUS-97197) "
-                                L"as a disc image (.iso).\n\nThe game files are read from the image; nothing is downloaded."
+                                L"as a disc image (.iso)."
                               : L"The disc image is no longer at:\n" + iso.wstring() + L"\n\nSelect it again.";
     while (true)
     {
