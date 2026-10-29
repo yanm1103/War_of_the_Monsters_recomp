@@ -1,0 +1,57 @@
+Third-party components in this package
+======================================
+
+War of the Monsters Recompiled (wotm.exe, wotm.pdb)
+  License: GNU General Public License 3.0 (licenses\WotM-GPL-3.0.txt)
+  Source: https://github.com/yanm1103/War_of_the_Monsters_recomp at the tag or commit in the
+  first line of wotm.log; the runtime is PS2Recomp with the changes in tools/runtime_patch/
+  of that repository.
+
+PS2Recomp (the recompiler runtime inside wotm.exe)
+  https://github.com/ran-j/PS2Recomp
+  License: GNU General Public License 3.0 (licenses\PS2Recomp-LICENSE.md)
+
+raylib (window, input, drawing, audio; inside wotm.exe)
+  https://github.com/raysan5/raylib
+  License: zlib/libpng (licenses\raylib-LICENSE.txt)
+  Includes GLFW, zlib/libpng license (licenses\GLFW-LICENSE.md), and single-file libraries
+  (miniaudio, stb, dr_libs and others) under public domain or MIT-style terms.
+
+FFmpeg 7.1 (avcodec-61.dll, avutil-59.dll, swscale-8.dll, swresample-5.dll: movie playback)
+  https://ffmpeg.org - LGPL build from https://github.com/System233/ffmpeg-msvc-prebuilt
+  (release n7.1-241205, lgpl-amd64-shared)
+  License: GNU Lesser General Public License 2.1 or later (licenses\FFmpeg-LICENSE.md,
+  licenses\LGPL-2.1.txt). Source: https://git.ffmpeg.org/ffmpeg.git, tag n7.1.
+  The DLLs are unmodified and can be replaced with compatible builds.
+
+libwebp (libwebp.dll, libwebpmux.dll, libsharpyuv.dll; used by FFmpeg)
+  https://chromium.googlesource.com/webm/libwebp
+  License: BSD 3-clause (licenses\libwebp-COPYING.txt)
+
+libjxl (jxl.dll, jxl_cms.dll, jxl_threads.dll; used by FFmpeg)
+  https://github.com/libjxl/libjxl
+  License: BSD 3-clause (licenses\libjxl-LICENSE.txt); includes skcms, BSD 3-clause
+  (licenses\skcms-LICENSE.txt), and may include Highway, Apache 2.0 (licenses\highway-LICENSE.txt)
+
+Brotli (brotlicommon.dll, brotlidec.dll, brotlienc.dll; used by libjxl)
+  https://github.com/google/brotli
+  License: MIT (licenses\brotli-LICENSE.txt)
+
+zlib (zlib1.dll)
+  https://zlib.net
+  License: zlib (licenses\zlib-LICENSE.txt)
+
+Microsoft Visual C++ runtime (msvcp140.dll, vcruntime140.dll, vcruntime140_1.dll)
+  Redistributed under the Microsoft Visual Studio license terms for redistributable code.
+
+Game art in the bundled mods (mods\)
+  mods\Mecha\monsters\mecha\files\MECHA.NGP, .PTR, .TEX, .RTX: the final boss robot of
+  War of the Monsters, rebuilt as a playable monster from the game's own files.
+  mods\Goliath Prime\goliathprime.png: made from the game's 3D model, edited.
+  mods\recompiled_logo\SHELL\*.png: the game's logo, edited.
+  These derive from the art of War of the Monsters ((c) 2003 Sony Computer Entertainment
+  America) and are not covered by the GPL. The monster.json files are part of the port.
+
+War of the Monsters is (c) 2003 Sony Computer Entertainment America. This project is not
+affiliated with or endorsed by Sony or Incognito Entertainment. No other game data is included:
+the game is read from your own disc image.
