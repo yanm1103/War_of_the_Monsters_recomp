@@ -96,6 +96,7 @@ uint32_t call(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t a
     ctx->r[31] = _mm_set_epi64x(0, 0);
     ctx->pc = addr;
     f(rdram, ctx, runtime);
+    wotmFinishGuestCall(rdram, ctx, runtime);
     const uint32_t v0 = GPR_U32(ctx, 2);
     *ctx = saved;
     return v0;
@@ -168,6 +169,7 @@ void callOrigWith(const Hook &h, uint8_t *rdram, R5900Context *ctx, PS2Runtime *
     ctx->r[31] = _mm_set_epi64x(0, 0);
     ctx->pc = h.addr;
     h.orig(rdram, ctx, runtime);
+    wotmFinishGuestCall(rdram, ctx, runtime);
     *ctx = saved;
 }
 

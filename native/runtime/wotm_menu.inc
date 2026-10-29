@@ -46,6 +46,7 @@ static uint32_t callGuest(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt, uin
     ctx->r[31] = _mm_set_epi64x(0, 0);
     ctx->pc = fn;
     f(rdram, ctx, rt);
+    wotmFinishGuestCall(rdram, ctx, rt);
     const uint32_t v0 = GPR_U32(ctx, 2);
     *ctx = saved;
     return v0;
@@ -76,6 +77,7 @@ static void realignButtons(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
         ctx->r[31] = _mm_set_epi64x(0, 0);
         ctx->pc = wotm::fn::uiAlignItemWithCamera__FP3_csfff;
         f(rdram, ctx, rt);
+        wotmFinishGuestCall(rdram, ctx, rt);
         *ctx = saved;
     }
 }

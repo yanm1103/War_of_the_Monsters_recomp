@@ -763,6 +763,9 @@ struct ScreenRect {
     // Barra de vida sobre o inimigo (wotmBarRect): vista em que foi montada (-1 = nao e barra). Na tela dividida vai para a metade da
     // janela dessa vista e fica cortada nela, sem esticar ate a borda como o fade e as faixas de cinema
     int8_t barView = -1;
+    // Retangulo do HUD nativo de um jogador (jogadores 3 e 4, wotmPlayerHud): sai depois das barras dos inimigos (por cima delas) e, na
+    // faixa de baixo dos 3 jogadores, com a escala em que as caixas dele foram medidas (barSpan)
+    bool hud = false;
     // Barra com textura residente (retrato do inimigo, wotmBarTex): TEX0 da imagem do .RTX (0 = cor lisa) e o trecho em texels
     uint64_t tex0 = 0;
     float u0 = 0.f, v0 = 0.f, u1 = 0.f, v1 = 0.f;
@@ -4150,20 +4153,21 @@ public:
             if (size_t(r.anchor) >= spans.size()) spans.resize(size_t(r.anchor) + 1);
             Span &sp = spans[size_t(r.anchor)];
             float x0, x1;
-            barSpan(gr, p.rw, r, x0, x1, sp.lo, sp.hi);
+            barSpan(gr, p.rw, p.rh, r, x0, x1, sp.lo, sp.hi);
             sp.x0 = std::min(sp.x0, x0);
             sp.x1 = std::max(sp.x1, x1);
         }
-        for (const ScreenRect &r : *p.rects) {
-            if (!mine(r)) continue;
-            float nudge = 0.f;
-            if (r.anchor >= 0 && size_t(r.anchor) < spans.size()) {
-                const Span &sp = spans[size_t(r.anchor)];
-                if (sp.x0 < sp.lo) nudge = sp.lo - sp.x0;
-                else if (sp.x1 > sp.hi) nudge = std::max(sp.hi - sp.x1, sp.lo - sp.x0);
+        for (const bool hud : {false, true})   // as barras dos inimigos, depois o HUD nativo dos jogadores por cima delas
+            for (const ScreenRect &r : *p.rects) {
+                if (!mine(r) || r.hud != hud) continue;
+                float nudge = 0.f;
+                if (r.anchor >= 0 && size_t(r.anchor) < spans.size()) {
+                    const Span &sp = spans[size_t(r.anchor)];
+                    if (sp.x0 < sp.lo) nudge = sp.lo - sp.x0;
+                    else if (sp.x1 > sp.hi) nudge = std::max(sp.hi - sp.x1, sp.lo - sp.x0);
+                }
+                drawBar(gr, p.rw, p.rh, r, nudge);
             }
-            drawBar(gr, p.rw, p.rh, r, nudge);
-        }
         EndBlendMode();
         rlDrawRenderBatchActive();
         rlSetMatrixProjection(keepProj);
@@ -4172,7 +4176,7 @@ public:
 
     // Barra sobre o inimigo: x na janela (rw de largura) antes do corte e a area em que ela sai (lo, hi: a metade da vista na tela
     // dividida, a janela fora dela)
-    void barSpan(const GsScreenRect &gr, float rw, const ScreenRect &r, float &x0, float &x1, float &lo, float &hi) const {
+    void barSpan(const GsScreenRect &gr, float rw, float rh, const ScreenRect &r, float &x0, float &x1, float &lo, float &hi) const {
         // px da janela por px do GS: a faixa da vista (gsScreenRect, na proporcao dela) sobre a largura dela, com a altura da vista na
         // conta (quadrantes: 112 linhas na faixa da janela inteira). Na tela dividida a faixa e a da metade (2:3, 320 px do GS)
         const ViewCtx &cv = curView();
@@ -4181,6 +4185,14 @@ public:
         x1 = gr.x0 + r.x1 * k;
         lo = 0.f;
         hi = rw;
+        if (r.barView >= 0 && r.barView == stripView && !r.hud) {
+            // faixa de baixo dos 3 jogadores (640 x 112 na janela inteira): as linhas tem a escala dos quadrantes, e o px do GS tambem
+            // (a do quadrante, a faixa 4:3 da tela cheia / 640), centrado na janela; a conta de cima dava a metade e as barras so iam
+            // ate o meio da tela
+            const float ks = std::min(rw, rh * 4.f / 3.f) / 640.f, c = 0.5f * rw;
+            x0 = c + (r.x0 - 320.f) * ks;
+            x1 = c + (r.x1 - 320.f) * ks;
+        }
         if (splitEdges && r.barView != stripView) {
             // cada vista sai na sua metade com a camera dela (drawView): o centro da vista no jogo (160 ou 480) vai para o centro da
             // metade, e nao para onde a faixa 4:3 da janela inteira o poria (ficava 1/4 da sobra do widescreen para o lado). Nos
@@ -4201,7 +4213,7 @@ public:
         if (!a) return;
         const float sy = rh / 224.f;
         float x0, x1, lo, hi;
-        barSpan(gr, rw, r, x0, x1, lo, hi);
+        barSpan(gr, rw, rh, r, x0, x1, lo, hi);
         x0 += nudge;
         x1 += nudge;
         const float fx0 = x0, fw = x1 - x0;   // antes do corte (o retrato tira dai o trecho da textura)

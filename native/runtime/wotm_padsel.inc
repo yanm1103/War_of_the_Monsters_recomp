@@ -59,7 +59,7 @@ constexpr uint32_t kShellSound = kShell + 0x2918;
 constexpr uint32_t kMonsterSel = kShell + 0x2938, kCostume = kShell + 0x2BE0, kNumPlayers = kShell + 0x2BB4, kNumAIs = kShell + 0x2BB8,
                    kMode = kShell + 0x2C10, kBattleMode = kShell + 0x2B54, kSw5CC = kShell + 0x5CC, kCostumeBox = kShell + 0x88;
 constexpr uint32_t kSlotSize = 0x2C;   // SelectSlot (monster_select.h): taken +0, state +4; 4 trajes por coluna
-enum Action { Left, Right, Ok, Back, Start, Up, Down, L1, R1, Square, kActions };   // L1/R1: abas do painel do wotm_mainmenu.inc; Square: so no roteiro (previa da aba VIDEO)
+enum Action { Left, Right, Ok, Back, Start, Up, Down, L1, R1, Square, Circle, kActions };   // L1/R1: abas do painel do wotm_mainmenu.inc; Square/Circle: bot na escolha de controles (no roteiro do painel, Square e a previa da aba VIDEO)
 enum Phase { Off, Config, Reveal, Leaving };
 // Casas da barra de monstros alem das 10 colunas: monstro aleatorio e personalizado (os monstros custom dos mods)
 constexpr int kCellRandom = 11, kCellCustom = 12;
@@ -94,8 +94,10 @@ struct View
     float alpha = 0.f;    // da escolha inteira (fade de entrada e saida)
     bool present[kDevs] = {};
     int slot[kDevs] = {};   // 0 fora, 1..8 jogador
+    bool bot[kMaxPlayers + 1] = {};   // numero de jogador com bot (escolha de controles)
     int count = 0;          // dispositivos presentes
     int players = 0;        // jogadores distintos escolhidos
+    int coopLoad = 0;       // save co-op carregado: jogadores que ele exige (0 = escolha livre)
     uint32_t screenObj = 0;
     uint32_t mgObj[24] = {}, mgUsed[2] = {};   // tela 7: objetos dos retratos grandes e o em uso de cada jogador (publish)
     // selecao
@@ -136,10 +138,18 @@ static float g_uiAlpha = 0.f, g_reveal = 0.f;
 static bool g_transMoving = false;   // a camera do jogo anda na transicao em curso (transitionHook)
 static float g_transProg = 0.f;
 static int g_slot[kDevs] = {};
+static bool g_bot[kMaxPlayers + 1] = {};   // escolha de controles: numero de jogador ocupado por um bot (jogador sob a IA)
+static unsigned g_bots = 0;                // bit p: jogador p + 1 da partida e bot (depois da renumeracao; vale com g_multi)
 static bool g_prev[kDevs][kActions] = {};
 static bool g_primed = false;
 static int g_inject = 0;   // codigo para o proximo screenGetInput (5 = voltar)
-static int g_multi = 0;    // 3 ou 4: jogadores da partida multijogador escolhida (0 = 1 ou 2 jogadores, retail)
+static int g_multi = 0;    // 3 ou 4 (ou 2 com bot): jogadores da partida multijogador escolhida, selecao do telao (0 = 1 ou 2 jogadores, retail)
+// Save co-op carregado (wotm_save.inc, wotmCoopLoadArm): a carga (9 -> 0x63) vira a escolha de controles (5), que exige n jogadores e
+// dali vai a carga com os jogadores 2..n do slot (sel/costume/lives). n 0: nenhum.
+struct CoopLoad { int n = 0; uint32_t sel[3] = {}, costume[3] = {}, lives[3] = {}; };
+static CoopLoad g_coopLoad;
+static bool g_coopGo = false;   // Start aceito: a carga na saida do screenGameModes2P
+static void adventureAis(uint8_t *rdram);
 static PS2Runtime::RecompiledFunction g_origTransition = nullptr, g_origModes2P = nullptr, g_origGetInput = nullptr, g_origMain = nullptr,
                                       g_origWaitStart = nullptr, g_origSelect2P = nullptr, g_origChangeScreen = nullptr;
 static uint32_t g_transRa = 0, g_modesRa = 0, g_selectRa = 0, g_mainRa = 0, g_select1Ra = 0, g_soloInRa = 0;
@@ -182,7 +192,7 @@ static void parseScript()
     const char *e = std::getenv("WOTM_PADSEL_SCRIPT");
     if (!e) return;
     std::string s(e);
-    static const char *const names[kActions] = {"left", "right", "ok", "back", "start", "up", "down", "l1", "r1", "square"};
+    static const char *const names[kActions] = {"left", "right", "ok", "back", "start", "up", "down", "l1", "r1", "square", "circle"};
     for (size_t pos = 0; pos < s.size();)
     {
         size_t end = s.find(';', pos);
@@ -234,6 +244,8 @@ static void readDevice(int d, bool out[kActions], bool bound = true)
         out[Back] = kbDown(st::BTriangle) || kbDown(st::BSelect);
         out[L1] = kbDown(st::BL1);
         out[R1] = kbDown(st::BR1);
+        out[Square] = kbDown(st::BSquare);
+        out[Circle] = kbDown(st::BCircle);
         // mouse (etapa 9, cursor solto): esquerdo confirma, direito volta, rodinha sobe e desce
         if (!wotm::mouse::g_captured.load(std::memory_order_relaxed))
         {
@@ -257,6 +269,8 @@ static void readDevice(int d, bool out[kActions], bool bound = true)
         out[Back] = btn(st::BTriangle, GAMEPAD_BUTTON_RIGHT_FACE_UP);
         out[L1] = btn(st::BL1, GAMEPAD_BUTTON_LEFT_TRIGGER_1);
         out[R1] = btn(st::BR1, GAMEPAD_BUTTON_RIGHT_TRIGGER_1);
+        out[Square] = btn(st::BSquare, GAMEPAD_BUTTON_RIGHT_FACE_LEFT);
+        out[Circle] = btn(st::BCircle, GAMEPAD_BUTTON_RIGHT_FACE_RIGHT);
     }
     const double now = GetTime();
     for (const ScriptStep &st : g_script)
@@ -277,6 +291,7 @@ static void callGuest(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt, uint32_
     ctx->r[31] = _mm_set_epi64x(0, 0);
     ctx->pc = fn;
     f(rdram, ctx, rt);
+    wotmFinishGuestCall(rdram, ctx, rt);
     *ctx = saved;
 }
 static void sfx(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt, int sound)   // ShellSound::playShellSFXSound (2/4 cursor, 6 voltar, 8 ok)
@@ -381,11 +396,19 @@ static void hideTwoPlayerItem(uint8_t *rdram)
 
 // ------------------------------------------------------------------ escolha de controles
 
-static int distinctPlayers(int map[kMaxPlayers + 1])
+// Numeros de jogador em uso (dispositivos e bots)
+static void usedPlayers(bool used[kMaxPlayers + 1])
 {
-    bool used[kMaxPlayers + 1] = {};
+    for (int p = 0; p <= kMaxPlayers; ++p)
+        used[p] = p > 0 && g_bot[p];
     for (int d = 0; d < kDevs; ++d)
         if (present(d) && g_slot[d] > 0) used[g_slot[d]] = true;
+}
+
+static int distinctPlayers(int map[kMaxPlayers + 1])
+{
+    bool used[kMaxPlayers + 1];
+    usedPlayers(used);
     int n = 0;
     for (int p = 1; p <= kMaxPlayers; ++p)
     {
@@ -395,8 +418,10 @@ static int distinctPlayers(int map[kMaxPlayers + 1])
     return n;
 }
 
+// Liga o mapa manual (os dispositivos de cada jogador, renumerados por map; os bots ficam sem nenhum e sob a IA) ou o desliga
 static void setManual(bool on, const int map[kMaxPlayers + 1] = nullptr)
 {
+    unsigned bots = 0;
     if (on)
     {
         uint32_t devs[kMaxPlayers] = {};
@@ -405,6 +430,16 @@ static void setManual(bool on, const int map[kMaxPlayers + 1] = nullptr)
                 devs[map[g_slot[d]] - 1] |= d == kKb ? PS2_PAD_DEV_KEYBOARD : 1u << d;
         for (int p = 0; p < kMaxPlayers; ++p)
             wotm_pad::g_manualDevs[p] = devs[p];
+        for (int p = 1; p <= kMaxPlayers; ++p)
+            if (g_bot[p] && map[p] > 0) bots |= 1u << (map[p] - 1);
+    }
+    g_bots = bots;
+    if (wotm_menucpus::g_botMask.exchange(bots) != bots && bots)
+    {
+        std::fprintf(stderr, "[padsel] jogadores sob a IA:");
+        for (int p = 0; p < kMaxPlayers; ++p)
+            if (bots >> p & 1u) std::fprintf(stderr, " %d", p + 1);
+        std::fprintf(stderr, "\n");
     }
     if (wotm_pad::g_manual.exchange(on) != on)
         std::fprintf(stderr, "[padsel] controles %s\n", on ? "escolhidos: mapa manual" : "desligados: mapa padrao");
@@ -422,7 +457,7 @@ static void configStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         return;
     }
     int moved = 0;
-    bool confirm = false, back = false;
+    bool confirm = false, back = false, addBot = false, dropBot = false;
     for (int d = 0; d < kDevs; ++d)
     {
         if (!present(d)) { g_slot[d] = 0; continue; }
@@ -434,9 +469,8 @@ static void configStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             if (e[Ok])
             {
-                bool used[kMaxPlayers + 1] = {};
-                for (int o = 0; o < kDevs; ++o)
-                    if (present(o) && g_slot[o] > 0) used[g_slot[o]] = true;
+                bool used[kMaxPlayers + 1];
+                usedPlayers(used);
                 for (int p = 1; p <= kMaxPlayers && !g_slot[d]; ++p)
                     if (!used[p]) g_slot[d] = p;
                 moved = 4;
@@ -446,10 +480,19 @@ static void configStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         }
         else
         {
-            if (e[Left]) { g_slot[d] = g_slot[d] > 1 ? g_slot[d] - 1 : kMaxPlayers; moved = 2; }
-            if (e[Right]) { g_slot[d] = g_slot[d] < kMaxPlayers ? g_slot[d] + 1 : 1; moved = 4; }
+            // esquerda/direita pulam os numeros dos bots (o proprio numero nunca e de bot: o laco para nele)
+            if (e[Left] || e[Right])
+            {
+                const int dir = e[Left] ? -1 : 1;
+                do
+                    g_slot[d] = (g_slot[d] - 1 + dir + kMaxPlayers) % kMaxPlayers + 1;
+                while (g_bot[g_slot[d]]);
+                moved = dir < 0 ? 2 : 4;
+            }
             if (e[Back]) { g_slot[d] = 0; moved = 2; }
             if (e[Start]) confirm = true;
+            addBot = addBot || e[Square];     // quadrado: um bot no menor numero livre
+            dropBot = dropBot || e[Circle];   // bola: tira o bot de maior numero
         }
         if (g_slot[d] != before)
             std::fprintf(stderr, "[padsel] %s %d: jogador %d\n", d == kKb ? "teclado" : "controle", d == kKb ? 0 : d, g_slot[d]);
@@ -458,13 +501,43 @@ static void configStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     if (back)
     {
         g_phase = Leaving;
+        g_coopLoad = CoopLoad{};   // save co-op: desistiu da carga
         g_inject = 5;   // o screenGameModes2P faz o resto (som, m_numPlayers 0, changeScreen de volta)
         std::fprintf(stderr, "[padsel] voltar ao menu principal\n");
         return;
     }
+    if (addBot)
+    {
+        bool used[kMaxPlayers + 1];
+        usedPlayers(used);
+        int p = 1;
+        while (p <= kMaxPlayers && used[p])
+            ++p;
+        if (p <= kMaxPlayers)
+        {
+            g_bot[p] = true;
+            moved = 4;
+            std::fprintf(stderr, "[padsel] bot: jogador %d\n", p);
+        }
+    }
+    if (dropBot)
+        for (int p = kMaxPlayers; p >= 1; --p)
+            if (g_bot[p])
+            {
+                g_bot[p] = false;
+                moved = 2;
+                std::fprintf(stderr, "[padsel] bot do jogador %d saiu\n", p);
+                break;
+            }
     int map[kMaxPlayers + 1];
     const int n = distinctPlayers(map);
-    if (confirm && n >= 2)
+    if (confirm && n >= 2 && g_coopLoad.n && n != g_coopLoad.n)
+    {
+        sfx(rdram, ctx, runtime, 6);   // save co-op: tantos jogadores quantos o save tem
+        std::fprintf(stderr, "[padsel] save co-op de %d jogadores: %d escolhidos\n", g_coopLoad.n, n);
+        confirm = false;
+    }
+    if (confirm && n >= 2)   // o Start vem de um dispositivo dentro: sempre ha um humano
     {
         setManual(true, map);
         sfx(rdram, ctx, runtime, 8);
@@ -472,8 +545,16 @@ static void configStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             if (present(d) && g_slot[d] > 0)
                 std::fprintf(stderr, "[padsel] jogador %d: %s %d\n", map[g_slot[d]], d == kKb ? "teclado" : "controle", d == kKb ? 0 : d);
         wotm_menucpus::g_menuPlayers.store(n);   // o maximo de CPUs da tela 13 (8 monstros)
-        // a lista de modos do retail aparece com 2, 3 ou 4 (com 3 e 4 as selecoes de monstros sao as nossas)
-        g_multi = n >= 3 ? n : 0;
+        // a lista de modos do retail aparece com 2, 3 ou 4; com 3 e 4, ou com bot, as selecoes de monstros sao as nossas (o bot nao
+        // tem controle para a selecao do jogo: um humano escolhe o monstro dele, como o das CPUs)
+        g_multi = n >= 3 || g_bots ? n : 0;
+        if (g_coopLoad.n)
+        {   // save co-op: a carga vai na saida do screenGameModes2P (coopLoadGo); aqui o changeScreen ligaria o screenFirstPass e o
+            // first pass dele, no mesmo quadro, zeraria as IAs
+            g_coopGo = true;
+            g_phase = Leaving;
+            return;
+        }
         g_phase = Reveal;
         g_reveal = 0.f;
         if (g_multi)
@@ -604,6 +685,12 @@ static const wotm::mods::Custom *customAt(int k)
     const auto &cs = wotm::mods::Registry::get().customs();
     return cs.empty() || k < 0 ? nullptr : &cs[size_t(k) % cs.size()];
 }
+// O custom pode ser confirmado neste quadro: num quadro de CPU, so os com "ai" (a IA de um chefe precisa da fase dele); na aventura
+// (m_mode 1), nenhum de tipo chefe (13 a 15: Goliath, jelly, Cerebulon), que sao os chefes das fases dela
+static bool customAllowed(const wotm::mods::Custom *cu, bool cpu, bool adventure)
+{
+    return cu && !(cpu && !cu->ai) && !(adventure && cu->type >= 13 && cu->type <= 15);
+}
 
 // Eliminacao de 3 e 4: cada monstro com um jogador so. Durante a escolha vale o "pronto" dos outros quadros; na saida o traje 0 das
 // colunas escolhidas fica com taken 0 (o que o screenCharSelect2P faz no modo 6; o wotm_modes4.inc tira dali o monstro seguinte de
@@ -636,6 +723,31 @@ static int elimRandom(uint8_t *rdram, int self)
     return n ? open[rng() % uint32_t(n)] : 0;
 }
 
+// Quadro escolhido por um humano para outro: jogador bot (escolha de controles) ou CPU
+static bool botPanel(int j) { return j < g_multi && (g_bots >> j & 1u); }
+static bool cpuPanel(int j) { return j >= g_multi || botPanel(j); }
+
+// Fila do jogador p: o quadro dele e os de bot e de CPU que lhe cabem, na ordem em que escolhe (o k-esimo desses, bots antes das
+// CPUs, e do k % H-esimo humano). Sem bots, a CPU c e do jogador c % N. Jogador bot: fila vazia.
+static int panelQueue(int p, int q[kMaxPanels])
+{
+    if (p < 0 || p >= g_multi || botPanel(p))
+        return 0;
+    int humans = 0, me = 0;
+    for (int j = 0; j < g_multi; ++j)
+        if (!botPanel(j))
+        {
+            if (j == p) me = humans;
+            ++humans;
+        }
+    int n = 0, k = 0;
+    q[n++] = p;
+    for (int j = 0; j < g_multi + g_selCpus; ++j)
+        if (cpuPanel(j) && k++ % humans == me)
+            q[n++] = j;
+    return n;
+}
+
 static void selectBegin(uint8_t *rdram)
 {
     g_selOn = true;
@@ -649,8 +761,9 @@ static void selectBegin(uint8_t *rdram)
     if (elim)   // volta da selecao de fase: os monstros que a saida marcou como levados ficam livres de novo
         elimRelease(rdram);
     // cursores espalhados pelas colunas abertas; o que ja foi escolhido (volta da selecao de fase, revanche) fica
-    const bool keep = g_pickFor == g_multi * 16 + g_selCpus;
-    g_pickFor = g_multi * 16 + g_selCpus;
+    const int pickFor = int(g_bots) * 256 + g_multi * 16 + g_selCpus;
+    const bool keep = g_pickFor == pickFor;
+    g_pickFor = pickFor;
     int col = stepColumn(rdram, 0, 1);
     for (int p = 0; p < g_multi + g_selCpus; ++p)
     {
@@ -668,7 +781,8 @@ static void selectBegin(uint8_t *rdram)
         col = stepColumn(rdram, col, 1);
         g_pick[p].ready = false;
     }
-    std::fprintf(stderr, "[padsel] selecao de monstros (modo %u) de %d jogadores e %d CPUs\n", gameMode(rdram), g_multi, g_selCpus);
+    std::fprintf(stderr, "[padsel] selecao de monstros (modo %u) de %d jogadores (bots: mascara %x) e %d CPUs\n", gameMode(rdram), g_multi,
+                 g_bots, g_selCpus);
 }
 
 // m_monsterSel da escolha: o da coluna ou o tipo do custom (o traje dele ja esta em Pick::costume)
@@ -690,7 +804,7 @@ static void selectFinish(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             wr32(rdram, kCostume + 4u * uint32_t(p), uint32_t(g_pick[p].costume));
         else
             wotmMultiSetCostume(p, uint32_t(g_pick[p].costume));
-        std::fprintf(stderr, "[padsel] jogador %d: %s traje %d\n", p + 1, monsterName(sel), g_pick[p].costume);
+        std::fprintf(stderr, "[padsel] jogador %d%s: %s traje %d\n", p + 1, botPanel(p) ? " (bot)" : "", monsterName(sel), g_pick[p].costume);
         if (elimination(rdram))   // o "play again" do dialogo 0xB volta a estes (Shell+0x2B84/0x2B88 como o retail; 3 e 4 no modes4)
         {
             if (p < 2)
@@ -756,7 +870,7 @@ static int mouseStep(int cur)
 // Toque na casa CUSTOM de um quadro da selecao de 3 e 4, em tres passos como nas telas 3 e 6 (customDecide): fechada, X abre a
 // lista (cima/baixo, X escolhe, triangulo fecha); escolhido, cima/baixo trocam de traje (o do monster.json e as skins dele), X
 // confirma e triangulo volta para a casa fechada. `cpu`: quadro de CPU (so os customs com "ai"). Devolve o som (0: nada feito).
-static int customStep(Pick &k, const bool *e, bool cpu)
+static int customStep(Pick &k, const bool *e, bool cpu, bool adventure)
 {
     const int nc = customCount();
     if (nc <= 0)
@@ -776,7 +890,7 @@ static int customStep(Pick &k, const bool *e, bool cpu)
             return 6;
         }
         const wotm::mods::Custom *cu = customAt(k.customHl);
-        if (!e[Ok] || !cu || (cpu && !cu->ai))   // a IA de um chefe precisa da fase dele
+        if (!e[Ok] || !customAllowed(cu, cpu, adventure))
             return 0;
         k.list = false;
         k.custom = k.customHl % nc + 1;
@@ -845,11 +959,11 @@ static void selectStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         bool e[kActions];
         for (int a = 0; a < kActions; ++a)
             e[a] = now[p][a] && !g_selPrev[p][a];
-        // fila do jogador: o dele e as CPUs que lhe cabem (p, p + N, p + 2N...); escolhe a primeira que nao esta pronta
-        const int total = g_multi + g_selCpus;
-        int q[kMaxPanels], nq = 0;
-        for (int j = p; j < total; j += g_multi)
-            q[nq++] = j;
+        // fila do jogador: o dele e os bots e CPUs que lhe cabem (panelQueue); escolhe o primeiro que nao esta pronto. Bot: nada
+        int q[kMaxPanels];
+        const int nq = panelQueue(p, q);
+        if (!nq)
+            continue;
         int at = 0;
         while (at < nq - 1 && g_pick[q[at]].ready)
             ++at;
@@ -857,7 +971,7 @@ static void selectStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         const bool customOpen = cur.col == kCellCustom && (cur.list || cur.custom);   // o triangulo e da casa CUSTOM
         if (at > 0 && !cur.ready && e[Back] && !customOpen)
         {
-            g_pick[q[at - 1]].ready = false;   // CPU: o triangulo desfaz a escolha anterior do mesmo jogador
+            g_pick[q[at - 1]].ready = false;   // bot ou CPU: o triangulo desfaz a escolha anterior do mesmo jogador
             sound = 6;
             continue;
         }
@@ -886,7 +1000,7 @@ static void selectStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         }
         if (k.col == kCellCustom)
         {
-            if (const int s = customStep(k, e, q[at] >= g_multi))
+            if (const int s = customStep(k, e, cpuPanel(q[at]), rd32(rdram, kMode) == 1u))
                 sound = s;
             else if (e[Back] && !k.custom && !k.list)
                 back = true;   // casa fechada: o triangulo volta de tela, como nas colunas
@@ -1337,7 +1451,7 @@ static uint32_t customDecide(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runt
             return 0;
         }
         const wotm::mods::Custom *cu = customAt(g_soloCustom[who]);
-        if (!cu || (p.ai && !cu->ai))   // quadro de CPU: so os customs com "ai" (a IA de um chefe precisa da fase dele)
+        if (!customAllowed(cu, p.ai, rd32(rdram, kMode) == 1u))
             return 0;
         g_soloList[who] = false;
         g_soloChosen[who] = g_soloCustom[who] % nc + 1;
@@ -1591,6 +1705,8 @@ static void publish(uint8_t *rdram)
         v.count += v.present[d];
     }
     v.players = distinctPlayers(nullptr);
+    v.coopLoad = g_coopLoad.n;
+    std::copy(g_bot, g_bot + kMaxPlayers + 1, v.bot);
     v.screenObj = rd32(rdram, kMovieScreen) & 0x1FFFFFFFu;
     // minigames de 2 (tela 7, no fliperama, sem o telao): os retratos grandes dos dois jogadores (switches Shell+0x1EC e +0x1F0, um
     // filho por coluna, com o "player N") saem da cena e o plano da selecao e o deles (mgPlane)
@@ -1625,15 +1741,24 @@ static void publish(uint8_t *rdram)
         v.selMonster[p] = col <= 10 ? rd32(rdram, wotm::sym::monsterNametomonsterId + 4u * uint32_t(col - 1)) : 0u;
         v.selCostume[p] = g_pick[p].costume;
         v.selReady[p] = g_pick[p].ready;
-        const bool cpu = p >= g_multi;
-        // CPU: espera enquanto o jogador dela (p % N) nao chegou nela
+        const bool cpu = cpuPanel(p);
+        // bot ou CPU: espera enquanto o humano que escolhe por ele (panelQueue) nao chegou nele
         bool waiting = false;
-        for (int j = p - g_multi; cpu && j >= 0; j -= g_multi)
-            waiting = waiting || !g_pick[j].ready;
+        for (int h = 0; cpu && h < g_multi; ++h)
+        {
+            int q[kMaxPanels];
+            const int nq = panelQueue(h, q);
+            for (int i = 1; i < nq; ++i)
+                if (q[i] == p)
+                    for (int j = 0; j < i; ++j)
+                        waiting = waiting || !g_pick[q[j]].ready;
+        }
         v.selWaiting[p] = waiting;
         v.selCpu[p] = cpu;
-        v.selColor[p] = cpu ? -1 : p;
-        if (cpu)
+        v.selColor[p] = cpu && !botPanel(p) ? -1 : p;   // o bot fica com a cor do numero dele
+        if (botPanel(p))
+            std::snprintf(v.selLabel[p], sizeof v.selLabel[p], "P%d CPU", p + 1);
+        else if (cpu)
             std::snprintf(v.selLabel[p], sizeof v.selLabel[p], "CPU%d", p - g_multi + 1);
         else
             std::snprintf(v.selLabel[p], sizeof v.selLabel[p], "P%d", p + 1);
@@ -1711,6 +1836,7 @@ static float transitionProgress(uint8_t *rdram, R5900Context *ctx, PS2Runtime *r
         ctx->r[31] = _mm_set_epi64x(0, 0);
         ctx->pc = fn;
         f(rdram, ctx, rt);
+        wotmFinishGuestCall(rdram, ctx, rt);
     };
     call(wotm::fn::animationGetCurrentPercent__FG11_animHandle, fp);
     const float pct = ctx->f[0];
@@ -1730,7 +1856,7 @@ static void transitionHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtim
     {
         const int cur = static_cast<int>(rd32(rdram, wotm::sym::currScreen)), last = static_cast<int>(rd32(rdram, wotm::sym::lastScreen));
         // a volta das telas seguintes (13, 15, 11, 14) mostra a lista de modos, com os mesmos jogadores
-        if (rd32(rdram, wotm::sym::screenFirstPass) && cur == 5 && last == 1)
+        if (rd32(rdram, wotm::sym::screenFirstPass) && cur == 5 && (last == 1 || (last == 9 && g_coopLoad.n)))
         {
             g_phase = Config;
             g_primed = false;
@@ -1806,6 +1932,26 @@ static void modes2PHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     if (!g_modesPending || ctx->pc != g_modesRa)
         return;
     g_modesPending = false;
+    if (g_coopGo && g_coopLoad.n)
+    {   // save co-op: os jogadores 2..n do slot (o setSaveData ja pos o 1, a fase, o modo 1 e a marca de save), as IAs da fase e a carga
+        const CoopLoad c = g_coopLoad;
+        g_coopLoad = CoopLoad{};
+        g_coopGo = false;
+        wr32(rdram, kNumPlayers, uint32_t(c.n));
+        for (int i = 1; i < c.n; ++i)
+        {
+            wr32(rdram, kMonsterSel + 4u * uint32_t(i), c.sel[i - 1]);
+            wr32(rdram, kShell + 0x2BBC + 4u * uint32_t(i), c.lives[i - 1]);   // m_lives[i]
+            if (i == 1)
+                wr32(rdram, kCostume + 4u, c.costume[0]);
+            else
+                wotmMultiSetCostume(i, c.costume[i - 1]);
+        }
+        adventureAis(rdram);
+        changeScreen(rdram, ctx, runtime, 5, 0x63, 1, 0);
+        std::fprintf(stderr, "[padsel] save co-op: %d jogadores, carga da fase %u\n", c.n, rd32(rdram, kShell + 0x2BB0));
+    }
+    g_coopGo = false;
     if (g_phase == Config || g_phase == Leaving)
         setItemsAlpha(rdram, 5, 0.f);
     else if (g_phase == Reveal)
@@ -2011,8 +2157,8 @@ static void extraCpus(uint8_t *rdram)
 {
     const int want = wotm_menucpus::g_want.load();
     const int players = rd32(rdram, kMode) == 2u ? 1 : int(rd32(rdram, kNumPlayers)), base = players == 1 ? 3 : 2;
-    if (players > 2 || want <= base || want > wotm_menucpus::maxFor(players) || rd32(rdram, kNumAIs) != uint32_t(base))
-        return;
+    if (g_multi || players > 2 || want <= base || want > wotm_menucpus::maxFor(players) || rd32(rdram, kNumAIs) != uint32_t(base))
+        return;   // g_multi (3 e 4, ou 2 com bot): a selecao do telao ja gravou todas as CPUs
     auto monAt = [](int c) { return kMonsterSel + 4u * uint32_t(3 + c); };
     auto cosAt = [](int c) { return kCostume + 4u * uint32_t(1 + c); };
     if (g_xDone == want - base)
@@ -2068,6 +2214,55 @@ static void extraCpus(uint8_t *rdram)
     wr32(rdram, kNumAIs, uint32_t(want));
 }
 
+// Campanha co-op (wotm_coop.inc): o m_mode 1 do Shell com 2 a 4 jogadores
+static bool coopMenu(const uint8_t *rdram)
+{
+    const uint32_t n = rd32(rdram, kNumPlayers);
+    return rd32(rdram, kMode) == 1u && n >= 2u && n <= 4u;
+}
+
+// X no ADVENTURE da lista multijogador (wotm_mainmenu.inc): a campanha da fase 1 com os jogadores da escolha de controles. Como o item 1
+// da tela 2 (m_mode 1, fase 1, pontos e "veio de um save" zerados) e, como o free for all, a selecao de monstros (tela 6: a do retail
+// com 2, a nossa com 3 e 4) com a animacao 2 da camera; sem as telas 13 e 15 (CPUs e regras), o que elas fariam vai aqui (monstros
+// das CPUs e o switch da coluna da CPU 2+ zerados, resetSelectables). A saida da selecao vai a carga (changeScreenHook).
+static bool adventureStart(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    if (g_phase != Off || rd32(rdram, wotm::sym::betweenScreens) != 0)
+        return false;
+    wr32(rdram, kMode, 1u);
+    wr32(rdram, kShell + 0x2BB0, 1u);   // m_levelNum
+    wr32(rdram, kNumAIs, 0u);           // as IAs da fase entram na saida da selecao
+    wr32(rdram, kShell + 0x2B2C, 0u);   // pontos acumulados
+    wr32(rdram, kShell + 0x2C18, 0u);   // veio de um save
+    for (uint32_t i = 4; i < 12; ++i)
+        wr32(rdram, kMonsterSel + 4u * i, 0u);
+    if (const uint32_t sw = rd32(rdram, kShell + 0x1E0))
+        callGuest(rdram, ctx, runtime, wotm::fn::hierSetSwitch__FP11_hierswitchi, sw, 0u);
+    if (const uint32_t sw = rd32(rdram, kSw5CC))
+        callGuest(rdram, ctx, runtime, wotm::fn::hierSetSwitch__FP11_hierswitchi, sw, 0u);
+    callGuest(rdram, ctx, runtime, wotm::fn::resetSelectables__Fv, 0u);
+    changeScreen(rdram, ctx, runtime, 5, 6, 1, 2);
+    callGuest(rdram, ctx, runtime, wotm::fn::initSelectSwitches__Fv, 0u);
+    sfx(rdram, ctx, runtime, 8);
+    std::fprintf(stderr, "[padsel] campanha de %d jogadores: selecao de monstros\n", g_multi ? g_multi : 2);
+    return true;
+}
+
+// Saida da selecao da campanha co-op: as IAs da fase (o selectFinish dos 3 e 4 zera m_monsterSel[N..12)), como a tela 3 faz
+static void adventureAis(uint8_t *rdram)
+{
+    const uint32_t level = rd32(rdram, kShell + 0x2BB0);
+    const uint32_t n = level < 17u ? rd32(rdram, kShell + 0x29E0 + 4u * level) : 0u;
+    for (uint32_t i = 0; i < n && i < 4u; ++i)
+    {
+        wr32(rdram, kMonsterSel + 4u * (4u + i), rd32(rdram, wotm::sym::levelMonsters + 48u * level + 4u * i));
+        wr32(rdram, kCostume + 4u * (2u + i), rd32(rdram, wotm::sym::levelMonsterModels + 16u * level + 4u * i));
+    }
+    wr32(rdram, kNumAIs, std::min(n, 4u));
+    wr32(rdram, wotm::sym::continueDecoding, 0u);
+    std::fprintf(stderr, "[padsel] campanha de %u jogadores: fase %u com %u IAs\n", rd32(rdram, kNumPlayers), level, std::min(n, 4u));
+}
+
 // changeScreen(de, para, sentido, animacao, ...): no multijogador a volta da tela 15 (que iria a 13, as CPUs) vem para a escolha
 // de controles (5), com a camera de volta ao telao, e a volta desta (prevScreen 15) vai ao menu principal
 static void changeScreenHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -2077,7 +2272,29 @@ static void changeScreenHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runt
         const int32_t from = static_cast<int32_t>(GPR_U32(ctx, 4)), to = static_cast<int32_t>(GPR_U32(ctx, 5)),
                       dir = static_cast<int32_t>(GPR_U32(ctx, 6));
         const uint32_t base = rd32(rdram, kMode) == 2u ? 3u : rd32(rdram, kNumPlayers) == 2u ? 2u : 0u;
-        if (to == 12 || to == 13)
+        if (from == 9 && to == 0x63 && g_coopLoad.n)
+        {   // save co-op carregado: a escolha de controles antes da carga, com a camera de volta ao telao (a da volta da tela 9)
+            wr32(rdram, kNumPlayers, uint32_t(g_coopLoad.n));
+            ctx->r[5] = _mm_set_epi64x(0, 5);
+            ctx->r[6] = _mm_set_epi64x(0, -1);
+            ctx->r[7] = _mm_set_epi64x(0, 9);
+            std::fprintf(stderr, "[padsel] save co-op de %d jogadores: escolha de controles\n", g_coopLoad.n);
+        }
+        else if (from == 6 && coopMenu(rdram))
+        {
+            if (to == 8 && dir > 0)
+            {   // campanha co-op: sem selecao de fase, a carga da fase 1 com as IAs dela (como a tela 3 do retail)
+                adventureAis(rdram);
+                ctx->r[5] = _mm_set_epi64x(0, 0x63);
+                ctx->r[7] = _mm_set_epi64x(0, 0);
+            }
+            else if (dir < 0)
+            {   // volta da selecao: a lista multijogador, com a camera de volta ao telao
+                ctx->r[5] = _mm_set_epi64x(0, 5);
+                ctx->r[7] = _mm_set_epi64x(0, 2);
+            }
+        }
+        else if (to == 12 || to == 13)
             wotm_menucpus::g_want.store(0);   // as telas 12 e 13 escolhem de novo
         else if ((to == 15 || to == 19) && base && !g_multi && rd32(rdram, kNumAIs) > base)
             wr32(rdram, kNumAIs, base);   // volta da luta com mais CPUs: o retail so conhece 3 (1 jogador) ou 2 (2) nessas telas
@@ -2127,6 +2344,7 @@ static void mainHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         if (wotm_pad::g_manual.load(std::memory_order_relaxed))
             setManual(false);
         g_multi = 0;
+        g_coopLoad = CoopLoad{};
         g_selOn = false;
         wotm_training::menuDisarm("menu principal");   // a luta de treino acabou (ou a escolha voltou ate aqui)
         wotm_training::restoreDifficulty(rdram, wotm::sym::shellGame + wotm_training::kDifficulty);
@@ -2146,6 +2364,7 @@ static void waitStartHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime
         if (wotm_pad::g_manual.load(std::memory_order_relaxed))
             setManual(false);
         g_multi = 0;
+        g_coopLoad = CoopLoad{};
         g_selOn = false;
     }
     g_origWaitStart(rdram, ctx, runtime);
@@ -2294,6 +2513,20 @@ static void keyboardIcon(float cx, float cy, float s, Color body, Color line, Co
     DrawRectangleRec(Rectangle{cx - 0.65f * s, cy + H / 2 - 0.1f * s - k, 1.3f * s, k}, dark);
 }
 
+// Bot da escolha de controles: cabeca de robo (antena, olhos e boca)
+static void botIcon(float cx, float cy, float s, Color body, Color line, Color dark)
+{
+    const float o = s * 0.07f, W = 1.5f * s, H = 1.1f * s, top = cy - H / 2;
+    DrawLineEx(Vector2{cx, top}, Vector2{cx, top - 0.35f * s}, 0.1f * s, line);
+    DrawCircleV(Vector2{cx, top - 0.38f * s}, 0.13f * s + o, line);
+    DrawCircleV(Vector2{cx, top - 0.38f * s}, 0.13f * s, body);
+    DrawRectangleRounded(Rectangle{cx - W / 2 - o, top - o, W + 2 * o, H + 2 * o}, 0.3f, 8, line);
+    DrawRectangleRounded(Rectangle{cx - W / 2, top, W, H}, 0.3f, 8, body);
+    DrawCircleV(Vector2{cx - 0.35f * s, cy - 0.12f * s}, 0.17f * s, dark);
+    DrawCircleV(Vector2{cx + 0.35f * s, cy - 0.12f * s}, 0.17f * s, dark);
+    DrawRectangleRec(Rectangle{cx - 0.4f * s, cy + 0.22f * s, 0.8f * s, 0.12f * s}, dark);
+}
+
 static constexpr Color kCream{240, 222, 180, 255}, kLine{25, 18, 12, 255}, kDark{60, 48, 38, 255};
 
 // Escolha de controles: quatro colunas (jogadores) em cima e, embaixo, quem esta fora; cada dispositivo anda ate a coluna dele
@@ -2303,8 +2536,11 @@ static void drawJoin(const View &v, std::vector<wotm::TextQuad> &quads, const wo
     const float colW = W * 0.96f / kMaxPlayers, left = W * 0.02f, boxTop = H * 0.02f, boxBottom = H * 0.70f;
     auto colX = [&](float slot) { return left + colW * (slot - 0.5f); };   // slot 1..8
     bool used[kMaxPlayers + 1] = {};
+    int joined = 0, bots = 0;
     for (int d = 0; d < kDevs; ++d)
-        if (v.present[d] && v.slot[d] > 0) used[v.slot[d]] = true;
+        if (v.present[d] && v.slot[d] > 0) used[v.slot[d]] = true, ++joined;
+    for (int p = 1; p <= kMaxPlayers; ++p)
+        if (v.bot[p]) used[p] = true, ++bots;
     for (int p = 1; p <= kMaxPlayers; ++p)
     {
         const Color c = kPlayerColors[p - 1];
@@ -2314,6 +2550,13 @@ static void drawJoin(const View &v, std::vector<wotm::TextQuad> &quads, const wo
         char label[8];
         std::snprintf(label, sizeof label, "P%d", p);
         text(quads, ram, tex0, kW, kH, label, colX(float(p)), H * 0.09f, H * 0.07f, gsColor(c, used[p] ? 0.5f : 0.3f));
+        if (v.bot[p])   // bot: o jogador sob a IA, sozinho na coluna (os dispositivos pulam o numero dele)
+        {
+            const float s = std::min(colW * 0.22f, H * 0.075f), ty = H * 0.25f;
+            botIcon(colX(float(p)), ty, s, c, kLine, kDark);
+            text(quads, ram, tex0, kW, kH, "CPU", colX(float(p)), ty + s * 1.05f, fitText("CPU", s * 0.5f, colW * 0.9f),
+                 Color{0x80, 0x7A, 0x6C, 0x80}, 1.f);
+        }
     }
     // dispositivos: de fora numa fileira embaixo; dentro, empilhados na coluna do jogador
     int outCount = 0, outIdx = 0, inCol[kMaxPlayers + 1] = {};
@@ -2346,16 +2589,36 @@ static void drawJoin(const View &v, std::vector<wotm::TextQuad> &quads, const wo
         text(quads, ram, tex0, kW, kH, label, x, ty + s * 1.05f, fitText(label, s * 0.5f, colW * 0.9f), Color{0x80, 0x7A, 0x6C, 0x80}, 1.f);
     }
     g_posInit = true;
+    if (v.coopLoad)   // save co-op: a carga so segue com tantos jogadores quantos o save tem
+    {
+        char need[40];
+        std::snprintf(need, sizeof need, "SAVED ADVENTURE FOR %d PLAYERS", v.coopLoad);
+        text(quads, ram, tex0, kW, kH, need, W * 0.5f, H * 0.93f, fitText(need, H * 0.05f, W * 0.9f),
+             v.players == v.coopLoad ? Color{0x80, 0x7A, 0x6C, 0x80} : gsColor(kPlayerColors[0], 0.5f), 1.f);
+    }
     // botoes: na legenda de baixo, no lugar da do jogo (wotm_legend.inc), com os do mapa (readDevice)
     namespace st = wotm::settings;
     using wotm_legend::bind;
-    if (v.count < 2)
-        wotm_legend::post({{{}, {}, "CONNECT A CONTROLLER"}, {bind(st::BCross), {}, "JOIN"}, {bind(st::BTriangle), {}, "BACK"}}, v.alpha);
-    else if (v.players >= 2)
-        wotm_legend::post({{bind(st::BStart), {}, "CONTINUE"}, {bind(st::BLeft), bind(st::BRight), "SWAP"}, {bind(st::BTriangle), {}, "BACK"}},
-                          v.alpha);
+    // quem ja entrou poe bots (quadrado) e os tira (bola); com um controle so, o jogador 1 e bots fazem a partida
+    const wotm_legend::Item addCpu{bind(st::BSquare), {}, "ADD CPU"}, dropCpu{bind(st::BCircle), {}, "REMOVE CPU"},
+        swap{bind(st::BLeft), bind(st::BRight), "SWAP"}, back{bind(st::BTriangle), {}, "BACK"};
+    if (!joined)
+    {
+        if (v.count < 2)
+            wotm_legend::post({{{}, {}, "CONNECT A CONTROLLER"}, {bind(st::BCross), {}, "JOIN"}, back}, v.alpha);
+        else
+            wotm_legend::post({{bind(st::BCross), {}, "JOIN"}, back}, v.alpha);
+    }
+    else if (v.players >= 2 && (!v.coopLoad || v.players == v.coopLoad))
+    {
+        const wotm_legend::Item go{bind(st::BStart), {}, "CONTINUE"};
+        if (bots) wotm_legend::post({go, swap, addCpu, dropCpu, back}, v.alpha);
+        else wotm_legend::post({go, swap, addCpu, back}, v.alpha);
+    }
+    else if (v.count >= 2)
+        wotm_legend::post({{bind(st::BCross), {}, "JOIN"}, swap, addCpu, back}, v.alpha);
     else
-        wotm_legend::post({{bind(st::BCross), {}, "JOIN"}, {bind(st::BLeft), bind(st::BRight), "SWAP"}, {bind(st::BTriangle), {}, "BACK"}}, v.alpha);
+        wotm_legend::post({swap, addCpu, back}, v.alpha);
 }
 
 // Fonte da selecao: a Oswald embutida no executavel (recurso FONT_OSWALD do native/wotm.rc, a da tela de opcoes); sem ela, a do raylib
@@ -2875,7 +3138,8 @@ static void loadPortraits()
     std::fprintf(stderr, "[padsel] barra de monstros: %d de %zu retratos\n", n, std::size(kPortraits));
 }
 
-// Textura do rotulo: "P<n>" vira "p" e o digito, "CPU" e "CPU<n>" o "cpu" e o digito com um espaco, na mesma linha de base. Outro
+// Textura do rotulo: "P<n>" vira "p" e o digito, "CPU" e "CPU<n>" o "cpu" e o digito com um espaco, "P<n> CPU" (bot) o "p", o
+// digito, um espaco e o "cpu", na mesma linha de base. Outro
 // texto (ou as letras sem ler): Texture2D vazia, e o quadro escreve com a fonte da selecao.
 static Texture2D menuLabel(const char *label)
 {
@@ -2897,6 +3161,12 @@ static Texture2D menuLabel(const char *label)
         return out;
     for (; *d; ++d)
     {
+        if (label[0] == 'P' && pieces.size() > 1 && std::strcmp(d, " CPU") == 0)   // "P<n> CPU": jogador bot
+        {
+            pieces.back().gap = kWordGap;
+            pieces.push_back({&g_menuCpu, kMenuCpu, kLetterGap});
+            break;
+        }
         if (*d < '0' || *d > '9')
             return out;
         pieces.push_back({&g_menuDigits, kMenuDigit[*d - '0'], kLetterGap});
@@ -3941,6 +4211,18 @@ static void drawOnTelao(wotm::Scene &scene, const wotm::Ram &ram, const Camera3D
                 0.002f * (pl.x1 - pl.x0));
 }
 } // namespace wotm_padsel
+
+// wotm_save.inc (loadRow, thread do EE): save co-op carregado; n 0 desarma
+void wotmCoopLoadArm(int n, const uint32_t *sel, const uint32_t *costume, const uint32_t *lives)
+{
+    using namespace wotm_padsel;
+    g_coopLoad = CoopLoad{};
+    if (n < 2 || n > kMaxPlayers)
+        return;
+    g_coopLoad.n = n;
+    for (int i = 0; i + 1 < n; ++i)
+        g_coopLoad.sel[i] = sel[i], g_coopLoad.costume[i] = costume[i], g_coopLoad.lives[i] = lives[i];
+}
 
 void wotmPadSelInstall(PS2Runtime &runtime)
 {

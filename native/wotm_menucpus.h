@@ -12,4 +12,7 @@ constexpr int kMax = kMonsters - 1;   // 1 jogador + 7 IAs
 constexpr int maxFor(int players) { return kMonsters - players; }
 inline std::atomic<int> g_want{0};          // CPUs pedidas acima do que o jogo conhece; 0: vale o m_numAIs
 inline std::atomic<int> g_menuPlayers{2};   // jogadores do multijogador (2 a 4, escolha de controles): o maximo da tela 13
+// Jogadores sob a IA escolhidos na escolha de controles (bit i: jogador i + 1; wotm_padsel.inc grava, os ganchos do WOTM_AIVSAI em
+// wotm_overrides.cpp e wotm_ai.inc leem); 0 fora do multijogador
+inline std::atomic<unsigned> g_botMask{0};
 }

@@ -6,26 +6,20 @@ O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado s
 | # | Item | Depende de | Custo |
 |---|---|---|---|
 | 8 | Mods que adicionam monstros (as skins já existem) | — | médio/alto |
-| 13 | Campanha (adventure) com até 4 jogadores | — | o mais alto |
+| 14 | Primeiro release (binário pronto) | 13 | médio |
 
 ### 8. Mods que adicionam monstros
 Como funciona hoje: `docs/passos/MODS.md` ("Skins", "Monstros custom").
 - **Monstros com arquivos próprios:** campo `files` no `monster.json`, com um tipo livre (6, 12 ou 16) ou remapeando um tipo. Hoje o custom usa o tipo de um monstro do jogo. Modelo novo depende de o `.NGP` voltar pelo kit (hoje ele só sai).
 - **Arquivo de mod maior que o do disco** fora de `MON/*`: o jogo carrega em regiões de tamanho fixo e pode sobrescrever o que vem depois (o log avisa). Abrir espaço por tipo de arquivo.
-- **Aviso dos tetos para skin com `.TEX`/`.RTX`/`.PTR` próprios:** a skin não tem original para comparar, então hoje nada avisa. O log de carga deveria comparar com os tetos reais: `texInfo[1000]` (`maxTexId` final), VRAM residente do `.RTX` e o buffer de 0x30D40 do `.PTR` (`0f091a4:docs/investigacoes/2026-10-23/skins_mod_carga.md`, item 8).
+- **Aviso do buffer do `.PTR` para skin com `.PTR` próprio:** o log de carga já mostra os texIds e a VRAM. Falta o buffer de 0x30D40 do `.PTR` (`0f091a4:docs/investigacoes/2026-10-23/skins_mod_carga.md`, item 8).
 
-### 13. Campanha com até 4 jogadores
-Contexto: `23b8a40:docs/investigacoes/2026-10-27/campanha4_0{1..4}_*.md` (fluxo, cinemas e vistas, chefes e fases, menu e save). Decisões do dono:
-- **Entrada:** linha ADVENTURE na tela 5 (multijogador), no molde da TRAINING: escolha de controles, seleção de 2 (tela 6) ou de 3 e 4 (nativa), depois a fase 1 (`changeScreenHook` 6→0x63, recopiar as IAs que o `selectFinish` apaga).
-- **Tela:** 2 jogadores em metades, 3 e 4 em quadrantes (`splitPlayers`/`gameReestablishViews` do `wotm_split4.inc` aceitando o modo 1; 2 jogadores na aventura ainda não têm gancho). Largada: a lista 0 é um ponto só, precisa de regra para N.
-- **Vidas:** cada jogador com as suas; quem fica sem sai até o fim da fase (molde da eliminação do `wotm_modes4.inc`). Hoje `EvaluateOnePlayerStoryStatus` (0x1A7C08) e o caso 1 do `gameResolveLifeAndDeath` (0x138068) só contam e só reerguem o jogador 1, e a vitória vem só da pose dele.
-- **Chefes:** alvo sorteado entre os jogadores vivos, sem vida extra. Hoje miram o jogador 1: Mecha e jelly (`m_monster7C`, gravado uma vez), cabeças/raízes/base da planta, giro e mísseis do Goliath (o golpe comum só fere o Goliath vindo do jogador 1). Troca barata: outro jogador em `m_monsters[0]` durante a chamada (como o TopSpin do `wotm_custom.inc`). Na cratera da fase 6 só o jogador 1 é levado ao ponto fixo (os outros ficam fora do mapa); em Tóquio o fim exige o jogador 1 vivo. 0x1A0/0x1C0/0x1E0 são códigos de monstro (Goliath, jelly, final), não slots.
-- **Tokens:** só os do jogador 1, multiplicados pelo número de jogadores (2: 1,2x; 3: 1,3x; 4: 1,4x), gancho no `grandTotal` (0x1D67E8) chamado do `EvaluateOnePlayerStoryStatus`.
-- **Cinemas:** os roteiros animam só `m_monsters[0]` (os outros ficam parados na cena), o `cleanUpForMovie` limpa só o 0, só os controles 0 e 1 pulam, o `endCinema` refaz só as câmeras 0 e 1; `doCinema`/`endCinema` decidem a divisão por `m_numMonsters`. Barra do chefe posta na câmera 0 (errada nas outras vistas: gancho no `drawBossHealthBar`); dicas e vidas num HUD só.
-- **Final:** um `GenesisMovie` atrás do outro, na ordem dos jogadores.
-- **Save:** guarda os jogadores e os monstros (chave `coop` no `save.json`, binário igual; `adventureToJson` precisa preservá-la). Carregar um save co-op leva à escolha de controles e dali direto à fase. `setSaveData` (0x1679A8) força 1 jogador.
-- **Depois:** entrar e sair do grupo entre fases (join/leave).
-- **Medir na carga:** `texInfo[1000]` e VRAM das `.RTX` com 4 jogadores + 4 IAs (Canyon com `ASSBOSS1` é o pior caso).
+### 14. Primeiro release (binário pronto)
+Decisão do dono: zip com o `wotm.exe` pronto (contém o código traduzido do jogo; vai só nos Releases do GitHub, nunca no repo), lançado depois do item 13.
+- **Primeira execução:** o launcher pede a ISO, confere o SHA1 do `SCUS_971.97` (`tools/setup_runtime.ps1` já faz) e grava `discroot\SCUS_971.97`; o resto vem da ISO (`PS2X_CD_IMAGE`). Nada do disco no zip.
+- **Build de release:** o `wotm.exe` com LTCG (o `build_dev` é sem), sem `ps2EntryRunner.exe`, sem variáveis de diagnóstico ligadas; `mods/` do repo dentro do zip.
+- **Pacote:** script em `tools/` que monta o zip (exe, DLLs do SDL2/FFmpeg/raylib, launcher, `mods/`), com as licenças de terceiros e o GPL-3.0 (apontar o código-fonte: este repo + `tools/runtime_patch/`).
+- **Conferir:** descompactar numa pasta limpa, numa máquina (ou conta) sem o ambiente de build, e jogar luta, aventura e save.
 
 ## Decomp
 - **Fora do caminho crítico:** oracle para funções com chamadas; cobertura com gameplay para realimentar o `boot_coverage_asm.csv` (`57d4afd:docs/investigacoes/2026-10-19/pendencias_oracle_cobertura.md`, seções 2 e 3).

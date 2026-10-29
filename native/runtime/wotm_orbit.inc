@@ -87,7 +87,7 @@ namespace
         }
         float headingTo(float dx, float dy) { return std::atan2(dx, dy); }   // 0 = +Y, positivo para +X
 
-        bool enabled() { return wotm::settings::on(wotm::settings::Camera) && !g_aiVsAi && !g_wotmFreeCam.load(std::memory_order_relaxed); }
+        bool enabled() { return wotm::settings::on(wotm::settings::Camera) && !aiVsAiAll() && !g_wotmFreeCam.load(std::memory_order_relaxed); }
 
         // Camera v elegivel neste quadro; mon = monstro, slot = jogador
         bool eligible(uint8_t *rdram, int v, uint32_t &mon, int &slot)
@@ -106,6 +106,8 @@ namespace
             const uint32_t cs = FAST_READ32(c + kCamCs) & 0x1FFFFFFFu;
             if (!okAddr(mon, kMonCamUnify + 4u) || !okAddr(cs, 0x70u) || !isPlayerMonster(rdram, FAST_READ32(c + kCamMonster), &slot))
                 return false;
+            if (aiVsAiSlot(slot))
+                return false;   // bot no slot de jogador (WOTM_AIVSAI=<lista>): camera do jogo
             if (!unified && static_cast<int32_t>(FAST_READ32(mon + kMonCameraView)) != v)
                 return false;   // camera 2 seguindo quem agarra fora da unificada (1P sem a de perto etc.): a vista do jogador e outra
             const uint32_t mcs = FAST_READ32(mon + kMonCs) & 0x1FFFFFFFu;
@@ -224,6 +226,7 @@ namespace
                 ctx->r[31] = _mm_set_epi64x(0, 0);
                 ctx->pc = fn;
                 fp(rdram, ctx, rt);
+                wotmFinishGuestCall(rdram, ctx, rt);
                 const bool back = ctx->pc == 0u;
                 v0 = GPR_U32(ctx, 2);
                 f0 = ctx->f[0];
@@ -817,7 +820,7 @@ namespace
                          wotm::settings::on(wotm::settings::CamRecenter) ? "ligado" : "desligado",
                          wotm::settings::on(wotm::settings::CloseCam) ? "ligada" : "desligada",
                          wotm::settings::get(wotm::settings::CamSens), wotm::settings::on(wotm::settings::CamInvertY) ? "invertido" : "normal",
-                         g_aiVsAi ? "; com WOTM_AIVSAI fica a classica" : "");
+                         aiVsAiAll() ? "; com WOTM_AIVSAI fica a classica" : (g_aiVsAi ? "; classica nos bots do WOTM_AIVSAI" : ""));
         }
     }
 }
