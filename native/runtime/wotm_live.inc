@@ -215,6 +215,12 @@ static void wotmBootDone(const char *what)
         return;
     wotmBoot("ready: %s", what);
     wotm_boot::done.store(true, std::memory_order_relaxed);
+    if (const char *c = std::getenv("WOTM_CRASHTEST"); c && c[0] == '1')   // diagnostico: cai aqui de proposito (pilha da queda no log)
+    {
+        std::fprintf(stderr, "[wotm] WOTM_CRASHTEST: queda de proposito\n");
+        std::fflush(stderr);
+        *static_cast<volatile int *>(nullptr) = 1;
+    }
 }
 // O vsync por segundo no aviso mostra se a espera e o relogio virtual andando devagar (o boot espera vsyncs).
 static void wotmBootPresent(uint32_t eePc, uint64_t vsync)
@@ -294,6 +300,10 @@ struct ExcPointers
 extern "C" __declspec(dllimport) void *__stdcall SetUnhandledExceptionFilter(long(__stdcall *)(ExcPointers *));
 extern "C" __declspec(dllimport) void *__stdcall GetModuleHandleA(const char *);
 inline const char *g_stage = "idle";   // etapa da camada nativa em andamento (para localizar a queda)
+} // namespace wotm_live
+void wotmCrashTrace(void *exceptionContext);   // wotm_standalone.cpp
+namespace wotm_live
+{
 inline long __stdcall crashFilter(ExcPointers *e)
 {
     const char *base = static_cast<const char *>(GetModuleHandleA(nullptr));
@@ -303,6 +313,12 @@ inline long __stdcall crashFilter(ExcPointers *e)
         std::fprintf(stderr, " acesso=%s endereco=0x%llx", e->rec->info[0] == 1 ? "escrita" : (e->rec->info[0] == 8 ? "execucao" : "leitura"), e->rec->info[1]);
     std::fprintf(stderr, "\n");
     std::fflush(stderr);
+    static bool traced = false;   // so a primeira queda: a pilha de uma segunda (dentro do dbghelp) nao ajuda
+    if (!traced)
+    {
+        traced = true;
+        wotmCrashTrace(e->ctx);   // pilha com nomes pelo wotm.pdb (wotm_standalone.cpp)
+    }
     return 0; // EXCEPTION_CONTINUE_SEARCH
 }
 struct State

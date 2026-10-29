@@ -45,6 +45,18 @@ if ($Bat -eq 'build_dev_nm.bat') {
     if (-not (Test-Path $nmSyms)) { throw "falta $nmSyms (rode de novo sh tools/wsl/recomp_nm.sh)" }
     Copy-Item $nmSyms $genDir -Force
 }
+# versao do build (native/wotm_version.hpp: no log e no titulo da janela): a tag do release ou o commit, -dirty com mudanca local.
+# So regrava quando muda (o ninja recompila quem inclui).
+$repoDir = Split-Path $PSScriptRoot -Parent
+# o build roda com um PATH minimo (o vcvars quebra com o normal): o git pode nao estar nele
+$git = (Get-Command git -ErrorAction SilentlyContinue).Source
+if (-not $git) { $git = @("$env:ProgramFiles\Git\cmd\git.exe", "${env:ProgramFiles(x86)}\Git\cmd\git.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1 }
+$ver = $null
+if ($git) { try { $ver = (& $git -C $repoDir describe --tags --always --dirty 2>$null) } catch {} }
+if (-not $ver) { $ver = 'dev'; Write-Host 'git nao achado: versao "dev"' -ForegroundColor Yellow }
+$verFile = Join-Path $genDir 'wotm_version.gen.h'
+$verText = "#define WOTM_VERSION `"$ver`"`r`n"
+if (-not (Test-Path $verFile) -or (Get-Content $verFile -Raw) -ne $verText) { [IO.File]::WriteAllText($verFile, $verText) }
 $inc = Join-Path $genDir 'wotm_vu0_native.gen.inc'
 $elf = Join-Path $PSScriptRoot '..\disc\SCUS_971.97'
 if ((Test-Path $elf) -and (-not (Test-Path $inc) -or (Get-Item $inc).LastWriteTime -lt (Get-Item $gen).LastWriteTime)) {

@@ -8,14 +8,17 @@
 // - mods: <dados>/mods, senao <jogo>/mods (WOTM_MODS);
 // - log: stderr em <dados>/wotm.log e stdout em wotm.out.log (os anteriores viram *.prev.log), so quando o stderr nao e arquivo
 //   nem pipe.
+// Tambem a pilha da queda com nomes (wotmCrashTrace, chamado pelo crashFilter do wotm_live.inc), lidos do wotm.pdb ao lado do exe.
 // Arquivo proprio (fora do unity build): o windows.h conflita com o raylib dos outros.
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
 #include <commdlg.h>
+#include <dbghelp.h>
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "user32.lib")
+#pragma comment(lib, "dbghelp.lib")
 #endif
 #include <cstdint>
 #include <cstdio>
@@ -26,6 +29,7 @@
 #include <string>
 #include <system_error>
 #include <vector>
+#include "wotm_version.hpp"
 
 namespace {
 
@@ -336,6 +340,62 @@ bool setup(const fs::path &data, const fs::path &elf, fs::path &iso, bool elfOk)
 
 } // namespace
 
+// Pilha da queda, com o nome de cada funcao pelo PDB (o do build: wotm.pdb ao lado do exe; so simbolos publicos, entao uma funcao
+// estatica sai com o nome da publica anterior e um deslocamento grande). Chamado uma vez pelo crashFilter (wotm_live.inc), na thread
+// que caiu, com o CONTEXT da excecao. Sem PDB, so modulo+deslocamento, que o .map do build resolve.
+void wotmCrashTrace(void *exceptionContext)
+{
+#ifdef _WIN32
+    if (!exceptionContext)
+        return;
+    CONTEXT ctx = *static_cast<CONTEXT *>(exceptionContext);
+    HANDLE proc = GetCurrentProcess(), thread = GetCurrentThread();
+    SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS | SYMOPT_FAIL_CRITICAL_ERRORS | SYMOPT_NO_PROMPTS);
+    const std::wstring dir = exeDir().wstring();
+    const bool syms = SymInitializeW(proc, dir.c_str(), TRUE) != FALSE;
+    if (!syms)
+        std::fprintf(stderr, "[CRASH] sem simbolos (dbghelp %lu)\n", GetLastError());
+    STACKFRAME64 f{};
+    f.AddrPC.Offset = ctx.Rip;
+    f.AddrPC.Mode = AddrModeFlat;
+    f.AddrFrame.Offset = ctx.Rbp;
+    f.AddrFrame.Mode = AddrModeFlat;
+    f.AddrStack.Offset = ctx.Rsp;
+    f.AddrStack.Mode = AddrModeFlat;
+    alignas(SYMBOL_INFO) char symBuf[sizeof(SYMBOL_INFO) + 512];
+    for (int i = 0; i < 32; ++i)
+    {
+        if (!StackWalk64(IMAGE_FILE_MACHINE_AMD64, proc, thread, &f, &ctx, nullptr, SymFunctionTableAccess64, SymGetModuleBase64, nullptr))
+            break;
+        const DWORD64 pc = f.AddrPC.Offset;
+        if (!pc)
+            break;
+        HMODULE mod = nullptr;
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCWSTR>(pc), &mod);
+        char modPath[MAX_PATH] = "?";
+        if (mod)
+            GetModuleFileNameA(mod, modPath, MAX_PATH);
+        const char *modName = std::strrchr(modPath, '\\') ? std::strrchr(modPath, '\\') + 1 : modPath;
+        const unsigned long long rel = mod ? pc - reinterpret_cast<DWORD64>(mod) : pc;
+        auto *sym = reinterpret_cast<SYMBOL_INFO *>(symBuf);
+        std::memset(symBuf, 0, sizeof symBuf);
+        sym->SizeOfStruct = sizeof(SYMBOL_INFO);
+        sym->MaxNameLen = 511;
+        DWORD64 disp = 0;
+        if (syms && SymFromAddr(proc, pc, &disp, sym))
+            std::fprintf(stderr, "[CRASH]   #%-2d %s+0x%llx  %s+0x%llx\n", i, modName, rel, sym->Name, static_cast<unsigned long long>(disp));
+        else
+            std::fprintf(stderr, "[CRASH]   #%-2d %s+0x%llx\n", i, modName, rel);
+    }
+    std::fflush(stderr);
+    if (syms)
+        SymCleanup(proc);
+#else
+    (void)exceptionContext;
+#endif
+}
+
 // Devolve o ELF a carregar, ou vazio (o jogador cancelou ou deu erro, ja avisado: o exe sai). Chamado pelo main.cpp sem argumento.
 std::filesystem::path wotmStandalonePrepare()
 {
@@ -360,6 +420,7 @@ std::filesystem::path wotmStandalonePrepare()
         }
     }
     redirectLog(data);
+    std::fprintf(stderr, "[wotm] War of the Monsters Recompiled %s\n", WOTM_VERSION);   // primeira linha do log: casa o relato com o PDB
     fs::current_path(data, ec);
 
     const fs::path elf = data / kElfName;
