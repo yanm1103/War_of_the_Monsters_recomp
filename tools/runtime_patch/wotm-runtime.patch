@@ -197,7 +197,7 @@ index 0000000..0947e18
 +    }
 +}
 diff --git a/ps2xRuntime/CMakeLists.txt b/ps2xRuntime/CMakeLists.txt
-index 589d768..cc00340 100644
+index 589d768..650398d 100644
 --- a/ps2xRuntime/CMakeLists.txt
 +++ b/ps2xRuntime/CMakeLists.txt
 @@ -393,6 +393,7 @@ add_library(ps2_runtime STATIC
@@ -317,7 +317,7 @@ index 589d768..cc00340 100644
  
      if(WIN32 AND NOT PS2X_SHOW_WINDOWS_CONSOLE)
          if(MSVC)
-@@ -608,3 +645,81 @@ endif()
+@@ -608,3 +645,91 @@ endif()
  install(DIRECTORY include/
      DESTINATION include
  )
@@ -340,7 +340,10 @@ index 589d768..cc00340 100644
 +target_sources(ps2_runtime PRIVATE
 +    "${WOTM_NATIVE_DIR}/runtime/wotm_overrides.cpp"
 +    "${WOTM_NATIVE_DIR}/runtime/wotm_vu0_native.cpp"
++    "${WOTM_NATIVE_DIR}/runtime/wotm_standalone.cpp"
 +)
++# wotm.exe sem argumento (primeira execucao, pastas, log): inclui o windows.h, que conflita com o raylib das outras unidades
++set_source_files_properties("${WOTM_NATIVE_DIR}/runtime/wotm_standalone.cpp" PROPERTIES SKIP_UNITY_BUILD_INCLUSION TRUE)
 +# VU0 nativo e interpretador do VU1: a aritmetica do VU (madd com dois arredondamentos, para zero) nao sobrevive a /fp:fast
 +# (contracao em FMA; no VU1 a corda do Ultra-V ganhava uma tangente de ruido onde os pontos coincidem)
 +set(WOTM_VU_STRICT_SOURCES
@@ -397,6 +400,13 @@ index 589d768..cc00340 100644
 +        endif()
 +    endforeach()
 +    target_compile_definitions(wotm PRIVATE PS2X_HW_EMU=0)
++    # o jogo nunca abre console (PS2X_SHOW_WINDOWS_CONSOLE vale so para o ps2EntryRunner): aberto direto, o log vai para wotm.log
++    # (native/runtime/wotm_standalone.cpp); pelo run_live, para o redirecionamento dele
++    if(MSVC)
++        target_link_options(wotm PRIVATE /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup)
++    elseif(MINGW)
++        target_link_options(wotm PRIVATE -mwindows)
++    endif()
 +    ps2x_stage_ffmpeg_runtime_dlls(wotm)
 +endif()
 diff --git a/ps2xRuntime/cmake/ReleaseMode.cmake b/ps2xRuntime/cmake/ReleaseMode.cmake
@@ -5878,7 +5888,7 @@ index bd75bba..68268a1 100644
          }
  
 diff --git a/ps2xRuntime/src/main.cpp b/ps2xRuntime/src/main.cpp
-index 563bcbd..34c790f 100644
+index 563bcbd..5db851e 100644
 --- a/ps2xRuntime/src/main.cpp
 +++ b/ps2xRuntime/src/main.cpp
 @@ -164,34 +164,128 @@ namespace
@@ -5887,7 +5897,7 @@ index 563bcbd..34c790f 100644
  
 +#include "ps2_runtime_macros.h"
 +#include "wotm_syms.h"   // wotm::sym / wotm::fn (native/; no runtime cobaia, enderecos do ELF nmall)
-+#include "wotm_standalone.hpp"   // wotm.exe sem argumento: pastas, ISO, ELF e log (native/)
++std::filesystem::path wotmStandalonePrepare();   // native/runtime/wotm_standalone.cpp: wotm.exe sem argumento (pastas, ISO, ELF, log)
 +
 +// Hook de teste: pula os filmes (decoder IPU do jogo ainda nao tem backend).
 +// Faz o que o fim natural faria: movieRequested=1, movieIsCompletelyFinished=1.
@@ -5966,11 +5976,11 @@ index 563bcbd..34c790f 100644
 +        return wotmVu1CmpMain(argc, argv);
 +    std::filesystem::path standaloneElf;
 +#if !PS2X_HW_EMU
-+    // Aberto direto, sem o ELF no argumento (dois cliques, release): native/wotm_standalone.hpp acha a pasta de dados, a ISO e o
-+    // ELF e manda o log para wotm.log
++    // Aberto direto, sem o ELF no argumento (dois cliques, release): native/runtime/wotm_standalone.cpp acha a pasta de dados, pede
++    // a ISO na primeira execucao, grava o ELF e manda o log para wotm.log
 +    if (argc < 2)
 +    {
-+        standaloneElf = wotm::standalone::prepare();
++        standaloneElf = wotmStandalonePrepare();
 +        if (standaloneElf.empty())
 +            return 1;
 +    }
