@@ -8,7 +8,9 @@ Requirements
 ------------
 - Windows 10 or 11, 64-bit
 - A graphics card with OpenGL 3.3
-- War of the Monsters NTSC-U SCUS-97197 ISO (sha1  111a4702dcf9523ad79bdbf89fb30dc068c3f151)
+- An ISO of War of the Monsters NTSC-U (SCUS-97197). Other regions are not supported.
+  The port checks the game executable SCUS_971.97 inside the ISO (sha1 1ed7f8457436a9170d8f85386e267369c7fcdd4f).
+  A known good ISO dump has sha1 111a4702dcf9523ad79bdbf89fb30dc068c3f151.
 
 Install
 -------
@@ -60,7 +62,7 @@ F11 switches between window and fullscreen
 Mods
 ----
 Mods go in the mods\ folder. This package comes with four:
-- Goliath Prime, Cerebulon: playable custom monsters
+- Goliath Prime, Cerebulon, Mecha: playable custom monsters
 - recompiled_logo: the title screen logo
 How to make your own (textures as PNG, custom monsters):
 https://github.com/yanm1103/War_of_the_Monsters_recomp/blob/master/docs/passos/MODS.md
@@ -68,7 +70,7 @@ https://github.com/yanm1103/War_of_the_Monsters_recomp/blob/master/docs/passos/M
 
 Reporting a bug
 ---------------
-Open an issue at https://github.com/yanm1103/War_of_the_Monsters_recomp/issues and attach wotm.log (from the folder in "Where things are saved").
+Open an issue at https://github.com/yanm1103/War_of_the_Monsters_recomp/issues and attach wotm.log (from the folder in "Save location").
 
 
 License
