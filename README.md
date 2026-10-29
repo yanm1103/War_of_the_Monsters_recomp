@@ -79,6 +79,9 @@ Before committing changes to decompiled code, run `sh tools/wsl/gate.sh` (build 
 - `build_runtime.bat` builds the runtime with the native layer (`build_dev`, fast link without LTCG): `wotm.exe` (the game) and `ps2EntryRunner.exe` (test build with the
   emulated VU1/GS and the renderer check).
 - `run_live.bat -Auto 0` runs the game to play with the keyboard; `tools/launcher/` is a small launcher with options such as starting a match directly (`WOTM_MATCH`) and cheats.
+- **Release zip:** tag the commit (`git tag v0.1.0`), run `build_runtime.bat`, then `powershell -ExecutionPolicy Bypass -File tools\release.ps1`. It writes
+  `<runtime>\release\WotM-<version>-win64.zip` and its `.sha256` (outside the repo: the exe holds the translated game code, so it goes to GitHub Releases only). Details in
+  [docs/passos/RUNTIME.md](docs/passos/RUNTIME.md), "Pacote de release".
 - `mods/` holds the project's own mods (the Goliath Prime custom monster, the "Recompiled" logo): JSON and original art only. Every launch mirrors them into
   `<runtime>\discroot\mods\` (`tools/sync_mods.ps1`), where the game reads mods from; your own mods live there too. See [docs/passos/MODS.md](docs/passos/MODS.md).
 
