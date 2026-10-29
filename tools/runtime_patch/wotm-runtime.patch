@@ -5878,15 +5878,16 @@ index bd75bba..68268a1 100644
          }
  
 diff --git a/ps2xRuntime/src/main.cpp b/ps2xRuntime/src/main.cpp
-index 563bcbd..c8eaf8e 100644
+index 563bcbd..34c790f 100644
 --- a/ps2xRuntime/src/main.cpp
 +++ b/ps2xRuntime/src/main.cpp
-@@ -164,12 +164,108 @@ namespace
+@@ -164,34 +164,128 @@ namespace
      }
  }
  
 +#include "ps2_runtime_macros.h"
 +#include "wotm_syms.h"   // wotm::sym / wotm::fn (native/; no runtime cobaia, enderecos do ELF nmall)
++#include "wotm_standalone.hpp"   // wotm.exe sem argumento: pastas, ISO, ELF e log (native/)
 +
 +// Hook de teste: pula os filmes (decoder IPU do jogo ainda nao tem backend).
 +// Faz o que o fim natural faria: movieRequested=1, movieIsCompletelyFinished=1.
@@ -5963,11 +5964,20 @@ index 563bcbd..c8eaf8e 100644
      setupTerminateLogger();
 +    if (argc >= 2 && std::strcmp(argv[1], "--vu1cmp") == 0)   // checagem VU1 x nativo a partir de um instantaneo (wotm_vu1check.inc)
 +        return wotmVu1CmpMain(argc, argv);
++    std::filesystem::path standaloneElf;
 +#if !PS2X_HW_EMU
++    // Aberto direto, sem o ELF no argumento (dois cliques, release): native/wotm_standalone.hpp acha a pasta de dados, a ISO e o
++    // ELF e manda o log para wotm.log
++    if (argc < 2)
++    {
++        standaloneElf = wotm::standalone::prepare();
++        if (standaloneElf.empty())
++            return 1;
++    }
 +    // Executavel do jogo (wotm): sem GS, VU1 e VIF1, o modo nativo e o unico. Os cortes que o ps2EntryRunner liga por PS2X_NO_VU1,
 +    // PS2X_NO_VIF1 e PS2X_NO_GS (ganchos de hierFlushObjQ/rtWaitForVu1/particleDraw abaixo, conclusao do pacote e fundo preto em
-+    // wotm_scene.inc) ficam sempre ligados.
-+    for (const char *name : {"PS2X_NO_VU1", "PS2X_NO_VIF1", "PS2X_NO_GS"})
++    // wotm_scene.inc) ficam sempre ligados, e o desenho nativo (PS2X_SCENE) tambem: sem ele a janela fica preta.
++    for (const char *name : {"PS2X_NO_VU1", "PS2X_NO_VIF1", "PS2X_NO_GS", "PS2X_SCENE"})
 +    {
 +#ifdef _WIN32
 +        _putenv_s(name, "1");
@@ -5990,7 +6000,8 @@ index 563bcbd..c8eaf8e 100644
  
      try
      {
-@@ -177,21 +273,9 @@ int main(int argc, char *argv[])
+-        std::filesystem::path pathObj = getExecutablePath(argc, argv);
++        std::filesystem::path pathObj = standaloneElf.empty() ? getExecutablePath(argc, argv) : standaloneElf;
  
          std::string filePathStr = pathObj.string();
          std::string elfName = pathObj.filename().string();
@@ -6014,7 +6025,7 @@ index 563bcbd..c8eaf8e 100644
  
          PS2Runtime runtime;
  #if defined(PS2X_ENABLE_DEBUG_UI) && !defined(PLATFORM_VITA)
-@@ -220,12 +304,79 @@ int main(int argc, char *argv[])
+@@ -220,12 +314,79 @@ int main(int argc, char *argv[])
              return 1;
          }
  
