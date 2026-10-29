@@ -909,8 +909,8 @@ void tazerUpdHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 // Toquio (fase 9): o tokyoUpdate so encerra a fase com as duas IAs fora e o m_monsters[0] fora da morte (+0xE8), e o cinema do fim
 // (roteiro 0x2266) abduz so ele (quadros 260 a 630 da animacao do disco: sobe, gira, some no 600). Durante a chamada o
 // m_monsters[0] vale o lider: o primeiro jogador vivo, fixo depois que o fim comeca. No cinema, os outros que continuam fazem a
-// mesma subida que o lider fez no quadro (mesmo z, giro, matriz) e somem com ele; o cleanUpForMovie vale para todos. Linha
-// [coop] Toquio.
+// mesma subida que o lider fez no quadro (mesmo z, giro, matriz) e somem com ele (o cleanUpForMovie do lider vale para todos:
+// cleanUpHook). Linha [coop] Toquio.
 constexpr uint32_t kTokyoEnd = 0x006F8CF4u;   // static do tokyoUpdate (sem nome no ELF): o fim da fase comecou
 Hook g_tokyoUpd{fn::tokyoUpdate__Fv};
 int g_tokyoLead = -1;
@@ -970,7 +970,6 @@ void tokyoUpdHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         }
         if (cs >= 0x1000u && hide)
             wotm_modes4::wr8(rdram, cs + 0xC, 0u);
-        call(rdram, ctx, runtime, fn::cleanUpForMovie__7Monster, {m});
     }
 }
 
@@ -1302,6 +1301,65 @@ void triggerAnimHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             callF(rdram, ctx, runtime, fn::animationTransitionInto__FR11_animHandlefii, {h, 1u, 1u}, {200.f});
             std::fprintf(stderr, "[coop] cinema: animacao %u do jogador %d tambem no %d\n", slot, lead + 1, k + 1);
         }
+}
+
+// Cinemas com 3 e 4 jogadores (quadrantes do split4, na campanha e no versus): o Monster::updateCinema pula o filme com o START dos
+// controles 0 e 1 (inputGetInput(8, 0) e (8, 1)); os jogadores 3 e 4 (controles 2 e 3) pulam pelo mesmo caminho (movieAborted,
+// fadeOutAndIn 4 e o stopAllActiveActions pelo TaskManager em 30 fields). O endCinema poe o corte (+0xD90 e +0xD98) so nas cameras
+// 0 e 1; as 2 e 3 recebem o mesmo, senao voltam do cinema deslizando de onde a cena as deixou. Linha [coop] cinema pulado.
+constexpr uint32_t kCamReset = 0xD90, kCamCut = 0xD98;
+Hook g_updCinema{fn::updateCinema__7Monster}, g_endCinema{fn::endCinema__FP11DelayActionP9ActCinema};
+
+void updCinemaHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    const int n = ctx->pc == g_updCinema.addr ? wotm_split4::splitPlayers(rdram) : 0;
+    g_updCinema.orig(rdram, ctx, runtime);
+    if (n < 3 || !rd32(rdram, wotm::sym::moviePlaying) || rd32(rdram, wotm::sym::movieAborted) || rd32(rdram, kGame + 0x120454u) ||
+        rd32(rdram, kGame + 0x120458u))
+        return;
+    for (int p = 2; p < n; ++p)
+        if (call(rdram, ctx, runtime, fn::inputGetInput__Fii, {8u, uint32_t(p)}))
+        {
+            wr32(rdram, wotm::sym::movieAborted, 1u);
+            call(rdram, ctx, runtime, fn::fadeOutAndIn__7TheGamei, {kGame, 4u});
+            call(rdram, ctx, runtime, fn::add__11TaskManagerPFv_Uii,
+                 {wotm::sym::x_11TaskManager_global, fn::stopAllActiveActions__14ActionDispatchv, 30u});
+            std::fprintf(stderr, "[coop] cinema pulado pelo jogador %d\n", p + 1);
+            return;
+        }
+}
+
+// Monster::cleanUpForMovie (cloak desligado, fogo apagado, efeitos presos ao monstro escondidos): as fases (vegas, ufo, tokyo, canyon2,
+// 3-Mile, planta, final) o chamam so no m_monsters[0] antes de um cinema. Chamado com ele (o P1, ou quem os ganchos poem no lugar
+// dele), vale para todos os jogadores que continuam.
+Hook g_cleanUp{fn::cleanUpForMovie__7Monster};
+void cleanUpHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    const uint32_t m = GPR_U32(ctx, 4) & 0x1FFFFFFFu, ra = GPR_U32(ctx, 31);
+    const int n = ctx->pc == g_cleanUp.addr ? players(rdram) : 0;
+    g_cleanUp.orig(rdram, ctx, runtime);
+    if (!n || m != (rd32(rdram, kMonsters) & 0x1FFFFFFFu))
+        return;
+    wotmFinishGuestCall(rdram, ctx, runtime, ra);
+    for (int i = 0; i < n; ++i)
+        if (const uint32_t o = monster(rdram, i); o && o != m && !g_out[i])
+            call(rdram, ctx, runtime, fn::cleanUpForMovie__7Monster, {o});
+}
+
+void endCinemaHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    const int n = ctx->pc == g_endCinema.addr ? wotm_split4::splitPlayers(rdram) : 0;
+    const bool ending = rd32(rdram, wotm::sym::s_endingActions) != 0u;   // so marca o fim; as cameras ficam para o endCinema seguinte
+    const uint32_t ra = GPR_U32(ctx, 31);
+    g_endCinema.orig(rdram, ctx, runtime);
+    if (n < 3 || ending)
+        return;
+    wotmFinishGuestCall(rdram, ctx, runtime, ra);
+    for (int c = 2; c < n; ++c)
+    {
+        wr32(rdram, kCameras + kCamStride * uint32_t(c) + kCamReset, 1u);
+        wr32(rdram, kCameras + kCamStride * uint32_t(c) + kCamCut, 1u);
+    }
 }
 
 // ------------------------------------------------------------------ vidas e vitoria
@@ -1811,7 +1869,8 @@ void install(PS2Runtime &runtime)
         {&g_bossHit, &bossHitHook}, {&g_genesis, &genesisHook}, {&g_playMovie, &playMovieHook},
         {&g_plantUpd, &plantUpdHook}, {&g_plantCam, &plantCamHook}, {&g_rootWake, &rootWakeHook}, {&g_rootUpd, &rootUpdHook},
         {&g_baseHit, &baseHitHook}, {&g_baseUpd, &baseUpdHook}, {&g_finalUpd, &finalUpdHook}, {&g_tazerUpd, &tazerUpdHook},
-        {&g_tokyoUpd, &tokyoUpdHook}, {&g_craterCount, &craterCountHook},
+        {&g_tokyoUpd, &tokyoUpdHook}, {&g_craterCount, &craterCountHook}, {&g_updCinema, &updCinemaHook}, {&g_endCinema, &endCinemaHook},
+        {&g_cleanUp, &cleanUpHook},
     };
     for (const H &h : hooks)
         if (!(h.h->orig = runtime.lookupFunction(h.h->addr)))

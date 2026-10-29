@@ -550,7 +550,11 @@ retail fica como era.
   mesmo jeito, com o giro da cena. A animação do roteiro no P1 (`triggerAnimation` com `ACTANIM_PLAYER` e monstro 0) toca também nos
   outros, no mesmo slot do `m_anims` deles (`animationSetSpeed` 1 e `animationTransitionInto` 200, como no P1). As aberturas que só
   mostram a IA da fase (a da fase 1 é a captura do Congar) continuam sem os jogadores. Com o P1 fora da fase, o papel dele no
-  roteiro é do primeiro jogador que continua (`m_monsters[0]` trocado durante o `doSetPlayerPos` e o `triggerAnimation`).
+  roteiro é do primeiro jogador que continua (`m_monsters[0]` trocado durante o `doSetPlayerPos` e o `triggerAnimation`). O
+  `cleanUpForMovie` (cloak desligado, fogo apagado, efeitos presos ao monstro escondidos), que as fases chamam só no `m_monsters[0]`,
+  vale para todos os que continuam. Com 3 e 4 jogadores (quadrantes, também no versus), o START dos controles 3 e 4 pula o cinema
+  pelo mesmo caminho do `Monster::updateCinema`, que só lê os controles 1 e 2 (log `[coop] cinema pulado pelo jogador N`), e o
+  `endCinema` põe o corte (+0xD90 e +0xD98) também nas câmeras 2 e 3, que o retail só põe na 0 e na 1.
 - **Tóquio:** o `tokyoUpdate` encerra a fase com as duas IAs fora e o `m_monsters[0]` fora da morte (+0xE8), e o cinema do fim
   (roteiro 0x2266) abduz só ele: sobe, gira e some entre os quadros 260 e 630 da animação do disco. Durante a chamada o
   `m_monsters[0]` vale o líder, o primeiro jogador vivo, fixo depois que o fim começa (o static em 0x6F8CF4 do `tokyoUpdate`). No
