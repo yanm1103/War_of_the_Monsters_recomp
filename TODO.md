@@ -13,7 +13,7 @@ O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado s
 Como funciona hoje: `docs/passos/MODS.md` ("Skins", "Monstros custom").
 - **Monstros com arquivos próprios:** campo `files` no `monster.json`, com um tipo livre (6, 12 ou 16) ou remapeando um tipo. Hoje o custom usa o tipo de um monstro do jogo. Modelo novo depende de o `.NGP` voltar pelo kit (hoje ele só sai).
 - **Arquivo de mod maior que o do disco** fora de `MON/*`: o jogo carrega em regiões de tamanho fixo e pode sobrescrever o que vem depois (o log avisa). Abrir espaço por tipo de arquivo.
-- **Aviso dos tetos para skin com `.TEX`/`.RTX`/`.PTR` próprios:** a skin não tem original para comparar, então hoje nada avisa. O log de carga deveria comparar com os tetos reais: `texInfo[1000]` (`maxTexId` final), VRAM residente do `.RTX` e o buffer de 0x30D40 do `.PTR` (`0f091a4:docs/investigacoes/2026-10-23/skins_mod_carga.md`, item 8).
+- **Aviso do buffer do `.PTR` para skin com `.PTR` próprio:** o log de carga já mostra os texIds e a VRAM. Falta o buffer de 0x30D40 do `.PTR` (`0f091a4:docs/investigacoes/2026-10-23/skins_mod_carga.md`, item 8).
 
 ### 13. Campanha com até 4 jogadores
 O que existe: `docs/passos/NATIVO.md`, "Campanha com até 4 jogadores" (entrada, tela, vidas, largada, tokens). Contexto e endereços do que falta: `docs/investigacoes/2026-10-27/campanha4.md`. Decisões do dono:
@@ -21,7 +21,7 @@ O que existe: `docs/passos/NATIVO.md`, "Campanha com até 4 jogadores" (entrada,
 - **Chefes:** alvo sorteado entre os jogadores vivos, sem vida extra. Em teste o Capitólio (Mecha e jelly, `[coop] Cerebulon` no log).
 - **Final:** em teste o filme de cada herói da party antes dos créditos (`[coop] final` no log).
 - **Save:** chave `coop` no `save.json` (o `adventureToJson` a preserva); carregar um save co-op passa pela escolha de controles e vai à fase.
-- **Carga e depois:** medir `texInfo[1000]` e VRAM das `.RTX` com 4 jogadores + 4 IAs (Canyon); barrar CUSTOM de tipo chefe na seleção; entrar e sair do grupo entre fases.
+- **Seleção e entre fases:** barrar CUSTOM de tipo chefe na seleção; entrar e sair do grupo entre uma fase e outra.
 
 ### 14. Primeiro release (binário pronto)
 Decisão do dono: zip com o `wotm.exe` pronto (contém o código traduzido do jogo; vai só nos Releases do GitHub, nunca no repo), lançado depois do item 13.

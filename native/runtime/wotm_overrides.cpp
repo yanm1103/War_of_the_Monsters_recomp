@@ -1290,6 +1290,12 @@ namespace
                 maxTex = std::max<uint32_t>(maxTex, FAST_READ16(kFileStatus + 0x130 + 2 * i));
             std::fprintf(stderr, "[wotm] carga da fase: %u de 1000 texIds%s\n", maxTex,
                          maxTex >= 1000 ? " -- ALEM DO texInfo, espere corrupcao" : maxTex >= 900 ? " -- perto do teto do texInfo" : "");
+            // VRAM (em palavras de 32 bits): as .RTX ficam embaixo e o cache das .TEX vai de startVramAddr (logo acima delas) ate
+            // lastVramTexAddr. Uma .RTX maior encolhe o cache; o wotm.exe desenha da RAM, entao o cache curto so pesa no ps2EntryRunner.
+            const uint32_t vStart = READ32(wotm::sym::startVramAddr), vLast = READ32(wotm::sym::lastVramTexAddr);
+            if (vStart && vLast > vStart)
+                std::fprintf(stderr, "[wotm] carga da fase: VRAM residente ate 0x%05X, cache de texturas com %u KB\n", vStart,
+                             (vLast - vStart) * 4 / 1024);
         }
         if (end > kHighBase)
         {   // area de cima: embaixo fica so o NGP da fase (fileStatus.ngpAddr[0] ate o fim do arquivo, guardado no log da carga)

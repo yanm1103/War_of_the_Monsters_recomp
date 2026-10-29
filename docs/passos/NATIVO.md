@@ -372,7 +372,9 @@ Compara, por objeto e em números, o que o microcódigo do VU1 mandaria ao GS co
   da fase e dos monstros vão para cima; embaixo fica só o NGP da fase. A relocação (`dbsRelocateViaPtrListFile`) soma "endereço -
   0xA00000" em 32 bits e vale em qualquer endereço. `WOTM_HIGHRAM=0` volta à carga contígua do PS2 (com 8 monstros, a Metro passa de
   32 MB e congela). A linha `[wotm] carga da fase` diz quanto sobra até o fim da RAM, e `N de 1000 texIds` avisa perto do teto do
-  `texInfo`.
+  `texInfo`. A linha `VRAM residente até ..., cache de texturas com N KB` dá o fim das `.RTX` (`startVramAddr`) e o espaço do cache
+  das `.TEX` até o `lastVramTexAddr`. O `wotm.exe` desenha da RAM e não depende do cache. No Canyon com 4 jogadores e 4 IAs: 238
+  texIds, 2134 KB de cache e 20,8 MB livres na RAM; com 1 jogador: 196 texIds e 2164 KB.
 - Instantâneos de 32 MB continuam abrindo: o replay aceita RAM menor que a do build e zera o resto.
 
 ## Save em JSON (`wotm_save.inc`, `wotm_json.hpp`)
