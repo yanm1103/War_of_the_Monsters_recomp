@@ -16,7 +16,7 @@ Como funciona hoje: `docs/passos/MODS.md` ("Skins", "Monstros custom").
 
 ### 14. Primeiro release (binário pronto)
 Decisão do dono: zip com o `wotm.exe` pronto (contém o código traduzido do jogo; vai só nos Releases do GitHub, nunca no repo). Levantamento do que falta e ordem sugerida: `docs/investigacoes/2026-10-29/release.md`.
-- **Build de release:** o `wotm.exe` com LTCG (o `build_dev` é sem), sem `ps2EntryRunner.exe`, sem variáveis de diagnóstico ligadas; runtime do MSVC (`/MT` ou as três DLLs ao lado), versão no exe e no log, PDB guardado fora do zip (seções 4 e 5 do levantamento).
+- **Build de release:** o mesmo `wotm.exe` do `build_dev`, sem LTCG (decisão do dono: não muda o fps, medido em `bdbe005`; o exe do release é o testado), sem `ps2EntryRunner.exe`, sem variáveis de diagnóstico ligadas; runtime do MSVC (`/MT` ou as três DLLs ao lado), versão no exe e no log, PDB guardado fora do zip (seções 4 e 5 do levantamento).
 - **Pacote:** script em `tools/` que monta o zip (exe, as DLLs do FFmpeg da seção 5 do levantamento, sem SDL2, `mods/`; a primeira execução está no próprio exe, `docs/passos/RUNTIME.md`), com as licenças de terceiros e o GPL-3.0 (apontar o código-fonte: este repo + `tools/runtime_patch/`). Nada do disco no zip.
 - **Conferir:** descompactar numa pasta limpa, numa máquina (ou conta) sem o ambiente de build, e jogar luta, aventura e save.
 
