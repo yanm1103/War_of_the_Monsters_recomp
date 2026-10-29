@@ -53,7 +53,7 @@
   - `reloc_addrs.txt` (gerado por `tools/gen_relocs.py`) força imediatos crus em 1.606 pares `%hi/%lo`
     que o spimdisasm resolvia para o meio do `.text`. São offsets de struct grande (`lui 0x12`), como
     `0x120380`, e não ponteiros.
-- `tools/symdiff.py` lista os símbolos que mudaram de endereço no ELF gerado, útil quando o checksum falha.
+- `tools/symdiff.py` lista os símbolos que mudaram de endereço no ELF gerado, útil quando o checksum falha; `tools/romdiff.py` mostra as palavras que diferem.
 
 ## Toolchain
 - Teste de referência: `zipCrc32__FUlPCUcl` (`common/zip`) é o `crc32` do zlib e dá match exato

@@ -37,6 +37,8 @@
 - **`sqrtf` em C++ NM sai com `sqrt.s` na codificação errada.** O R5900 usa `SQRT.S fd, ft` (fonte em `ft`, `fs=0`; retail `0x46020084`); o gas/ee-gcc emite a forma MIPS32 com a fonte em `fs`
   (`0x46006044`), que no EE lê `$f0`. Em `AiPathFinder::computeCostEstimate` isso descartava o termo z (comprovado rodando retail × nossa versão recompilada, 300/300 divergentes). O `difftest` (unicorn)
   não vê isso. Use `eeSqrtf` (`include/vecmath.h`, `.word 0x46040104`) em vez de `sqrtf` em código NM; para varrer um ELF NM: forma errada = `ft==0 && fs!=0` (o retail tem 127 `sqrt.s`, todos `ft`).
+- Clone novo: o `configure.py --split` pode deixar de gerar os `.s` de dados (vtables como `_vt$12PointToolKit.s`) e o `ninja` para num arquivo faltando (splat 0.41.1 e 0.50.0).
+  Contorno: tirar `src/` do repo, rodar o `--split` e devolver `src/`. A causa não foi investigada.
 - Loops de espera por registrador de hardware (`objsInPacket`, `gRtReturn`): declarar `volatile`; sem isso o gcc vira laço infinito/hoisting.
 - Ordem de stores em struct pequena pode inverter no gcc 2.95 (`rtReturnToShell`: escrever `code, active, delay` para sair `delay, active, code`).
 - Teste automático: `powershell -ExecutionPolicy Bypass -File tools/pcsx2_auto/play.ps1 halfcpp [-pause]` (sem `-File`/`Bypass` o PowerShell recusa o script). Só exercita 1 jogador/free-for-all; telas de 2P, elimination, minigames e história não são cobertas.
