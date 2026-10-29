@@ -1,4 +1,4 @@
-// Modo treino (NATIVO.md, "Runtime: modo treino"; WOTM_TRAINING=1 ou a linha TRAINING do menu): ganchos na thread do EE que gravam o que o jogo testa nos
+// Modo treino (NATIVE.md, "Runtime: modo treino"; WOTM_TRAINING=1 ou a linha TRAINING do menu): ganchos na thread do EE que gravam o que o jogo testa nos
 // golpes e o dano de cada um. Incluido pelo wotm_overrides.cpp; estado compartilhado em native/wotm_training.h; os volumes do corpo
 // sao lidos no wotmCaptureFrame (wotm_live.inc) e o desenho e o painel de opcoes (menu de pausa) estao no wotm_live.inc. Investigacoes:
 // git show 635fd3c:docs/investigacoes/2026-10-23/treino_hitboxes.md e treino_dano.md.

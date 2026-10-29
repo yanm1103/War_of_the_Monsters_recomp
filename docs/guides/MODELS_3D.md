@@ -1,7 +1,7 @@
 # 3D monsters straight from the disc
 
 (Doc index in `CLAUDE.md`.) How to assemble an animated monster from the `MON/` files alone, without the game or a RAM dump. It serves the save list
-(monster in idle over the stage picture, `NATIVO.md`, "Save as JSON"), the 3D preview in the select screen (item 12) and the web viewer (`VIEWER_WEB.md`). Base formats (mesh, curves) in `docs/FORMATOS.md`.
+(monster in idle over the stage picture, `NATIVE.md`, "Save as JSON"), the 3D preview in the select screen (item 12) and the web viewer (`WEB_VIEWER.md`). Base formats (mesh, curves) in `docs/FORMATS.md`.
 
 ## Code
 | Where | What |
@@ -31,7 +31,7 @@ draws the monster into the RenderTexture before the frame (`wotm_live.inc` calls
 - Animation `id` = the one in `animations[k]` with `head >> 18 == id` (the Monster stores the k-th as `m_anims[id]`, ids 0..299,
   `Monster::initAfterDbLoad`). `startTime` @4, `endTime` @8, `numChannels` u16 @0xC, curves @0x18. **Idle = 90 (0x5A)**
   (`StateIdle::chooseBaseIdle`; 0x5F tired, 0x60 with special). Time in frames of 60/s; Congar's idle has 160.
-- Each curve writes `val[dataIdx]` (FORMATOS.md, "Animation (curves in the `.NGP` and the runtime mixer)"). It matches `animOutput.val` from a fight in 128 of 130 channels (the remaining 2, 0.007, come from a blend layer).
+- Each curve writes `val[dataIdx]` (FORMATS.md, "Animation (curves in the `.NGP` and the runtime mixer)"). It matches `animOutput.val` from a fight in 128 of 130 channels (the remaining 2, 0.007, come from a blend layer).
 
 ## Traversal (part matrices)
 Row vectors (`p' = p·M`), child = `local · pai`. Per node:

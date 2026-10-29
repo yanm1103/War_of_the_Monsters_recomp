@@ -1,4 +1,4 @@
-// Tela dividida de 3 e 4 jogadores (NATIVO.md, "Tela dividida de 3 e 4 jogadores"). Incluido pelo wotm_overrides.cpp. Sempre instalada: age quando o Shell
+// Tela dividida de 3 e 4 jogadores (NATIVE.md, "Tela dividida de 3 e 4 jogadores"). Incluido pelo wotm_overrides.cpp. Sempre instalada: age quando o Shell
 // tem 3 ou 4 jogadores (m_numPlayers), postos pelo menu multijogador (wotm_padsel.inc) ou pela WOTM_MATCH com WOTM_PLAYERS=3 ou 4.
 //
 // O motor ja tem quase tudo para 4 vistas: viewInfo, worldCtx e viewDb com 5 entradas (a 4 e a da sombra), 4 cameras

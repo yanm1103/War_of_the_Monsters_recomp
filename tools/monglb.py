@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exporta um monstro do WotM para glTF binario (.glb) com esqueleto e animacoes, para o viewer web (VIEWER_WEB.md, etapa 1).
+"""Exporta um monstro do WotM para glTF binario (.glb) com esqueleto e animacoes, para o viewer web (WEB_VIEWER.md, etapa 1).
 
   python tools/monglb.py disc/MON/LIZARD0.NGP saida/LIZARD0.glb               # idle (animacao 90)
   python tools/monglb.py disc/MON/LIZARD0.NGP saida/LIZARD0.glb --anims 90,0  # outras animacoes (ids do pose.py --list)

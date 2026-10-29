@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Exporta as fotos largas das fases e os logos dos monstros do menu (SHELL/SHELL.TEX + SHELL.RTX) para PNG, como a lista
-de saves do nativo mostra (native/wotm_savepics.hpp, NATIVO.md, "Save em JSON"). Usado pelo viewer web (VIEWER_WEB.md) para o
+de saves do nativo mostra (native/wotm_savepics.hpp, NATIVE.md, "Save em JSON"). Usado pelo viewer web (WEB_VIEWER.md) para o
 fundo da pagina.
 
   python tools/shellpics.py disc/SHELL saida/        # saida/stages/01_midtown_park.png (+ stages/thumbs/, 128x64) e

@@ -44,7 +44,7 @@ except ImportError:   # sem Pillow: sem miniaturas nem previa de imagem
 
 CONF = os.path.join(os.path.expanduser("~"), ".wotm_modkit.json")
 
-# Monstros: prefixo do arquivo (MON/<PREFIXO><traje>) -> nome no jogo, bancos de som (GLOSSARIO.md)
+# Monstros: prefixo do arquivo (MON/<PREFIXO><traje>) -> nome no jogo, bancos de som (GLOSSARY.md)
 MONSTERS = [
     ("MONKEY", "Congar", ("APE_S", "APE_LS")), ("ROBOT", "Robo-47", ("ROBOT_S", "ROBOT_LS")),
     ("LIZARD", "Togera", ("LIZARD_S", "LIZRD_LS")), ("SHOGUN", "Ultra V", ("SHOGUN_S", "SHOGN_LS")),

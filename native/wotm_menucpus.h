@@ -1,4 +1,4 @@
-// Mais CPUs no free for all do que o menu do jogo deixa (NATIVO.md, "Mais CPUs pelo menu"): ate 8 monstros na luta, 0 a 7 CPUs com
+// Mais CPUs no free for all do que o menu do jogo deixa (NATIVE.md, "Mais CPUs pelo menu"): ate 8 monstros na luta, 0 a 7 CPUs com
 // 1 jogador (tela 12) e 0 a 8 - N com N = 2 a 4 (tela 13). Os ganchos das telas (wotm_overrides.cpp) guardam o numero escolhido; o
 // menu segue com o que o jogo conhece (3 CPUs com 1 jogador, 2 com 2, nenhuma com 3 e 4), e o wotm_padsel.inc poe as CPUs a mais na
 // selecao e grava o numero de verdade quando a fase e confirmada (1 e 2 jogadores) ou na saida da selecao (3 e 4).

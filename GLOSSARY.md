@@ -1,6 +1,6 @@
 # WotM glossary
 
-Quick reference so everyone uses the same names in the project. Sources: `include/game/MonsterNames.h` (`MonsterNewNames`), `docs/FORMATOS.md` (`MonsterLongNames`) and the contents of `disc/MON/` (not versioned). What came from the project owner is marked as such.
+Quick reference so everyone uses the same names in the project. Sources: `include/game/MonsterNames.h` (`MonsterNewNames`), `docs/FORMATS.md` (`MonsterLongNames`) and the contents of `disc/MON/` (not versioned). What came from the project owner is marked as such.
 
 ## Monsters
 

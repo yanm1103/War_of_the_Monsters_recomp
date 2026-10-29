@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Confere a tabela de variaveis WOTM_* de docs/passos/NATIVO.md contra o codigo.
+"""Confere a tabela de variaveis WOTM_* de docs/guides/NATIVE.md contra o codigo.
 
 O codigo (native/ e o patch do runtime em tools/runtime_patch/) e a fonte: toda
 variavel lida por getenv("WOTM_...") tem que estar na tabela entre os marcadores
@@ -15,7 +15,7 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DOC = os.path.join(ROOT, "docs", "passos", "NATIVO.md")
+DOC = os.path.join(ROOT, "docs", "guides", "NATIVE.md")
 SRC_DIRS = [os.path.join(ROOT, "native"), os.path.join(ROOT, "tools", "runtime_patch")]
 SRC_EXT = (".hpp", ".h", ".cpp", ".inc", ".patch")
 START, END = "<!-- WOTM_ENV:START -->", "<!-- WOTM_ENV:END -->"

@@ -3,7 +3,7 @@
 // O jogo fala com o driver 989snd (que roda no IOP) pelas funcoes `snd_*` da lib989snd do EE. O runtime troca essas funcoes
 // por hooks (wotm_live.inc, sempre ligados) que chamam este motor: os bancos .BNK sao lidos do disco, os sons sao executados
 // grain a grain como no 989snd e as vozes ADPCM do SPU2 sao mixadas aqui, a 48 kHz, numa AudioStream do raylib.
-// Formatos e API em docs/FORMATOS.md ("Som") e tools/snd989.py.
+// Formatos e API em docs/FORMATS.md ("Som") e tools/snd989.py.
 //
 // O motor de efeitos (grains, envelope ADSR do SPU2, LFO, volume/pan) segue a reimplementacao do 989snd do OpenGOAL
 // (github.com/open-goal/jak-project, game/sound/989snd e game/sound/common; Copyright 2021-2024 Ziemas, licenca ISC), adaptada

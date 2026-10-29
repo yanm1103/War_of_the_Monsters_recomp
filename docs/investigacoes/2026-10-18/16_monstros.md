@@ -42,7 +42,7 @@ Também provado no retail: o Endurance mantém 6 monstros carregados e o `m_mode
    novo não deve herdar isso.
 
 ## Riscos a medir (não bloqueiam, podem pedir ajuste)
-- **Desempenho.** Com 4 monstros a CPU fica em 6,2 ms medianos (`NATIVO.md`). Por monstro cresce a lógica, o skinning e o
+- **Desempenho.** Com 4 monstros a CPU fica em 6,2 ms medianos (`NATIVE.md`). Por monstro cresce a lógica, o skinning e o
   `EnemyInfo::update` (um `hdLosCSTest` por par: de 1..6 hoje para até 120..240 por quadro). Estimativa grosseira 12..20 ms: 60 fps
   no limite; medir antes de otimizar.
 - **Som.** `loadRTSoundBanks` usa bancos "lo-res" quando há mais de 3 slots e carrega um banco por tipo de monstro (até ~10 tipos
@@ -70,7 +70,7 @@ Esforço estimado: degrau 1 em um ou dois dias; 2 e 3 juntos em alguns dias; o r
 Feito sem mexer na RAM: `WOTM_MATCH` aceita até 7 IAs (`native/runtime/wotm_overrides.cpp`) e `tools/lote.ps1 -AIs` vai até 7.
 O bloco em 0x1B70000 que parecia ocupado é sobra do menu: a área de carga vai até ~0x1F10000 (o Metro com 2 monstros chega a
 0x1D0C380). Centro + 8 monstros terminou em 0x1CC3400, com 2,3 MB de folga; luta de 150 s sem travar, todos lutando, 60 fps,
-~9 ms de CPU por quadro. Detalhes em `docs/passos/NATIVO.md` ("Até 8 monstros").
+~9 ms de CPU por quadro. Detalhes em `docs/guides/NATIVE.md` ("Até 8 monstros").
 
 ### 8 monstros em todas as fases do lote (30 s cada, IA contra IA)
 Fim da carga com 8 monstros sorteados (folga até o teto 0x1F10000): Centro 2,6 MB, Vegas 2,1, Aeroporto 7,5, San Francisco 1,8,

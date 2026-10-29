@@ -4,7 +4,7 @@
 #   Um arquivo guarda os quadros de uma sessao (gatilho/rajada: WOTM_VU1CHECK_WHEN, WOTM_VU1CHECK_BURST); todos sao comparados.
 #   -Frame <g_frame>: so esse quadro do arquivo
 #   -Full: todas as linhas [vu1check] (padrao: as linhas de resumo de cada quadro, objetos/atributos/particulas/sprites, e o inventario
-#          inteiro, linhas "inv": o que so a referencia ou so o nativo desenha, por dono; ver docs/passos/VU1CHECK.md)
+#          inteiro, linhas "inv": o que so a referencia ou so o nativo desenha, por dono; ver docs/guides/VU1CHECK.md)
 #   -Dump <prefixo>: grava os triangulos de cada checagem em <prefixo>_<g_frame>.csv (o mesmo WOTM_VU1CHECK_DUMP)
 #   -NoPng: sem as imagens (padrao: <arquivo>_<g_frame>_{ref,nat,diff,trio}.png ao lado do instantaneo; ref = GS em software do
 #           runtime, aproximacao do GS do PS2; nat = camada nativa; diff = pixels diferentes; trio = os tres lado a lado)

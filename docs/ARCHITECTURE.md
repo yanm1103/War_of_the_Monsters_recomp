@@ -8,12 +8,12 @@ Direction: **port first**; the decomp only advances on the mod surface.
    (`ctx->r4 = ADD32(ctx->r4, 0x20)`), one function per MIPS function, on top of an emulated PS2 RAM. It is unreadable, but faithful: logic, classes and libs. Nobody needs to read it.
 2. **Runtime (fake hardware).** Separate from the recompiled code, it provides what the PS2 had in hardware: GS and VU1 in software, IOP/sound, IPU/movies, controller, disc.
    In the port, the emulated VU1 and GS are turned off (`PS2X_NO_VU1`, `PS2X_NO_GS`) and drawing belongs to the native layer. The emulated VU1 remains useful as a **reference**: the VU1 x native check
-   (`docs/passos/VU1CHECK.md`) compares, per triangle, what it would send to the GS with what the native layer draws (more than 99% matched in geometry).
+   (`docs/guides/VU1CHECK.md`) compares, per triangle, what it would send to the GS with what the native layer draws (more than 99% matched in geometry).
 3. **Native layer (what we write).** `native/` in this repo: GPU drawing (raylib) from the scene hierarchy read from the EE RAM, particles, shadows, fog, menu text,
    sound (`wotm_snd.hpp`), movies (`wotm_fmv.hpp`), keyboard, native VU0 generated from the microcode. The hooks that run inside the runtime live in `native/runtime/`. This is the port work
-   (`docs/passos/NATIVO.md`).
+   (`docs/guides/NATIVE.md`).
 4. **Readable layer (decomp).** `src/` + `include/`: `matched`/`equivalent` functions in readable C++. **It does not go into the base port.** It serves to (a) mod: take the readable version of the function, change it and
-   rebuild it into the ELF; (b) the oracle; (c) structures and formats the native layer needs (`include/hieri_types.h`, `docs/FORMATOS.md`).
+   rebuild it into the ELF; (b) the oracle; (c) structures and formats the native layer needs (`include/hieri_types.h`, `docs/FORMATS.md`).
 
 ## What goes in the repo and what is generated
 - **In the repo:** the readable decomp, the type headers, `tools/`, the native layer (`native/`, including `native/runtime/`), the documentation.
@@ -21,7 +21,7 @@ Direction: **port first**; the decomp only advances on the mod surface.
 - **Layout:** PS2Recomp is a **submodule** (`third_party/PS2Recomp`, branch `wotm` of the fork `yanm1103/PS2Recomp`, with the `sqrt` fix). Clone with `git clone --recurse-submodules`.
   The generated code goes in `recomp/` (in `.gitignore`): `recomp/retail/` (retail ELF) and `recomp/nm/` (ELF with the equivalents, test-subject runtime). The runtime reads that folder with `-DPS2X_GENERATED_DIR=<repo>/recomp/retail`.
   The fork's CMake receives `-DWOTM_NATIVE_DIR=<repo>/native` and compiles `native/runtime/`; the patch `tools/runtime_patch/wotm-runtime.patch` holds only the seams (CMake, `main.cpp`, taps on VIF1/VU1/memory, scheduler, pad).
-- **Runtime build:** `build_runtime.bat` at the root (no LTCG; `docs/passos/RUNTIME.md`). *Still manual:* generating `recomp/` (analyzer + `ps2_recomp` over the ELF). *Missing:* a single script that does this from the ISO.
+- **Runtime build:** `build_runtime.bat` at the root (no LTCG; `docs/guides/RUNTIME.md`). *Still manual:* generating `recomp/` (analyzer + `ps2_recomp` over the ELF). *Missing:* a single script that does this from the ISO.
 - The recompiler needs the `SQRT.S`/`RSQRT.S` fix (PR https://github.com/ran-j/PS2Recomp/pull/277); without it, 108 + 76 game functions compute wrong results.
 
 ## Copyright and license
@@ -38,7 +38,7 @@ Direction: **port first**; the decomp only advances on the mod surface.
    `build_runtime.bat nm` (Windows: `build_dev_nm`, the "test-subject" runtime, same hooks) and `run_live.bat -Build build_dev_nm` to play.
 4. Check that **only** what you wanted changed: `tools\lote.ps1 -Build build_dev_nm` with the same batch (same `-Seed`) as the normal runtime and compare the `resumo.csv` files;
    for an isolated function, `tools/recomp_oracle` compares the original version with the new one. Equivalents that do not link in the full ELF are listed in `config/nm_all_exclude.txt`.
-   **State:** the chain exists, but the test subject still breaks in the fight (`docs/passos/NATIVO.md`, "Test-subject runtime"); it is on hold until the port has HUD and widescreen.
+   **State:** the chain exists, but the test subject still breaks in the fight (`docs/guides/NATIVE.md`, "Test-subject runtime"); it is on hold until the port has HUD and widescreen.
 
 ## Milestones
 | # | Milestone | State |
@@ -57,4 +57,4 @@ Direction: **port first**; the decomp only advances on the mod surface.
 - raylib's `TakeScreenshot` comes out empty if the draw batch is not flushed first (`rlDrawRenderBatchActive`).
 - The emulated VU1 is too slow to draw with (the fight dropped to ~15 vsync/s) and, without the VU1, the game needs someone to zero `objsInPacket`/`objsInAlphaPacket`; that is why we cut at the scene hierarchy and keep the VU1 only as the check's reference.
 - `pktAddVu1ObjAsm`, `hierTraverseAsm` and `hierCsUpdateAsm` are handwritten assembly with their own convention: do not decompile, replace.
-- A host hook without `hostLeaf` freezes the logic when the time slice ends inside it (`NATIVO.md`, "Runtime: host hooks end with `pc = $ra`").
+- A host hook without `hostLeaf` freezes the logic when the time slice ends inside it (`NATIVE.md`, "Runtime: host hooks end with `pc = $ra`").

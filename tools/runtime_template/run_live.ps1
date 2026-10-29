@@ -32,7 +32,7 @@ if (-not $env:PS2X_CD_IMAGE) {
         $env:PS2X_CD_IMAGE = $iso.FullName
     }
 }
-# mods do repo (mods\<mod>\) para discroot\mods\ (tools\sync_mods.ps1; docs/passos/MODS.md)
+# mods do repo (mods\<mod>\) para discroot\mods\ (tools\sync_mods.ps1; docs/guides/MODS.md)
 $repoDir = if ($env:WOTM_REPO) { $env:WOTM_REPO } else { Split-Path $rt -Parent | Join-Path -ChildPath 'WoTM' }
 $sync = Join-Path $repoDir 'tools\sync_mods.ps1'
 if (Test-Path $sync) { & $sync -Runtime $rt -Repo $repoDir }

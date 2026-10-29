@@ -1,4 +1,4 @@
-// Icone de salvamento automatico (NATIVO.md, "Save em JSON"): a fita de filme 3D que o jogo grava como icone do memory card
+// Icone de salvamento automatico (NATIVE.md, "Save em JSON"): a fita de filme 3D que o jogo grava como icone do memory card
 // (MEMCRD/ICON.ICO do disco) gira no canto inferior direito por 1 s a cada gravacao do save.json (wotm_save.inc soma
 // g_wotmSaveCount na thread do EE; a janela desenha aqui, de dentro do wotmDrawScene).
 //

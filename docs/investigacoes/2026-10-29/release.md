@@ -43,7 +43,7 @@ graváveis para `%APPDATA%\WotM` com a pasta do jogo como fallback.
 ## 4. Build de release
 
 - `wotm.exe` com LTCG (o `build.bat` da pasta do runtime; link de ~28 min), sem `ps2EntryRunner.exe`.
-- Nenhuma `WOTM_*`/`PS2X_*` de diagnóstico ligada por padrão (`python tools/wotm_env.py` e a tabela do `NATIVO.md`). O vigia
+- Nenhuma `WOTM_*`/`PS2X_*` de diagnóstico ligada por padrão (`python tools/wotm_env.py` e a tabela do `NATIVE.md`). O vigia
   (`WOTM_WATCHDOG`) grava `ram_/vram_vigia_*.bin` de 36 MB no travamento: no release, só o log, sem dump.
 - PDB fora do zip, guardado por versão, para resolver os `[CRASH] exe+0x…` que chegarem.
 - Número de versão no exe e no log (commit da master + versão), para casar relato e PDB.
@@ -85,9 +85,9 @@ O `README.md` é para quem compila. O zip precisa de um `LEIA-ME`/`README` curto
 - requisitos (Windows 10/11 x64, OpenGL 3.3, a ISO NTSC-U própria);
 - primeira execução, onde ficam saves, mods e screenshots;
 - controles padrão (teclado e controle) e o painel "Recompiled options";
-- mods: pasta `mods\`, link para `docs/passos/MODS.md`;
+- mods: pasta `mods\`, link para `docs/guides/MODS.md`;
 - como relatar bug (qual arquivo de log anexar);
-- bugs conhecidos, tirados do `docs/passos/VU1CHECK.md`.
+- bugs conhecidos, tirados do `docs/guides/VU1CHECK.md`.
 
 E as notas do release no GitHub (o que funciona: luta, aventura até 4 jogadores, versus até 8, save em JSON, skins e monstros de
 mod, modo treino, Mecha jogável).

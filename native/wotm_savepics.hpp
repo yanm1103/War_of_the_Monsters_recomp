@@ -1,4 +1,4 @@
-// Imagens da lista de saves (NATIVO.md, "Save em JSON"): a esquerda do modal, a foto larga da fase do save e, por cima, o logo do
+// Imagens da lista de saves (NATIVE.md, "Save em JSON"): a esquerda do modal, a foto larga da fase do save e, por cima, o logo do
 // monstro, como na escolha de fase e de monstro do menu. Saem do SHELL/SHELL.TEX e SHELL/SHELL.RTX do disco (o mesmo par que o menu
 // carrega; depois da luta ele nao esta na memoria, por isso a leitura e direta do disco).
 //

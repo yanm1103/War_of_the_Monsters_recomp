@@ -3,7 +3,7 @@
 // No retail, `particlePrepDraw` (particleMove + o *PacketBuild de cada tipo) monta um pacote VIF por sistema e `particleDraw`
 // (0x21B378; o laco que espera o VU1 fica em 0x21B8A0) manda esses pacotes para o microcodigo de particulas do VU1, que expande
 // cada particula em sprite/linha/faixa. Aqui o corte e antes do VU1: le o estado de cada sistema (`_ParticleType`,
-// include/hieri_types.h) e desenha direto. Detalhes e o que ainda e hipotese: docs/FORMATOS.md ("Particulas").
+// include/hieri_types.h) e desenha direto. Detalhes e o que ainda e hipotese: docs/FORMATS.md ("Particulas").
 //
 // Confirmado no codigo da CPU (asm de common/particle e common/partdraw):
 //   - fx[100] em 0x5BA280 (0x2EE0 bytes cada); lista ativa: fxActiveTop (0x6F88EC) -> fxList[i].next (+8, 12 bytes por entrada), -1 = fim

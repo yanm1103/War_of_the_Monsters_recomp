@@ -4,10 +4,10 @@
 
 ## Load chain: from `main` to the monster on the map
 Flow of `main` (comment in `src/game/Shell.cpp`): boot -> intro/outro -> menus (`userintMain`) -> session: `InitRTState`, `BootInitGame`, `InitBeforeDbLoad`, `LoadLevelFiles`, `FinishLoadBar`, `FadeScreen`, `InitAfterDbLoad`, `InitPlayers`, `initAfter` of the 4 `Hud`s, per-mode init (BigShot/Crush/DodgeBall), `UpdatePadTweaks`, sounds, `rtMain` in a loop with `EvaluateGameStatus`.
-- Loading: `Shell::LoadLevelFiles` -> `LoadLevelDB`, `LoadMonstersDB`, `LoadResTexture`, `LoadTexture` -> `dbsRelocateFileZero` (`.PTR`, TBP0) -> `dbInitDb` -> `dbsRelocateViaPtrListFile` (`mon/<nome>.ptr`) -> `dbsTraverse` (+ `dbsPush`/`dbsPop`) -> `dbProcInteractive` (object id table). Formats and the id table in `docs/FORMATOS.md`.
+- Loading: `Shell::LoadLevelFiles` -> `LoadLevelDB`, `LoadMonstersDB`, `LoadResTexture`, `LoadTexture` -> `dbsRelocateFileZero` (`.PTR`, TBP0) -> `dbInitDb` -> `dbsRelocateViaPtrListFile` (`mon/<nome>.ptr`) -> `dbsTraverse` (+ `dbsPush`/`dbsPop`) -> `dbProcInteractive` (object id table). Formats and the id table in `docs/FORMATS.md`.
 - Monsters: `Shell::InitPlayers` -> `TheGame::MonsterParse/AddMonster/GetMonsterFromName/SetPlayerMonster/SetAIMonster` (create the slot, register in `Interactives`) -> `Monster::initBeforeDbLoad/playerInit/aiInit/initAfterDbLoad`. `Monster::playerInit` jumps (`j`) to `aiInit` with the same registers.
 - The `file*` and `zip*` functions are a platform layer (the port reads files directly).
-- Validation of this chain: halfcpp in PCSX2 (`TESTE_PCSX2.md`; `idx.py` checks that the ids and `Interactives` indices match) and the game running in the runtime.
+- Validation of this chain: halfcpp in PCSX2 (`PCSX2_TESTING.md`; `idx.py` checks that the ids and `Interactives` indices match) and the game running in the runtime.
 
 ## Menu (`game/ui`, `game/screen`)
 - The `screen*` screens use `screenGetInput(1)`: it returns `(pad << 16) | ação`; actions 1/2 = up/down, 3/4 = left/right, 5 = back, 6 = confirm. Each screen changes `currentSelection[currScreen]` and swaps the shell's `hierSetSwitch`.
@@ -17,7 +17,7 @@ Flow of `main` (comment in `src/game/Shell.cpp`): boot -> intro/outro -> menus (
 - The port can replace the menus with its own UI; the check inventory lists what they draw (`VU1CHECK.md`).
 
 ## Game loop (`game/rt`)
-- `rtMain(first)` is the per-frame loop: `startFrame` → input → per view: `CullView`, GS double buffer, `viewUpdate`, HUD, `hier(view,0)`, `TheGame::Update` (view 0 only), `animationRunGlobal`, `Update2` (view 1 or the only one), particles, `TaskManager(debris)`, `hier(view,1)`, DMA; at the end of the frame `updateLevelObjectSoundManager`, `updateSoundManager`, `g_frame++` and the time pacing (`timerWaitForMinUpdateRate`; `dt` details in `NATIVO.md`, "Physics with `dt = 1/updateRate`").
+- `rtMain(first)` is the per-frame loop: `startFrame` → input → per view: `CullView`, GS double buffer, `viewUpdate`, HUD, `hier(view,0)`, `TheGame::Update` (view 0 only), `animationRunGlobal`, `Update2` (view 1 or the only one), particles, `TaskManager(debris)`, `hier(view,1)`, DMA; at the end of the frame `updateLevelObjectSoundManager`, `updateSoundManager`, `g_frame++` and the time pacing (`timerWaitForMinUpdateRate`; `dt` details in `NATIVE.md`, "Physics with `dt = 1/updateRate`").
 - It returns the code given to `rtReturnToShell` (2 = pause/dialog, 3 = quit, 5 = end session, 0/1/4 = end of stage). `rtPauseRT` (START or controller disconnected → `rtReturnToShell(2, bit do campo GS)`).
 - The codes come from `Shell::EvaluateGameStatus` and the per-mode `Evaluate*Status` (story, challenge, FFA with/without AI, endurance, bigshot, crush, dodgeball). Without `m_killTarget` (0), `EvaluateOnePlayerChallengeStatus` only raises the downed monster (`reinitSlot`) and the fight goes on without the end dialog.
 

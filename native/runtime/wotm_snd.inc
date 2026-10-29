@@ -1,7 +1,7 @@
 // wotm_snd.inc: som nativo (incluido por wotm_live.inc, no escopo global de ps2_runtime.cpp). Sempre ligado.
 // Troca as funcoes snd_* da lib989snd do EE (que mandam comandos por RPC ao 989snd no IOP) pelo motor de native/wotm_snd.hpp
 // (repo WoTM): bancos lidos do disco, sons e streams mixados no host. Com isso os IRX de som (LIBSD, 989SND, 989ERR) nao
-// sao carregados no IOP emulado. Formatos e API em docs/FORMATOS.md ("Som").
+// sao carregados no IOP emulado. Formatos e API em docs/FORMATS.md ("Som").
 // PS2X_SND_LOG=1: uma linha por chamada (menos as por quadro: volume/pan, "ainda tocando").
 #if __has_include("wotm_snd.hpp")
 #include "raylib.h"   // antes do motor: liga Engine::startOutput (AudioStream)
@@ -229,7 +229,7 @@ void unhandledCommand(uint8_t *, R5900Context *ctx, PS2Runtime *)
 // sceSifLoadModule: nenhum IRX sobe para o IOP emulado. Os de som sobram com o som nativo; os outros (SIO2MAN, PADMAN, MCMAN,
 // MCSERV) tambem, porque o lado do EE ja e atendido pelos stubs do runtime (scePad* le o teclado e o roteiro de pad, sceMc* grava
 // em arquivos do host, sceCd* le a ISO). Conferido em 2026-10-18: menu pelo roteiro de pad ate a luta e luta IA x IA, a 60 q/s
-// (docs/passos/FRONTEIRA.md). WOTM_IRX=1 volta a carregar os IRX que nao sao de som no IOP emulado, so no executavel de teste: o do
+// (docs/guides/BOUNDARY.md). WOTM_IRX=1 volta a carregar os IRX que nao sao de som no IOP emulado, so no executavel de teste: o do
 // jogo (wotm, PS2X_HW_EMU=0) nao tem IOP emulado desde o passo 6 e ignora a variavel.
 void loadModule(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
 {

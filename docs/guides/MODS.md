@@ -323,7 +323,7 @@ all four are in `.gitignore`).
 ## Stage select pictures
 `mods/<mod>/levelpics/<nome>.png` replaces the picture of the stages `SHELL.TEX` does not have (`training`, `lakepowell`, `tokyodeathmatch`) and
 the one of the RANDOM entry (`random`; without it, a mosaic of the game's pictures). Aspect ratio 2:1, any resolution. It wins over the repo's
-`levelpics/` folder (`NATIVO.md`, "Stage select").
+`levelpics/` folder (`NATIVE.md`, "Stage select").
 
 ## Under the hood (for those who touch the code)
 

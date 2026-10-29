@@ -2,7 +2,7 @@
 """Checa a separação dos docs: referência no presente, TODO só com o aberto, diário no git.
 
 Três tipos de texto (regra completa no CLAUDE.md, "Documentação"):
-- Referência (README.md, CLAUDE.md, docs/*.md, docs/passos/*.md): como as coisas são hoje. Sem datas, sem "antes era", sem
+- Referência (README.md, CLAUDE.md, docs/*.md, docs/guides/*.md): como as coisas são hoje. Sem datas, sem "antes era", sem
   "feito/corrigido em", sem relato de teste ("conferido"). A história vai na mensagem do commit.
 - TODO.md: só o que está aberto. Item terminado sai do arquivo (sem "feito", sem riscado).
 - Diário: mensagens de commit e docs/investigacoes/<data>/ (não são checados aqui).
@@ -51,7 +51,7 @@ def e_referencia(rel):
         return False
     if rel in ("README.md", "CLAUDE.md", "CONTRIBUTING.md"):
         return True
-    return re.fullmatch(r"docs/(passos/)?[^/]+\.md", rel) is not None
+    return re.fullmatch(r"docs/(guides/)?[^/]+\.md", rel) is not None
 
 
 def problemas_referencia(linha):
@@ -122,7 +122,7 @@ def main():
     if args == ["--all"]:
         arquivos = [p.relative_to(RAIZ).as_posix() for p in
                     [RAIZ / "README.md", RAIZ / "CLAUDE.md", RAIZ / "CONTRIBUTING.md", *sorted((RAIZ / "docs").glob("*.md")),
-                     *sorted((RAIZ / "docs/passos").glob("*.md"))] if p.exists()]
+                     *sorted((RAIZ / "docs/guides").glob("*.md"))] if p.exists()]
         alvo = {a: list(enumerate((RAIZ / a).read_text("utf-8").split("\n"), 1)) for a in arquivos}
     elif args:
         alvo = {Path(a).resolve().relative_to(RAIZ).as_posix(): None for a in args}

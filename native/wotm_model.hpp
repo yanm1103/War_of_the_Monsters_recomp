@@ -1,6 +1,6 @@
 // Monstro 3D direto do disco, sem o jogo: le o .NGP/.TEX/.RTX de MON/, avalia uma animacao (curvas), monta as matrizes das
 // partes e a paleta de ossos como a travessia do jogo, e devolve os triangulos posados com textura. Porte de tools/animcurve.py e
-// tools/pose.py (conferidos contra dumps de RAM de luta); formato e resultados em docs/passos/MODELOS_3D.md.
+// tools/pose.py (conferidos contra dumps de RAM de luta); formato e resultados em docs/guides/MODELS_3D.md.
 //
 // Uso: Model m; m.load(discRoot, iso, "MONKEY0"); m.pose(90, quadro); m.verts() / m.textures(). O desenho com raylib fica em
 // Renderer (abaixo), que usa um RenderTexture como o wotm_saveicon.hpp.

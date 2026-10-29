@@ -1,4 +1,4 @@
-// Campanha (aventura, modo 1) com 2 a 4 jogadores (NATIVO.md, "Campanha com até 4 jogadores"). Incluido pelo wotm_overrides.cpp depois
+// Campanha (aventura, modo 1) com 2 a 4 jogadores (NATIVE.md, "Campanha com até 4 jogadores"). Incluido pelo wotm_overrides.cpp depois
 // do wotm_modes4.inc, cujos ganchos (e os do wotm_split4.inc) estes embrulham. Vale com o m_mode 1 do Shell e 2 a 4 jogadores
 // (m_numPlayers), postos pela linha ADVENTURE da lista multijogador (wotm_mainmenu.inc, wotm_padsel.inc); a aventura de 1 jogador do
 // retail nunca tem m_numPlayers maior que 1, entao fica como era.

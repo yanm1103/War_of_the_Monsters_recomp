@@ -78,7 +78,7 @@ class DarkCheckBox : CheckBox
 class Launcher : Form
 {
     // Chaves com ':' sao parametros do run_live.ps1; as outras viram variaveis de ambiente (=1 quando marcadas, removidas quando nao).
-    // Diagnosticos sem caixa continuam valendo pela variavel (WOTM_RATEMIN=0, WOTM_VU0_INTERP, PS2X_PAD_DEADZONE; tabela no NATIVO.md).
+    // Diagnosticos sem caixa continuam valendo pela variavel (WOTM_RATEMIN=0, WOTM_VU0_INTERP, PS2X_PAD_DEADZONE; tabela no NATIVE.md).
     // Caixas de investigacoes fechadas sairam (buracos nos monstros: NOSKIN/NOVCOL/OPAQUE/ONEPASS; giro sozinho: TURNLOG/PS2X_PADLOG).
     static readonly Flag[] Flags = {
         new Flag("Run", ":Auto", false, "Scripted input up to a stage", "-Auto 1: a scripted pad plays up to a stage (~50 s). Unchecked: you play with the keyboard."),
@@ -169,7 +169,7 @@ class Launcher : Form
         buttons.Controls.Add(log);
         var modkit = new Button { Text = "Mod kit", AutoSize = true };
         modkit.Click += delegate { OpenModKit(); };
-        tips.SetToolTip(modkit, "Extract textures and sounds from the disc, edit them and pack them into mods\\<mod>\\ (docs\\passos\\MODS.md).");
+        tips.SetToolTip(modkit, "Extract textures and sounds from the disc, edit them and pack them into mods\\<mod>\\ (docs\\guides\\MODS.md).");
         buttons.Controls.Add(modkit);
         buttons.Controls.Add(reset);
         root.Controls.Add(buttons);
@@ -182,7 +182,7 @@ class Launcher : Form
         FormClosing += delegate { SaveIni(); };
     }
 
-    // Partida direta (WOTM_MATCH=<jogador>[:<skin>][,<ia>[:<skin>]...],<fase>; sem IA = sozinho na fase): indices do GLOSSARIO.md. O runtime
+    // Partida direta (WOTM_MATCH=<jogador>[:<skin>][,<ia>[:<skin>]...],<fase>; sem IA = sozinho na fase): indices do GLOSSARY.md. O runtime
     // aceita ate 7 IAs (8 monstros). Skin = figurino 0..3 (arquivos <PREFIXO>0-3 em disc\MON); "Random" (monstro ou skin) e sorteado no Play.
     // Fora da lista: Spider (6) e Ogre (12), cortados, e os chefes (13..15).
     static readonly int[] MonsterIds = { 1, 2, 3, 4, 5, 7, 8, 9, 10, 11 };
@@ -361,7 +361,7 @@ class Launcher : Form
 
         foreach (int id in LevelIds) matchLevel.Items.Add(id + "  " + LevelNames[Array.IndexOf(LevelIds, id)]);
         matchLevel.SelectedIndex = IndexOrZero(LevelIds, saved, ":MatchLevel");
-        tips.SetToolTip(matchLevel, "Number = stage index in GLOSSARIO.md. Every stage fits 8 monsters: the monsters load above 32 MB (64 MB runtime); " +
+        tips.SetToolTip(matchLevel, "Number = stage index in GLOSSARY.md. Every stage fits 8 monsters: the monsters load above 32 MB (64 MB runtime); " +
             "Metro City with 8 still has ~21 MB to spare.");
         inner.Controls.Add(Row("Stage", matchLevel));
 
@@ -647,7 +647,7 @@ class Launcher : Form
         catch (Exception e) { status.Text = "Failed: " + e.Message; }
     }
 
-    // Kit de mods (tools\modkit_gui.py, docs\passos\MODS.md): pythonw sem console; sem ele, python
+    // Kit de mods (tools\modkit_gui.py, docs\guides\MODS.md): pythonw sem console; sem ele, python
     void OpenModKit()
     {
         string script = Path.Combine(exeDir, "tools", "modkit_gui.py");

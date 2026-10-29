@@ -7,7 +7,7 @@
 
 Preset and texture names come from the game's own enums FxId and FxTextureId (include/hieri_types.h).
 
-Same reading as native/wotm_fx.hpp (layout: include/hieri_types.h `_ParticleType`; notes: docs/FORMATOS.md "Particulas").
+Same reading as native/wotm_fx.hpp (layout: include/hieri_types.h `_ParticleType`; notes: docs/FORMATS.md "Particulas").
 """
 import argparse
 import re

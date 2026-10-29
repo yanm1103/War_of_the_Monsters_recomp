@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pose de um monstro do WotM direto do disco, sem o jogo: avalia uma animacao (curvas) e monta as matrizes das partes
-(ANIM_XFORM), o esqueleto e a paleta de ossos das malhas skinned, como o jogo faz na travessia. Formato em docs/FORMATOS.md
-("Animacao") e docs/passos/MODELOS_3D.md.
+(ANIM_XFORM), o esqueleto e a paleta de ossos das malhas skinned, como o jogo faz na travessia. Formato em docs/FORMATS.md
+("Animacao") e docs/guides/MODELS_3D.md.
 
   python tools/pose.py disc/MON/MONKEY0.NGP --list                      # animacoes do monstro (id, quadros, canais)
   python tools/pose.py disc/MON/MONKEY0.NGP saida.glb                   # pose do idle (animacao 90) no quadro 0

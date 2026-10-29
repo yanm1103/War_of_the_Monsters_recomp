@@ -62,7 +62,7 @@ void wotmFmvInstall(PS2Runtime &)
 static void wotmFmvPresent(uint8_t *) {}
 #endif
 
-// Microcodigo do VU0 sem VIF0 (FRONTEIRA.md, passo 7). A cada quadro o hier chama o hierLoadVu0Ucode, que manda pelo canal 0
+// Microcodigo do VU0 sem VIF0 (BOUNDARY.md, passo 7). A cada quadro o hier chama o hierLoadVu0Ucode, que manda pelo canal 0
 // do DMA uma cadeia fixa do ELF: so MPG, a imagem inteira dos microprogramas (sombras e particulas inclusas), nunca UNPACK.
 // No executavel do jogo o gancho copia a imagem (wotmVu0CodeImage, gerada por tools/vu0native.py do mesmo pacote) direto na
 // memoria de codigo do VU0, so quando ela muda (a geracao nova faz os microprogramas traduzidos conferirem o hash de novo); o
@@ -341,7 +341,7 @@ struct State
     float lastAlpha = -1.f;    // alfa do ultimo redesenho (-1: sem mistura)
 };
 
-// Fase carregada: so o cabecalho da imagem do nivel em 0xA00000 (N e os N ponteiros dos nos-raiz, docs/FORMATOS.md) e o endereco
+// Fase carregada: so o cabecalho da imagem do nivel em 0xA00000 (N e os N ponteiros dos nos-raiz, docs/FORMATS.md) e o endereco
 // das texturas. Os nos logo depois sao estado vivo (o menu reescreve matrizes ali a cada quadro nas transicoes de tela, o que
 // invalidava a cena inteira por quadro: tela a ~16/s).
 inline uint32_t levelSignature(const wotm::Ram &ram)
@@ -641,7 +641,7 @@ static Capture &capture()
     static Capture c;
     return c;
 }
-// Interpolacao de quadros (opcao INTERPOLATE FRAMES, WOTM_INTERP; NATIVO.md, "Taxa de apresentacao"): relogio comum as
+// Interpolacao de quadros (opcao INTERPOLATE FRAMES, WOTM_INTERP; NATIVE.md, "Taxa de apresentacao"): relogio comum as
 // duas threads (carimbo Snapshot::hostT) e a margem do corte por esfera, que a janela liga e a captura le (Scene::cullMargin)
 static double hostNow()
 {
@@ -1648,7 +1648,7 @@ static bool wotmDrawNative(const uint8_t *rdram)
         const char *e = std::getenv("WOTM_INTERP");
         return e && std::strstr(e, "redraw") != nullptr;
     }();
-    // Interpolacao de quadros (opcao INTERPOLATE FRAMES, ligada por padrao; NATIVO.md, "Taxa de apresentacao"): com a
+    // Interpolacao de quadros (opcao INTERPOLATE FRAMES, ligada por padrao; NATIVE.md, "Taxa de apresentacao"): com a
     // apresentacao acima de 60 Hz (ou ate 60 com o jogo a 30: slowGame), cada apresentacao desenha a mistura de A (S.prev) e B
     // (S.snap) no instante D do relogio de exibicao, um quadro
     // do jogo atras do mais novo (mais uma margem, para a captura atrasada ainda chegar antes do alfa bater em 1). Sem quadro novo o

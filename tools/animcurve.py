@@ -1,4 +1,4 @@
-"""Avaliador de curvas de animacao do WotM (porte de src/common/AnimCurve.cpp; formato em docs/FORMATOS.md, "Animacao").
+"""Avaliador de curvas de animacao do WotM (porte de src/common/AnimCurve.cpp; formato em docs/FORMATS.md, "Animacao").
 
 `Curve(mem, endereco).eval(t)`: `mem` e qualquer leitor com u8/u16/s16/f32 por endereco (ngp.Image, um dump de RAM...).
 Conferido em 2026-10-20 contra os canais (`animOutput.val`) que o jogo calculou numa luta: 128 de 130 canais iguais (os 2

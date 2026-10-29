@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Leitor de imagens .NGP do WotM e extrator de malhas (formatos em docs/FORMATOS.md).
+"""Leitor de imagens .NGP do WotM e extrator de malhas (formatos em docs/FORMATS.md).
 
 O .NGP de fase e um zip com o magic "IE\\3\\4" (no lugar de "PK\\3\\4"), um unico arquivo em deflate; o de
 monstro vem cru. A imagem e pre-ligada para uma base (0xA00000); ponteiros dentro dela sao enderecos
@@ -7,7 +7,7 @@ absolutos da RAM do PS2, entao `Image.u32(addr)` aceita o endereco como o jogo o
 Nao grava nada do jogo: le o disco do usuario em tempo de execucao.
 
 Malha (`HierObject::polyPkt`): uma sub-cadeia de DMA (tag QWC/ID=ret, 8 bytes + 8 bytes de padding) seguida de um
-fluxo VIF para o microcodigo do VU1. Ver `decode_object` e docs/FORMATOS.md ("Malhas").
+fluxo VIF para o microcodigo do VU1. Ver `decode_object` e docs/FORMATS.md ("Malhas").
 """
 import struct
 import sys

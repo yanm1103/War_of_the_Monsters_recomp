@@ -5,28 +5,28 @@ Projeto de decompilação do executável `SCUS_971.97`. O objetivo final é um p
 **Direção: port primeiro.** A base é o jogo recompilado com o PS2Recomp (fora do repo; o C++ gerado é código do jogo) mais a camada nativa deste repo
 (`native/`: desenho com GPU, som, filmes, teclado), que já roda a luta a 60 fps. A decompilação (`src/`) é a camada legível que substitui, por hook, só o que importa para modar (`Shell::Load*`, `MonsterParse`,
 câmera); o runtime cobaia com as equivalentes está parado. **Byte match não é requisito por função** (`equivalent` basta; `matched` quando sai barato; o `gate.sh` continua obrigatório). O VU1/GS emulado do
-runtime é só a referência da checagem (`docs/passos/VU1CHECK.md`). As regras abaixo continuam valendo; onde disserem "matching", leia "matching quando for o objetivo da função".
+runtime é só a referência da checagem (`docs/guides/VU1CHECK.md`). As regras abaixo continuam valendo; onde disserem "matching", leia "matching quando for o objetivo da função".
 
 **O que fazer:** **`TODO.md`** na raiz (a lista e a ordem são do dono); os relatos de bug do dono têm prioridade sobre ela.
 
-Leia antes de começar: `README.md` (setup), `docs/ANALYSIS.md` (o que se sabe do ELF e as convenções de status), `docs/PLANO.md` (arquitetura) e `TODO.md`. Índice de `docs/passos/`:
-- `NATIVO.md`: camada nativa (desenho, texturas, monstros, partículas, sombras, menus, painel "Recompiled options", ícones), hooks de host, vigia, lote, tabela de variáveis `WOTM_*`.
+Leia antes de começar: `README.md` (setup), `docs/ANALYSIS.md` (o que se sabe do ELF e as convenções de status), `docs/ARCHITECTURE.md` (arquitetura) e `TODO.md`. Índice de `docs/guides/`:
+- `NATIVE.md`: camada nativa (desenho, texturas, monstros, partículas, sombras, menus, painel "Recompiled options", ícones), hooks de host, vigia, lote, tabela de variáveis `WOTM_*`.
 - `VU1CHECK.md`: checagem VU1 x nativo, corpus, fotos do dono, bugs abertos.
-- `RUNTIME.md`: runtime recompilado no Windows (build, `PS2X_*`, teclado, endereços úteis). `FRONTEIRA.md`: o que do PS2 o port deixou de emular.
-- `FERRAMENTAS.md` (`tools/`, headers, difftest), `ARMADILHAS.md` (pegadinhas do gcc 2.95 e do build NM), `ESPINHA.md` (fluxo do jogo), `TESTE_PCSX2.md` (halfcpp no PCSX2).
-- `MODS.md` (pasta `mods/`, texturas em PNG, `tools/modkit.py`), `MODELOS_3D.md` (monstro animado direto do disco), `VIEWER_WEB.md` (avaliação do viewer no navegador; o viewer está pronto em https://yanm1103.github.io/wotm-model-museum/).
+- `RUNTIME.md`: runtime recompilado no Windows (build, `PS2X_*`, teclado, endereços úteis). `BOUNDARY.md`: o que do PS2 o port deixou de emular.
+- `TOOLS.md` (`tools/`, headers, difftest), `PITFALLS.md` (pegadinhas do gcc 2.95 e do build NM), `SPINE.md` (fluxo do jogo), `PCSX2_TESTING.md` (halfcpp no PCSX2).
+- `MODS.md` (pasta `mods/`, texturas em PNG, `tools/modkit.py`), `MODELS_3D.md` (monstro animado direto do disco), `WEB_VIEWER.md` (avaliação do viewer no navegador; o viewer está pronto em https://yanm1103.github.io/wotm-model-museum/).
 - Investigações datadas em `docs/investigacoes/<data>/`. Encerrada (o que ela pedia já está no código) é apagada; o que ficar pendente vai para o `TODO.md`, e as referências viram `<commit>:docs/investigacoes/...` (ler com `git show`).
-- `docs/FORMATOS.md`: formatos de arquivo do jogo (fase, monstro, som, filme, save do memory card).
+- `docs/FORMATS.md`: formatos de arquivo do jogo (fase, monstro, som, filme, save do memory card).
 
 ## Documentação: três tipos de texto, cada um no seu lugar
-- **Referência** (`README.md`, este arquivo, `docs/*.md`, `docs/passos/*.md`, `GLOSSARIO.md`, `CONTRIBUTING.md`): como as coisas são hoje, no presente. Escrita **em inglês**, menos este arquivo; `TODO.md`, commits e `docs/investigacoes/` seguem em português. Sem datas, sem "antes era", sem "feito/corrigido em", sem contar como foi testado. Um número medido só entra se for usado (ex.: "9619 ticks por field").
+- **Referência** (`README.md`, este arquivo, `docs/*.md`, `docs/guides/*.md`, `GLOSSARY.md`, `CONTRIBUTING.md`): como as coisas são hoje, no presente. Escrita **em inglês**, menos este arquivo; `TODO.md`, commits e `docs/investigacoes/` seguem em português. Sem datas, sem "antes era", sem "feito/corrigido em", sem contar como foi testado. Um número medido só entra se for usado (ex.: "9619 ticks por field").
 - **A fazer** (`TODO.md`): só o que está aberto, cada item curto (o que é, por onde começar, onde está o contexto). Terminou: a linha sai, sem "feito" nem riscado; o que passou a existir vai para a referência. Decisões do dono de não fazer algo ficam em "Descartado".
 - **Diário** (o que aconteceu, por quê, como foi medido e testado): a mensagem do commit e `docs/investigacoes/<data>/`.
 - `python tools/doclint.py` confere as linhas que o commit acrescenta e o `TODO.md` inteiro; o pre-commit do git o roda sozinho (ligar uma vez por clone: `git config core.hooksPath tools/githooks`). Linha antiga só editada não é cobrada pelo que já tinha; `--all` lista o que ainda falta migrar.
 
 ## Fluxo do port (mudança em `native/`)
 1. Antes de mexer: `tools\corpus.ps1 -Check` guarda a base (`<runtime>\corpus\resumo_<data>.csv`; capture o corpus uma vez com `-Capture`). O que está errado ou faltando vem do inventário (`VU1CHECK.md`, "Port inventory"), não de lembrança.
-2. Editar `native/*.hpp` ou `native/runtime/*.inc|.cpp` (hooks e código do jogo que rodam dentro do runtime). Endereços por nome (`wotm::sym::`/`wotm::fn::` de `native/wotm_syms.h`), nunca número cru. Variável de diagnóstico nova entra na tabela do `NATIVO.md` (`python tools/wotm_env.py` confere).
+2. Editar `native/*.hpp` ou `native/runtime/*.inc|.cpp` (hooks e código do jogo que rodam dentro do runtime). Endereços por nome (`wotm::sym::`/`wotm::fn::` de `native/wotm_syms.h`), nunca número cru. Variável de diagnóstico nova entra na tabela do `NATIVE.md` (`python tools/wotm_env.py` confere).
 3. `build_runtime.bat` na raiz (configura e compila `build_dev`, sem LTCG; o ninja não rastreia `native/`, o script cuida disso). Nunca o `build.bat` da pasta velha com LTCG.
 4. Conferir: `tools\corpus.ps1 -Check -Baseline <csv da base>` diz o que piorou; `run_live.bat` para ver na tela; `tools\lote.ps1` para lutas em lote com vigia.
 5. Commit sem gate (`native/`, `docs/` e `tools/` fora do build não mudam a ROM). Mudança numa costura do PS2Recomp (CMake, `main.cpp`, taps) exige regenerar `tools/runtime_patch/wotm-runtime.patch`.

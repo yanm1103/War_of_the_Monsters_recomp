@@ -65,7 +65,7 @@ Mods go in the mods\ folder. This package comes with four:
 - Goliath Prime, Cerebulon, Mecha: playable custom monsters
 - recompiled_logo: the title screen logo
 How to make your own (textures as PNG, custom monsters):
-https://github.com/yanm1103/War_of_the_Monsters_recomp/blob/master/docs/passos/MODS.md
+https://github.com/yanm1103/War_of_the_Monsters_recomp/blob/master/docs/guides/MODS.md
 
 
 Reporting a bug

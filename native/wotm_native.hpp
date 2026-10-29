@@ -2,7 +2,7 @@
 //
 // Usada de dois jeitos: pelo runtime recompilado (wotm_scene.inc, a cada quadro, sobre a RDRAM viva)
 // e pelo visualizador standalone (native/viewer.cpp, sobre um dump `ram_<quadro>.bin`).
-// Formatos: docs/FORMATOS.md. Este arquivo nao contem dados do jogo.
+// Formatos: docs/FORMATS.md. Este arquivo nao contem dados do jogo.
 //
 // Convencoes do jogo (PS2): vetores-linha (p' = p * M), mundo com Z para cima, float32 little-endian.
 #pragma once
@@ -1411,7 +1411,7 @@ public:
 
     // Textura composta de poeira/fumaca (VRAM 0xFD800, TEX0 com TBP 0x3F60, CT32 64x64, quatro celulas de 32x32), que o jogo refaz
     // na VRAM a cada particleDraw com algum sistema (texDrawDustPacketBuild, pacote em 0x78F6E0). Aqui a mesma conta na CPU, refeita
-    // quando os parametros mudam (a fase anda 1/256 por quadro; depende da camera). docs/passos/VU1CHECK.md, "Corrigido".
+    // quando os parametros mudam (a fase anda 1/256 por quadro; depende da camera). docs/guides/VU1CHECK.md, "Corrigido".
     //  - Passe 1 (microprograma 0x2E98): um gerador h = frac(c + h * b) sorteia 70 normais x 4 celulas; cada uma vira um SPRITE de
     //    meio-lado 5 + 4t texels (t = frac(fase + h.w)) no centro da celula + A * n * t, com A das colunas do worldToScreenMat (q0-q3)
     //    e o foco (q5); z = min(72 - 1000 t (frente . n), 128), a = min(t, 1 - t) z, emitido so com a >= 1 (hemisferio voltado para a
@@ -1645,7 +1645,7 @@ public:
     // posta na direcao da luz (vista 4, a `radius * fator` da origem) para uma textura pequena, filtrada e reprojetada sobre os objetos
     // proximos (psBldBlkRObjs). Aqui: a silhueta e rasterizada na CPU num quadro ortografico no espaco da luz (sem trocar de
     // framebuffer dentro do BeginMode3D, o que quebraria o render texture do runtime) e os triangulos dos objetos proximos sao
-    // redesenhados com essa textura projetada. docs/passos/NATIVO.md ("Sombras").
+    // redesenhados com essa textura projetada. docs/guides/NATIVE.md ("Sombras").
     std::vector<ShadowBlocker> shadows;
 
     // Bloqueadores ativos, como psFindActiveBlockers: sombras ligadas (psSetShadowOnOff), entrada em uso, cs desenhavel e visivel na vista 0
@@ -5308,7 +5308,7 @@ private:
         }
         case 39: {                                                                          // INTERACTIVE_STATE (+4 whichChild, +0xC filho)
             // O filho de um destrutivel e um DESTRUCTIBLE: o jogo escolhe o estado (0 = intacto, depois danificado/ruina...) em
-            // `whichChild` deste no pai (docs/FORMATOS.md, "Destrutiveis"); a travessia desce so para child[whichChild].child.
+            // `whichChild` deste no pai (docs/FORMATS.md, "Destrutiveis"); a travessia desce so para child[whichChild].child.
             const uint32_t c = ram.u32(node + 0xC);
             if (!ram.ok(c)) break;
             if ((ram.u32(c) & 63) == 31) {

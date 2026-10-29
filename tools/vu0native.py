@@ -626,7 +626,7 @@ def main():
     out.append('};')
     out.append('static constexpr size_t kProgramCount = sizeof(kPrograms) / sizeof(kPrograms[0]);')
     # Imagem da memoria de codigo do VU0 que o pacote do ELF deixa (o hierLoadVu0Ucode a manda pelo VIF0 a cada quadro); o
-    # executavel do jogo a copia direto, sem VIF0 (FRONTEIRA.md, passo 7).
+    # executavel do jogo a copia direto, sem VIF0 (BOUNDARY.md, passo 7).
     out.append('#define WOTM_VU0_HAVE_IMAGE 1')
     out.append(f'static const unsigned char kVu0CodeImage[{CODE_SIZE}] = {{')
     for k in range(0, CODE_SIZE, 32):

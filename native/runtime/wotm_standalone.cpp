@@ -1,5 +1,5 @@
 // wotm.exe aberto direto (sem argumento: dois cliques, o zip do release). O run_live.ps1 passa o ELF, o cwd, a ISO e redireciona o
-// stderr; aqui o exe acha tudo sozinho (docs/passos/RUNTIME.md, "wotm.exe sem argumento"):
+// stderr; aqui o exe acha tudo sozinho (docs/guides/RUNTIME.md, "wotm.exe sem argumento"):
 // - pasta do jogo: a do exe (DLLs, mods/ do zip);
 // - pasta de dados: a do jogo, se der para gravar nela; senao %LOCALAPPDATA%\WotM (zip em Program Files). Nela ficam o SCUS_971.97,
 //   o wotm.ini (iso=<caminho da ISO>), os logs, e, por seguirem a pasta do ELF, mc0/, save.json, settings.ini e screenshots/;

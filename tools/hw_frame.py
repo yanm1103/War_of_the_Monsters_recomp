@@ -11,7 +11,7 @@ Uso:
     tudo todas as funcoes chamadas no trecho
   Exemplo (luta IA x IA, uma execucao de 85 s): WOTM_MATCH=3,1,1 WOTM_AIVSAI=1 PS2X_COVERAGE=<pasta>\\cov, depois
   python tools/hw_frame.py <pasta>\\cov.1800 <pasta>\\cov.4800
-Mapa da fronteira e como ler o resultado: docs/passos/FRONTEIRA.md.
+Mapa da fronteira e como ler o resultado: docs/guides/BOUNDARY.md.
 """
 import argparse
 import csv

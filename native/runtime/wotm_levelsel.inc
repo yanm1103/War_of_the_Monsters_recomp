@@ -1,5 +1,5 @@
 // wotm_levelsel.inc: selecao de fase (tela 8 do jogo, screenLevelSelect) com as fases que o retail nao lista e a entrada RANDOM
-// (incluido por wotm_live.inc depois do wotm_padsel.inc; escopo global de ps2_runtime.cpp). NATIVO.md, "Selecao de fase".
+// (incluido por wotm_live.inc depois do wotm_padsel.inc; escopo global de ps2_runtime.cpp). NATIVE.md, "Selecao de fase".
 //
 // Thread do EE (gancho do screenLevelSelect): na entrada, se o g_levelList e uma das quatro listas do retail (PO_1PFreeForAll,
 // PO_MPFreeForAll, PO_1PEndurance, PO_MPElimination), ele passa a apontar para uma copia no topo da RAM (kList) com as fases do

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Kit de mods do WotM (docs/passos/MODS.md). Extrai arquivos do disco para formatos editaveis na pasta
+"""Kit de mods do WotM (docs/guides/MODS.md). Extrai arquivos do disco para formatos editaveis na pasta
 de trabalho do mod e devolve o que mudou, ja no formato que o jogo le, para mods/<mod>/. Um mod = um projeto: cada mod tem a sua
 pasta de trabalho (<mods>/_work/<mod>/, com o modkit.json dela), e o pack de um mod nunca leva o que foi editado para outro.
 

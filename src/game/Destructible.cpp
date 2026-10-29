@@ -9,7 +9,7 @@
  * hands both to Destructibles::AddDestruct, the state node first: it registers the next free slot in Interactives, the
  * DESTRUCTIBLE then fills that slot and takes it. A hit takes health, the health fraction picks the new state (at most one
  * state per hit), the state's actions run (debris, sounds...) and the drawing switches a couple of fields later (SwitchState
- * on the TaskManager). Format notes in docs/FORMATOS.md ("Destrutíveis"). Virtual in retail (DbInteractive: vptr at 0x10,
+ * on the TaskManager). Format notes in docs/FORMATS.md ("Destructibles"). Virtual in retail (DbInteractive: vptr at 0x10,
  * takeHit in the vtable); the vtable, __tf and the inline DbInteractive methods emitted here stay asm. */
 
 extern "C" float fabsf(float);

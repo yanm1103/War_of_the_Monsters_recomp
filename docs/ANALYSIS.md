@@ -106,7 +106,7 @@ A decomp-permuter should solve a good part of these cases.
   `configure.py` fixes both after the split.
 
 ## Hardware boundary (first pass)
-Dynamic view (what runs per frame in the port and the order for removing the emulator code): `docs/passos/FRONTEIRA.md`.
+Dynamic view (what runs per frame in the port and the order for removing the emulator code): `docs/guides/BOUNDARY.md`.
 `tools/hw_boundary.py` generates `config/hw_boundary.csv` with, per TU, SDK calls, register accesses
 (0x1000xxxx/0x1200xxxx), VU0 (COP2) instructions, scratchpad and 989snd calls.
 - **VU0 macro-mode is in almost all the game code** (2,681 `lqc2`, 1,426 `sqc2`, `vmulax/vmadday/vmaddz`...):
@@ -135,8 +135,8 @@ Done with [PS2Recomp](https://github.com/ran-j/PS2Recomp) (commit 2c5fbb9), **ou
   (0 jump tables detected); the recompiler covers them with "fallback entries" (60,604).
 - All the C++ compiles and links with the runtime. The game loads the 7 IRX on the emulated IOP (989snd included), gets past sound init and enters the interface loop (`userintMain`).
   The game's movie decoder (`decBs0`/`videoDec*`) waits on the IPU, which the runtime does not emulate; the port replaces `playMpegMovie*` and the `updateMpegMovieDecoding` thread with the
-  native player. The game runs on Windows (MSVC) with native drawing, sound, movies and keyboard (`native/`; state in `docs/passos/NATIVO.md`, what is missing in `TODO.md`).
-- The runtime brings a CPU GS, VU and VIF1 interpreters and an emulated IOP; it is the bridge, not the destination (the destination is native rendering at the engine boundary). The emulated VU1 serves as the reference for the VU1 x native check (`docs/passos/VU1CHECK.md`).
+  native player. The game runs on Windows (MSVC) with native drawing, sound, movies and keyboard (`native/`; state in `docs/guides/NATIVE.md`, what is missing in `TODO.md`).
+- The runtime brings a CPU GS, VU and VIF1 interpreters and an emulated IOP; it is the bridge, not the destination (the destination is native rendering at the engine boundary). The emulated VU1 serves as the reference for the VU1 x native check (`docs/guides/VU1CHECK.md`).
 - **PS2Recomp bug**: `SQRT.S fd, ft` reads the source in `ft` (uses |ft|) and `RSQRT.S fd, fs, ft` is `fs / sqrt(|ft|)`; upstream uses `fs` (PR #277 open). Affects 108 functions (`sqrt.s`) and 76 (`rsqrt.s`).
   **`div.s` and `rsqrt.s` by zero**: the EE saturates to ±FLT_MAX, not ±Inf (with ±Inf, VU0 does 0 × Inf = NaN; analysis in commit 7c1c24e). The WSL generator
   (`~/wotm-recomp`, `fpu_translator.cpp`: `FPU_DIV_S`/`FPU_RSQRT_S`) and the runtime (`ps2_fpu_rsqrt` in the patch) saturate; upstream does the same (PR #272). Not verified: `min/max` with NaN.
@@ -155,6 +155,6 @@ Each function in the binary is in one of these states (`python3 tools/progress.p
 | `asm` | still only in assembly | plain `INCLUDE_ASM` |
 
 - The default build (`ninja`, `tools/wsl/check.sh`) uses the original assembly of the `equivalent` functions, so the ROM always checks out against retail. A build with `-DNON_MATCHING` would compile all the C++ rewrites (the base of the port).
-- The `equivalent` functions are verified without unit tests (project decision): `tools/difftest.py` (retail x ours in a MIPS emulator, same random state), `tools/recomp_oracle` (those with VU0 or `min/max/madd`), the halfcpp ELF in PCSX2 (`docs/passos/TESTE_PCSX2.md`) and, incomplete, the test-subject runtime (`docs/passos/NATIVO.md`). `tools/verify_tu.py` runs all of this per TU. Real errors found by each one are in `docs/passos/ARMADILHAS.md` and `TESTE_PCSX2.md`.
+- The `equivalent` functions are verified without unit tests (project decision): `tools/difftest.py` (retail x ours in a MIPS emulator, same random state), `tools/recomp_oracle` (those with VU0 or `min/max/madd`), the halfcpp ELF in PCSX2 (`docs/guides/PCSX2_TESTING.md`) and, incomplete, the test-subject runtime (`docs/guides/NATIVE.md`). `tools/verify_tu.py` runs all of this per TU. Real errors found by each one are in `docs/guides/PITFALLS.md` and `PCSX2_TESTING.md`.
 - For anyone who wants to continue the byte-for-byte work: `grep -rn NON_MATCHING src/`, the comment next to each function says where it stopped. `tools/wsl/variants.py` and `tools/wsl/permute.py` test many source variations in parallel.
 - `hw` code and library functions (`libs`) do not need to match: do not spend effort on them.

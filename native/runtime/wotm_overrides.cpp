@@ -95,11 +95,11 @@ std::atomic<float> g_wotmMechaReticle{0.f};   // retícula da camera da torre do
 std::mutex g_wotmFreeCamM;
 WotmFreeCamPose g_wotmFreeCamPose;
 
-// Save em JSON ao lado do mc0/ (NATIVO.md, "Save em JSON"): ganchos no MonsterMc::stdInit/stdExit.
+// Save em JSON ao lado do mc0/ (NATIVE.md, "Save em JSON"): ganchos no MonsterMc::stdInit/stdExit.
 #include "wotm_save.inc"
 // "Press start" do menu principal: X vale como Start e o botao vale ja durante a transicao.
 #include "wotm_menu.inc"
-// Tela dividida de 3 e 4 jogadores (NATIVO.md, "Tela dividida de 3 e 4 jogadores"; WOTM_PLAYERS=3 ou 4): vistas, cameras, carga e controles 3 e 4.
+// Tela dividida de 3 e 4 jogadores (NATIVE.md, "Tela dividida de 3 e 4 jogadores"; WOTM_PLAYERS=3 ou 4): vistas, cameras, carga e controles 3 e 4.
 #include "wotm_split4.inc"
 // Eliminacao e minigames com 3 e 4 jogadores (por cima dos ganchos do wotm_split4.inc)
 #include "wotm_modes4.inc"
@@ -154,7 +154,7 @@ namespace
         }
     }
 
-    // Relogio nativo do timer (FRONTEIRA.md, passo 4; WOTM_TIMER_EMU=1 volta ao timer 1 emulado). O jogo mede o tempo pelo timer 1
+    // Relogio nativo do timer (BOUNDARY.md, passo 4; WOTM_TIMER_EMU=1 volta ao timer 1 emulado). O jogo mede o tempo pelo timer 1
     // (timerInit: modo 0x82, BUSCLK/256 = 576 kHz; 9619 ticks por field, timerGetFrameTime divide por 576 para dar ms):
     // timerGetCurTics devolve D_006F8DC4 + T1, e timer1Handler soma ceil(T1 / 9619) fields (ate 16) ao contador D_006F8DBC, sendo T1
     // o tempo desde o ultimo zero (fim do timerWaitForMinUpdateRate, timerSetFrameStart ou o timer1Handler anterior). No runtime o
@@ -1250,7 +1250,7 @@ namespace
     // confere o teto. Acima de ~0x1F10000 ha dados vivos (e o buffer do zip em 0x1F7F840); medido em 2026-10-18, o bloco em 0x1B70000
     // e sobra do menu e pode ser sobrescrito (o Metro com 2 monstros vai ate 0x1D0C380). Loga quando muda e avisa perto do teto.
     constexpr uint32_t kFileStatus = wotm::sym::fileStatus, kLoadBase = 0xA00000u, kLoadCeiling = 0x1F10000u;
-    // RAM acima de 32 MB (NATIVO.md, "RAM de 64 MB"): o runtime tem 64 MB (PS2_RAM_SIZE) e o jogo ve 32 (PS2_GUEST_RAM_SIZE: pilha, heap e
+    // RAM acima de 32 MB (NATIVE.md, "RAM de 64 MB"): o runtime tem 64 MB (PS2_RAM_SIZE) e o jogo ve 32 (PS2_GUEST_RAM_SIZE: pilha, heap e
     // GetMemorySize iguais aos do PS2). Na entrada do Shell::LoadMonstersDB o proximo endereco de carga (fileStatus.ngpAddr[ngpLoaded],
     // logo depois do NGP da fase) pula para 0x2000000: os NGP dos monstros e, atras deles, os RTX e TEX da fase e dos monstros moram na
     // area de cima, e embaixo fica so o NGP da fase. A relocacao (dbsRelocateViaPtrListFile) soma "endereco - 0xA00000" em 32 bits, entao
@@ -1408,7 +1408,7 @@ namespace
     constexpr uint32_t kTheGameUpdate = wotm::fn::Update__7TheGame;
     PS2Runtime::RecompiledFunction g_origTheGameUpdate = nullptr;
     // WOTM_LOGICDELAY=<ms>: atraso de host de 0 a <ms> (sorteado, sequencia fixa) na entrada do TheGame::Update, para testar o
-    // relogio e o vsync com quadros de 1 e 2 fields (FRONTEIRA.md, passo 4). Diagnostico; nunca ligado por padrao.
+    // relogio e o vsync com quadros de 1 e 2 fields (BOUNDARY.md, passo 4). Diagnostico; nunca ligado por padrao.
     int g_logicDelayMs = 0;
     uint32_t g_logicDelaySeed = 12345u;
     void theGameUpdateTapped(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -2641,7 +2641,7 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
         runtime.registerFunction(kSceGsSyncV, &syncVTapped);
     g_nativeTimer = std::getenv("WOTM_TIMER_EMU") == nullptr;
 #if !PS2X_HW_EMU
-    if (!g_nativeTimer)   // o wotm.exe nao tem os timers do EE (FRONTEIRA.md, passo 8): o T1 emulado ficaria parado
+    if (!g_nativeTimer)   // o wotm.exe nao tem os timers do EE (BOUNDARY.md, passo 8): o T1 emulado ficaria parado
     {
         std::fprintf(stderr, "[wotm] WOTM_TIMER_EMU ignorada: o wotm.exe nao tem os timers do EE (use o ps2EntryRunner)\n");
         g_nativeTimer = true;

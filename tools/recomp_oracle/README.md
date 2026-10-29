@@ -46,11 +46,4 @@ and functions whose loop depends on the random data can time out (`Monster::getC
 
 ## Scan for miscoded `sqrt.s`
 `python3 tools/recomp_oracle/scan_sqrt.py <elf>`: counts `sqrt.s` in the R5900 form (`fs=0`) and in the wrong form (`ft=0, fs≠0`). Retail has 127 and none wrong.
-See `docs/passos/ARMADILHAS.md` (the `sqrtf` pitfall; use `eeSqrtf` from `include/vecmath.h` in NM code).
-
-## Findings (2026-10-09)
-- `AiPathFinder::computeCostEstimate` and 10 more uses of `sqrtf`: `sqrt.s` encoded in the MIPS32 form → on the EE it read `$f0`. Fixed (`eeSqrtf`). 0/300 → 300/300.
-- `StateClimb::handlePreemption`: wrote 4 bytes where retail writes 1 (`sb`). Fixed. 0/200 → 200/200.
-- Of the 24 functions of the batch that ran (200 states each): 18 only `exact`; 2 only `approx` (`AiNavigator::orientTo`, `strafeTo`); 3 mixed with no `diff`
-  (`Ai::creditRelevance(Pickup)`, `AiPathNet::getClosestNode`, `PathNet::getClosestNode`); 1 only `retonly` (`HeliVehicle::updateElevator`, `void`). No `diff`.
-  Did not run: `Monster::getClosestMonster` (timeout with random data). The other 35 candidates have calls (non-leaf) and 1 unsupported signature.
+See `docs/guides/PITFALLS.md` (the `sqrtf` pitfall; use `eeSqrtf` from `include/vecmath.h` in NM code).

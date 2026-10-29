@@ -38,7 +38,7 @@ static void wotmDrawScene(const uint8_t *rdram)
             DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), BLACK);
     }
     {
-        // Icone de salvamento (NATIVO.md, "Save em JSON"): 1 s no canto a cada gravacao do save.json (wotm_save.inc)
+        // Icone de salvamento (NATIVE.md, "Save em JSON"): 1 s no canto a cada gravacao do save.json (wotm_save.inc)
         static const PS2Runtime::IoPaths &io = PS2Runtime::getIoPaths();
         static const std::filesystem::path card =
             (io.mcRoot.empty() ? (io.elfDirectory.empty() ? std::filesystem::current_path() : io.elfDirectory) / "mc0" : io.mcRoot) / "BASCUS-97197";

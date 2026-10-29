@@ -3,7 +3,7 @@
 Uso: python tools/mcsave.py <pasta que contem mc0/ e mc1/>
 
 E o mesmo formato do save.json que o runtime grava (native/runtime/wotm_save.inc); serve para conferir os dois. Layout dos blocos
-em docs/FORMATOS.md, "Save do memory card". So le.
+em docs/FORMATS.md, "Save do memory card". So le.
 """
 import json
 import os

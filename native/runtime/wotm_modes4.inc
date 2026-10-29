@@ -1,4 +1,4 @@
-// Eliminacao e minigames com 3 e 4 jogadores (NATIVO.md, "Eliminacao e minigames com 3 e 4"). Incluido pelo wotm_overrides.cpp depois do
+// Eliminacao e minigames com 3 e 4 jogadores (NATIVE.md, "Eliminacao e minigames com 3 e 4"). Incluido pelo wotm_overrides.cpp depois do
 // wotm_split4.inc (tela em quadrantes, carga e controles dos jogadores 3 e 4), cujos ganchos estes embrulham. Age so com 3 ou 4
 // jogadores no Shell (m_numPlayers), postos pelo menu multijogador (wotm_padsel.inc); com 1 ou 2 tudo e o retail.
 //
