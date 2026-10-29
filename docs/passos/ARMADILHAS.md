@@ -1,45 +1,45 @@
-# Armadilhas já vistas (decomp NM / build / jogo)
+# Pitfalls seen (NM decomp / build / game)
 
-(Índice dos docs no `CLAUDE.md`.)
+(Doc index in `CLAUDE.md`.)
 
-## Armadilhas já vistas
-- Ao reescrever o fim de um `.cpp` com script, conferir que as linhas `INCLUDE_ASM` finais (static init, `__tf`, ctor, `_GLOBAL_$I$`) continuam lá.
-- `ccmatch.py` sem `-DNON_MATCHING` só compila as `INCLUDE_ASM` (tudo "MATCH"); para pontuar o C++ novo use `-DNON_MATCHING` (o `scoreall.sh` já faz).
-- Layout das ferramentas de pontos: pontos de 0x40 bytes, `numPoints` em 0x4000, campos próprios a partir de 0x4050; `levelData = gameSlotBase(game->m_levelIdx)`.
-- `shell` é gp-relativo em alguns TUs (PowerUpTool, PathTool, AiPathTool) e não em outros (StartPointTool): `__asm__("#SNFIX_SMALL shell")` só onde o retail usa gp.
-  Dentro de um delay slot (`.set nomacro`) o acesso a global é sempre gp, sem precisar do pragma (tokyo).
-- gas insere 2 `nop` extras num `.p2align 3` logo depois de uma sequência `li.s` (StickShaker::DefaultSetup); o retail não tem. Sem causa achada: marcar como equivalente.
-- `_fvector` tem alinhamento 16 no ee-gcc: uma classe com membro `_fvector` fica alinhada a 16 e o `sizeof` arredonda para
-  múltiplo de 16 (ex.: `IslandLevelSound` 0xF4 vira 0x100). Ao embutir essas classes numa maior, não ponha padding manual entre
-  elas; confira com `typedef char x[sizeof(T) == n ? 1 : -1]` (game/Sound).
-- `(x & 1) == 0` em vez de `!(x & 1)` muda `lw`/`xori` para `ld`/`andi` com campo de 64 bits (MilitaryPickup::kill).
-- Cópia de `_fvector` por `lq/sq` com `jr` seguido de `nop` indica `asm volatile` com `lq/sq` no retail (setFormationPos, setTrans); registrador `$2` fixado com `register int t __asm__("$2")`.
-- Chamada de função dentro dos argumentos da chamada final (operador vírgula) muda o agendamento do prólogo e fez `loadPoints` bater (PathTool/AiPathTool).
-- Ponteiros intermediários (`VehicleNavigator *n = &nav; n->f14 = ...`) imitam os `addiu v1,v0,0x210` do retail.
-- Strings de uma função que passam de `INCLUDE_ASM` para C mudam o padding do `.rodata`: acrescentar `.word 0` em `.rodata` por asm.
-- `switch` em C gera jump table; o retail alinha em 24 palavras (acrescentar `.word 0` x2).
-- Classes com vtable: ctor, `__tf` e `_vt$...` ficam como `INCLUDE_ASM`; escrever os métodos sem `virtual`.
-- Funções estáticas sem argumentos às vezes têm um `v` no fim do símbolo retail: usar `__asm__("nome__Classev")` no membro.
-- Mangling de matriz: `float (*m)[4]` vira `PA3_f` no gcc 2.95.
-- O heredoc da ferramenta pode transformar `\n` em quebra de linha real dentro de scripts Python: para arquivos com regex, usar o Edit.
-- `sh tools/wsl/gate.sh | tail` esconde o código de saída: para commitar só com ROM OK usar `sh tools/wsl/commit_if_ok.sh && git commit ...`.
-- Global gp-relativo já definido no `.sdata` de um asm de dados (ex.: `WaterLevel`): declarar `extern float X; __asm__("#SNFIX_SMALL X");`, nunca definir de novo (duplicate symbol no link).
-- Armazenar num campo de `struct` (ex.: `gameHud(i)->f0D0 = 0`) não invalida o `game` já carregado; armazenar via `*(int*)((char*)p + off)` invalida e o gcc recarrega. Por isso `Hud` ganhou campos reais.
-- `EnemyInfo::s_info[i][j']` (include/game/enemy_info.h): tabela par-a-par, `j' = j - 1` quando `i < j`. `vecLenSq` (vecmath.h) = `mula.s/madda.s/madd.s` do retail.
-- Em laços `for (j = 0; j < n; j++, m++)` guardar `n = game->m_numSlots` numa local (senão o gcc recarrega a cada volta).
-- **`ccmatch.py` mascara os nomes dos símbolos chamados** (relocações): uma função pode dar MATCH chamando um callee com nome/mangling errado (classe local `MemoryStackG` em vez de `MemoryStack`, `transitionOK(Monster*)` em vez de `transitionOK()`). Só vale como "bate" depois do `gate.sh` (link real) com a função fora do `#ifdef NON_MATCHING`.
-- **Variável vs objeto em `__asm__("sym")`**: `shell` e `game` são PONTEIROS (`Shell *shell`); `extern char x[] __asm__("shell")` dá o endereço da variável, não do objeto, e `x + 0x2C30` corrompe a memória em silêncio (o jogo congelava ~30-40 s depois, com `fileStatus`/`cdFileSystemToc` sobrescritos, `getNgpFilesLoaded()` = 80 e o laço de animação lendo lixo: `cpuTlbMiss` em `animationManager`/`AnimPlayer::UpdateAnimations` no log). Só use `char[]` para objetos de verdade (`gsPkt`, `_7Cameras$m_cameras`, `_12BigShotLevel$instance`); para ponteiros use `extern T *x`. `ccmatch.py` e o gate não pegam isso (relocações mascaradas); só jogando.
-- **Build NM com erro de link deixa o `halfcpp.elf` ANTIGO** e o `play.ps1` continua dizendo "OK". Sempre ler a saída de `build_nm.sh` procurando `undefined reference` (use `| tail -3`, não esconda).
-- **Ordem no arquivo**: cada função nova entra onde estava seu `INCLUDE_ASM` (ordem de endereço). Declarações, macros (`GM`, `SHI`) e classes locais que uma função NM usa precisam estar ACIMA do primeiro uso nessa ordem; funções que batem (fora do `#ifdef`) só podem usar declarações também fora do `#ifdef`.
-- Chamar um símbolo retail com assinatura "criativa" (floats em `$f12`, `this` solto): declarar uma função livre com `__asm__("nome__Mangled")` (ver `src/game/rt.cpp`, bloco `SYM(...)`) em vez de adivinhar a classe; para variáveis `static` de classe: `extern char x[] __asm__("_12BigShotLevel$instance")`.
-- m2c mostra argumentos a mais em chamadas (`transitionOK(this, monstro)`): o mangling diz quantos parâmetros existem de verdade (`transitionOK__12StateVictory` = só `this`). Confira o nome do símbolo antes de escrever.
-- `extern int x;` de uma global gp pode sair como `lui/%lo` no primeiro store (em vez de `%gp_rel`); o remédio é o `__asm__("#SNFIX_SMALL x")` descrito acima (não testei neste caso: `numModsLeft`, `_7Cameras$m_numCameras` ficaram como equivalentes).
-- **`sqrtf` em C++ NM sai com `sqrt.s` na codificação errada.** O R5900 usa `SQRT.S fd, ft` (fonte em `ft`, `fs=0`; retail `0x46020084`); o gas/ee-gcc emite a forma MIPS32 com a fonte em `fs`
-  (`0x46006044`), que no EE lê `$f0`. Em `AiPathFinder::computeCostEstimate` isso descartava o termo z (comprovado rodando retail × nossa versão recompilada, 300/300 divergentes). O `difftest` (unicorn)
-  não vê isso. Use `eeSqrtf` (`include/vecmath.h`, `.word 0x46040104`) em vez de `sqrtf` em código NM; para varrer um ELF NM: forma errada = `ft==0 && fs!=0` (o retail tem 127 `sqrt.s`, todos `ft`).
-- Clone novo: o `configure.py --split` pode deixar de gerar os `.s` de dados (vtables como `_vt$12PointToolKit.s`) e o `ninja` para num arquivo faltando (splat 0.41.1 e 0.50.0).
-  Contorno: tirar `src/` do repo, rodar o `--split` e devolver `src/`. A causa não foi investigada.
-- Loops de espera por registrador de hardware (`objsInPacket`, `gRtReturn`): declarar `volatile`; sem isso o gcc vira laço infinito/hoisting.
-- Ordem de stores em struct pequena pode inverter no gcc 2.95 (`rtReturnToShell`: escrever `code, active, delay` para sair `delay, active, code`).
-- Teste automático: `powershell -ExecutionPolicy Bypass -File tools/pcsx2_auto/play.ps1 halfcpp [-pause]` (sem `-File`/`Bypass` o PowerShell recusa o script). Só exercita 1 jogador/free-for-all; telas de 2P, elimination, minigames e história não são cobertas.
+## Pitfalls seen
+- When rewriting the end of a `.cpp` with a script, check that the final `INCLUDE_ASM` lines (static init, `__tf`, ctor, `_GLOBAL_$I$`) are still there.
+- `ccmatch.py` without `-DNON_MATCHING` only compiles the `INCLUDE_ASM` (everything "MATCH"); to score the new C++ use `-DNON_MATCHING` (`scoreall.sh` already does).
+- Layout of the point tools: points of 0x40 bytes, `numPoints` at 0x4000, own fields from 0x4050; `levelData = gameSlotBase(game->m_levelIdx)`.
+- `shell` is gp-relative in some TUs (PowerUpTool, PathTool, AiPathTool) and not in others (StartPointTool): `__asm__("#SNFIX_SMALL shell")` only where the retail uses gp.
+  Inside a delay slot (`.set nomacro`) a global access is always gp, with no need for the pragma (tokyo).
+- gas inserts 2 extra `nop` in a `.p2align 3` right after a `li.s` sequence (StickShaker::DefaultSetup); the retail does not have them. No cause found: mark as equivalent.
+- `_fvector` has alignment 16 in ee-gcc: a class with a `_fvector` member is aligned to 16 and its `sizeof` rounds up to a
+  multiple of 16 (e.g.: `IslandLevelSound` 0xF4 becomes 0x100). When embedding these classes in a bigger one, do not put manual padding between
+  them; check with `typedef char x[sizeof(T) == n ? 1 : -1]` (game/Sound).
+- `(x & 1) == 0` instead of `!(x & 1)` changes `lw`/`xori` to `ld`/`andi` with a 64-bit field (MilitaryPickup::kill).
+- A `_fvector` copy via `lq/sq` with `jr` followed by `nop` indicates `asm volatile` with `lq/sq` in the retail (setFormationPos, setTrans); register `$2` pinned with `register int t __asm__("$2")`.
+- A function call inside the arguments of the final call (comma operator) changes the prologue scheduling and made `loadPoints` match (PathTool/AiPathTool).
+- Intermediate pointers (`VehicleNavigator *n = &nav; n->f14 = ...`) imitate the retail's `addiu v1,v0,0x210`.
+- Strings of a function that move from `INCLUDE_ASM` to C change the `.rodata` padding: add `.word 0` in `.rodata` via asm.
+- `switch` in C generates a jump table; the retail aligns at 24 words (add `.word 0` x2).
+- Classes with a vtable: ctor, `__tf` and `_vt$...` stay as `INCLUDE_ASM`; write the methods without `virtual`.
+- Static functions with no arguments sometimes have a `v` at the end of the retail symbol: use `__asm__("nome__Classev")` on the member.
+- Matrix mangling: `float (*m)[4]` becomes `PA3_f` in gcc 2.95.
+- The tool's heredoc can turn `\n` into a real line break inside Python scripts: for files with regex, use Edit.
+- `sh tools/wsl/gate.sh | tail` hides the exit code: to commit only with the ROM OK use `sh tools/wsl/commit_if_ok.sh && git commit ...`.
+- A gp-relative global already defined in the `.sdata` of a data asm (e.g.: `WaterLevel`): declare `extern float X; __asm__("#SNFIX_SMALL X");`, never define it again (duplicate symbol at link).
+- Storing to a `struct` field (e.g.: `gameHud(i)->f0D0 = 0`) does not invalidate the already loaded `game`; storing via `*(int*)((char*)p + off)` invalidates it and gcc reloads. That is why `Hud` has real fields.
+- `EnemyInfo::s_info[i][j']` (include/game/enemy_info.h): pairwise table, `j' = j - 1` when `i < j`. `vecLenSq` (vecmath.h) = the retail's `mula.s/madda.s/madd.s`.
+- In `for (j = 0; j < n; j++, m++)` loops keep `n = game->m_numSlots` in a local (otherwise gcc reloads it on every iteration).
+- **`ccmatch.py` masks the names of the called symbols** (relocations): a function can give MATCH while calling a callee with the wrong name/mangling (local class `MemoryStackG` instead of `MemoryStack`, `transitionOK(Monster*)` instead of `transitionOK()`). It only counts as "matches" after `gate.sh` (real link) with the function outside `#ifdef NON_MATCHING`.
+- **Variable vs object in `__asm__("sym")`**: `shell` and `game` are POINTERS (`Shell *shell`); `extern char x[] __asm__("shell")` gives the address of the variable, not of the object, and `x + 0x2C30` silently corrupts memory (the game froze ~30-40 s later, with `fileStatus`/`cdFileSystemToc` overwritten, `getNgpFilesLoaded()` = 80 and the animation loop reading garbage: `cpuTlbMiss` in `animationManager`/`AnimPlayer::UpdateAnimations` in the log). Only use `char[]` for real objects (`gsPkt`, `_7Cameras$m_cameras`, `_12BigShotLevel$instance`); for pointers use `extern T *x`. `ccmatch.py` and the gate do not catch this (masked relocations); only playing does.
+- **An NM build with a link error leaves the OLD `halfcpp.elf`** and `play.ps1` keeps saying "OK". Always read the output of `build_nm.sh` looking for `undefined reference` (use `| tail -3`, do not hide it).
+- **Order in the file**: each new function goes where its `INCLUDE_ASM` was (address order). Declarations, macros (`GM`, `SHI`) and local classes that an NM function uses must be ABOVE the first use in that order; functions that match (outside the `#ifdef`) can only use declarations that are also outside the `#ifdef`.
+- Calling a retail symbol with a "creative" signature (floats in `$f12`, loose `this`): declare a free function with `__asm__("nome__Mangled")` (see `src/game/rt.cpp`, `SYM(...)` block) instead of guessing the class; for class `static` variables: `extern char x[] __asm__("_12BigShotLevel$instance")`.
+- m2c shows extra arguments in calls (`transitionOK(this, monstro)`): the mangling says how many parameters really exist (`transitionOK__12StateVictory` = only `this`). Check the symbol name before writing.
+- `extern int x;` of a gp global can come out as `lui/%lo` on the first store (instead of `%gp_rel`); the remedy is the `__asm__("#SNFIX_SMALL x")` described above (not tested in this case: `numModsLeft`, `_7Cameras$m_numCameras` stayed equivalent).
+- **`sqrtf` in NM C++ comes out with `sqrt.s` in the wrong encoding.** The R5900 uses `SQRT.S fd, ft` (source in `ft`, `fs=0`; retail `0x46020084`); gas/ee-gcc emits the MIPS32 form with the source in `fs`
+  (`0x46006044`), which on the EE reads `$f0`. In `AiPathFinder::computeCostEstimate` this discarded the z term (proven by running retail × our recompiled version, 300/300 diverging). The `difftest` (unicorn)
+  does not see this. Use `eeSqrtf` (`include/vecmath.h`, `.word 0x46040104`) instead of `sqrtf` in NM code; to sweep an NM ELF: wrong form = `ft==0 && fs!=0` (the retail has 127 `sqrt.s`, all `ft`).
+- Fresh clone: `configure.py --split` can fail to generate the data `.s` files (vtables such as `_vt$12PointToolKit.s`) and `ninja` stops on a missing file (splat 0.41.1 and 0.50.0).
+  Workaround: take `src/` out of the repo, run `--split` and put `src/` back. The cause was not investigated.
+- Wait loops on a hardware register (`objsInPacket`, `gRtReturn`): declare `volatile`; without it gcc turns it into an infinite loop/hoisting.
+- The order of stores in a small struct can invert in gcc 2.95 (`rtReturnToShell`: write `code, active, delay` to get `delay, active, code`).
+- Automatic test: `powershell -ExecutionPolicy Bypass -File tools/pcsx2_auto/play.ps1 halfcpp [-pause]` (without `-File`/`Bypass` PowerShell refuses the script). It only exercises 1 player/free-for-all; 2P, elimination, minigame and story screens are not covered.
 

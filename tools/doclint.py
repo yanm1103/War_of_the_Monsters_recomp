@@ -34,12 +34,14 @@ def tira_caminhos(linha):
 
 HISTORIA = re.compile(
     r"\b(feit[oa]s? em|corrigid[oa]s? (em|no|na|de passagem)|antes (era|ficava|saía|vinha|dava|zerava|ia|não)|"
-    r"na master|(depois|antes|desde) d[oe] merge\b|conferid[oa]s?\b|relato de)",
+    r"na master|(depois|antes|desde) d[oe] merge\b|conferid[oa]s?\b|relato de|"
+    r"fixed (in|on|by|along the way)\b|used to (be|go|come|give|stay|reset)\b|(was|were) (fixed|done) in\b|"
+    r"on master\b|(after|before|since) the merge\b|verified by the owner\b)",
     re.IGNORECASE,
 )
 CITACAO = re.compile(r'"[^"\n]*"')  # palavra entre aspas é citada (ex.: a própria regra), não é história
 FEITO = re.compile(r"(\bfeit[oa]s? (em|no|na|pel[oa]s?)\b|\*\*feit|— feit|\(feit|\bna master\b|~~|\bcorrigid[oa]s? em\b|"
-                   r"\bconferid[oa]s? pelo dono\b)", re.IGNORECASE)
+                   r"\bconferid[oa]s? pelo dono\b|\bdone (in|on|by)\b|\bon master\b|\bfixed in\b)", re.IGNORECASE)
 MAX_LINHAS_ITEM = 6  # um item do TODO (bullet ou número) com mais linhas que isso vira relato
 
 

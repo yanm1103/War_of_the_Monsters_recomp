@@ -1,51 +1,51 @@
-# Ferramentas, headers compartilhados e teste diferencial
+# Tools, shared headers and differential testing
 
-(Índice dos docs no `CLAUDE.md`.)
+(Doc index in `CLAUDE.md`.)
 
-## Ferramentas (tools/)
-- `wsl/gate.sh` (build + SHA1, sai com erro se falhar), `wsl/scoreall.sh` (pontuação por função com NON_MATCHING), `wsl/convert_tus.sh`, `wsl/check.sh`,
-  `ccmatch.py`, `nm_wrap.py`, `new_tu.py`, `place_data.py`, `progress.py` (escreve `config/status.csv`), `callgraph.py`, `m2c.sh`, `wsl/variants.py`, `wsl/permute.py`.
-- Verificação por TU num comando: `~/.venvs/wotm/bin/python tools/verify_tu.py game/<TU> [...] [--runs N] [--no-nm] [-v]` roda a pontuação (`ccmatch`), o `difftest_all`, o `nm_retvals` e, salvo com `--no-nm`, um `build_nm.sh verify` só com essas TUs para o `nm_calls` e o `nm_audit`; imprime uma tabela por função (score, difftest, chamadas, layout, retorno) e sai com erro se alguma equivalente difere no difftest, nas chamadas ou tem retorno `void` consumido. Com o ELF leva ~4,5 min (o `build_nm`); sem, segundos. `sh tools/m2c_batch.sh [csv | tu...]` gera os rascunhos do m2c de toda a fila (`config/boot_coverage_asm.csv` por padrão) em `build/m2c/<tu>/<função>.c`, em paralelo e só o que falta.
-- Camada nativa e runtime: `native_syms.py` (`--gen` grava `native/wotm_syms.h` com `wotm::sym::<dado>` e `wotm::fn::<função>` a partir de `symbol_addrs.txt`; `--audit` lista os literais hex de `native/` que batem com um símbolo, caem dentro de um ou não casam; `--apply` troca os exatos por nome, só no código, e inclui o header onde faltar), `vu1cmp.ps1` (checagem VU1 x nativo e imagens a partir de instantâneos), `corpus.ps1` (corpus de regressão: `-Capture` grava menus e lutas em `<runtime>\corpus`, `-Check -Baseline <csv>` diz o que piorou depois de uma mudança em `native/`), `build_runtime.ps1` (ou `build_runtime.bat` na raiz), `lote.ps1`, `wotm_env.py` (confere a tabela de variáveis `WOTM_*` do `NATIVO.md` contra o código), `vu0native.py`, `vu1dis.py`, `fx.py`.
-- Golpes do monstro: `python tools/chr_dump.py disc/RST/<MONSTRO>.CHR [--keys] [--csv]` imprime a tabela dos socos (posição no combo, tipo, janela, dano, raio, atordoamento, knockback, pausa, localizadores) da chave 0xFCC; só lê. Layout em `FORMATOS.md`, "Personagem".
-- Save do memory card: `python tools/mcsave.py <pasta com mc0/ e mc1/>` (o `discroot` do runtime) mostra os dois cartões como um JSON só, no formato do `save.json` que o runtime grava (`native/runtime/wotm_save.inc`); só lê. Layout em `FORMATOS.md`, "Save do memory card".
-- Assets para formatos comuns e de volta (formatos em `docs/FORMATOS.md`; leem o `disc/` do usuário, nada extraído vai ao repo; testados contra o código do nativo e com arquivos sintéticos, falta testar com o disco):
-  - `tex.py list|export|inject`: texturas `.TEX`/`.RTX` para PNG com `manifest.json` (paleta achada pelos objetos do `.NGP`) e PNG/TGA de volta, do mesmo tamanho (paleta atual ou `--new-palette`).
-  - `snd989.py wav|vpk|vag|bnk-replace`: som para WAV e WAV de volta para `.VPK`, `.VAG` e sons dentro de um `.BNK` (codificador ADPCM que simula o decodificador do jogo).
-  - `gltf.py <arquivo.NGP> <saida.glb>`: geometria estática com texturas em glTF binário (Blender, three.js, viewer web). Monstros em pose ainda não: falta avaliar o esqueleto e as curvas de animação (ver a docstring).
-  - `ngp.decode_mesh`: porte do `decodeObject` do nativo (textura por seção, ADC como o GS, sprites), usado pelo `gltf.py`.
-- Scripts `.sh` devem ser criados por heredoc no bash; gravar com Python no Windows deixa CRLF e o `sh` do WSL quebra (`sed -i 's/\r$//'` conserta).
-- O estado por função fica em `config/status.csv` (`python3 tools/progress.py`, ~12 s via WSL, precisa de `disc/`); o README não tem bloco de progresso.
-- Mod `/wotm` (HUD) carrega com `startup_command.bat` (no `.gitignore`), que inicia o Claude com `--plugin-dir ~/.claude/my-plugins/wotm-hud`.
+## Tools (tools/)
+- `wsl/gate.sh` (build + SHA1, exits with an error if it fails), `wsl/scoreall.sh` (per-function score with NON_MATCHING), `wsl/convert_tus.sh`, `wsl/check.sh`,
+  `ccmatch.py`, `nm_wrap.py`, `new_tu.py`, `place_data.py`, `progress.py` (writes `config/status.csv`), `callgraph.py`, `m2c.sh`, `wsl/variants.py`, `wsl/permute.py`.
+- Per-TU verification in one command: `~/.venvs/wotm/bin/python tools/verify_tu.py game/<TU> [...] [--runs N] [--no-nm] [-v]` runs the score (`ccmatch`), `difftest_all`, `nm_retvals` and, unless `--no-nm`, a `build_nm.sh verify` with only those TUs for `nm_calls` and `nm_audit`; it prints a table per function (score, difftest, calls, layout, return) and exits with an error if some equivalent differs in the difftest, in the calls, or has a consumed `void` return. With the ELF it takes ~4.5 min (the `build_nm`); without, seconds. `sh tools/m2c_batch.sh [csv | tu...]` generates the m2c drafts for the whole queue (`config/boot_coverage_asm.csv` by default) in `build/m2c/<tu>/<função>.c`, in parallel and only what is missing.
+- Native layer and runtime: `native_syms.py` (`--gen` writes `native/wotm_syms.h` with `wotm::sym::<dado>` and `wotm::fn::<função>` from `symbol_addrs.txt`; `--audit` lists the hex literals in `native/` that match a symbol, fall inside one, or match none; `--apply` replaces the exact ones with names, only in code, and includes the header where missing), `vu1cmp.ps1` (VU1 x native check and images from snapshots), `corpus.ps1` (regression corpus: `-Capture` records menus and fights in `<runtime>\corpus`, `-Check -Baseline <csv>` says what got worse after a change in `native/`), `build_runtime.ps1` (or `build_runtime.bat` at the root), `lote.ps1`, `wotm_env.py` (checks the `WOTM_*` variable table in `NATIVO.md` against the code), `vu0native.py`, `vu1dis.py`, `fx.py`.
+- Monster moves: `python tools/chr_dump.py disc/RST/<MONSTRO>.CHR [--keys] [--csv]` prints the punch table (position in the combo, type, window, damage, radius, stun, knockback, pause, locators) from key 0xFCC; read only. Layout in `FORMATOS.md`, "Character".
+- Memory card save: `python tools/mcsave.py <pasta com mc0/ e mc1/>` (the runtime's `discroot`) shows both cards as a single JSON, in the format of the `save.json` the runtime writes (`native/runtime/wotm_save.inc`); read only. Layout in `FORMATOS.md`, "Memory card save".
+- Assets to common formats and back (formats in `docs/FORMATOS.md`; they read the user's `disc/`, nothing extracted goes to the repo; tested against the native code and with synthetic files, not yet tested with the disc):
+  - `tex.py list|export|inject`: `.TEX`/`.RTX` textures to PNG with `manifest.json` (palette found through the `.NGP` objects) and PNG/TGA back, at the same size (current palette or `--new-palette`).
+  - `snd989.py wav|vpk|vag|bnk-replace`: sound to WAV and WAV back to `.VPK`, `.VAG` and sounds inside a `.BNK` (ADPCM encoder that simulates the game's decoder).
+  - `gltf.py <arquivo.NGP> <saida.glb>`: static geometry with textures in binary glTF (Blender, three.js, web viewer). Posed monsters not yet: the skeleton and the animation curves still need evaluating (see the docstring).
+  - `ngp.decode_mesh`: port of the native `decodeObject` (texture per section, ADC like the GS, sprites), used by `gltf.py`.
+- `.sh` scripts must be created by heredoc in bash; writing with Python on Windows leaves CRLF and the WSL `sh` breaks (`sed -i 's/\r$//'` fixes it).
+- The per-function state lives in `config/status.csv` (`python3 tools/progress.py`, ~12 s via WSL, needs `disc/`); the README has no progress block.
+- The `/wotm` mod (HUD) loads with `startup_command.bat` (in `.gitignore`), which starts Claude with `--plugin-dir ~/.claude/my-plugins/wotm-hud`.
 
-## Headers compartilhados (include/)
-Regra: uma classe/API usada por mais de um TU mora num header; não redeclarar parcialmente dentro do `.cpp`.
-- `engine.h`: API do motor (matemática, timers, `_animHandle`/animation*, particleKillFx, hier/hd). `game/game.h` inclui.
+## Shared headers (include/)
+Rule: a class/API used by more than one TU lives in a header; do not partially redeclare it inside the `.cpp`.
+- `engine.h`: engine API (math, timers, `_animHandle`/animation*, particleKillFx, hier/hd). `game/game.h` includes it.
 - `game/game.h`: `Monster` (0x11190 bytes: `m_cs`, `m_playerNum`, `m_id`, `m_health`, `m_stamina`, `m_target`, `m_camUnify`), `TheGame`
-  (`m_huds[4]`, `m_slots[16]` = os `Monster` em 0xB80, `m_monsters[]` = ponteiros, `m_gravity`, `m_gameMode`, `m_matchMode`, `m_levelId` (1 central, 2 vegas, 3 canyon2,
+  (`m_huds[4]`, `m_slots[16]` = the `Monster`s at 0xB80, `m_monsters[]` = pointers, `m_gravity`, `m_gameMode`, `m_matchMode`, `m_levelId` (1 central, 2 vegas, 3 canyon2,
   5 airport, 6 threemile, 7 sanfran, 8/15 island, 9 tokyo, 10 ufo, 11 final boss, 26 bigshot, 27 crush), `m_numSlots`, `m_numMonsters`, `m_levelIdx`, `m_playerMask`),
-  `Cameras` (`m_cameras`, `m_state`), acessores `gameSlotBase(idx)` (mantém a ordem `idx*0x11190 + 0xB80`), `gameHud(i)`, `gameWeapons()`.
-- `point_tool_kit.h` (base de PathTool/PowerUpTool/StartPointTool/AiPathTool; derivados chamam `PointToolKit::init/loadPoints/getPoint`), `task_manager.h`, `bidir_link.h`,
-  `cs_pool.h` (tudo estático), `game/{shell,hit_history,pickup,military_pickup,pickup_sound,vehicle_navigator,hud,weapons,power_ups,start_points,stamina_meter,crush_level,levels,streaming_sound}.h`.
-- Mover uma classe para header pode mudar `sizeof` e deslocar campos de structs parciais que a embutem (aconteceu com `StaminaMeter`): sempre comparar antes/depois.
-- Funções que o retail chama com `this` mesmo sem usá-lo (ex.: `StartPoints::getNumPoints`) só batem se declaradas não-estáticas; `isThisTypeFull` é estática.
-- Ainda não unificados: `GamePad` (`GamePad.cpp` vê 6 ints, `GamePadClipPlayer.cpp` vê bytes), `GamePadClipPlayer`/`AiPadClips` (tipo do clipe diverge entre `AiGrapple` e os outros),
+  `Cameras` (`m_cameras`, `m_state`), accessors `gameSlotBase(idx)` (keeps the `idx*0x11190 + 0xB80` order), `gameHud(i)`, `gameWeapons()`.
+- `point_tool_kit.h` (base of PathTool/PowerUpTool/StartPointTool/AiPathTool; derived classes call `PointToolKit::init/loadPoints/getPoint`), `task_manager.h`, `bidir_link.h`,
+  `cs_pool.h` (all static), `game/{shell,hit_history,pickup,military_pickup,pickup_sound,vehicle_navigator,hud,weapons,power_ups,start_points,stamina_meter,crush_level,levels,streaming_sound}.h`.
+- Moving a class to a header can change `sizeof` and shift fields of partial structs that embed it (it happened with `StaminaMeter`): always compare before/after.
+- Functions the retail calls with `this` even without using it (e.g.: `StartPoints::getNumPoints`) only match if declared non-static; `isThisTypeFull` is static.
+- Not unified yet: `GamePad` (`GamePad.cpp` sees 6 ints, `GamePadClipPlayer.cpp` sees bytes), `GamePadClipPlayer`/`AiPadClips` (the clip type diverges between `AiGrapple` and the others),
   `Ai`, `Destructibles`.
 
-## Estado da decomp em `TheGame` (fonte: `config/status.csv`)
-- `src/game/TheGame.cpp` convertido. Equivalentes: `Update`, `InitAfterDbLoad`, `ResetLevel`, `UpdatePadTweaks`, `gameResolveLifeAndDeath`; matched: `Update2`, `SetGravity`, `SetOkToUnify`, `GetNumAIsAlive`. Ainda em asm: `InitBeforeDbLoad` e `gameCheckForCloseCombat`.
-- A decomp só avança na superfície de mod: `Shell::Load*`, `MonsterParse`, câmera. Para o que falta em cada TU, `grep -c INCLUDE_ASM` ou o `status.csv`.
+## Decomp state in `TheGame` (source: `config/status.csv`)
+- `src/game/TheGame.cpp` converted. Equivalent: `Update`, `InitAfterDbLoad`, `ResetLevel`, `UpdatePadTweaks`, `gameResolveLifeAndDeath`; matched: `Update2`, `SetGravity`, `SetOkToUnify`, `GetNumAIsAlive`. Still in asm: `InitBeforeDbLoad` and `gameCheckForCloseCombat`.
+- The decomp only advances on the mod surface: `Shell::Load*`, `MonsterParse`, camera. For what is missing in each TU, `grep -c INCLUDE_ASM` or `status.csv`.
 
-## Teste diferencial (tools/difftest.py, tools/difftest_all.py)
-Roda a função retail e a nossa (compilada com `-DNON_MATCHING`) num emulador MIPS (unicorn), com o mesmo estado aleatório, e compara retorno, chamadas a outras funções
-(os callees viram `jr ra`; nome + argumentos relevantes, com strings comparadas pelo texto e ponteiros de função pelo nome), bytes alterados na arena e nos dados do retail e as variáveis
-que o próprio TU define (alias para a cópia do retail). Serve para validar as funções "equivalentes (untuned)" sem PCSX2.
-- Uma função: `~/.venvs/wotm/bin/python tools/difftest.py game/Monster isFullHealth__7Monster --args this --ret int --runs 60 [--objsize 0x122000]`
-  (`--args` aceita `this,p,i,b,f`; `--alt OUTRAFUNC` é o controle negativo, deve dar MISMATCH; `--objsize` mantém ponteiros aleatórios fora do objeto, use 0x122000 para `TheGame`).
-- Todas as equivalentes de TUs: `python3 tools/difftest_all.py game/Monster game/TheGame ... --runs 30` (adivinha a assinatura pelo nome mangled e o retorno pela definição).
-- Tipo de erro que ele pega (exemplos de equivalentes que divergiam do retail: Vehicle::setCs/setPos, StaminaMeter::credit, UpdatePadTweaks, TheGame::Update (2º TaskManager),
-  MonkeyChains::init (FxTextureId é enum), AnimContact).
-- Limites: não executa VU0/COP2 nem `min.s`/`madd.s`; funções com métodos virtuais ou estruturas encadeadas válidas são puladas ("skipped"); mais de 4 args inteiros ou 2 floats não são suportados;
-  é evidência (só os caminhos que o estado aleatório alcança), não prova. Rodar em toda função equivalente nova antes de commitar.
-- Armadilha do emulador: hook de escrita de memória quebra saltos com store no delay slot; por isso comparamos imagens de memória no fim, não escritas.
+## Differential test (tools/difftest.py, tools/difftest_all.py)
+Runs the retail function and ours (compiled with `-DNON_MATCHING`) in a MIPS emulator (unicorn), with the same random state, and compares the return value, calls to other functions
+(the callees become `jr ra`; name + relevant arguments, with strings compared by text and function pointers by name), bytes changed in the arena and in the retail data, and the variables
+the TU itself defines (aliased to the retail copy). It serves to validate the "equivalent (untuned)" functions without PCSX2.
+- One function: `~/.venvs/wotm/bin/python tools/difftest.py game/Monster isFullHealth__7Monster --args this --ret int --runs 60 [--objsize 0x122000]`
+  (`--args` accepts `this,p,i,b,f`; `--alt OUTRAFUNC` is the negative control, it must give MISMATCH; `--objsize` keeps random pointers outside the object, use 0x122000 for `TheGame`).
+- All equivalents of some TUs: `python3 tools/difftest_all.py game/Monster game/TheGame ... --runs 30` (guesses the signature from the mangled name and the return from the definition).
+- Kind of error it catches (examples of equivalents that diverged from the retail: Vehicle::setCs/setPos, StaminaMeter::credit, UpdatePadTweaks, TheGame::Update (2nd TaskManager),
+  MonkeyChains::init (FxTextureId is an enum), AnimContact).
+- Limits: it does not execute VU0/COP2 nor `min.s`/`madd.s`; functions with virtual methods or valid linked structures are skipped ("skipped"); more than 4 integer args or 2 floats are not supported;
+  it is evidence (only the paths the random state reaches), not proof. Run it on every new equivalent function before committing.
+- Emulator pitfall: a memory write hook breaks jumps with a store in the delay slot; that is why we compare memory images at the end, not writes.
 

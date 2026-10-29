@@ -19,13 +19,13 @@ Leia antes de começar: `README.md` (setup), `docs/ANALYSIS.md` (o que se sabe d
 - `docs/FORMATOS.md`: formatos de arquivo do jogo (fase, monstro, som, filme, save do memory card).
 
 ## Documentação: três tipos de texto, cada um no seu lugar
-- **Referência** (`README.md`, este arquivo, `docs/*.md`, `docs/passos/*.md`): como as coisas são hoje, no presente. Sem datas, sem "antes era", sem "feito/corrigido em", sem contar como foi testado. Um número medido só entra se for usado (ex.: "9619 ticks por field").
+- **Referência** (`README.md`, este arquivo, `docs/*.md`, `docs/passos/*.md`, `GLOSSARIO.md`, `CONTRIBUTING.md`): como as coisas são hoje, no presente. Escrita **em inglês**, menos este arquivo; `TODO.md`, commits e `docs/investigacoes/` seguem em português. Sem datas, sem "antes era", sem "feito/corrigido em", sem contar como foi testado. Um número medido só entra se for usado (ex.: "9619 ticks por field").
 - **A fazer** (`TODO.md`): só o que está aberto, cada item curto (o que é, por onde começar, onde está o contexto). Terminou: a linha sai, sem "feito" nem riscado; o que passou a existir vai para a referência. Decisões do dono de não fazer algo ficam em "Descartado".
 - **Diário** (o que aconteceu, por quê, como foi medido e testado): a mensagem do commit e `docs/investigacoes/<data>/`.
 - `python tools/doclint.py` confere as linhas que o commit acrescenta e o `TODO.md` inteiro; o pre-commit do git o roda sozinho (ligar uma vez por clone: `git config core.hooksPath tools/githooks`). Linha antiga só editada não é cobrada pelo que já tinha; `--all` lista o que ainda falta migrar.
 
 ## Fluxo do port (mudança em `native/`)
-1. Antes de mexer: `tools\corpus.ps1 -Check` guarda a base (`<runtime>\corpus\resumo_<data>.csv`; capture o corpus uma vez com `-Capture`). O que está errado ou faltando vem do inventário (`VU1CHECK.md`, "Inventário do port"), não de lembrança.
+1. Antes de mexer: `tools\corpus.ps1 -Check` guarda a base (`<runtime>\corpus\resumo_<data>.csv`; capture o corpus uma vez com `-Capture`). O que está errado ou faltando vem do inventário (`VU1CHECK.md`, "Port inventory"), não de lembrança.
 2. Editar `native/*.hpp` ou `native/runtime/*.inc|.cpp` (hooks e código do jogo que rodam dentro do runtime). Endereços por nome (`wotm::sym::`/`wotm::fn::` de `native/wotm_syms.h`), nunca número cru. Variável de diagnóstico nova entra na tabela do `NATIVO.md` (`python tools/wotm_env.py` confere).
 3. `build_runtime.bat` na raiz (configura e compila `build_dev`, sem LTCG; o ninja não rastreia `native/`, o script cuida disso). Nunca o `build.bat` da pasta velha com LTCG.
 4. Conferir: `tools\corpus.ps1 -Check -Baseline <csv da base>` diz o que piorou; `run_live.bat` para ver na tela; `tools\lote.ps1` para lutas em lote com vigia.

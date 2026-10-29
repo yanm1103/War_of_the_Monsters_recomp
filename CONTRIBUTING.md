@@ -1,28 +1,29 @@
-# Contribuindo
+# Contributing
 
-Obrigado por ajudar! O projeto é uma decompilação cujo objetivo é um port nativo de PC fácil de modar; leia o [CLAUDE.md](CLAUDE.md) (serve para humanos também) e o [README](README.md) para o setup.
+Thanks for helping! The project is a decompilation whose goal is a native PC port that is easy to mod; read [CLAUDE.md](CLAUDE.md) (it works for humans too) and the [README](README.md) for the setup.
 
-## O que priorizar
-- **Byte match não é exigido.** Uma função `equivalent` (C++ legível, comportamento verificado) vale tanto quanto uma `matched` para o objetivo. Se bater barato, ótimo; não gaste horas afinando.
-- **Escolha pelo que importa para modar**, não pelo tamanho: lógica de jogo, IA, monstros, fases, animação e formatos de arquivo. A fila está em `config/boot_coverage_asm.csv`
-  (funções ainda em asm que o jogo chama do boot até a interface). Deixe para o fim memory card (`McPage`/`McFile`), `input`, `vi`, `ps`, `sce/*` e `lib989snd`.
-- **Confira o comportamento**: `tools/difftest.py` para funções sem VU0; `tools/recomp_oracle` (veja o README dele) para as que usam VU0 ou `min/max/madd`. Não use `sqrtf` em código novo: use `eeSqrtf` (`include/vecmath.h`).
+## What to prioritize
+- **Byte match is not required.** An `equivalent` function (readable C++, verified behavior) is worth as much as a `matched` one for the goal. If it matches cheaply, great; do not spend hours tuning.
+- **Pick by what matters for modding**, not by size: game logic, AI, monsters, stages, animation and file formats. The queue is in `config/boot_coverage_asm.csv`
+  (functions still in asm that the game calls from boot to the interface). Leave memory card (`McPage`/`McFile`), `input`, `vi`, `ps`, `sce/*` and `lib989snd` for last.
+- **Check the behavior**: `tools/difftest.py` for functions without VU0; `tools/recomp_oracle` (see its README) for those that use VU0 or `min/max/madd`. Do not use `sqrtf` in new code: use `eeSqrtf` (`include/vecmath.h`).
 
-## Licença
-Ao contribuir, você concorda que sua contribuição seja distribuída sob a [GPL-3.0](LICENSE) do projeto.
+## License
+By contributing, you agree that your contribution is distributed under the project's [GPL-3.0](LICENSE).
 
-## Antes de começar
-- Você precisa da **sua própria cópia** do jogo (NTSC-U, SCUS-97197). Nada do jogo entra no repo: nem ISO, nem `asm/`, nem trechos de assembly em issues/PRs.
-- Faça o setup do README e confirme que `ninja` termina com `build/SCUS_971.97.rom: OK` antes de mexer em qualquer coisa.
-- Combine com o dono qual área (TU) você vai pegar, para não trabalharmos na mesma. Headers compartilhados (`include/game/game.h`, `include/engine.h`) são o ponto mais provável de conflito: avise antes de alterá-los.
+## Before you start
+- You need **your own copy** of the game (NTSC-U, SCUS-97197). Nothing from the game goes into the repo: no ISO, no `asm/`, no assembly snippets in issues/PRs.
+- Do the README setup and confirm that `ninja` ends with `build/SCUS_971.97.rom: OK` before touching anything.
+- Agree with the owner on which area (TU) you will take, so we do not work on the same one. Shared headers (`include/game/game.h`, `include/engine.h`) are the most likely conflict point: give notice before changing them.
+- Reference docs are written in English; `CLAUDE.md`, `TODO.md`, commit messages and `docs/investigacoes/` are in Portuguese.
 
-## Fluxo
-1. Fork do repo (ou branch, se você tem acesso de escrita) a partir da `master` atualizada: `git switch -c <tu>-<assunto>`.
-2. Um PR por TU ou por pequeno grupo de funções relacionadas.
-3. Antes de cada commit: `sh tools/wsl/gate.sh` tem que terminar em `ROM OK`.
-4. **Não commite** `config/status.csv`: é gerado (`tools/progress.py`) e causa conflito em todo PR. O dono o regenera ao integrar o PR. Evite `git commit -a`.
-5. Abra o PR contra `master` preenchendo o template. Não há CI (não dá para buildar sem a ROM), então a saída do `gate.sh` no PR é a prova. O merge na `master` é feito só pelo dono e por `LostTwilightG`.
-6. Mantenha o branch atualizado com `git rebase origin/master`.
+## Workflow
+1. Fork the repo (or branch, if you have write access) from an up-to-date `master`: `git switch -c <tu>-<assunto>`.
+2. One PR per TU or per small group of related functions.
+3. Before each commit: `sh tools/wsl/gate.sh` must end in `ROM OK`.
+4. **Do not commit** `config/status.csv`: it is generated (`tools/progress.py`) and causes conflicts in every PR. The owner regenerates it when merging the PR. Avoid `git commit -a`.
+5. Open the PR against `master` filling in the template. There is no CI (it cannot build without the ROM), so the `gate.sh` output in the PR is the proof. Merges into `master` are done only by the owner and by `LostTwilightG`.
+6. Keep the branch up to date with `git rebase origin/master`.
 
-## Usando Claude Code
-Ok e incentivado. O `CLAUDE.md` já carrega as regras. Lembre o seu Claude de rodar o gate antes de cada commit.
+## Using Claude Code
+Fine and encouraged. `CLAUDE.md` already loads the rules. Remind your Claude to run the gate before each commit.

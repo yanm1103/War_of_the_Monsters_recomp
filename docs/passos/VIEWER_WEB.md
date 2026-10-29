@@ -1,19 +1,19 @@
-# Visualizador de modelos 3D no navegador
+# Browser 3D model viewer
 
-(Índice dos docs no `CLAUDE.md`.) O viewer é um projeto à parte: https://yanm1103.github.io/wotm-model-museum/. A avaliação de
-viabilidade que o originou está em `bbed7d9:docs/passos/VIEWER_WEB.md` (ler com `git show`).
+(Docs index in `CLAUDE.md`.) The viewer is a separate project: https://yanm1103.github.io/wotm-model-museum/. The feasibility
+assessment it came from is in `bbed7d9:docs/passos/VIEWER_WEB.md` (read with `git show`).
 
-## Regras
-- **Nenhum arquivo do jogo no servidor.** Página estática que lê a pasta `disc/` (ou a ISO) do usuário pela File API; tudo é
-  processado localmente. A hospedagem (GitHub Pages) não contém nada do jogo.
+## Rules
+- **No game file on the server.** A static page that reads the user's `disc/` folder (or the ISO) through the File API; everything is
+  processed locally. The hosting (GitHub Pages) contains nothing from the game.
 
-## O que ele usa deste repo
-- **Formato** (`docs/FORMATOS.md`, `NATIVO.md`): `.NGP` (zip `IE\3\4` na fase, cru no monstro; imagem pré-ligada em
-  `0xA00000`; hierarquia GROUP/LOD/SWITCH/ROTATE/TRANSLATE/SCALE/CHAR_INSTANCE/DESTRUCTIBLE/CONTROL), malha do `polyPkt` (posições,
-  normais, strips com ADC, cor por vértice, UV 4.12, multitextura por seção, lotes de 190 vértices), texturas CT32/24/16, T8, T4,
-  T8H/4HL/4HH com paletas do `.RTX` (troca CSM1), skinning dos monstros (código de osso nos bits baixos de xyz, paleta de matrizes,
-  3 pesos) e curvas de animação + mixer.
-- **Monstros do disco** (pose e texturas sem dump da RAM): `passos/MODELOS_3D.md`, `tools/pose.py`, `native/wotm_model.hpp`.
-- **Cenários e objetos:** `tools/ngp.py` (`ngp.decode_mesh`) e `tools/gltf.py` (glTF binário, `FERRAMENTAS.md`).
-- `native/viewer.cpp` (raylib) é o visualizador local com câmera livre; ele parte de um **dump da RAM** (texturas por `texInfo` e
-  matrizes de osso calculadas pelo jogo).
+## What it uses from this repo
+- **Format** (`docs/FORMATOS.md`, `NATIVO.md`): `.NGP` (zip `IE\3\4` in the stage, raw in the monster; image pre-linked at
+  `0xA00000`; hierarchy GROUP/LOD/SWITCH/ROTATE/TRANSLATE/SCALE/CHAR_INSTANCE/DESTRUCTIBLE/CONTROL), `polyPkt` mesh (positions,
+  normals, strips with ADC, per-vertex color, UV 4.12, multitexture per section, batches of 190 vertices), CT32/24/16, T8, T4,
+  T8H/4HL/4HH textures with palettes from the `.RTX` (CSM1 swap), monster skinning (bone code in the low bits of xyz, matrix palette,
+  3 weights) and animation curves + mixer.
+- **Monsters from the disc** (pose and textures without a RAM dump): `passos/MODELOS_3D.md`, `tools/pose.py`, `native/wotm_model.hpp`.
+- **Scenery and objects:** `tools/ngp.py` (`ngp.decode_mesh`) and `tools/gltf.py` (binary glTF, `FERRAMENTAS.md`).
+- `native/viewer.cpp` (raylib) is the local viewer with a free camera; it starts from a **RAM dump** (textures by `texInfo` and
+  bone matrices computed by the game).
