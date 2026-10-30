@@ -60,6 +60,11 @@ def sha1(path):
         return hashlib.sha1(f.read()).hexdigest()
 
 
+def pack_hint(mod):
+    """Como mandar o mod para o jogo, na mensagem: no exe so ha a interface."""
+    return "the Build mod button" if FROZEN else "modkit.py pack %s, or the Build mod button" % mod
+
+
 def game_data_dir():
     """Pasta de dados do wotm.exe do release (native/runtime/wotm_standalone.cpp): a do jogo, ou %LOCALAPPDATA%\\WotM quando o
     jogo esta numa pasta so de leitura. None fora do release (o kit rodando do repo)."""
@@ -69,7 +74,19 @@ def game_data_dir():
     for d in (REPO, local):
         if os.path.isfile(os.path.join(d, "wotm.ini")):
             return d
-    return REPO if os.access(REPO, os.W_OK) else local
+    return REPO if _writable(REPO) else local
+
+
+def _writable(d):
+    """Como o writable() do wotm_standalone.cpp: cria e apaga um arquivo (os.access no Windows ignora as permissoes da pasta)."""
+    probe = os.path.join(d, ".wotm_write_probe")
+    try:
+        with open(probe, "wb"):
+            pass
+        os.remove(probe)
+        return True
+    except OSError:
+        return False
 
 
 def ini_iso(data):
@@ -265,11 +282,12 @@ def _iso_file(iso, disc, rel):
     # .TEX/.RTX/.NGP: os irmaos tambem (o tex.py procura o .RTX e o .NGP ao lado)
     stem, ext = os.path.splitext(rel)
     sibs = [rel] + ([stem + x for x in (".TEX", ".RTX", ".NGP") if x != ext.upper()] if ext.upper() in (".TEX", ".RTX", ".NGP") else [])
-    for r in sibs:
-        f = iso.find(r)
-        q = os.path.join(disc_cache(disc), *r.split("/"))
-        if f and not f[2] and not (os.path.isfile(q) and os.path.getsize(q) == f[1]):
-            iso.extract(r, q)
+    with iso.lock:   # a interface le retratos numa thread e extrai em outra: a mesma copia nao pode correr duas vezes
+        for r in sibs:
+            f = iso.find(r)
+            q = os.path.join(disc_cache(disc), *r.split("/"))
+            if f and not f[2] and not (os.path.isfile(q) and os.path.getsize(q) == f[1]):
+                iso.extract(r, q)
     return out
 
 
@@ -379,7 +397,7 @@ def export(disc, work, pats, dest=None):
         if kept:
             print("  %d file(s) already edited in the work folder were kept" % kept)
         save_state(work, state)
-    print("work folder: %s (edit there, then pack into a mod: modkit.py pack <mod>, or the Pack button)" % work)
+    print("work folder: %s (edit there, then send it to the mod: %s)" % (work, pack_hint("<mod>")))
 
 
 def source_of(disc, rel):
@@ -830,7 +848,7 @@ def skin_new(disc, work, mods, mod, monster, sid, base=None, name=None, ai=False
     if not textures:
         return
     export(disc, work, ["MON/%s%d" % (prefix, costume)], dest="skins/" + sid)
-    print("edit the PNGs in %s, then: modkit.py pack %s" % (os.path.join(work, "skins", sid), mod))
+    print("edit the PNGs in %s, then: %s" % (os.path.join(work, "skins", sid), pack_hint(mod)))
 
 
 # ---------------------------------------------------------------- monstros custom (MODS.md, "Monstros custom")
@@ -920,8 +938,8 @@ def monster_new(disc, work, mods, mod, cid, base, costume=None, name=None, ai=Fa
                                       if camera else ""))
     if textures:
         export(disc, work, ["MON/%s%d" % (prefix, costume)], dest="monsters/%s/files" % cid)
-        print("edit the PNGs in %s, then: modkit.py pack %s" % (os.path.join(work, "monsters", cid, "files"), mod))
-    print("in the game: the CUSTOM box of the selection, or WOTM_MATCH=%s,1,1" % cid)
+        print("edit the PNGs in %s, then: %s" % (os.path.join(work, "monsters", cid, "files"), pack_hint(mod)))
+    print("in the game: the CUSTOM box of the selection" + ("" if FROZEN else ", or WOTM_MATCH=%s,1,1" % cid))
 
 
 def monster_portrait(disc, work, mods, mod, cid, png):
@@ -990,7 +1008,7 @@ def monster_model(work, mods, mod, cid, paths):
         data["files"] = True
         write_monster_json(mods, mod, cid, data)
         print("monster.json of %s: \"files\": true" % cid)
-    print("build the mod (modkit.py pack %s) to send them to the mod" % mod)
+    print("send them to the mod: %s" % pack_hint(mod))
 
 
 def monster_duplicate(mods, mod, work, cid, new):

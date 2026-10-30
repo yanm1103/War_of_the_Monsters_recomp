@@ -42,7 +42,8 @@ try:
 except ImportError:   # sem Pillow: sem miniaturas nem previa de imagem
     Image = ImageTk = None
 
-CONF = os.path.join(os.path.expanduser("~"), ".wotm_modkit.json")
+# no exe do release, uma por instalacao (na pasta de dados do jogo, com o wotm.ini); no repo, a do usuario
+CONF = os.path.join(modkit.game_data_dir(), "modkit.json") if modkit.FROZEN else os.path.join(os.path.expanduser("~"), ".wotm_modkit.json")
 
 # Monstros: prefixo do arquivo (MON/<PREFIXO><traje>) -> nome no jogo, bancos de som (GLOSSARY.md)
 MONSTERS = [
@@ -82,8 +83,11 @@ class App:
         root.minsize(900, 560)
         root.configure(bg=BG)
         self.conf = self.load_conf()
-        self.disc = tk.StringVar(value=self.conf.get("disc") or modkit.default_disc())
-        self.mods = tk.StringVar(value=self.conf.get("mods") or modkit.default_mods(self.disc.get()))
+        # caminho salvo que sumiu (ISO movida, jogo movido): volta ao padrao
+        disc = self.conf.get("disc")
+        self.disc = tk.StringVar(value=disc if disc and os.path.exists(disc) else modkit.default_disc())
+        mods = self.conf.get("mods")
+        self.mods = tk.StringVar(value=mods if mods and os.path.isdir(mods) else modkit.default_mods(self.disc.get()))
         self.mod = tk.StringVar(value=self.conf.get("mod") or "")   # mod atual; refresh_mods zera se ele nao existe mais
         self.mod_buttons = []   # botoes que so valem com um mod escolhido (update_mod_state liga/desliga)
         self._shown_work = None   # pasta de trabalho que a lista mostra (trocou: selecao e grupos abertos nao valem)

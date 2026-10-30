@@ -62,7 +62,8 @@ work area. Without a mod, the right-hand list is empty and the buttons tied to i
    sits at the bottom, with a divider you can drag up and down.
 
 The folders (disc and mods), the last mod, the editors, the log height and the last "Save to folder" folder are kept in
-`~/.wotm_modkit.json`. Underneath are the same functions of `modkit.py` below.
+`~/.wotm_modkit.json` (in `WotM_ModKit.exe`, `modkit.json` in the game's data folder, next to `wotm.ini`); a saved folder that no
+longer exists falls back to the default. Underneath are the same functions of `modkit.py` below.
 
 **Skins from the window.** **New skin...** (in the list header, next to Refresh) opens a dialog: *Monster* (a list with the ten
 playable monsters and the known custom monsters; it also accepts a typed id, which counts as a custom monster id: no extracted textures
