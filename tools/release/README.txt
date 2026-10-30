@@ -64,7 +64,9 @@ Mods
 Mods go in the mods\ folder. This package comes with four:
 - Goliath Prime, Cerebulon, Mecha: playable custom monsters
 - recompiled_logo: the title screen logo
-How to make your own (textures as PNG, custom monsters):
+To make your own, open WotM_ModKit.exe: it reads your ISO (the one wotm.exe uses), extracts
+textures as PNG and sounds as WAV, and builds what you edited into a mod. It also creates skins and
+custom monsters. Guide:
 https://github.com/yanm1103/War_of_the_Monsters_recomp/blob/master/docs/guides/MODS.md
 
 

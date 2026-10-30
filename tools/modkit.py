@@ -16,8 +16,8 @@ pasta de trabalho (<mods>/_work/<mod>/, com o modkit.json dela), e o pack de um 
   python tools/modkit.py monster model my_mod fire_togera X.NGP X.PTR          # modelo proprio (esqueleto do tipo base)
   python tools/modkit_gui.py                                 # o mesmo com interface (botao "Mod kit" do launcher)
 
-Opcoes: --disc <pasta> (disco extraido; padrao WOTM_DISC ou disc/ do repo), --mods <pasta> (padrao: <runtime>/discroot/mods, o
-runtime de .wotm_recomp_dir; sem ele, <disco>/mods), --work <pasta> (padrao: <mods>/_work/<mod>; pasta com '_' o jogo nao le).
+Opcoes: --disc <pasta ou .iso> (disco extraido ou a ISO; padrao WOTM_DISC ou disc/ do repo; no WotM_ModKit.exe, o iso= do
+wotm.ini), --mods <pasta> (padrao: <runtime>/discroot/mods, o runtime de .wotm_recomp_dir; sem ele, <disco>/mods; no exe, a do jogo), --work <pasta> (padrao: <mods>/_work/<mod>; pasta com '_' o jogo nao le).
 Nome de mod: nao comeca com '_' nem '.', sem \\ / : * ? " < > |.
 Arquivos do export podem ter curinga (MON/LIZARD*) e sem extensao pegam .TEX e .RTX.
 
@@ -45,8 +45,11 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tex      # noqa: E402
 import snd989   # noqa: E402
+import iso9660  # noqa: E402
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# FROZEN: o WotM_ModKit.exe do release (PyInstaller), ao lado do wotm.exe; REPO vira a pasta do jogo (mods/ do zip)
+FROZEN = bool(getattr(sys, "frozen", False))
+REPO = os.path.dirname(os.path.abspath(sys.executable)) if FROZEN else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEX_DIRS = ("LVL", "MON", "SHELL")
 PNG_RE = re.compile(r"^(.+?)(_rtx)?_t(\d+)(?:_sempaleta)?\.png$", re.I)   # _sempaleta: o export nao achou a paleta (cinza)
 BNK_RE = re.compile(r"^(.+)_s(\d+)\.wav$", re.I)
@@ -57,11 +60,46 @@ def sha1(path):
         return hashlib.sha1(f.read()).hexdigest()
 
 
+def game_data_dir():
+    """Pasta de dados do wotm.exe do release (native/runtime/wotm_standalone.cpp): a do jogo, ou %LOCALAPPDATA%\\WotM quando o
+    jogo esta numa pasta so de leitura. None fora do release (o kit rodando do repo)."""
+    if not FROZEN:
+        return None
+    local = os.path.join(os.environ.get("LOCALAPPDATA", ""), "WotM")
+    for d in (REPO, local):
+        if os.path.isfile(os.path.join(d, "wotm.ini")):
+            return d
+    return REPO if os.access(REPO, os.W_OK) else local
+
+
+def ini_iso(data):
+    """A ISO que o jogo usa (iso= do wotm.ini)."""
+    try:
+        with open(os.path.join(data, "wotm.ini"), encoding="utf-8-sig") as f:
+            for line in f:
+                if line.startswith("iso=") and line.strip()[4:]:
+                    return line.strip()[4:]
+    except OSError:
+        pass
+    return None
+
+
 def default_disc():
-    return os.environ.get("WOTM_DISC") or os.path.join(REPO, "disc")
+    """WOTM_DISC; no repo, a pasta disc/; no release, a ISO que o jogo usa."""
+    if os.environ.get("WOTM_DISC"):
+        return os.environ["WOTM_DISC"]
+    data = game_data_dir()
+    if data:
+        return ini_iso(data) or ""
+    return os.path.join(REPO, "disc")
 
 
 def default_mods(disc):
+    data = game_data_dir()
+    if data:   # como o wotm.exe: <dados>/mods, senao <jogo>/mods
+        if not os.path.isdir(os.path.join(data, "mods")) and os.path.isdir(os.path.join(REPO, "mods")):
+            return os.path.join(REPO, "mods")
+        return os.path.join(data, "mods")
     try:
         with open(os.path.join(REPO, ".wotm_recomp_dir"), encoding="utf-8") as f:
             rt = f.read().strip()
@@ -157,8 +195,89 @@ def work_dir(mods, mod):
     return os.path.join(mods, WORK, validate_mod_name(mod))
 
 
+# ---------------------------------------------------------------- o disco: pasta extraida ou imagem .iso
+# Com a ISO, cada arquivo pedido e copiado uma vez para um cache (disc_cache) e o resto do kit le de la como de uma pasta.
+
+_isos = {}
+
+
+def disc_iso(disc):
+    """O leitor da ISO, se o disco e uma imagem; None se e uma pasta (ou nao existe)."""
+    if not disc or not os.path.isfile(disc):
+        return None
+    key = os.path.abspath(disc)
+    if key not in _isos:
+        _isos[key] = iso9660.Iso(key)
+    return _isos[key]
+
+
+def disc_ok(disc):
+    if disc and os.path.isdir(disc):
+        return True
+    try:
+        return disc_iso(disc) is not None
+    except (OSError, ValueError):
+        return False
+
+
+def disc_cache(disc):
+    """Pasta onde os arquivos da ISO sao copiados (uma por imagem: caminho, tamanho e data)."""
+    st = os.stat(disc)
+    key = hashlib.sha1(("%s|%d|%d" % (os.path.abspath(disc).lower(), st.st_size, int(st.st_mtime))).encode()).hexdigest()[:12]
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    return os.path.join(base, "WotM", "modkit_disc", key)
+
+
+def disc_has(disc, rel):
+    """O disco tem esse arquivo/pasta? (sem copiar nada da ISO)"""
+    iso = disc_iso(disc)
+    if iso:
+        return iso.find(rel) is not None
+    return disc_file(disc, rel) is not None
+
+
+def disc_listdir(disc, rel=""):
+    """Nomes de uma pasta do disco ([] se nao existe)."""
+    iso = disc_iso(disc)
+    if iso:
+        return iso.listdir(rel)
+    d = disc_file(disc, rel) if rel else disc
+    return os.listdir(d) if d and os.path.isdir(d) else []
+
+
+def _iso_file(iso, disc, rel):
+    rel = rel.replace("\\", "/").strip("/")
+    if not rel:
+        os.makedirs(disc_cache(disc), exist_ok=True)
+        return disc_cache(disc)
+    parts, cur, names = rel.split("/"), "", []
+    for p in parts:
+        e = iso.find(cur + p)
+        if not e:
+            return None
+        names.append(e[3])
+        cur += e[3] + "/"
+    out = os.path.join(disc_cache(disc), *names)
+    if e[2]:
+        os.makedirs(out, exist_ok=True)
+        return out
+    rel = "/".join(names)
+    # .TEX/.RTX/.NGP: os irmaos tambem (o tex.py procura o .RTX e o .NGP ao lado)
+    stem, ext = os.path.splitext(rel)
+    sibs = [rel] + ([stem + x for x in (".TEX", ".RTX", ".NGP") if x != ext.upper()] if ext.upper() in (".TEX", ".RTX", ".NGP") else [])
+    for r in sibs:
+        f = iso.find(r)
+        q = os.path.join(disc_cache(disc), *r.split("/"))
+        if f and not f[2] and not (os.path.isfile(q) and os.path.getsize(q) == f[1]):
+            iso.extract(r, q)
+    return out
+
+
 def disc_file(disc, rel):
-    """Caminho no disco sem depender de maiusculas (o disco extraido no Windows nao liga, o WSL liga)."""
+    """Caminho no disco sem depender de maiusculas (o disco extraido no Windows nao liga, o WSL liga). Com a ISO, a copia no cache."""
+    iso = disc_iso(disc)
+    if iso:
+        return _iso_file(iso, disc, rel)
     p = os.path.join(disc, *rel.split("/"))
     if os.path.exists(p):
         return p
@@ -177,7 +296,7 @@ def find_texfile(disc, stem, ext):
     """<STEM>.TEX/.RTX no disco: LVL/, MON/, SHELL/ ou <STEM>/ (como o desenho nativo procura). Devolve o caminho relativo."""
     for d in TEX_DIRS + (stem.upper(),):
         rel = "%s/%s%s" % (d, stem.upper(), ext)
-        if disc_file(disc, rel):
+        if disc_has(disc, rel):
             return rel
     return None
 
@@ -192,10 +311,7 @@ def expand(disc, pats):
             pats2 = [pat]
         for p in pats2:
             d, base = os.path.split(p)
-            dd = disc_file(disc, d) if d else disc
-            if not dd:
-                continue
-            for n in sorted(os.listdir(dd)):
+            for n in sorted(disc_listdir(disc, d)):
                 if fnmatch.fnmatch(n.upper(), base.upper()):
                     out.append((d + "/" if d else "") + n)
     if not out:
@@ -282,7 +398,7 @@ def source_of(disc, rel):
     else:
         cands = [n]
     for c in cands:
-        if disc_file(disc, pre + c):
+        if disc_has(disc, pre + c):
             return pre + c
     return None
 
@@ -778,7 +894,7 @@ def monster_new(disc, work, mods, mod, cid, base, costume=None, name=None, ai=Fa
     prefix = base_prefix(bname)
     dco, dcam = BOSS_DEFAULTS.get(bname, (0, None))
     costume = dco if costume is None else costume
-    if costume not in range(4) or not disc_file(disc, "MON/%s%d.NGP" % (prefix, costume)):
+    if costume not in range(4) or not disc_has(disc, "MON/%s%d.NGP" % (prefix, costume)):
         raise SystemExit("monster new: the disc has no costume %s of %s (MON/%s%s.NGP)" % (costume, bname, prefix, costume))
     camera = dcam if camera is None else camera
     if camera:
@@ -1111,8 +1227,8 @@ def main(argv):
         return 1
     disc = opts.get("disc") or default_disc()
     mods = opts.get("mods") or default_mods(disc)
-    if not os.path.isdir(disc):
-        raise SystemExit("extracted disc not found at %s (--disc or WOTM_DISC)" % disc)
+    if not disc_ok(disc):
+        raise SystemExit("game disc not found at %r (--disc or WOTM_DISC: the .iso or the extracted folder)" % disc)
 
     def work_of(cmd, mod):
         validate_mod_name(mod, cmd)

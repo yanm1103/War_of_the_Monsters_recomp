@@ -1,4 +1,4 @@
-# ABOUTME: Monta o zip do release (item 14 do TODO.md): wotm.exe do build_dev, PDB, DLLs, mods, licencas e o texto do jogador.
+# ABOUTME: Monta o zip do release (item 14 do TODO.md): wotm.exe do build_dev, PDB, DLLs, kit de mods, mods, licencas e o texto do jogador.
 # ABOUTME: Confere que o exe e do commit atual e que nada do disco entrou (so os MECHA.* do mod Mecha, decisao do dono).
 #
 # Uso: powershell -ExecutionPolicy Bypass -File tools\release.ps1 [-Runtime <pasta>] [-Build build_dev] [-Out <pasta>] [-AllowDirty]
@@ -79,6 +79,12 @@ if (-not (Test-Path $pdb)) { Fail "falta $pdb" }
 Copy-Item $pdb $stage   # no zip, decisao do dono: quem relata uma queda le a pilha com nomes
 foreach ($d in $dlls.Values) { Copy-Item $d $stage }
 
+# kit de mods: WotM_ModKit.exe (tools/build_modkit.ps1, montado de novo a cada release) e as licencas do que vai dentro dele
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'build_modkit.ps1') -Runtime $Runtime
+if ($LASTEXITCODE) { Fail 'tools\build_modkit.ps1 falhou' }
+$kitDist = Join-Path $Runtime 'modkit_build\dist'
+Copy-Item (Join-Path $kitDist 'WotM_ModKit.exe') $stage
+
 # mods: os arquivos que o git rastreia em mods\ e os quatro do Mecha gerados do disco (tools/mechamon.py; no .gitignore)
 $mecha = 'mods/Mecha/monsters/mecha/files'
 $mechaFiles = 'MECHA.NGP', 'MECHA.PTR', 'MECHA.TEX', 'MECHA.RTX' | ForEach-Object { "$mecha/$_" }
@@ -97,6 +103,7 @@ Copy-Item (Join-Path $PSScriptRoot 'release\THIRD_PARTY.txt') $stage
 $lic = Join-Path $stage 'licenses'
 New-Item -ItemType Directory -Force $lic | Out-Null
 Copy-Item (Join-Path $PSScriptRoot 'release\licenses\*') $lic
+Copy-Item (Join-Path $kitDist 'licenses\*') $lic
 Copy-Item (Join-Path $repo 'LICENSE') (Join-Path $lic 'WotM-GPL-3.0.txt')
 $fromBuild = @{
     'PS2Recomp-LICENSE.md' = Join-Path $Runtime 'PS2Recomp\LICENSE'
@@ -110,7 +117,8 @@ foreach ($k in $fromBuild.Keys) {
 # cada arquivo citado no THIRD_PARTY.txt tem que estar no pacote
 $cited = [regex]::Matches((Get-Content (Join-Path $stage 'THIRD_PARTY.txt') -Raw), 'licenses\\([\w.\-]+)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
 foreach ($c in $cited) { if (-not (Test-Path (Join-Path $lic $c))) { Fail "THIRD_PARTY.txt cita licenses\$c, que nao esta no pacote" } }
-foreach ($d in $dlls.Keys) { if ((Get-Content (Join-Path $stage 'THIRD_PARTY.txt') -Raw) -notmatch [regex]::Escape($d)) { Fail "a DLL $d nao esta listada no THIRD_PARTY.txt" } }
+if ((Get-Content (Join-Path $stage 'THIRD_PARTY.txt') -Raw) -notmatch 'WotM_ModKit\.exe') { Fail 'o WotM_ModKit.exe nao esta no THIRD_PARTY.txt' }
+foreach ($d in $dlls.Keys) { if((Get-Content (Join-Path $stage 'THIRD_PARTY.txt') -Raw) -notmatch [regex]::Escape($d)) { Fail "a DLL $d nao esta listada no THIRD_PARTY.txt" } }
 
 # --- nada do disco nem do PC de quem empacota ---------------------------------------------------------------------------------------
 $allowed = $mechaFiles | ForEach-Object { ($_ -replace '/', '\').ToLower() }
