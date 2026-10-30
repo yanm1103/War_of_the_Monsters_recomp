@@ -141,10 +141,10 @@ class App:
     def build(self):
         top = ttk.Frame(self.root, padding=(10, 8, 10, 4))
         top.pack(fill="x")
-        for r, (label, var) in enumerate((("Extracted disc", self.disc), ("Mods folder", self.mods))):
+        for r, (label, var, pick) in enumerate((("Game disc (.iso)", self.disc, self.pick_disc), ("Mods folder", self.mods, self.pick_dir))):
             ttk.Label(top, text=label).grid(row=r, column=0, sticky="w", padx=(0, 8), pady=2)
             ttk.Entry(top, textvariable=var).grid(row=r, column=1, sticky="ew", pady=2)
-            ttk.Button(top, text="...", width=3, command=lambda v=var: self.pick_dir(v)).grid(row=r, column=2, padx=(4, 0))
+            ttk.Button(top, text="...", width=3, command=lambda v=var, f=pick: f(v)).grid(row=r, column=2, padx=(4, 0))
         top.columnconfigure(1, weight=1)
         # o mod atual: governa a pasta de trabalho, o Extract e o Build
         ttk.Label(top, text="Mod", style="Head.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=(6, 2))
@@ -284,7 +284,7 @@ class App:
         self.log.tag_configure("warn", foreground=EDIT)
         self.log.tag_configure("err", foreground="#ff6b6b")
         self.say("Mod kit. Pick or create a mod at the top, extract something from the disc into its work folder, edit it and build "
-                 "the mod. No game files go into the repo.\n")
+                 "the mod.%s\n" % ("" if modkit.FROZEN else " No game files go into the repo."))
 
     # ------------------------------------------------------------ caminhos e mod atual
     @staticmethod
@@ -360,6 +360,15 @@ class App:
         if d:
             var.set(os.path.normpath(d))
 
+    def pick_disc(self, var):
+        """A ISO do jogo; quem tem o disco extraido numa pasta escreve o caminho no campo."""
+        cur = var.get()
+        f = filedialog.askopenfilename(parent=self.root, title="War of the Monsters ISO (NTSC-U, SCUS-97197)",
+                                       initialdir=os.path.dirname(cur) if cur else os.getcwd(),
+                                       filetypes=[("Disc image", "*.iso"), ("All files", "*.*")])
+        if f:
+            var.set(os.path.normpath(f))
+
     def on_paths(self):
         if getattr(self, "_paths_job", None):
             self.root.after_cancel(self._paths_job)
@@ -403,13 +412,13 @@ class App:
         t = self.disc_tree
         t.delete(*t.get_children())
         disc = self.disc.get()
-        if not os.path.isdir(disc):
-            t.insert("", "end", text="(extracted disc not found: pick the folder above)")
+        if not modkit.disc_ok(disc):
+            t.insert("", "end", text="(game disc not found: pick your War of the Monsters .iso above)")
             return
         q = self.filter.get().strip().lower()
 
         def has(rel):
-            return modkit.disc_file(disc, rel) is not None
+            return modkit.disc_has(disc, rel)
 
         def add(parent, text, pats, open_=False):
             if q and q not in text.lower() and not any(q in p.lower() for p in pats):
@@ -439,13 +448,11 @@ class App:
                 add(g, "%s  (%s)" % (name, f), ["SHELL/%s" % f])
         used = {b for _, _, bs in MONSTERS + BOSSES for b in bs}
         g = group("Sound banks")
-        sd = modkit.disc_file(disc, "SND")
-        for n in sorted(os.listdir(sd)) if sd else []:
+        for n in sorted(modkit.disc_listdir(disc, "SND")):
             if n.upper().endswith(".BNK") and os.path.splitext(n)[0].upper() not in used:
                 add(g, n.upper(), ["SND/" + n])
         g = group("Music and voices")
-        vd = modkit.disc_file(disc, "VAG")
-        for n in sorted(os.listdir(vd)) if vd else []:
+        for n in sorted(modkit.disc_listdir(disc, "VAG")):
             if n.upper().endswith((".VPK", ".VAG")):
                 add(g, n.upper(), ["VAG/" + n])
         for g in t.get_children():
@@ -1205,7 +1212,7 @@ class App:
             for k, rb in enumerate(radios[:4]):
                 if not rb.winfo_exists():
                     return
-                ok = bool(prefix) and modkit.disc_file(disc, "MON/%s%d.TEX" % (prefix, k)) is not None
+                ok = bool(prefix) and modkit.disc_has(disc, "MON/%s%d.TEX" % (prefix, k))
                 if enabled is not None:
                     ok = ok and k in enabled
                 loading = bool(prefix) and Image is not None and prefix not in self.portraits
@@ -2057,7 +2064,7 @@ class App:
 def main():
     root = tk.Tk()
     try:
-        ico = os.path.join(modkit.REPO, "native", "wotm.ico")
+        ico = os.path.join(getattr(sys, "_MEIPASS", ""), "wotm.ico") if modkit.FROZEN else os.path.join(modkit.REPO, "native", "wotm.ico")
         if os.path.exists(ico):
             root.iconbitmap(ico)
     except tk.TclError:

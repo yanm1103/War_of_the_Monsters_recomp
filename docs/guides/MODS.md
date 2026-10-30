@@ -31,6 +31,13 @@ Windows the path `mods` falls on the disc's `MOD\`, the IRX one) next to the ELF
 
 `pythonw tools/modkit_gui.py`, or the **Mod kit** button of `WotM_Launcher.exe`. It needs Python 3 with Pillow (`pip install pillow`). The window is in English.
 
+In the release zip it is `WotM_ModKit.exe`, next to `wotm.exe` (built by `tools/build_modkit.ps1` with PyInstaller, Python, Tk and
+Pillow inside; `tools/release.ps1` calls it). There it finds by itself what `wotm.exe` uses: the ISO in `wotm.ini` (`iso=`) and the mods
+folder (`<data>/mods`, otherwise `<game>/mods`, where `<data>` is the game folder or `%LOCALAPPDATA%\WotM`).
+
+**Game disc** takes the `.iso` or the extracted disc folder. With the ISO, each file the kit needs is copied once to
+`%LOCALAPPDATA%\WotM\modkit_disc\<key>\` (one folder per image; `tools/iso9660.py` reads it), and the rest works as with the folder.
+
 A mod is a project: at the top, **Mod: [list] [New mod...]** picks the mod (New mod creates the mod folder and its work folder,
 `<mods>/_work/<mod>/`; the name only has letters, digits, `_` and `-`, starting with a letter or digit). When you pick the mod, its files
 that the work folder does not have (a mod made earlier or by hand) are copied there and show up as edited; Build takes them back.
