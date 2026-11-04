@@ -12,7 +12,7 @@
 // Alvo: o getClosestPlayer (so os humanos) vira o monstro vivo mais proximo entre todos os slots. KO pelo exercito: o
 // StateDeath::transitionInto tira 1 do placar da vitima quando nao ha assassino; o gancho devolve esse ponto (decisao do dono: KO
 // sem dono, sem ponto perdido).
-// Contexto e medidas: docs/investigacoes/2026-10-25/militares_spawn.md e docs/investigacoes/2026-11-04/militares_*.md.
+// Contexto e medidas (com git show): f70a4f0:docs/investigacoes/2026-10-25/militares_spawn.md e f70a4f0:docs/investigacoes/2026-11-04/militares_*.md.
 namespace wotm_army
 {
 using wotm_coop::call;

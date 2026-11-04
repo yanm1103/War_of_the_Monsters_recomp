@@ -15,7 +15,7 @@ Como funciona hoje: `docs/guides/MODS.md` ("Skins", "Monstros custom").
 - **Aviso do buffer do `.PTR` para skin com `.PTR` próprio:** o log de carga já mostra os texIds e a VRAM. Falta o buffer de 0x30D40 do `.PTR` (`0f091a4:docs/investigacoes/2026-10-23/skins_mod_carga.md`, item 8).
 
 ### 15. Exército: rotor do helicóptero fora de Vegas
-O `MON/ARMY.NGP` traz um `ANIM_MGR` próprio com a animação do rotor; ainda não foi visto girando fora de Vegas (ex.: VOLCANO, que só tem helicópteros). Parado fica na pose do arquivo, sem quebra. Por onde começar: foto de perto de um helicóptero em duas horas diferentes. Como funciona: `docs/guides/NATIVE.md`, "Army in versus fights". Contexto: `docs/investigacoes/2026-11-04/militares_etapa3_carga.md` (seção do rotor).
+O `MON/ARMY.NGP` traz um `ANIM_MGR` próprio com a animação do rotor; ainda não foi visto girando fora de Vegas (ex.: VOLCANO, que só tem helicópteros). Parado fica na pose do arquivo, sem quebra. Por onde começar: foto de perto de um helicóptero em duas horas diferentes. Como funciona: `docs/guides/NATIVE.md`, "Army in versus fights". Contexto: `f70a4f0:docs/investigacoes/2026-11-04/militares_etapa3_carga.md` (seção do rotor).
 
 ## Decomp
 - **Fora do caminho crítico:** oracle para funções com chamadas; cobertura com gameplay para realimentar o `boot_coverage_asm.csv` (`57d4afd:docs/investigacoes/2026-10-19/pendencias_oracle_cobertura.md`, seções 2 e 3).
