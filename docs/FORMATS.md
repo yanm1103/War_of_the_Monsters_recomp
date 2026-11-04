@@ -122,7 +122,8 @@ An `OBJECT` node (`_hierobject`, 0xA0 bytes) points with `polyPkt` (+4) to a DMA
 - Word 0: DMA tag with `QWC` in the low 16 bits and `ID=6` (`ret`) at `0x60000000`; the packet has `QWC + 1` quadwords. Words 2 onward are a **VIF stream** for the VU1 microcode.
 - **Positions**: `UNPACK V3-32` at `0xB5` (up to 190 vertices, XYZ floats). **Normals**: `UNPACK V3-8` at `0x175`, signed bytes (/127), 3 per normal without padding.
 - One or more **strip sections**, each ended by `MSCNT`. The section starts with a **GIF tag** (`UNPACK V4-32`, 1 element, at H = `0x238`/`0x2C8`/`0x358` in turn through the whole packet, VU1 triple buffering; up to 44 vertices):
-  `NLOOP` (bits 0..14) = number of vertices, `PRIM` (bits 47..57; triangle strip with Gouraud, texture and fog) and `REGS` = ST, RGBAQ, XYZF2. Then, with `STCYCL CL=3 WL=1`, each vertex takes 3 quadwords:
+  `NLOOP` (bits 0..14) = number of vertices, `PRIM` (bits 47..57; triangle strip with Gouraud, texture and fog) and `REGS` = ST, RGBAQ, XYZF2. Word 3, bits 0..14, picks the texture: `1 + 3 * slot`
+  loads `gsTexCtx[slot]` (1, 4, 7 in the monster files), 0 keeps the current one. Then, with `STCYCL CL=3 WL=1`, each vertex takes 3 quadwords:
   `S-8 @H+1+3k` position **index** (0..189), `V4-8 @H+2+3k` **RGBA** (`0x80` = 1.0; alpha too), `V2-16 @H+3+3k` fixed-point **UV** (`4096` = 1.0; negative and outside [0,1] repeats the texture).
 - **Strip break (ADC)**: `STMASK 0xBFBFBFBF` followed by `UNPACK S-8 num=2 @H+3+3k` marks vertices `k` and `k+1` as "do not draw" (XYZF2 ADC bit): the strip restarts at `k`. 8-vertex strips are common (cylinders/tubes). Joins by repeated vertex produce degenerate triangles (discard).
 - A new `UNPACK V3-32 @0xB5` replaces the position table (big objects have several batches of up to 190 vertices, separated by `STCYCL CL=4 WL=4` and `FLUSHE`).

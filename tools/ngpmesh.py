@@ -6,11 +6,13 @@
 The .glb comes from `tools/monglb.py` (the base monster in its skeleton, one mesh per skinned OBJECT, `obj_<address>`;
 joints `bone<N>` = skelOutputMatIdx N) and goes through Blender: the meshes can be remodeled, reweighted and re-UVed as long
 as the bones keep their names and the armature is not moved. Each `obj_<address>` mesh of the .glb replaces that OBJECT's
-sub-packets; every level of the LOD that holds it points at its level (the game draws it at any distance). Textures stay the base's (texId of the
-OBJECT): a new UV layout pairs with a PNG of the same size in the mod.
+sub-packets; every level of the LOD that holds it points at its level (the game draws it at any distance). Textures stay the base's (texIds of the
+OBJECT): each primitive draws with the texture its material names (`tex<texId>`, as monglb names them; otherwise the first), and a new
+UV layout pairs with a PNG of the same size in the mod.
 
-Limits: monsters with one palette block (Congar, Robo-47, Togera, Ultra-V, Preytor, Kineticlops, Magmo, Agamo, Goliath);
-3 bones per vertex (the heaviest kept); one texture per skinned OBJECT. Only the standard library: it runs inside the mod kit.
+Limits: skinned OBJECTs with one palette block (every one of Congar, Robo-47, Togera, Ultra-V, Preytor, Kineticlops, Magmo,
+Agamo and Goliath; it refuses the others); 3 bones per vertex (the heaviest kept). Only the standard library: it runs inside the
+mod kit.
 Formats: docs/FORMATS.md ("Meshes", "Fixups"); the packet writer is tools/vifpkt.py.
 """
 import json
@@ -130,6 +132,9 @@ class Base:
     def ok(self, a, n=4):
         return BASE <= a and a - BASE + n <= len(self.d)
 
+    def u16(self, a):
+        return struct.unpack_from("<H", self.d, a - BASE)[0]
+
     def u32(self, a):
         return struct.unpack_from("<I", self.d, a - BASE)[0]
 
@@ -218,13 +223,15 @@ class Base:
 # ---------------------------------------------------------------- glb mesh -> game vertices
 
 def _bone_out(name):
-    m = re.fullmatch(r"bone(?:[0-9a-f]+_)?(\d+)", name or "")
+    # bone<N>; bone<N>@<OBJECT>: the copy of the bones under the "off_<OBJECT>" node (skin with an object matrix, Agamo)
+    m = re.fullmatch(r"bone(?:[0-9a-f]+_)?(\d+)(?:@[0-9a-f]+)?", name or "")
     return int(m.group(1)) if m else None
 
 
 def read_mesh(glb, name, base, obj, warn):
-    """Triangles of the .glb mesh `name` in the game's terms: [(corner, corner, corner)], corner = (pos4 raw u32, normal s8x3,
-    uv s16x2, rgba u8x4); positions with the bone codes and weights already encoded for `obj`'s palette."""
+    """Triangles of the .glb mesh `name` in the game's terms, by texture slot of the OBJECT: {slot: [(corner, corner, corner)]},
+    corner = (pos4 raw u32, normal s8x3, uv s16x2, rgba u8x4); positions with the bone codes and weights already encoded for
+    `obj`'s palette. The slot comes from the primitive's material name (`tex<texId>`)."""
     node = next((n for n in glb.nodes if n.get("name") == name and "mesh" in n), None)
     if node is None:
         mi = next((k for k, m in enumerate(glb.j.get("meshes", [])) if m.get("name") == name), None)
@@ -261,11 +268,24 @@ def read_mesh(glb, name, base, obj, warn):
                         "keep the armature where the export put it" % (name, err[space]))
     conv = _to_game if space == "yup" else (lambda p: p)
 
-    tris = []
+    texids = [base.u16(obj + 0x50 + 2 * k) for k in range(min(base.u16(obj + 0x5A), 5))]
+    by_slot = {}
     lost = {}
     for prim in glb.j["meshes"][node["mesh"]]["primitives"]:
         if prim.get("mode", 4) != 4:
             raise MeshError("mesh %s: primitive mode %d (triangles only)" % (name, prim["mode"]))
+        mats = glb.j.get("materials", [])
+        mname = mats[prim["material"]].get("name", "") if "material" in prim and prim["material"] < len(mats) else ""
+        m = re.match(r"tex(\d+)", mname or "")
+        tid = int(m.group(1)) if m else None
+        if tid in texids:
+            slot = texids.index(tid)
+        else:
+            slot = 0
+            if len(texids) > 1:
+                warn("mesh %s: material %r is not one of the OBJECT's textures (%s); drawn with tex%d" % (
+                    name, mname, ", ".join("tex%d" % t for t in texids), texids[0]))
+        tris = by_slot.setdefault(slot, [])
         at = prim["attributes"]
         pos = glb.accessor(at["POSITION"])
         nrm = glb.accessor(at["NORMAL"]) if "NORMAL" in at else None
@@ -302,7 +322,7 @@ def read_mesh(glb, name, base, obj, warn):
             n = conv(nrm[v]) if nrm else (0.0, 0.0, 1.0)
             ln = math.sqrt(sum(c * c for c in n)) or 1.0
             n8 = tuple(max(-127, min(127, int(round(c / ln * 127)))) for c in n)
-            t = uv[v] if uv else (0.0, 0.0)
+            t = uv[v] if uv else (1.0, 1.0)   # no UV: untextured (PRIM.TME 0), where the game's files have 1.0
             uv16 = tuple(max(-32768, min(32767, int(round(c * 4096)))) for c in t)
             if col:
                 c = col[v] + ((1.0,) if len(col[v]) == 3 else ())
@@ -319,9 +339,10 @@ def read_mesh(glb, name, base, obj, warn):
             tris.append((a, b, c))
     if lost:
         warn("mesh %s: weights on bones outside the palette dropped: %s" % (name, ", ".join(sorted(map(str, lost)))))
-    if not tris:
+    by_slot = {k: v for k, v in by_slot.items() if v}
+    if not by_slot:
         raise MeshError("mesh %s: no triangles" % name)
-    return tris
+    return by_slot
 
 
 def encode_skinned(p, bones, nslots):
@@ -494,12 +515,19 @@ def build_packets(tris, gif_first, gif_rest, warn=None):
 # ---------------------------------------------------------------- patching the .NGP
 
 def _gif_templates(base, obj):
+    """GIF tag words of the first section of a sub-packet and of the others, from the base's first sub-packet. The low 15 bits of
+    word 3 pick the texture: 1 + 3 * slot loads the slot's GS context (TEX0, TEX1, MIP), 0 keeps the current one."""
     import ngp
     img = ngp.Image(bytes(base.d), BASE)
     addr, qwc = base.skinned[obj][2][0]
     p = vifpkt.parse(bytes(img.d[addr - BASE:addr - BASE + 16 * qwc]), True)
     secs = p.batches[0].sections
-    return secs[0].gif, (secs[1].gif if len(secs) > 1 else secs[0].gif[:3] + (0,))
+    rest = secs[1].gif if len(secs) > 1 else secs[0].gif
+    return secs[0].gif, rest[:3] + (rest[3] & ~0x7FFF,)
+
+
+def _with_slot(gif, slot):
+    return gif[:3] + ((gif[3] & ~0x7FFF) | (1 + 3 * slot),)
 
 
 def replace(base, obj, pkts):
@@ -604,7 +632,7 @@ def share_lod(base, objs, log):
     return out
 
 
-def write(base, out_dir, name):
+def write(base, out_dir, name, textures=True):
     os.makedirs(out_dir, exist_ok=True)
     stem = os.path.join(out_dir, name)
     with open(stem + ".NGP", "wb") as f:
@@ -615,6 +643,8 @@ def write(base, out_dir, name):
     ptr += base.ptr_tail
     with open(stem + ".PTR", "wb") as f:
         f.write(ptr)
+    if not textures:
+        return
     src = os.path.splitext(base.path)[0]
     for ext in (".TEX", ".RTX"):
         for cand in (src + ext, src + ext.lower()):
@@ -623,8 +653,9 @@ def write(base, out_dir, name):
                 break
 
 
-def import_glb(ngp_path, glb_path, out_dir, name=None, log=print):
-    """Replaces every skinned OBJECT whose `obj_<address>` mesh is in the .glb. Returns {OBJECT: (sub-packets, triangles)}."""
+def import_glb(ngp_path, glb_path, out_dir, name=None, log=print, textures=True):
+    """Replaces every skinned OBJECT whose `obj_<address>` mesh is in the .glb. Returns {OBJECT: (sub-packets, triangles)}.
+    textures=False: only the .NGP/.PTR (a skin or custom folder takes the missing .TEX/.RTX from the base costume)."""
     base = Base(ngp_path)
     glb = Glb(glb_path)
     names = {n.get("name") for n in glb.nodes} | {m.get("name") for m in glb.j.get("meshes", [])}
@@ -633,17 +664,21 @@ def import_glb(ngp_path, glb_path, out_dir, name=None, log=print):
         nm = "obj_%x" % obj
         if nm not in names:
             continue
-        tris = read_mesh(glb, nm, base, obj, log)
+        by_slot = read_mesh(glb, nm, base, obj, log)
         first, rest = _gif_templates(base, obj)
-        pkts = build_packets(tris, first, rest)
+        pkts = []
+        for slot, tris in sorted(by_slot.items()):   # each sub-packet draws one texture, picked by its first section
+            pkts += build_packets(tris, first if by_slot.keys() == {0} else _with_slot(first, slot), rest)
         replace(base, obj, pkts)
-        done[obj] = (len(pkts), len(tris))
-        log("%s: %d triangles in %d sub-packets (%d positions)" % (nm, len(tris), len(pkts), sum(p.nverts() for p in pkts)))
+        ntri = sum(len(t) for t in by_slot.values())
+        done[obj] = (len(pkts), ntri)
+        log("%s: %d triangles in %d sub-packets (%d positions)%s" % (nm, ntri, len(pkts), sum(p.nverts() for p in pkts),
+            "; textures %s" % ", ".join("slot %d: %d" % (k, len(v)) for k, v in sorted(by_slot.items())) if len(by_slot) > 1 else ""))
     if not done:
         raise MeshError("no obj_<address> mesh of a skinned OBJECT of %s in the .glb" % os.path.basename(ngp_path))
     for lod, lvl in share_lod(base, done, log):
         log("LOD %x: every level draws level %d" % (lod, lvl))
-    write(base, out_dir, name or os.path.splitext(os.path.basename(ngp_path))[0])
+    write(base, out_dir, name or os.path.splitext(os.path.basename(ngp_path))[0], textures)
     return done
 
 

@@ -1,8 +1,9 @@
-# ABOUTME: Monta o WotM_ModKit.exe (tools/modkit_gui.py com Python, Tk e Pillow dentro, PyInstaller) para o zip do release.
+# ABOUTME: Monta o WotM_ModKit.exe (tools/modkit_gui.py com Python, Tk, Pillow e numpy dentro, PyInstaller) para o zip do release.
 # ABOUTME: Venv proprio fora do repo (<runtime>\modkit_build\venv); saida em <runtime>\modkit_build\dist\, com as licencas do que vai dentro.
 #
 # Uso: powershell -ExecutionPolicy Bypass -File tools\build_modkit.ps1 [-Runtime <pasta>]   (o tools\release.ps1 chama sozinho)
-# Precisa do Python 3 no PATH (py ou python). Versoes fixas: PyInstaller e Pillow abaixo.
+# Precisa do Python 3 no PATH (py ou python). Versoes fixas: PyInstaller, Pillow e numpy abaixo (numpy: o
+# export da malha para o Blender, tools/monglb.py).
 param([string]$Runtime = '')
 
 $ErrorActionPreference = 'Stop'
@@ -18,7 +19,7 @@ $venv = Join-Path $root 'venv'
 $py = Join-Path $venv 'Scripts\python.exe'
 
 # --- venv com as versoes fixas ------------------------------------------------------------------------------------------------------
-$pins = 'pyinstaller==6.16.0', 'pillow==12.0.0'
+$pins = 'pyinstaller==6.16.0', 'pillow==12.0.0', 'numpy==2.5.4'
 if (-not (Test-Path $py)) {
     $base = (Get-Command py -ErrorAction SilentlyContinue).Source
     $baseArgs = @('-3')
@@ -37,13 +38,13 @@ $work = Join-Path $root 'work'
 $ico = Join-Path $repo 'native\wotm.ico'
 Remove-Item -Recurse -Force $dist, $work -ErrorAction SilentlyContinue
 & $py -m PyInstaller --noconfirm --clean --onefile --windowed --name WotM_ModKit --icon $ico --add-data "$ico;." `
-    --paths (Join-Path $repo 'tools') --hidden-import ngp --distpath $dist --workpath $work --specpath $work `
+    --paths (Join-Path $repo 'tools') --hidden-import ngp --hidden-import monglb --hidden-import ngpmesh --distpath $dist --workpath $work --specpath $work `
     (Join-Path $repo 'tools\modkit_gui.py')
 if ($LASTEXITCODE) { Fail 'PyInstaller falhou' }
 $exe = Join-Path $dist 'WotM_ModKit.exe'
 if (-not (Test-Path $exe)) { Fail "falta $exe" }
 
-# --- licencas do que vai dentro do exe (Python, Tcl/Tk, Pillow, bootloader do PyInstaller) -------------------------------------------
+# --- licencas do que vai dentro do exe (Python, Tcl/Tk, Pillow, numpy, bootloader do PyInstaller) ------------------------------------
 $lic = Join-Path $dist 'licenses'
 New-Item -ItemType Directory -Force $lic | Out-Null
 $basePrefix = (& $py -c 'import sys; print(sys.base_prefix)').Trim()
@@ -62,5 +63,10 @@ $pin = Get-ChildItem $site -Directory -Filter 'pyinstaller-*.dist-info' | Select
 $pinLic = if ($pin) { Get-ChildItem $pin.FullName -Recurse -File | Where-Object { $_.Name -match '^COPYING|^LICENSE' } | Select-Object -First 1 }
 if (-not $pinLic) { Fail 'licenca do PyInstaller nao achada no dist-info' }
 Copy-Item $pinLic.FullName (Join-Path $lic 'PyInstaller-COPYING.txt')
+# a do numpy junta as das bibliotecas que a roda leva (OpenBLAS, LAPACK, gfortran)
+$np = Get-ChildItem $site -Directory -Filter 'numpy-*.dist-info' | Select-Object -First 1
+$npLic = if ($np) { Get-ChildItem $np.FullName -Recurse -File | Where-Object { $_.Name -match '^LICENSE' } | Select-Object -First 1 }
+if (-not $npLic) { Fail 'licenca do numpy nao achada no dist-info' }
+Copy-Item $npLic.FullName (Join-Path $lic 'numpy-LICENSE.txt')
 
 Write-Host ("WotM_ModKit.exe: {0:N1} MB  ({1})" -f ((Get-Item $exe).Length / 1MB), $exe)

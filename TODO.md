@@ -10,7 +10,6 @@ O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado s
 ### 8. Mods que adicionam monstros
 Como funciona hoje: `docs/guides/MODS.md` ("Skins", "Monstros custom").
 Levantamento (tipo livre descartado em favor de remapear por instância; níveis do kit; medidas): `docs/investigacoes/2026-11-04/monstro_novo.md`. Ordem proposta:
-- **Kit L1, malha nova no esqueleto de um monstro do jogo:** `tools/ngpmesh.py` já importa o `.glb` editado (`MODELS_3D.md`); falta ligar ao kit: comando `modkit.py mesh export/import` e botão na janela (o export do `monglb.py` usa numpy, que o exe do kit não leva). Só monstros de um bloco de paleta.
 - **Banco de som por instância:** segundo banco no som nativo, handle trocado em volta dos `MonsterSound::*` do custom. Médio.
 - **Kit L2, animações no mesmo esqueleto:** trocar as existentes, depois acrescentar; pede exportar um nó por ANIM_XFORM no `monglb.py`. ~1 a 2 semanas.
 - **`"special"` no `monster.json`** (ponteiro em +0x7980 depois do `initDynamics`).

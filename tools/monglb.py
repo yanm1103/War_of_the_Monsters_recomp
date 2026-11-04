@@ -8,7 +8,8 @@
       (--anim-dir LIZARD: grava em LIZARD/ ao lado; os trajes de um monstro tem animacoes iguais e dividem a pasta)
   python tools/monglb.py disc/LVL/3-MILE.NGP saida/PLANT0.glb --boss plant --split --anim-dir PLANT   # chefes montados
       de pecas da fase: plant (3-MILE), root (3-MILE), mecha (CAPITOL); ver boss()
-  opcoes: --unlit (material sem luz; padrao: com luz, como o Renderer do nativo), --fps 60
+  opcoes: --unlit (material sem luz; padrao: com luz, como o Renderer do nativo), --fps 60, --vertex-alpha (alfa do vertice no
+      COLOR_0 tambem sem mistura: o tools/ngpmesh.py o devolve ao jogo; padrao: 1, o que o viewer mostra)
 
 Como sai (o mesmo modelo do tools/pose.py, conferido contra RAM de luta):
 - Um no raiz "WotM" gira o jogo (Z para cima) para o glTF (Y para cima). Tudo dentro dele esta nas unidades e eixos do jogo.
@@ -110,11 +111,12 @@ def const(vals, eps=1e-6):
 
 
 class Exporter:
-    def __init__(self, ngp_path, unlit=False, model=None, groups=None):
+    def __init__(self, ngp_path, unlit=False, model=None, groups=None, vertex_alpha=False):
         """model: um pose.Model ja montado (chefes); groups: [(nome, [instancias], id padrao)] — as animacoes de um chefe
         sao por peca: a chave k = 100 * grupo + indice toca essa animacao no grupo (nas outras instancias do grupo, a de
         mesmo id) e a animacao de id padrao nos outros grupos."""
         self.path = ngp_path
+        self.vertex_alpha = vertex_alpha
         self.mdl = model or pose.Model(ngp_path)
         self.groups = groups
         self.img = self.mdl.img   # base 0xA00000 (o .NGP do monstro vem pre-ligado)
@@ -142,7 +144,7 @@ class Exporter:
                 for v in tri:
                     ln = math.sqrt(v.nx * v.nx + v.ny * v.ny + v.nz * v.nz)
                     n = (v.nx / ln, v.ny / ln, v.nz / ln) if ln > 1e-6 else (0.0, 0.0, 1.0)
-                    c = (min(1.0, v.r / 128.0), min(1.0, v.g / 128.0), min(1.0, v.b / 128.0), min(1.0, v.a / 128.0) if md.abe else 1.0)
+                    c = (min(1.0, v.r / 128.0), min(1.0, v.g / 128.0), min(1.0, v.b / 128.0), min(1.0, v.a / 128.0) if md.abe or self.vertex_alpha else 1.0)
                     jw = self.weights(v, joint_of) if joint_of is not None else None
                     key = ((v.x, v.y, v.z), n, (v.u, v.v), c, jw)
                     if key not in verts:
@@ -728,7 +730,7 @@ def main(argv):
         anim_dir = argv[argv.index("--anim-dir") + 1] if "--anim-dir" in argv else None
         ex.export(argv[1], keys, 60.0, split="--split" in argv, anim_dir=anim_dir)
         return 0
-    ex = Exporter(argv[0], unlit="--unlit" in argv)
+    ex = Exporter(argv[0], unlit="--unlit" in argv, vertex_alpha="--vertex-alpha" in argv)
     table = ex.mdl.anims()
     idle_k = next(a[1] for a in table if a[0] == pose.IDLE)
     keys, fps = [idle_k], 60.0

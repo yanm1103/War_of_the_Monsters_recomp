@@ -589,12 +589,13 @@ class App:
                     continue
                 p = os.path.join(root, n)
                 rel = os.path.relpath(p, work).replace("\\", "/")
-                edited = state.get(rel, {}).get("sha1") != modkit.sha1(p)
+                src = n.lower().endswith(modkit.MESH_SRC)   # .glb/.blend do Blender: fica na pasta de trabalho
+                edited = not src and state.get(rel, {}).get("sha1") != modkit.sha1(p)
                 total += 1
                 edited_total += edited
                 if self.only_edited.get() and not edited:
                     continue
-                groups.setdefault(self.group_of(rel), []).append((rel, p, edited))
+                groups.setdefault(self.group_of(rel), []).append((rel, p, "for Blender" if src else edited))
         want = {self.group_of_pat(p) for p in focus} if focus else None
         first_new = None
         for key in sorted(groups, key=lambda k: (not k.startswith("monsters/"), not k.startswith("skins/"), k)):   # customs e skins primeiro
@@ -606,14 +607,15 @@ class App:
                 is_open = gid in was_open
             else:
                 is_open = len(groups) == 1
-            ne = sum(1 for _, _, e in items if e)
+            ne = sum(1 for _, _, e in items if e is True)
             t.insert("", "end", iid=gid, text="%s   [%d file(s)%s]" % (self.group_label(key), len(items), ", %d edited" % ne if ne else ""),
                      open=is_open, tags=("edited",) if ne else ())
             for rel, p, edited in items:
                 img = self.thumb(p)
                 kw = {"image": img} if img else {}
-                t.insert(gid, "end", iid=rel, text=" " + os.path.basename(rel), values=(self.info(p), "edited" if edited else "original"),
-                         tags=("edited",) if edited else (), **kw)
+                st = edited if isinstance(edited, str) else ("edited" if edited else "original")
+                t.insert(gid, "end", iid=rel, text=" " + os.path.basename(rel), values=(self.info(p), st),
+                         tags=("edited",) if edited is True else (), **kw)
             if want is not None and key in want and first_new is None:
                 first_new = gid
         if first_new and first_new.startswith(("grp:skins/", "grp:monsters/")):   # o grupo, para o painel de propriedades aparecer
@@ -1072,6 +1074,8 @@ class App:
         st = modkit.load_state(work)["files"]
         out = []
         for p in self.selected_files(groups=True):
+            if p.lower().endswith(modkit.MESH_SRC):   # o .glb do Blender nao tem original no disco
+                continue
             old = st.get(os.path.relpath(p, work).replace("\\", "/"), {}).get("sha1")
             if not old or not os.path.exists(p) or modkit.sha1(p) != old:
                 out.append(p)
@@ -1509,8 +1513,10 @@ class App:
                 w.state(["!disabled"])
         ai = tk.BooleanVar(value=bool(data.get("ai")))
         ttk.Checkbutton(p, text="CPUs may pick this skin", variable=ai).grid(row=4, column=1, sticky="w", pady=(6, 0))
+        ttk.Label(p, text="Mesh").grid(row=5, column=0, sticky="nw", padx=(0, 8), pady=(8, 2))
+        self.mesh_row(p, "skin", sid, os.path.join(self.work(), "skins", sid)).grid(row=5, column=1, sticky="w", pady=(8, 2))
         ttk.Button(p, text="Save", style="Accent.TButton", command=lambda: self.save_skin_props(sid, name.get(), base.get(), ai.get())
-                   ).grid(row=5, column=1, sticky="w", pady=(10, 0))
+                   ).grid(row=6, column=1, sticky="w", pady=(10, 0))
         p.columnconfigure(1, weight=1)
         self._skin_panel_vars = dict(name=name, base=base, ai=ai)   # para testes
 
@@ -1861,6 +1867,7 @@ class App:
         ttk.Button(lb, text="Extract stats", command=lambda: self.extract_stats(cid)).pack(side="left", padx=(6, 0))
         ttk.Label(lb, text=", ".join(chr_ + (["%d .AIC" % len(aic)] if aic else [])) or "stats: the base's",
                   style="Dim.TLabel").pack(side="left", padx=(8, 0))
+        self.mesh_row(lf, "monster", cid, wfiles, status=False).pack(anchor="w", pady=(4, 0))
         bf = ttk.Frame(p)
         bf.grid(row=9, column=1, sticky="w", pady=(4, 0))
         ttk.Button(bf, text="Save", style="Accent.TButton",
@@ -1962,6 +1969,55 @@ class App:
         self.run("Importing the model of %s..." % cid,
                  lambda mods=self.mods.get(): modkit.monster_model(work, mods, mod, cid, list(ps)),
                  lambda: self.reselect("monsters/" + cid))
+
+    def mesh_row(self, parent, kind, tid, folder, status=True):
+        """Export mesh (.glb para o Blender) e Import mesh... (o .glb editado vira o .NGP/.PTR), com o que a pasta ja tem."""
+        f = ttk.Frame(parent)
+        names = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+        if status:
+            model = [n for n in names if os.path.splitext(n)[1].upper() in (".NGP", ".PTR")]
+            glb = [n for n in names if n.lower().endswith(".glb")]
+            txt = ("own model: %s" % ", ".join(model)) if model else "the base costume's"
+            if glb:
+                txt += "; for Blender: %s" % ", ".join(glb)
+            ttk.Label(f, text=txt, style="Dim.TLabel", wraplength=300, justify="left").pack(anchor="w")
+        bf = ttk.Frame(f)
+        bf.pack(anchor="w", pady=(4, 0) if status else 0)
+        ttk.Button(bf, text="Export mesh", command=lambda: self.export_mesh(kind, tid)).pack(side="left")
+        ttk.Button(bf, text="Import mesh...", command=lambda: self.import_mesh(kind, tid)).pack(side="left", padx=(6, 0))
+        ttk.Label(bf, text="(.glb, Blender)", style="Dim.TLabel").pack(side="left", padx=(8, 0))
+        return f
+
+    def export_mesh(self, kind, tid):
+        work, mod = self.work(), self.cur_mod()
+        if not work:
+            return
+        key = ("skins/" if kind == "skin" else "monsters/") + tid
+        self.run("Exporting the mesh of %s for Blender..." % tid,
+                 lambda disc=self.disc.get(), mods=self.mods.get(): modkit.mesh_export(disc, work, mods, mod, kind, tid),
+                 lambda: self.reselect(key))
+
+    def import_mesh(self, kind, tid):
+        work, mod, mods = self.work(), self.cur_mod(), self.mods.get()
+        if not work:
+            return
+        try:
+            glb = modkit.mesh_glb(work, mods, mod, kind, tid)
+        except SystemExit as ex:
+            self.say("%s\n" % ex, "err")
+            return
+        d = os.path.dirname(glb)
+        kw = {"initialdir": d} if os.path.isdir(d) else {}
+        if os.path.isfile(glb):
+            kw["initialfile"] = os.path.basename(glb)
+        p = filedialog.askopenfilename(parent=self.root, title="Edited mesh of %s (.glb exported from Blender)" % tid,
+                                       filetypes=[("glTF binary", "*.glb *.GLB"), ("All files", "*.*")], **kw)
+        if not p:
+            return
+        key = ("skins/" if kind == "skin" else "monsters/") + tid
+        self.run("Importing the mesh of %s..." % tid,
+                 lambda disc=self.disc.get(): modkit.mesh_import(disc, work, mods, mod, kind, tid, p),
+                 lambda: self.reselect(key))
 
     def extract_stats(self, cid):
         work, mod = self.work(), self.cur_mod()
