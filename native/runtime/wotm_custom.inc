@@ -1264,6 +1264,10 @@ namespace wotm_custom
     }
 } // namespace wotm_custom
 
+// O custom de um Monster com o traje dos arquivos proprios (ou uma skin dele); nullptr = monstro do jogo. O banco de som proprio
+// (wotm_snd.inc, outro TU) pergunta por aqui.
+const wotm::mods::Custom *wotmCustomOwnFiles(uint8_t *rdram, uint32_t monster) { return wotm_custom::ownFilesCustom(rdram, monster); }
+
 // Depois do wotmSkinsInstall: embrulha os ganchos do SetAIMonster que ja estiverem registrados (WOTM_AIVSAI, skins).
 void wotmCustomInstall(PS2Runtime &runtime)
 {

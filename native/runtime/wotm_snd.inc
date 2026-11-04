@@ -13,6 +13,8 @@
 #include <cstring>
 #include "Kernel/Stubs/CD.h"
 #include <fstream>
+#include <iterator>
+#include <map>
 #define WOTM_HAVE_SND 1
 
 namespace wotm_snd_hooks
@@ -21,6 +23,7 @@ using wotm::snd::Engine;
 
 static bool g_log = false;
 static PS2Runtime::RecompiledFunction g_origLoadModule = nullptr;
+void preloadOwnBanks();   // banco de som proprio dos customs (abaixo)
 
 inline uint32_t arg(R5900Context *ctx, int i) { return getRegU32(ctx, 4 + i); }   // a0..a3, t0..t3 (EABI: 8 em registradores)
 inline int32_t sarg(R5900Context *ctx, int i) { return static_cast<int32_t>(getRegU32(ctx, 4 + i)); }
@@ -124,12 +127,14 @@ static void dropCryBank()
 void bankLoadByLoc(uint8_t *, R5900Context *ctx, PS2Runtime *)
 {
     dropCryBank();
+    preloadOwnBanks();
     const uint32_t h = Engine::get().loadBank(arg(ctx, 0), arg(ctx, 1));
     setReturnU32(ctx, h);
 }
 void bankLoadByLocCB(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
 {
     dropCryBank();
+    preloadOwnBanks();
     const uint32_t h = Engine::get().loadBank(arg(ctx, 0), arg(ctx, 1));
     callGuest(rdram, ctx, rt, arg(ctx, 2), h, arg(ctx, 3));
 }
@@ -359,6 +364,185 @@ void tankSound(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
     wotmFinishGuestCall(rdram, ctx, rt, ra);   // a troca vale ate o fim, mesmo com a funcao pausada no meio
     std::memcpy(rdram + (kBank12 & PS2_RAM_MASK), &bank, 4);
 }
+
+// Banco de som proprio de um custom (um .BNK na pasta "files", com os indices do banco do tipo; MODS.md, "Custom monsters"). Os
+// sons de um monstro saem de gSoundBanks[<tipo> - 1] (BANK_MECH no Goliath, BANK_FINAL no Jelly e na forma final), e quem os toca
+// sabe de qual Monster e: o MonsterSound (this +0xC), o WeaponSound do projetil (this = Weapon +0x64, dono pelo id em +0x120) e o
+// SuckerBugSound do inseto do Preytor (this = HomingBug +0x14, dono em +0xB0). Os ganchos trocam a entrada do tipo pelo banco do
+// custom durante a chamada, e um Monster do jogo do mesmo tipo chamado no meio dela volta a ver o do jogo. O banco fica so no
+// motor nativo, carregado uma vez e mantido; o _LS de baixa resolucao tem os mesmos indices do _S, entao o mesmo banco serve nas
+// lutas de 3 e 4.
+}   // namespace wotm_snd_hooks
+const wotm::mods::Custom *wotmCustomOwnFiles(uint8_t *rdram, uint32_t monster);   // wotm_overrides.cpp (wotm_custom.inc)
+namespace wotm_snd_hooks
+{
+constexpr uint32_t kMsMonster = 0xC, kWeaponSound = 0x64, kWeaponOwner = 0x120, kBugSound = 0x14, kBugOwner = 0xB0;
+constexpr uint32_t kTypeBits = 0x14, kMonsterId = 0x20, kMonsters = wotm::sym::shellGame + 0x120380u;   // TheGame::m_monsters[8]
+constexpr uint32_t kTakeHit = wotm::fn::playTakeHit__12MonsterSoundP7Monster;
+static uint32_t g_ownBankTypes = 0;   // bit por tipo de jogo com algum custom de banco proprio
+static uint32_t g_realBank[32];       // gSoundBanks[i] do jogo enquanto alguma troca esta de pe
+static int g_swapDepth[32];
+inline uint32_t rdU32(const uint8_t *rdram, uint32_t a) { uint32_t v; std::memcpy(&v, rdram + (a & PS2_RAM_MASK), 4); return v; }
+inline void wrU32(uint8_t *rdram, uint32_t a, uint32_t v) { std::memcpy(rdram + (a & PS2_RAM_MASK), &v, 4); }
+// Entrada de gSoundBanks dos sons de um tipo (loadMonsterBank; o 6 nao tem banco)
+inline int monsterBankSlot(uint32_t type)
+{
+    if (type >= 1 && type <= 11 && type != 6)
+        return int(type) - 1;
+    return type == 13 ? 22 : type == 14 || type == 15 ? 24 : -1;   // BANK_MECH, BANK_FINAL
+}
+uint32_t ownBank(const wotm::mods::Custom &cu)
+{
+    static std::map<std::string, uint32_t> s_banks;   // id do custom -> handle (0 = nao carregou)
+    if (auto it = s_banks.find(cu.id); it != s_banks.end())
+        return it->second;
+    std::vector<uint8_t> f;
+    std::ifstream in(cu.bank, std::ios::binary);
+    if (in)
+        f.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    const uint32_t h = f.empty() ? 0u : Engine::get().loadBankData(f);
+    std::fprintf(stderr, "[snd] %s: banco de som proprio %s %s %#x\n", cu.id.c_str(), cu.bank.filename().string().c_str(),
+                 h ? "no handle" : "NAO carregou (fica o do tipo)", h);
+    return s_banks[cu.id] = h;
+}
+// Carrega de antemao os bancos dos customs (no carregamento de um banco do jogo, entre telas), para o primeiro som da luta nao
+// esperar o disco
+void preloadOwnBanks()
+{
+    static bool s_done = false;
+    if (s_done)
+        return;
+    s_done = true;
+    for (const wotm::mods::Custom &cu : wotm::mods::Registry::get().customs())
+        if (!cu.bank.empty() && monsterBankSlot(uint32_t(cu.type)) >= 0 && ownBank(cu))
+            g_ownBankTypes |= 1u << cu.type;
+}
+struct BankSwap { int slot = -1; uint32_t prev = 0; };
+// Poe em gSoundBanks o banco que o Monster `m` usa: o proprio (custom com .BNK) ou, dentro da troca de outro Monster do mesmo
+// tipo, o do jogo de volta. false = nada a trocar.
+bool swapBankFor(uint8_t *rdram, uint32_t m, BankSwap &s)
+{
+    if (!m || !g_ownBankTypes)
+        return false;
+    const uint32_t type = rdU32(rdram, m + kTypeBits) >> 5;
+    const int slot = type < 32 && (g_ownBankTypes >> type & 1u) ? monsterBankSlot(type) : -1;
+    if (slot < 0)
+        return false;
+    const wotm::mods::Custom *cu = wotmCustomOwnFiles(rdram, m);
+    uint32_t want = cu && !cu->bank.empty() ? ownBank(*cu) : 0u;
+    if (!want && g_swapDepth[slot])
+        want = g_realBank[slot];
+    if (!want)
+        return false;
+    const uint32_t a = wotm::sym::gSoundBanks + 4u * uint32_t(slot);
+    s.slot = slot;
+    s.prev = rdU32(rdram, a);
+    if (!g_swapDepth[slot]++)
+        g_realBank[slot] = s.prev;
+    wrU32(rdram, a, want);
+    return true;
+}
+void unswapBank(uint8_t *rdram, const BankSwap &s)
+{
+    if (s.slot < 0)
+        return;
+    wrU32(rdram, wotm::sym::gSoundBanks + 4u * uint32_t(s.slot), s.prev);
+    --g_swapDepth[s.slot];
+}
+uint32_t monsterById(uint8_t *rdram, uint32_t id)
+{
+    for (uint32_t i = 0; i < 8; ++i)
+        if (const uint32_t m = rdU32(rdram, kMonsters + 4 * i); m && rdU32(rdram, m + kMonsterId) == id)
+            return m;
+    return 0;
+}
+enum SoundOwner { kOwnerMonsterSound, kOwnerWeapon, kOwnerBug };
+template <uint32_t A>
+PS2Runtime::RecompiledFunction g_soundOrig = nullptr;
+template <uint32_t A, int Owner>
+void ownBankHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
+{
+    if (ctx->pc != A || !g_ownBankTypes)
+    {
+        g_soundOrig<A>(rdram, ctx, rt);
+        return;
+    }
+    const uint32_t self = arg(ctx, 0);
+    uint32_t m = 0, attacker = 0;
+    if constexpr (Owner == kOwnerMonsterSound)
+    {
+        m = rdU32(rdram, self + kMsMonster);
+        // o impacto do golpe do Preytor e do Magmo sai do banco de quem bate (o this e quem apanha)
+        if (A == kTakeHit && arg(ctx, 1))
+        {
+            const uint32_t t = rdU32(rdram, arg(ctx, 1) + kTypeBits);
+            attacker = t == 0xA0u || t == 0x100u ? arg(ctx, 1) : 0u;
+        }
+    }
+    else if constexpr (Owner == kOwnerWeapon)
+        m = monsterById(rdram, rdU32(rdram, self - kWeaponSound + kWeaponOwner));
+    else
+        m = rdU32(rdram, self - kBugSound + kBugOwner);
+    BankSwap s1, s2;
+    const bool a = swapBankFor(rdram, m, s1), b = swapBankFor(rdram, attacker, s2);
+    if (!a && !b)
+    {
+        g_soundOrig<A>(rdram, ctx, rt);
+        return;
+    }
+    const uint32_t ra = getRegU32(ctx, 31);
+    g_soundOrig<A>(rdram, ctx, rt);
+    wotmFinishGuestCall(rdram, ctx, rt, ra);
+    unswapBank(rdram, s2);
+    unswapBank(rdram, s1);
+}
+template <uint32_t A, int Owner>
+void hookOwnBank(PS2Runtime &runtime)
+{
+    if ((g_soundOrig<A> = runtime.lookupFunction(A)))
+        runtime.registerFunction(A, &ownBankHook<A, Owner>);
+}
+void installOwnBankHooks(PS2Runtime &runtime)
+{
+    using namespace wotm::fn;
+    // os do MonsterSound que tocam ou param sons (fora o construtor, o init e os terminate*)
+#define WOTM_MS(f) hookOwnBank<f, kOwnerMonsterSound>(runtime)
+    WOTM_MS(play206Sound__12MonsterSound); WOTM_MS(playAlienRaygunDrawSound__12MonsterSound);
+    WOTM_MS(playAssBossWeaponDrawSound__12MonsterSound); WOTM_MS(playBatWhooshSound__12MonsterSound);
+    WOTM_MS(playBodyImpactSound__12MonsterSound); WOTM_MS(playButtSlamSound__12MonsterSound); WOTM_MS(playCloakingSound__12MonsterSound);
+    WOTM_MS(playCounterAttackSound__12MonsterSound); WOTM_MS(playCrowdControlSound__12MonsterSound); WOTM_MS(playDeathSound__12MonsterSoundi);
+    WOTM_MS(playEnterCounterBlockSound__12MonsterSound); WOTM_MS(playFootstepSound__12MonsterSound);
+    WOTM_MS(playGeneratorTazerSound__12MonsterSound); WOTM_MS(playGrappleAttackSound__12MonsterSound);
+    WOTM_MS(playGrapplePickupSound__12MonsterSound); WOTM_MS(playGrappleSwing__12MonsterSoundi); WOTM_MS(playGrappleThrowSound__12MonsterSound);
+    WOTM_MS(playImpalerRemoveSound__12MonsterSound); WOTM_MS(playJellyTazerOneShot__12MonsterSound); WOTM_MS(playJumpSound__12MonsterSound);
+    WOTM_MS(playLandingSound__12MonsterSound); WOTM_MS(playLavaSpecialInhale__12MonsterSound); WOTM_MS(playObjectThrowSound__12MonsterSound);
+    WOTM_MS(playPedSquishSound__12MonsterSound); WOTM_MS(playPickupSound__12MonsterSound); WOTM_MS(playPunchSound__12MonsterSound);
+    WOTM_MS(playRamSound__12MonsterSound); WOTM_MS(playRoboJetOneShot__12MonsterSound); WOTM_MS(playRobotHeadSound__12MonsterSound);
+    WOTM_MS(playRockmanSpecialBounce__12MonsterSoundP8_fvector); WOTM_MS(playRockmanSpecialExplode__12MonsterSoundP8_fvector);
+    WOTM_MS(playRockmanSpecialLaunch__12MonsterSound); WOTM_MS(playScrape__12MonsterSound); WOTM_MS(playShockedSound__12MonsterSound);
+    WOTM_MS(playShogunSpecialImpactSound__12MonsterSound); WOTM_MS(playShogunSpecialOneShot__12MonsterSound);
+    WOTM_MS(playSignatureSound__12MonsterSound); WOTM_MS(playSonicRoarSound__12MonsterSound); WOTM_MS(playSoundFromAnimation__12MonsterSoundf);
+    WOTM_MS(playStompAttackSound__12MonsterSound); WOTM_MS(playSuckerBugLaunch__12MonsterSound); WOTM_MS(playSwing__12MonsterSoundii);
+    WOTM_MS(playTakeBatHitSound__12MonsterSound); WOTM_MS(playTakeHitSound__12MonsterSound); WOTM_MS(playTakeHit__12MonsterSoundP7Monster);
+    WOTM_MS(playTauntSound__12MonsterSound); WOTM_MS(playVictorySound__12MonsterSoundi); WOTM_MS(playWaterFootstepSound__12MonsterSound);
+    WOTM_MS(playWaterSplashSound__12MonsterSound); WOTM_MS(playWingFlap__12MonsterSound);
+    WOTM_MS(updateAlienSound__12MonsterSound); WOTM_MS(updateAlienSpecial__12MonsterSoundi); WOTM_MS(updateAssBossRotorSound__12MonsterSound);
+    WOTM_MS(updateAssBossSpinSound__12MonsterSound); WOTM_MS(updateClimbingSound__12MonsterSound11MonsterAnim);
+    WOTM_MS(updateDashSound__12MonsterSound); WOTM_MS(updateElectricShockSound__12MonsterSound); WOTM_MS(updateEvilEye__12MonsterSound);
+    WOTM_MS(updateFireBreath__12MonsterSound); WOTM_MS(updateFlightGlideSound__12MonsterSoundi);
+    WOTM_MS(updateGeneralMonsterSounds__12MonsterSound); WOTM_MS(updateJellyTazer__12MonsterSound); WOTM_MS(updateLavaSound__12MonsterSound);
+    WOTM_MS(updateLavaSpecialInhaleChargeup__12MonsterSound); WOTM_MS(updateMantisSound__12MonsterSound);
+    WOTM_MS(updateMonsterCinemaSound__12MonsterSound); WOTM_MS(updateMonsterSound__12MonsterSound); WOTM_MS(updateOgreSound__12MonsterSound);
+    WOTM_MS(updateRobotReticleSound__12MonsterSound); WOTM_MS(updateRobotSound__12MonsterSound); WOTM_MS(updateShogunSound__12MonsterSound);
+    WOTM_MS(updateShogunSpecialSound__12MonsterSound); WOTM_MS(updateSpiderMagnoSpecial__12MonsterSound);
+    WOTM_MS(updateZapAttackSound__12MonsterSoundiP7Monster);
+#undef WOTM_MS
+    hookOwnBank<playWeaponLaunchSound__11WeaponSoundP8_fvectori, kOwnerWeapon>(runtime);
+    hookOwnBank<playWeaponExplosion__11WeaponSoundP8_fvectorii, kOwnerWeapon>(runtime);
+    hookOwnBank<playRockSpecialImpact__11WeaponSoundP8_fvector, kOwnerWeapon>(runtime);
+    hookOwnBank<updateWeaponSound__11WeaponSoundP6Weapon, kOwnerWeapon>(runtime);
+    hookOwnBank<updateSuckerBugSound__14SuckerBugSoundP8_fvectori, kOwnerBug>(runtime);
+}
 } // namespace wotm_snd_hooks
 
 void wotmSndInstall(PS2Runtime &runtime)
@@ -395,6 +579,7 @@ void wotmSndInstall(PS2Runtime &runtime)
         runtime.registerFunction(wotm::fn::sceSifLoadModule, hostLeaf<loadModule>);
     if ((g_origTankSound = runtime.lookupFunction(wotm::fn::updateTankSound__9TankSoundP10TankPickupi)))
         runtime.registerFunction(wotm::fn::updateTankSound__9TankSoundP10TankPickupi, &tankSound);
+    installOwnBankHooks(runtime);
     std::fprintf(stderr, "[snd] som nativo: %zu funcoes do 989snd trocadas\n", sizeof hooks / sizeof hooks[0]);
 }
 #else

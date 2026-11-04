@@ -86,7 +86,8 @@ disc costume stays untouched). In the list, the monster is a group at the top ("
 preview becomes the properties panel: Name, Camera, Narrator, *Rules* (the `kind`), CPUs, *HUD portrait* (**Set...** copies the image to
 `portrait.png` and writes the right `portraitTex` of the costume's `.RTX`; **Remove** goes back to the costume's) and *Look* (how many textures and the own
 model; **Import model files...** copies `.NGP` + `.PTR`, and optional `.TEX`/`.RTX`, to `files/`; **Extract stats** extracts the base
-type's `.CHR` and `.AIC` files to `files/`, where the edited ones become the monster's own; **Export mesh** and **Import mesh...**, below). **Save** rewrites `monster.json`
+type's `.CHR` and `.AIC` files to `files/`, where the edited ones become the monster's own; **Extract sounds** extracts the base type's
+sound bank as WAVs to `files/`, and on Build the replaced ones make the monster's own bank; **Export mesh** and **Import mesh...**, below). **Save** rewrites `monster.json`
 keeping the other keys. Right click on the group: **New skin for this monster...**, **Duplicate monster...** and **Delete monster** (its
 skins stay and the log warns). On an extracted costume group (playable or boss, e.g. "MON/ASSBOSS1"), right click has **Turn into
 custom monster...**, which moves the group's PNGs to the new monster.
@@ -119,6 +120,7 @@ python tools/modkit.py monster new my_mod fire_togera --base togera --costume 2 
 python tools/modkit.py monster portrait my_mod fire_togera retrato.png   # HUD portrait (2:1) and the portraitTex
 python tools/modkit.py monster model my_mod fire_togera X.NGP X.PTR [X.TEX] [X.RTX]   # own model into files/
 python tools/modkit.py monster stats my_mod fire_togera   # the base type's .CHR and .AIC to edit (own fight numbers and AI)
+python tools/modkit.py monster sounds my_mod fire_togera  # the base type's sound bank as WAVs (own sounds)
 python tools/modkit.py monster mesh export my_mod fire_togera   # the base costume as .glb for Blender ("New mesh from Blender")
 python tools/modkit.py monster mesh import my_mod fire_togera [edited.glb]   # the edited .glb becomes its .NGP + .PTR
 python tools/modkit.py skin mesh export my_mod green          # the same for a skin (skin mesh import my_mod green [edited.glb])
@@ -265,6 +267,15 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   type in one fight each read their own. Log: `[mods] monstro fire_togera: .CHR LIZARD.CHR, .AIC 0 LIZARD0.AIC, ... (RST/C_FIRE_TOGERA)`
   and, in the fight, `[custom] fire_togera: .CHR proprio (C_FIRE_TOGERA no lugar de lizard)`. The punch animations named in the `.CHR`
   are the model's, so the `.CHR` has to match the skeleton and animations of the base type.
+  A `.BNK` in the folder is the monster's own sound bank: it takes the place of the base type's bank (`SND/<BANK>.BNK`: `APE_S` for
+  Congar, `LIZARD_S` for Togera, `ROKMAN_S` for Agamo, `ASSEMB_S` for Goliath, `FINAL_S` for Jelly and the final form) for everything
+  this monster plays: its moves and hits (`MonsterSound`), its projectiles (`WeaponSound`, by the weapon's owner) and Preytor's bugs
+  (`SuckerBugSound`). It keeps the base bank's numbering (sound N plays where the game asks for sound N of the type), so it is the base
+  bank with some sounds replaced, as `monster sounds` and `pack` make it. A Preytor or Magmo hit sounds from the attacker's bank. Like the
+  `.CHR`, it applies to the custom's costume and skins only; a game monster of the same type in the same fight keeps the disc's. The
+  same bank serves in 3 and 4 player fights, where the game loads the low-res `_LS` banks (same numbering). Log: `[mods] monstro
+  fire_togera: som LIZARD_S.BNK` and `[snd] fire_togera: banco de som proprio LIZARD_S.BNK no handle 0x10001`; with `PS2X_SND_LOG=1`
+  each `Play banco` line shows the bank's handle.
 - `kind`: the port's own rules for the monster (`wotm_custom.inc`). Only `"mecha"` for now (below); empty = the type's.
 - `ai`: whether a CPU can use it (default no); without it the select screen shows "PLAYERS ONLY" in the CPU's box. With `"ai": true` the CPU can
   pick it in the select screen's CUSTOM slot; the launcher only offers customs to the player. A custom with a playable base fights as a CPU
@@ -285,7 +296,9 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   where they become its own costume (PNGs alone are enough: what the folder does not bring comes from `costume`). `monster portrait` copies the
   portrait and finds the `portraitTex` (the last 128 × 64 texture of the costume's `.RTX`); `monster model` puts its own `.NGP` + `.PTR` in
   `files/`; `monster stats` extracts the base type's `.CHR` and `.AIC` files to the work folder's `monsters/<id>/files/` (`pack` takes the
-  edited ones; `python tools/chr_dump.py` lists the punch table). `check` warns about a `base` that is not accepted, an invalid id and a missing `files` folder. In the window: **New monster...** (section
+  edited ones; `python tools/chr_dump.py` lists the punch table); `monster sounds` extracts the base type's bank as
+  `<bank>_sNNN.wav` to the same folder, and `pack` builds the monster's `.BNK` in `files/` from the disc bank with the replaced WAVs
+  (`snd989 bnk-replace`). `check` describes the bank and warns when it has fewer sounds than the base's. `check` warns about a `base` that is not accepted, an invalid id and a missing `files` folder. In the window: **New monster...** (section
   "Interface").
 - **Launcher:** customs show up in "Your monster", after Random (only for the player).
 - **What the port does for Goliath** (`native/runtime/wotm_custom.inc`): he is visible and controllable with AIs in the fight (the

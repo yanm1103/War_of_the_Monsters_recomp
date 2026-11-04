@@ -74,7 +74,10 @@ struct Custom {
     std::string resetStem;
     bool ownChr = false;
     bool ownAic = false;
-    std::string kind;          // regras proprias do port ("kind": "mecha" = escudo e laser, wotm_custom.inc); vazio = as do tipo
+    // .BNK da pasta "files": banco de som proprio, com os indices do banco do tipo (wotm_snd.inc o troca em volta dos sons desta
+    // instancia); vazio = o do tipo
+    std::filesystem::path bank;
+    std::string kind;         // regras proprias do port ("kind": "mecha" = escudo e laser, wotm_custom.inc); vazio = as do tipo
     std::string cameraFrom;     // MonsterLongNames do .CHR da camera ("lizard"); vazio = a do proprio tipo
     float cameraScale = 1.f;    // distancias da camera emprestada
     std::string narrator;       // narrator/<nome>.mp3 (vazio = o do tipo)
@@ -451,17 +454,19 @@ private:
 
     // .CHR e .AIC da pasta "files" de um custom (numeros da luta e IA proprios): entram como RST/C_<ID>.CHR e RST/C_<ID><d>.AIC
     // (d = dificuldade 0..2). Um .AIC terminado em 0, 1 ou 2 vale para essa dificuldade; sem numero, para as que nao tem o seu;
-    // dificuldade sem nenhum dos dois fica com o de outra.
+    // dificuldade sem nenhum dos dois fica com o de outra. Um .BNK e o banco de som proprio (Custom::bank).
     void scanResetFiles(Custom &c) {
         namespace fs = std::filesystem;
         std::error_code ec;
         fs::path chr, aicAny, aic[3];
+        c.bank.clear();
         for (auto it = fs::recursive_directory_iterator(c.files, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
             if (ec) break;
             if (!it->is_regular_file(ec)) continue;
             const std::string ext = key(it->path().extension().string()), stem = key(it->path().stem().string());
             fs::path *slot = nullptr;
             if (ext == ".CHR") slot = &chr;
+            else if (ext == ".BNK") slot = &c.bank;
             else if (ext == ".AIC") slot = !stem.empty() && stem.back() >= '0' && stem.back() <= '2' ? &aic[stem.back() - '0'] : &aicAny;
             if (!slot) continue;
             if (!slot->empty())
@@ -490,6 +495,8 @@ private:
             c.ownAic = true;
             what += std::string(what.empty() ? "" : ", ") + ".AIC " + std::to_string(d) + " " + p.filename().string();
         }
+        if (!c.bank.empty())
+            what += std::string(what.empty() ? "" : ", ") + "som " + c.bank.filename().string();
         if (!what.empty())
             std::fprintf(stderr, "[mods] monstro %s: %s (RST/%s)\n", c.id.c_str(), what.c_str(), c.resetStem.c_str());
     }

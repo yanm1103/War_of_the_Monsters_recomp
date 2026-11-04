@@ -15,6 +15,7 @@ pasta de trabalho (<mods>/_work/<mod>/, com o modkit.json dela), e o pack de um 
   python tools/modkit.py monster portrait my_mod fire_togera retrato.png       # retrato do HUD (2:1)
   python tools/modkit.py monster model my_mod fire_togera X.NGP X.PTR          # modelo proprio (esqueleto do tipo base)
   python tools/modkit.py monster stats my_mod fire_togera                     # .CHR e .AIC do tipo base para editar (so dele)
+  python tools/modkit.py monster sounds my_mod fire_togera                    # sons do banco do tipo base em WAV (banco so dele)
   python tools/modkit.py monster mesh export my_mod fire_togera               # malha do traje base em .glb para o Blender
   python tools/modkit.py monster mesh import my_mod fire_togera [editado.glb] # a malha editada vira o .NGP/.PTR do custom
   python tools/modkit.py skin mesh export my_mod green / skin mesh import my_mod green [editado.glb]   # o mesmo numa skin
@@ -407,10 +408,19 @@ def export(disc, work, pats, dest=None):
     print("work folder: %s (edit there, then send it to the mod: %s)" % (work, pack_hint("<mod>")))
 
 
+def bank_dir(d):
+    """Pasta do disco do .BNK de um <banco>_sNNN.wav: o banco proprio de um custom (monsters/<id>/files) sai do banco do tipo em SND/."""
+    return "SND" if d.startswith("monsters/") else d
+
+
 def source_of(disc, rel):
     """Arquivo do disco de onde saiu um arquivo da pasta de trabalho ("MON/lizard0_t0004.png" -> "MON/LIZARD0.TEX"); None se nao achou."""
     d, n = os.path.split(rel.replace("\\", "/"))
-    if d.startswith(("skins/", "monsters/")):   # PNG de skin ou de custom (skins/<id>/, monsters/<id>/files/): saiu do traje base em MON/
+    if d.startswith("monsters/") and BNK_RE.match(n):   # som do banco proprio de um custom: saiu do banco do tipo em SND/
+        d = "SND"
+    elif d.startswith("monsters/") and os.path.splitext(n)[1].upper() in (".CHR", ".AIC"):   # monster stats: de RST/
+        d = "RST"
+    elif d.startswith(("skins/", "monsters/")):   # PNG de skin ou de custom (skins/<id>/, monsters/<id>/files/): saiu do traje base em MON/
         d = "MON"
     pre = d + "/" if d else ""
     m = PNG_RE.match(n)
@@ -533,7 +543,7 @@ def pack(disc, work, mods, mod, inject=False):
             continue
         if n.lower().endswith(".wav"):
             mb = BNK_RE.match(n)
-            if mb and find_disc_ext(disc, d, mb.group(1), ".BNK"):
+            if mb and find_disc_ext(disc, bank_dir(d), mb.group(1), ".BNK"):
                 banks.setdefault((d, mb.group(1)), []).append((int(mb.group(2)), p))
                 continue
             stem = os.path.splitext(n)[0]
@@ -561,7 +571,7 @@ def pack(disc, work, mods, mod, inject=False):
         shutil.copy2(p, out)
         print("file %s -> %s/%s (as is)" % (rel, mod, rel))
     for (d, stem), sounds in sorted(banks.items()):
-        src = find_disc_ext(disc, d, stem, ".BNK")
+        src = find_disc_ext(disc, bank_dir(d), stem, ".BNK")
         out = os.path.join(dst, *d.split("/"), stem.upper() + ".BNK")
         os.makedirs(os.path.dirname(out), exist_ok=True)
         tmp = out + ".tmp"
@@ -1052,6 +1062,34 @@ def monster_stats(disc, work, mods, mod, cid):
         os.path.join(work, "monsters", cid, "files"), pack_hint(mod)))
 
 
+# Banco de som de cada tipo base (SoundManager::loadMonsterBank; o Goliath usa o do chefe, o Jelly e a forma final o da fase final)
+MONSTER_BANKS = {"MONKEY": "APE_S", "ROBOT": "ROBOT_S", "LIZARD": "LIZARD_S", "SHOGUN": "SHOGUN_S", "MANTIS": "MANTIS_S",
+                 "ENERGY": "ENERGY_S", "LAVA": "LAVA_S", "DRAGON": "DRAGON_S", "ROCK": "ROKMAN_S", "ALIEN": "ALIEN_S",
+                 "ASSBOSS": "ASSEMB_S", "JELLY": "FINAL_S", "FINAL": "FINAL_S"}
+
+
+def monster_sounds(disc, work, mods, mod, cid):
+    """Sons do banco do tipo base (SND/<BANCO>.BNK), do disco para <work>/monsters/<id>/files/ como <banco>_sNNN.wav. O pack
+    monta com os editados um .BNK na pasta files/ do monstro, e o port toca os sons deste custom dele, com os mesmos indices do
+    banco do tipo (MODS.md, "Custom monsters"). Liga "files" no monster.json."""
+    js = os.path.join(monster_dir(mods, mod, cid), "monster.json")
+    data = _json_obj(js)
+    if not data:
+        raise SystemExit("sounds: no monster.json in %s" % monster_dir(mods, mod, cid))
+    prefix = base_prefix(str(data.get("base", "")))
+    bank = MONSTER_BANKS.get(prefix)
+    if not bank:
+        raise SystemExit("sounds: \"base\" %r has no sound bank" % data.get("base"))
+    export(disc, work, ["SND/%s.BNK" % bank], dest="monsters/%s/files" % cid)
+    if not data.get("files"):
+        data["files"] = True
+        write_monster_json(mods, mod, cid, data)
+        print("monster.json of %s: \"files\": true" % cid)
+    os.makedirs(os.path.join(monster_dir(mods, mod, cid), "files"), exist_ok=True)
+    print("replace the WAVs you want in %s (same number = same sound), then: %s" % (
+        os.path.join(work, "monsters", cid, "files"), pack_hint(mod)))
+
+
 # ---------------------------------------------------------------- malha nova no esqueleto do tipo (MODELS_3D.md, tools/ngpmesh.py)
 
 def mesh_target(mods, mod, kind, tid):
@@ -1333,6 +1371,18 @@ def check(disc, mods, only=None):
                         "AI of the custom (%s)" % ("difficulty " + n[-5] if len(n) > 4 and n[-5] in "012" else "difficulties without their own")
                     if size > 0xC000:
                         note += " WARNING: fixed-size format, the game reads only the first %d bytes" % 0xC000
+                elif not orig and rel.upper().startswith("MONSTERS/") and ext == ".BNK":
+                    note = "sound bank of the custom (in place of the base type's)"
+                    parts = rel.split("/")
+                    bank = MONSTER_BANKS.get(base_prefix(str(_json_obj(os.path.join(mods, mod, parts[0], parts[1], "monster.json")).get("base", ""))))
+                    try:
+                        nb = len(snd989.read_bnk(p)["sounds"])
+                        nbase = len(snd989.read_bnk(disc_file(disc, "SND/%s.BNK" % bank))["sounds"]) if bank else 0
+                        note += ", %d sounds" % nb
+                        if nb < nbase:
+                            note += " WARNING: the base's %s.BNK has %d; the missing numbers play nothing" % (bank, nbase)
+                    except Exception as e:   # noqa: BLE001 (o check descreve, nao para)
+                        note, problems = "ERROR: not a sound bank (%s)" % e, problems + 1
                 elif not orig:
                     note = "new file (not on the disc; nothing asks for it yet)" if key else "part of the %s" % rel.split("/")[0][:-1]
                 else:
@@ -1424,8 +1474,8 @@ def main(argv):
     elif args[0] == "monster":
         use = ("monster new <mod> <id> --base <monster> [--costume N] [--name \"X\"] [--ai] [--camera togera:200 | --camera none] "
                "[--narrator <name>] [--no-textures]\nmonster portrait <mod> <id> <png>\nmonster model <mod> <id> <.NGP> <.PTR> [.TEX] [.RTX]"
-               "\nmonster stats <mod> <id>\nmonster mesh export <mod> <id>\nmonster mesh import <mod> <id> [edited.glb]")
-        if len(args) < 4 or args[1] not in ("new", "portrait", "model", "stats"):
+               "\nmonster stats <mod> <id>\nmonster sounds <mod> <id>\nmonster mesh export <mod> <id>\nmonster mesh import <mod> <id> [edited.glb]")
+        if len(args) < 4 or args[1] not in ("new", "portrait", "model", "stats", "sounds"):
             raise SystemExit(use)
         w = work_of("monster " + args[1], args[2])
         if args[1] == "new":
@@ -1456,6 +1506,10 @@ def main(argv):
             if len(args) != 4:
                 raise SystemExit(use)
             monster_stats(disc, w, mods, args[2], args[3])
+        elif args[1] == "sounds":
+            if len(args) != 4:
+                raise SystemExit(use)
+            monster_sounds(disc, w, mods, args[2], args[3])
         else:
             if len(args) < 5:
                 raise SystemExit(use)

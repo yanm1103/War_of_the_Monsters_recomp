@@ -1867,6 +1867,15 @@ class App:
         ttk.Button(lb, text="Extract stats", command=lambda: self.extract_stats(cid)).pack(side="left", padx=(6, 0))
         ttk.Label(lb, text=", ".join(chr_ + (["%d .AIC" % len(aic)] if aic else [])) or "stats: the base's",
                   style="Dim.TLabel").pack(side="left", padx=(8, 0))
+        # banco de som proprio: os sons do banco do tipo base em WAV; o pack monta o .BNK do custom com os trocados
+        wavs = [n for n in names if modkit.BNK_RE.match(n)]
+        st = modkit.load_state(self.work())["files"] if wavs else {}
+        changed = sum(1 for n in wavs if st.get("monsters/%s/files/%s" % (cid, n), {}).get("sha1") != modkit.sha1(os.path.join(wfiles, n)))
+        sb = ttk.Frame(lf)
+        sb.pack(anchor="w", pady=(4, 0))
+        ttk.Button(sb, text="Extract sounds", command=lambda: self.extract_sounds(cid)).pack(side="left")
+        ttk.Label(sb, text=("%d sound(s) as WAV, %d replaced" % (len(wavs), changed)) if wavs else "sounds: the base's",
+                  style="Dim.TLabel").pack(side="left", padx=(8, 0))
         self.mesh_row(lf, "monster", cid, wfiles, status=False).pack(anchor="w", pady=(4, 0))
         bf = ttk.Frame(p)
         bf.grid(row=9, column=1, sticky="w", pady=(4, 0))
@@ -2025,6 +2034,14 @@ class App:
             return
         self.run("Extracting the base's fight numbers and AI for %s..." % cid,
                  lambda disc=self.disc.get(), mods=self.mods.get(): modkit.monster_stats(disc, work, mods, mod, cid),
+                 lambda: self.reselect("monsters/" + cid))
+
+    def extract_sounds(self, cid):
+        work, mod = self.work(), self.cur_mod()
+        if not work:
+            return
+        self.run("Extracting the base's sounds for %s..." % cid,
+                 lambda disc=self.disc.get(), mods=self.mods.get(): modkit.monster_sounds(disc, work, mods, mod, cid),
                  lambda: self.reselect("monsters/" + cid))
 
     def duplicate_monster(self, cid):
