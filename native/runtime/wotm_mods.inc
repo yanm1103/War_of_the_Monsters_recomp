@@ -107,15 +107,25 @@ void wotmModsInstall(PS2Runtime &runtime, const std::string &elfPath)
 {
     using namespace wotm_mods_hooks;
     namespace fs = std::filesystem;
+    // Veiculos militares de VEGAS como MON/ARMY.* (exercito em qualquer fase, wotm_army.inc): gerados do disco do usuario numa cache ao
+    // lado do ELF e servidos pelo registro, com ou sem a pasta de mods (o WOTM_MODS=0 so desliga a pasta)
+    {
+        const fs::path cache = fs::path(elfPath).parent_path() / "cache" / "army";
+        const char *iso = std::getenv("WOTM_ISO");
+        if (!iso) iso = std::getenv("PS2X_CD_IMAGE");
+        std::string log;
+        if (wotm::army_files::ensure(cache, fs::path(elfPath).parent_path(), iso ? iso : "", log))
+            for (const char *f : wotm::army_files::kFiles)
+                Registry::get().addGenerated(std::string("MON/") + f, cache / f, "army (gerado)");
+        std::fprintf(stderr, "[exercito] arquivos MON/ARMY.*: %s\n", log.c_str());
+    }
     fs::path dir;
     if (const char *e = std::getenv("WOTM_MODS"))
     {
         if (std::strcmp(e, "0") == 0)
-        {
-            std::fprintf(stderr, "[mods] desligado (WOTM_MODS=0)\n");
-            return;
-        }
-        dir = e;
+            std::fprintf(stderr, "[mods] pasta de mods desligada (WOTM_MODS=0)\n");
+        else
+            dir = e;
     }
     else
     {
@@ -134,18 +144,6 @@ void wotmModsInstall(PS2Runtime &runtime, const std::string &elfPath)
         if (!modsIn(fs::path(elfPath).parent_path()) && repo && *repo && modsIn(fs::path(repo)))
             dir = fs::path(repo) / "mods";
     }
-    // Veiculos militares de VEGAS como MON/ARMY.* (exercito em qualquer fase, wotm_army.inc): gerados do disco do usuario numa cache ao
-    // lado do ELF, e servidos como um mod
-    {
-        const fs::path cache = fs::path(elfPath).parent_path() / "cache" / "army";
-        const char *iso = std::getenv("WOTM_ISO");
-        if (!iso) iso = std::getenv("PS2X_CD_IMAGE");
-        std::string log;
-        if (wotm::army_files::ensure(cache, fs::path(elfPath).parent_path(), iso ? iso : "", log))
-            for (const char *f : wotm::army_files::kFiles)
-                Registry::get().addGenerated(std::string("MON/") + f, cache / f, "army (gerado)");
-        std::fprintf(stderr, "[exercito] arquivos MON/ARMY.*: %s\n", log.c_str());
-    }
     const size_t n = Registry::get().scan(dir);
     if (n == 0)
         return;   // sem arquivos de mod: nenhum gancho, o jogo le o disco como sempre
@@ -161,5 +159,8 @@ void wotmModsInstall(PS2Runtime &runtime, const std::string &elfPath)
     std::string names;
     for (const std::string &m : Registry::get().modNames())
         names += (names.empty() ? "" : ", ") + m;
-    std::fprintf(stderr, "[mods] %zu arquivo(s) de %s em %s\n", n, names.c_str(), dir.string().c_str());
+    if (names.empty())
+        std::fprintf(stderr, "[mods] %zu arquivo(s) gerados pelo port, sem pasta de mods\n", n);
+    else
+        std::fprintf(stderr, "[mods] %zu arquivo(s) de %s em %s\n", n, names.c_str(), dir.string().c_str());
 }

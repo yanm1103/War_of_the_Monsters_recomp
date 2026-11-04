@@ -682,7 +682,8 @@ helicopters from `MON/ARMY.*` (below). The adventure keeps its own army untouche
   `LevelPickups::killPickup` with a `cs`: car (types 2, 15, 26) 3, tanker (3) 4, civil helicopter (11) and subway (27) 5.
 - **Target:** tank, truck and helicopter pick their target with `TheGame::getClosestPlayer`, which only walks the human players. With
   the army on, the hook returns the closest live monster of all slots (`m_playerNum`, not cloaked, not dead, not out, `m_flags & 2`,
-  drawn), and writes the squared distance, as the original.
+  drawn), and writes the squared distance, as the original. Only calls from the three vehicles' `updateAttackBehavior` (by `$ra`)
+  change: turrets and the UFO also call it and keep aiming at the human players only. The adventure (mode 1) never has the army.
 - **KO by the army:** the shot carries the vehicle's id (`kind` 5), so `Monster::takeHit` leaves `m_killer` 0 and
   `StateDeath::transitionInto` takes 1 from the victim's `m_winsThisGame`, as for a fall into water. The `takeHit` hook notes the
   time of the last army hit on each slot (a hit from a monster clears it); at the entry of `transitionInto`, with no killer and an
@@ -782,7 +783,7 @@ helicopters from `MON/ARMY.*` (below). The adventure keeps its own army untouche
 | `WOTM_RES=<linhas>`, `WOTM_FULLSCREEN=1`/`2` | height of the native frame (default 720; 224..4320; the PS2 shows 448; `0` or `window` = the height of the window or of the full screen, in pixels, with the window opening at 720) / full screen on open: 1 borderless, 2 exclusive (the monitor switches to its native resolution); F11 toggles between the window and the chosen type; the window opens at the frame size, reduced to fit the monitor (VIDEO tab of "Recompiled options") |
 | `WOTM_RENDERSCALE=<%>`, `WOTM_MSAA=<n>`, `WOTM_TEXFILTER=<f>` | PC graphics (VIDEO tab of "Recompiled options"; section "PC graphics"): frame scale over `WOTM_RES` (default 100; the panel offers 50, 75, 100, 125, 150, 200; above 100 is supersampling, the presentation downscales with bilinear; height up to 8640 and width up to 16384) / MSAA with `n` samples (0, 2, 4, 8; default 0; limited to `GL_MAX_SAMPLES`) / filter of the game textures: `bilinear` (default, the GS one), `trilinear` (mipmaps) or `2x`, `4x`, `8x`, `16x` (anisotropic with trilinear). The replay (`--vu1cmp`) ignores all three |
 | `WOTM_DISC=<pasta>`, `WOTM_ISO=<arquivo>` | force the source of the disc files (`.RTX`, `.PSS`) instead of `PS2X_CD_IMAGE`/the ELF folder |
-| `WOTM_MODS=<pasta>` (`0` turns it off) | folder of mods that override disc files (default: `mods/` next to the ELF; `wotm_mods.inc`, `MODS.md`) |
+| `WOTM_MODS=<pasta>` (`0` turns the folder off) | folder of mods that override disc files (default: `mods/` next to the ELF; the generated `MON/ARMY.*` load without it; `wotm_mods.inc`, `MODS.md`) |
 | `WOTM_FMV_MUTE=1` | movies without audio |
 | `WOTM_ARMY=1` | army in versus fights (ARMY option of the ARMY tab of "Recompiled options", `settings.ini`; section "Army in versus fights") |
 | `WOTM_ARMY_TRIGGER=<0..2>` | what sends a wave: 0 time, 1 destruction, 2 whichever comes first (default) |

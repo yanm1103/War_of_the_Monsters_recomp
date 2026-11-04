@@ -9,7 +9,7 @@
 // os estaciona escondidos. Na luta, o TheGame::Update conta o tempo de luta valendo e o caos (ganchos de entrada no
 // Destructible::ChangeState, LevelPickups::killPickup e pedsTurnOff); cada leva acorda veiculos estacionados ou mortos (regen +
 // posicao num no da PathNet::fodder do tipo do veiculo + enterState(0)).
-// Alvo: o getClosestPlayer (so os humanos) vira o monstro vivo mais proximo entre todos os slots. KO pelo exercito: o
+// Alvo: o getClosestPlayer (so os humanos) vira, para os veiculos do exercito, o monstro vivo mais proximo entre todos os slots. KO pelo exercito: o
 // StateDeath::transitionInto tira 1 do placar da vitima quando nao ha assassino; o gancho devolve esse ponto (decisao do dono: KO
 // sem dono, sem ponto perdido).
 // Contexto e medidas (com git show): f70a4f0:docs/investigacoes/2026-10-25/militares_spawn.md e f70a4f0:docs/investigacoes/2026-11-04/militares_*.md.
@@ -571,7 +571,12 @@ bool fightLive(uint8_t *rdram)
 
 void updateHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
-    if (ctx->pc != g_update.addr || !g_ready || !g_poolN)
+    if (ctx->pc != g_update.addr)   // retomada no meio: o quadro segue com o estado da entrada
+    {
+        g_update.orig(rdram, ctx, runtime);
+        return;
+    }
+    if (!g_ready || !g_poolN)
     {
         g_on = g_live = false;
         g_update.orig(rdram, ctx, runtime);
@@ -628,9 +633,21 @@ void updateHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 }
 
 // ------------------------------------------------------------------ alvo: o monstro vivo mais proximo
+// So para os veiculos do exercito (o updateAttackBehavior de cada um); as torretas e o UFO, que tambem chamam o getClosestPlayer,
+// seguem mirando so os jogadores
+struct Caller { uint32_t addr, size; };
+constexpr Caller kArmyCallers[] = {{fn::updateAttackBehavior__10TankPickupR7GamePad, 0x318},
+                                   {fn::updateAttackBehavior__18MissileTruckPickupR7GamePad, 0x304},
+                                   {fn::updateAttackBehavior__10HeliPickupR7GamePad, 0x5B8}};
+bool armyCaller(uint32_t ra)
+{
+    for (const Caller &c : kArmyCallers)
+        if (ra - c.addr < c.size) return true;
+    return false;
+}
 void closestHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
-    if (ctx->pc != g_closest.addr || !g_on)
+    if (ctx->pc != g_closest.addr || !g_on || !armyCaller(GPR_U32(ctx, 31)))
     {
         g_closest.orig(rdram, ctx, runtime);
         return;
