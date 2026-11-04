@@ -225,6 +225,75 @@ namespace wotm_custom
     void loadBank(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { loadBankCommon(rdram, ctx, runtime, kLoadBank, g_origLoadBank); }
     void loadLoBank(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { loadBankCommon(rdram, ctx, runtime, kLoadLoBank, g_origLoadLoBank); }
 
+    // .CHR e .AIC proprios (pasta "files", Registry::scanResetFiles). O charreset::setCharacter (MonsterTweaks::setActiveMonster,
+    // no initAfterDbLoad) e o AiReset::setAi (AiTweaks::setActiveAi, no Ai::init) montam o nome do arquivo com o MonsterLongNames
+    // do tipo no resetcom::m_fileName ("lizard"; "rst/lizard1.aic", ou "<fase>/lizard1.aic" na aventura), e o forceRead seguinte
+    // le o arquivo e grava os valores no Monster/Ai guardado em +0x40C0. Num Monster com o traje de um custom (o dos arquivos
+    // proprios ou uma skin dele), o nome vira o do custom: so pelo traje, porque um custom sem "files" nao se distingue do monstro
+    // do jogo do mesmo tipo. Cada instancia le o seu: dois customs do mesmo tipo na luta ficam com os numeros de cada um.
+    constexpr uint32_t kSetCharacter = wotm::fn::setCharacter__9charresetP7Monster, kSetAiReset = wotm::fn::setAi__7AiResetP2Ai;
+    constexpr uint32_t kResetFileName = 0xC040, kResetFileNameSize = 0x40;   // resetcom::m_fileName[0x40]
+    PS2Runtime::RecompiledFunction g_origSetCharacter = nullptr, g_origSetAiReset = nullptr;
+    const wotm::mods::Custom *ownFilesCustom(uint8_t *rdram, uint32_t m)
+    {
+        const int costume = m ? monsterCostume(rdram, m) : -1;
+        if (costume < 4)
+            return nullptr;
+        const wotm::mods::Registry &r = wotm::mods::Registry::get();
+        const wotm::mods::Skin *k = r.skinByIndex(int(cRd32(rdram, m + kTypeBits) >> 5), costume);
+        return k && !k->custom.empty() ? r.custom(k->custom) : nullptr;
+    }
+    std::string resetName(uint8_t *rdram, uint32_t self)
+    {
+        const char *s = reinterpret_cast<const char *>(rdram + ((self + kResetFileName) & 0x01FFFFFFu));
+        return std::string(s, strnlen(s, kResetFileNameSize));
+    }
+    void setResetName(uint8_t *rdram, uint32_t self, const std::string &name, const wotm::mods::Custom &cu, const char *what)
+    {
+        const std::string old = resetName(rdram, self);
+        char *dst = reinterpret_cast<char *>(rdram + ((self + kResetFileName) & 0x01FFFFFFu));
+        std::memset(dst, 0, kResetFileNameSize);
+        std::memcpy(dst, name.data(), std::min<size_t>(name.size(), kResetFileNameSize - 1));
+        static std::set<std::string> logged;   // uma linha por custom e arquivo (o jogo le de novo a cada luta)
+        if (logged.insert(cu.id + "/" + name).second)
+            std::fprintf(stderr, "[custom] %s: %s proprio (%s no lugar de %s)\n", cu.id.c_str(), what, name.c_str(), old.c_str());
+    }
+    void setCharacter(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (ctx->pc != kSetCharacter)
+        {
+            g_origSetCharacter(rdram, ctx, runtime);
+            return;
+        }
+        const uint32_t self = GPR_U32(ctx, 4), m = GPR_U32(ctx, 5);
+        g_origSetCharacter(rdram, ctx, runtime);
+        if (const wotm::mods::Custom *cu = ownFilesCustom(rdram, m); cu && cu->ownChr)
+            setResetName(rdram, self, cu->resetStem, *cu, ".CHR");
+    }
+    void setAiReset(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (ctx->pc != kSetAiReset)
+        {
+            g_origSetAiReset(rdram, ctx, runtime);
+            return;
+        }
+        const uint32_t self = GPR_U32(ctx, 4), ai = GPR_U32(ctx, 5);
+        g_origSetAiReset(rdram, ctx, runtime);
+        const wotm::mods::Custom *cu = ai ? ownFilesCustom(rdram, cRd32(rdram, ai)) : nullptr;   // Ai +0: o Monster
+        if (!cu || !cu->ownAic)
+            return;
+        // "rst/lizard1.aic" -> "rst/C_<ID>1.aic" (tambem na aventura: o custom nao tem .AIC por fase)
+        const std::string old = resetName(rdram, self);
+        const size_t dot = old.size() >= 5 ? old.size() - 4 : std::string::npos;
+        const char d = dot != std::string::npos ? old[dot - 1] : 0;
+        if (d < '0' || d > '2')
+        {
+            std::fprintf(stderr, "[custom] %s: nome de .AIC inesperado (%s); fica o do tipo\n", cu->id.c_str(), old.c_str());
+            return;
+        }
+        setResetName(rdram, self, "rst/" + cu->resetStem + d + ".aic", *cu, ".AIC");
+    }
+
     // Camera: o RST/ASSBOSS.CHR traz parametros de camera que o retail nunca usou (no POV 0 a camera fica na frente e baixa:
     // m_00 = (-70, 336, 90) contra (0, -255, 150) do Togera), e a do RST/JELLY.CHR fica nas pernas do Jelly. A tabela de camera do
     // monstro (+0x6CF0: 10 POVs de 0xA0, mais 10 da tela dividida) vem do .CHR dele (MonsterTweaks::setActiveMonster) e o
@@ -1229,6 +1298,10 @@ void wotmCustomInstall(PS2Runtime &runtime)
         runtime.registerFunction(kLoadBank, &loadBank);
     if ((g_origLoadLoBank = runtime.lookupFunction(kLoadLoBank)))
         runtime.registerFunction(kLoadLoBank, &loadLoBank);
+    if ((g_origSetCharacter = runtime.lookupFunction(kSetCharacter)))
+        runtime.registerFunction(kSetCharacter, &setCharacter);
+    if ((g_origSetAiReset = runtime.lookupFunction(kSetAiReset)))
+        runtime.registerFunction(kSetAiReset, &setAiReset);
     if ((g_origMonsterUpdate = runtime.lookupFunction(kMonsterUpdate)))
         runtime.registerFunction(kMonsterUpdate, &monsterUpdate);
     if ((g_origTakeDamage = runtime.lookupFunction(kTakeDamage)))

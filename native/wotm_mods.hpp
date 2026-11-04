@@ -69,7 +69,12 @@ struct Custom {
     int costume = 0;            // traje padrao: o do disco (0..3) ou, com "files", o traje de mod dos arquivos proprios (4..99)
     int diskCostume = 0;        // traje do disco do "costume" do JSON: base das skins dele e o que os arquivos proprios nao trazem
     std::filesystem::path files;   // pasta dos arquivos proprios ("files"); vazia = os do tipo
-    std::string kind;           // regras proprias do port ("kind": "mecha" = escudo e laser, wotm_custom.inc); vazio = as do tipo
+    // .CHR e .AIC da pasta "files": servidos como RST/<resetStem>.CHR e RST/<resetStem><dificuldade>.AIC (wotm_custom.inc troca
+    // o nome no charreset/AiReset); vazio = os do tipo
+    std::string resetStem;
+    bool ownChr = false;
+    bool ownAic = false;
+    std::string kind;          // regras proprias do port ("kind": "mecha" = escudo e laser, wotm_custom.inc); vazio = as do tipo
     std::string cameraFrom;     // MonsterLongNames do .CHR da camera ("lizard"); vazio = a do proprio tipo
     float cameraScale = 1.f;    // distancias da camera emprestada
     std::string narrator;       // narrator/<nome>.mp3 (vazio = o do tipo)
@@ -180,6 +185,7 @@ public:
                 continue;
             }
             c.costume = k->index;
+            scanResetFiles(c);
         }
         assignLsns();
         return m_files.size() + m_alias.size();
@@ -441,6 +447,51 @@ private:
             kept.push_back(k);
         }
         m_skins = std::move(kept);
+    }
+
+    // .CHR e .AIC da pasta "files" de um custom (numeros da luta e IA proprios): entram como RST/C_<ID>.CHR e RST/C_<ID><d>.AIC
+    // (d = dificuldade 0..2). Um .AIC terminado em 0, 1 ou 2 vale para essa dificuldade; sem numero, para as que nao tem o seu;
+    // dificuldade sem nenhum dos dois fica com o de outra.
+    void scanResetFiles(Custom &c) {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        fs::path chr, aicAny, aic[3];
+        for (auto it = fs::recursive_directory_iterator(c.files, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
+            if (ec) break;
+            if (!it->is_regular_file(ec)) continue;
+            const std::string ext = key(it->path().extension().string()), stem = key(it->path().stem().string());
+            fs::path *slot = nullptr;
+            if (ext == ".CHR") slot = &chr;
+            else if (ext == ".AIC") slot = !stem.empty() && stem.back() >= '0' && stem.back() <= '2' ? &aic[stem.back() - '0'] : &aicAny;
+            if (!slot) continue;
+            if (!slot->empty())
+                std::fprintf(stderr, "[mods] monstro %s: dois %s, usando %s\n", c.id.c_str(), ext.c_str(), slot->filename().string().c_str());
+            else
+                *slot = it->path();
+        }
+        c.resetStem = "C_" + key(c.id);
+        const auto add = [&](const std::string &rel, const fs::path &host) {
+            File &f = m_files[rel];
+            f.rel = rel;
+            f.host = host;
+            f.mod = c.mod;
+            f.size = fs::file_size(host, ec);
+        };
+        std::string what;
+        if (!chr.empty()) {
+            add("RST/" + c.resetStem + ".CHR", chr);
+            c.ownChr = true;
+            what = ".CHR " + chr.filename().string();
+        }
+        for (int d = 0; d < 3; ++d) {
+            const fs::path &p = !aic[d].empty() ? aic[d] : !aicAny.empty() ? aicAny : !aic[1].empty() ? aic[1] : !aic[0].empty() ? aic[0] : aic[2];
+            if (p.empty()) continue;
+            add("RST/" + c.resetStem + std::to_string(d) + ".AIC", p);
+            c.ownAic = true;
+            what += std::string(what.empty() ? "" : ", ") + ".AIC " + std::to_string(d) + " " + p.filename().string();
+        }
+        if (!what.empty())
+            std::fprintf(stderr, "[mods] monstro %s: %s (RST/%s)\n", c.id.c_str(), what.c_str(), c.resetStem.c_str());
     }
 
     // mods/<mod>/monsters/<pasta>/monster.json: {"id", "name", "base", "costume", "camera": {"from", "scale" (%)}, "narrator", "ai"}.

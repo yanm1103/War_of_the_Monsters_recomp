@@ -1851,10 +1851,18 @@ class App:
             look = "the disc costume (no own files)"
         else:
             look = "%d texture(s) to edit in monsters/%s/files" % (npng, cid) + ("; own model: %s" % ", ".join(model) if model else "")
+        # numeros da luta (.CHR) e IA (.AIC) proprios: os do tipo base, extraidos para editar na pasta de trabalho
+        chr_ = [n for n in names if n.upper().endswith(".CHR")]
+        aic = [n for n in names if n.upper().endswith(".AIC")]
         ttk.Label(lf, text=look, style="Dim.TLabel", wraplength=300, justify="left").pack(anchor="w")
-        ttk.Button(lf, text="Import model files...", command=lambda: self.import_model(cid)).pack(anchor="w", pady=(4, 0))
+        lb = ttk.Frame(lf)
+        lb.pack(anchor="w", pady=(4, 0))
+        ttk.Button(lb, text="Import model files...", command=lambda: self.import_model(cid)).pack(side="left")
+        ttk.Button(lb, text="Extract stats", command=lambda: self.extract_stats(cid)).pack(side="left", padx=(6, 0))
+        ttk.Label(lb, text=", ".join(chr_ + (["%d .AIC" % len(aic)] if aic else [])) or "stats: the base's",
+                  style="Dim.TLabel").pack(side="left", padx=(8, 0))
         bf = ttk.Frame(p)
-        bf.grid(row=9, column=1, sticky="w", pady=(10, 0))
+        bf.grid(row=9, column=1, sticky="w", pady=(4, 0))
         ttk.Button(bf, text="Save", style="Accent.TButton",
                    command=lambda: self.save_monster_props(cid, name.get(), cam_from, cam_scale, narr.get(), kind.get(), ai.get())).pack(side="left")
         ttk.Button(bf, text="New skin for it...", command=lambda: self.new_skin(preset=cid)).pack(side="left", padx=(6, 0))
@@ -1953,6 +1961,14 @@ class App:
             return
         self.run("Importing the model of %s..." % cid,
                  lambda mods=self.mods.get(): modkit.monster_model(work, mods, mod, cid, list(ps)),
+                 lambda: self.reselect("monsters/" + cid))
+
+    def extract_stats(self, cid):
+        work, mod = self.work(), self.cur_mod()
+        if not work:
+            return
+        self.run("Extracting the base's fight numbers and AI for %s..." % cid,
+                 lambda disc=self.disc.get(), mods=self.mods.get(): modkit.monster_stats(disc, work, mods, mod, cid),
                  lambda: self.reselect("monsters/" + cid))
 
     def duplicate_monster(self, cid):

@@ -14,6 +14,7 @@ pasta de trabalho (<mods>/_work/<mod>/, com o modkit.json dela), e o pack de um 
   python tools/modkit.py monster new my_mod gold_goliath --base assboss       # de um chefe (traje e camera padrao do chefe)
   python tools/modkit.py monster portrait my_mod fire_togera retrato.png       # retrato do HUD (2:1)
   python tools/modkit.py monster model my_mod fire_togera X.NGP X.PTR          # modelo proprio (esqueleto do tipo base)
+  python tools/modkit.py monster stats my_mod fire_togera                     # .CHR e .AIC do tipo base para editar (so dele)
   python tools/modkit_gui.py                                 # o mesmo com interface (botao "Mod kit" do launcher)
 
 Opcoes: --disc <pasta ou .iso> (disco extraido ou a ISO; padrao WOTM_DISC ou disc/ do repo; no WotM_ModKit.exe, o iso= do
@@ -1011,6 +1012,28 @@ def monster_model(work, mods, mod, cid, paths):
     print("send them to the mod: %s" % pack_hint(mod))
 
 
+def monster_stats(disc, work, mods, mod, cid):
+    """Numeros da luta (RST/<PREFIXO>.CHR) e IA (RST/<PREFIXO>0..2.AIC) do tipo base, do disco para <work>/monsters/<id>/files/.
+    Os editados o pack leva para a pasta files/ do monstro, e o port os le no lugar dos do tipo, so para este custom (MODS.md,
+    "Custom monsters"). Liga "files" no monster.json."""
+    js = os.path.join(monster_dir(mods, mod, cid), "monster.json")
+    data = _json_obj(js)
+    if not data:
+        raise SystemExit("stats: no monster.json in %s" % monster_dir(mods, mod, cid))
+    prefix = base_prefix(str(data.get("base", "")))
+    if not prefix:
+        raise SystemExit("stats: \"base\" %r is not a type the port accepts" % data.get("base"))
+    rels = ["RST/%s.CHR" % prefix] + ["RST/%s%d.AIC" % (prefix, d) for d in range(3) if disc_has(disc, "RST/%s%d.AIC" % (prefix, d))]
+    export(disc, work, rels, dest="monsters/%s/files" % cid)
+    if not data.get("files"):
+        data["files"] = True
+        write_monster_json(mods, mod, cid, data)
+        print("monster.json of %s: \"files\": true" % cid)
+    os.makedirs(os.path.join(monster_dir(mods, mod, cid), "files"), exist_ok=True)
+    print("edit them in %s (python tools/chr_dump.py <.CHR> lists the punches), then: %s" % (
+        os.path.join(work, "monsters", cid, "files"), pack_hint(mod)))
+
+
 def monster_duplicate(mods, mod, work, cid, new):
     """Copia o monstro cid para new: a pasta no mod (monster.json com o id novo), a pasta de trabalho e o estado."""
     err = custom_id_error(new)
@@ -1199,7 +1222,13 @@ def check(disc, mods, only=None):
             else:
                 orig = disc_file(disc, rel)
                 size = os.path.getsize(p)
-                if not orig:
+                ext = os.path.splitext(n)[1].upper()
+                if not orig and rel.upper().startswith("MONSTERS/") and ext in (".CHR", ".AIC"):
+                    note = "fight numbers of the custom (in place of the base type's)" if ext == ".CHR" else \
+                        "AI of the custom (%s)" % ("difficulty " + n[-5] if len(n) > 4 and n[-5] in "012" else "difficulties without their own")
+                    if size > 0xC000:
+                        note += " WARNING: fixed-size format, the game reads only the first %d bytes" % 0xC000
+                elif not orig:
                     note = "new file (not on the disc; nothing asks for it yet)" if key else "part of the %s" % rel.split("/")[0][:-1]
                 else:
                     osz = os.path.getsize(orig)
@@ -1280,8 +1309,9 @@ def main(argv):
         skin_new(disc, work_of("skin new", args[2]), mods, args[2], args[3], args[4], base, opts.get("name"), opts.get("ai", False))
     elif args[0] == "monster":
         use = ("monster new <mod> <id> --base <monster> [--costume N] [--name \"X\"] [--ai] [--camera togera:200 | --camera none] "
-               "[--narrator <name>] [--no-textures]\nmonster portrait <mod> <id> <png>\nmonster model <mod> <id> <.NGP> <.PTR> [.TEX] [.RTX]")
-        if len(args) < 4 or args[1] not in ("new", "portrait", "model"):
+               "[--narrator <name>] [--no-textures]\nmonster portrait <mod> <id> <png>\nmonster model <mod> <id> <.NGP> <.PTR> [.TEX] [.RTX]"
+               "\nmonster stats <mod> <id>")
+        if len(args) < 4 or args[1] not in ("new", "portrait", "model", "stats"):
             raise SystemExit(use)
         w = work_of("monster " + args[1], args[2])
         if args[1] == "new":
@@ -1308,6 +1338,10 @@ def main(argv):
             if len(args) != 5:
                 raise SystemExit(use)
             monster_portrait(disc, w, mods, args[2], args[3], args[4])
+        elif args[1] == "stats":
+            if len(args) != 4:
+                raise SystemExit(use)
+            monster_stats(disc, w, mods, args[2], args[3])
         else:
             if len(args) < 5:
                 raise SystemExit(use)

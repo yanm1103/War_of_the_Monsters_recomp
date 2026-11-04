@@ -85,7 +85,8 @@ It creates the `monster.json` in `mods/<mod>/monsters/<id>/` and, with "Own look
 disc costume stays untouched). In the list, the monster is a group at the top ("Monster: NAME (custom id, base X costume N)"); when selected, the
 preview becomes the properties panel: Name, Camera, Narrator, *Rules* (the `kind`), CPUs, *HUD portrait* (**Set...** copies the image to
 `portrait.png` and writes the right `portraitTex` of the costume's `.RTX`; **Remove** goes back to the costume's) and *Look* (how many textures and the own
-model; **Import model files...** copies `.NGP` + `.PTR`, and optional `.TEX`/`.RTX`, to `files/`). **Save** rewrites `monster.json`
+model; **Import model files...** copies `.NGP` + `.PTR`, and optional `.TEX`/`.RTX`, to `files/`; **Extract stats** extracts the base
+type's `.CHR` and `.AIC` files to `files/`, where the edited ones become the monster's own). **Save** rewrites `monster.json`
 keeping the other keys. Right click on the group: **New skin for this monster...**, **Duplicate monster...** and **Delete monster** (its
 skins stay and the log warns). On an extracted costume group (playable or boss, e.g. "MON/ASSBOSS1"), right click has **Turn into
 custom monster...**, which moves the group's PNGs to the new monster.
@@ -103,6 +104,7 @@ python tools/modkit.py monster new my_mod fire_togera --base togera --costume 2 
     [--camera togera:200 | --camera none] [--narrator togera] [--no-textures]   # custom monster (section "Custom monsters")
 python tools/modkit.py monster portrait my_mod fire_togera retrato.png   # HUD portrait (2:1) and the portraitTex
 python tools/modkit.py monster model my_mod fire_togera X.NGP X.PTR [X.TEX] [X.RTX]   # own model into files/
+python tools/modkit.py monster stats my_mod fire_togera   # the base type's .CHR and .AIC to edit (own fight numbers and AI)
 ```
 
 - A mod is a project: the work folder is `<mods>/_work/<mod>/`, with its `modkit.json`, and one mod's `pack` never takes what
@@ -238,6 +240,13 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
 - `files`: the model's own files, in a subfolder of the monster (`true` = `files/`, or its name) with `<any name>.NGP` and
   `.PTR` (and `.TEX`/`.RTX`, optional): they become a mod costume of its own (like an implicit skin, costume 4 to 99), which becomes the default
   costume; the JSON's `costume` provides what the files do not bring (sounds, whatever is missing). Without the folder, the log warns and the disc costume stays.
+  The same folder takes the monster's own fight numbers and AI, in place of the base type's: a `.CHR` (punches, damage, ranges, camera;
+  `RST/<PREFIX>.CHR` format) and `.AIC` files (`RST/<PREFIX><difficulty>.AIC` format). An `.AIC` whose name ends in 0, 1 or 2 is that
+  difficulty's; one without a digit covers the difficulties without their own (the adventure uses them too, in place of the per-stage
+  ones). They apply to the custom's own costume and to its skins, never to the game's monster of the same type, and two customs of the same
+  type in one fight each read their own. Log: `[mods] monstro fire_togera: .CHR LIZARD.CHR, .AIC 0 LIZARD0.AIC, ... (RST/C_FIRE_TOGERA)`
+  and, in the fight, `[custom] fire_togera: .CHR proprio (C_FIRE_TOGERA no lugar de lizard)`. The punch animations named in the `.CHR`
+  are the model's, so the `.CHR` has to match the skeleton and animations of the base type.
 - `kind`: the port's own rules for the monster (`wotm_custom.inc`). Only `"mecha"` for now (below); empty = the type's.
 - `ai`: whether a CPU can use it (default no); without it the select screen shows "PLAYERS ONLY" in the CPU's box. With `"ai": true` the CPU can
   pick it in the select screen's CUSTOM slot; the launcher only offers customs to the player. A custom with a playable base fights as a CPU
@@ -257,7 +266,8 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   exports the costume's textures to `mods/_work/<mod>/monsters/<id>/files/`; `pack` takes the edited ones to the monster's `files/` folder,
   where they become its own costume (PNGs alone are enough: what the folder does not bring comes from `costume`). `monster portrait` copies the
   portrait and finds the `portraitTex` (the last 128 × 64 texture of the costume's `.RTX`); `monster model` puts its own `.NGP` + `.PTR` in
-  `files/`. `check` warns about a `base` that is not accepted, an invalid id and a missing `files` folder. In the window: **New monster...** (section
+  `files/`; `monster stats` extracts the base type's `.CHR` and `.AIC` files to the work folder's `monsters/<id>/files/` (`pack` takes the
+  edited ones; `python tools/chr_dump.py` lists the punch table). `check` warns about a `base` that is not accepted, an invalid id and a missing `files` folder. In the window: **New monster...** (section
   "Interface").
 - **Launcher:** customs show up in "Your monster", after Random (only for the player).
 - **What the port does for Goliath** (`native/runtime/wotm_custom.inc`): he is visible and controllable with AIs in the fight (the
