@@ -117,15 +117,21 @@ Id = high 14 bits of the node's first word. Nodes with opcode 0x1F and 0x27 are 
 Pickups keep the `Interactives` slot id in the `hierhead`: `Interactives::addInteractive` returns that index.
 
 ## Meshes (`HierObject::polyPkt`)
-Reference readers: `tools/ngp.py` (Python, offline, straight from the disc) and `native/wotm_native.hpp` (`decodeObject`, C++, reads EE RAM).
+Reference readers: `tools/ngp.py` (Python, offline, straight from the disc) and `native/wotm_native.hpp` (`decodeObject`, C++, reads EE RAM). Writer: `tools/vifpkt.py` (packet to geometry and back; byte-exact on every packet of the 44 monster `.NGP`).
 An `OBJECT` node (`_hierobject`, 0xA0 bytes) points with `polyPkt` (+4) to a DMA sub-chain called by `pktAddVu1ObjAsm` (tag `CALL`; the packet ends in `RET`):
 - Word 0: DMA tag with `QWC` in the low 16 bits and `ID=6` (`ret`) at `0x60000000`; the packet has `QWC + 1` quadwords. Words 2 onward are a **VIF stream** for the VU1 microcode.
 - **Positions**: `UNPACK V3-32` at `0xB5` (up to 190 vertices, XYZ floats). **Normals**: `UNPACK V3-8` at `0x175`, signed bytes (/127), 3 per normal without padding.
-- One or more **strip sections**, each ended by `MSCNT`. The section starts with a **GIF tag** (`UNPACK V4-32`, 1 element, at H = `0x238`/`0x2C8`/`0x358`, alternating because of VU1 double buffering):
+- One or more **strip sections**, each ended by `MSCNT`. The section starts with a **GIF tag** (`UNPACK V4-32`, 1 element, at H = `0x238`/`0x2C8`/`0x358` in turn through the whole packet, VU1 triple buffering; up to 44 vertices):
   `NLOOP` (bits 0..14) = number of vertices, `PRIM` (bits 47..57; triangle strip with Gouraud, texture and fog) and `REGS` = ST, RGBAQ, XYZF2. Then, with `STCYCL CL=3 WL=1`, each vertex takes 3 quadwords:
   `S-8 @H+1+3k` position **index** (0..189), `V4-8 @H+2+3k` **RGBA** (`0x80` = 1.0; alpha too), `V2-16 @H+3+3k` fixed-point **UV** (`4096` = 1.0; negative and outside [0,1] repeats the texture).
 - **Strip break (ADC)**: `STMASK 0xBFBFBFBF` followed by `UNPACK S-8 num=2 @H+3+3k` marks vertices `k` and `k+1` as "do not draw" (XYZF2 ADC bit): the strip restarts at `k`. 8-vertex strips are common (cylinders/tubes). Joins by repeated vertex produce degenerate triangles (discard).
-- A new `UNPACK V3-32 @0xB5` replaces the position table (big objects have several batches of up to 190 vertices).
+- A new `UNPACK V3-32 @0xB5` replaces the position table (big objects have several batches of up to 190 vertices, separated by `STCYCL CL=4 WL=4` and `FLUSHE`).
+- The UV unpack runs under `STMASK 0x50505050` (S and T from the data, the rest from the row register); a section with ADC sets `0xBFBFBFBF` for them and restores `0x50505050`.
+- The packet ends with `STCYCL CL=4 WL=4`, zero-padded to a quadword. Every packet starts on a 0x80 boundary.
+- **Sprite sections** (shadow, reticle and other billboards): the GIF tag has PRIM sprite; then `STCYCL CL=6 WL=1`, `V4-32 @H+3` center and half side per sprite, `V4-8 @H+2` RGBA, `STCYCL CL=3 WL=1` and `V2-16 @H+1` two UVs per sprite. A sprite packet has no positions or normals.
+- **Skinned objects** do not use `polyPkt` (it points at the padding before the first sub-packet). `CHAR_INSTANCE::animPktPtr[OBJECT+0x68]` is a DMA chain of `REF palette, REF sub-packet` pairs ended by `RET`; each REF gives the sub-packet length. A sub-packet is pure VIF:
+  `UNPACK S-32 @0xB4` = vertex count, `UNPACK V4-32 @0xB5` positions (bone codes in the low 8 bits of x/y/z, weight in w; up to 190), the normals, `MSCALF` into the skinning program (0: every vertex has one bone, 2: up to two, 4: up to three), then the strip sections.
+  The three bone slots of a vertex are always distinct; unused ones have weight 0.
 - `_hierobject.bits.numVerts` (13 bits) is the object's total vertex count; `texId[5]`/`numTextures` and `gsTexCtx[i]` (+0x70, 0x30 bytes each: `TEX0`, `TEX1`, `MIP`) describe the textures. Collision/visibility sphere at +0x10 (center) and +0x1C (radius); `sphereRadiusSqrd` at +8.
 - World conventions: row vectors (`p' = p * M`), **Z up**; `ROTATE` matrices at +0x10 (4x4), `TRANSLATE` adds `trans` (+0x10), `SCALE` applies `scale` (+0x20) then `trans` (+0x10).
 - Nodes traversed by the port: `GROUP` (children at +0x20, u16 count at +8), `LOD` (list of `{fade, switchOutDis, child, pad}` at +0x20; 0 is the coarsest and the last the most detailed; the game picks the highest index whose `switchOutDis`, a squared distance, is greater than the distance to the LOD's center), `SWITCH` (child `whichChild` at +0xC), `CONTROL` (`child1` at +4), `ACTION_DATA` (child at +4), `CHAR_INSTANCE` (children at +0x2C, count at +0x28), `INTERACTIVE` (child at +0xC), `DESTRUCTIBLE` (states at +0xC, 12 bytes each; 0 is the intact one).

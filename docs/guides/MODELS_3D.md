@@ -10,6 +10,7 @@
 | `tools/pose.py` | pose of a monster (`Model(ngp).pose(anim, quadro)`), `--list` shows the animations; writes a posed `.glb` |
 | `tools/gltf.py` | exports `.glb` (textures from `tex.py`); with `model=` the skinned meshes come out in the pose |
 | `tools/monglb.py` | animated `.glb` for the web viewer: joints = bones with an output (parent = whoever wrote the starting matrix on the stack), inverse bind = `restPoseInv`, rigid parts as nodes; curves sampled at 60/s; GS blends, scrolling texture, fire and lens flare in the extras. `--boss plant|root|mecha` assembles the bosses from the stage pieces (3-MILE, CAPITOL). Matches `pose.py` vertex by vertex |
+| `tools/vifpkt.py` | reads a mesh packet into geometry and writes it back (rigid, sprite, skinned sub-packets); `python tools/vifpkt.py disc/MON` checks the byte-exact round trip on every packet |
 | `tools/shellpics.py` | wide stage pictures and monster logos from `SHELL.TEX/.RTX` as PNG (the same ones as `wotm_savepics.hpp`) |
 | `native/wotm_model.hpp` | the same in C++: `wotm::model::Model` (load, pose, posed triangles, textures) and `Renderer` (raylib, RenderTexture) |
 | `native/monview.cpp` | `build\monview.exe disc MONKEY0 [--anim 90] [--yaw 35] [--shot x.png]`: animated window (arrows rotate, PgUp/PgDn switch the animation) or PNG |
