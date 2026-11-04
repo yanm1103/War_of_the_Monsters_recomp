@@ -113,6 +113,8 @@ WotmFreeCamPose g_wotmFreeCamPose;
 #include "wotm_custom.inc"
 // Modo treino (item 9): esferas dos golpes, dano exato e boneco (WOTM_TRAINING, menu F2)
 #include "wotm_training.inc"
+// Exercito nas lutas versus (opcao ARMY): tanques, caminhoes e helicopteros da fase em levas
+#include "wotm_army.inc"
 // Log das acoes da IA (WOTM_AILOG)
 #include "wotm_ai.inc"
 
@@ -2976,6 +2978,7 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
     if (g_matchMode == 1 && g_matchLevel >= 0 && (g_origDialogAdventure = runtime.lookupFunction(wotm::fn::displayDialog__Fi)))
         runtime.registerFunction(wotm::fn::displayDialog__Fi, &dialogAdventure);   // depois do da pausa (wotm_pausemenu.inc)
     wotmCustomInstall(runtime);  // depois das skins: embrulha o SetAIMonster delas
+    wotmArmyInstall(runtime);   // antes do treino: o takeHit dele fica por fora
     wotmTrainingInstall(runtime);   // por ultimo: o gancho mais de fora do update/takeHit/takeDamage (ve o dano que as trapacas deixam)
     if (g_minRate > 0)
         std::fprintf(stderr, "[wotm] updateRate >= %d (dt <= 1/%d) para o jogo inteiro (WOTM_RATEMIN)\n", g_minRate, g_minRate);

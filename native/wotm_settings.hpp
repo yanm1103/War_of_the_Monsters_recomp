@@ -48,6 +48,15 @@ enum Key
     SkipIntro,    // pula os dois filmes do boot (wotm_fmv.hpp); lido uma vez, no primeiro filme: vale no proximo boot
     Vibration,    // vibracao dos gamepads (wotm_rumble.inc)
     Interp,       // interpolacao de quadros (wotm_live.inc, "interpolacao"), ligada por padrao: acima de 60 Hz (g_presentHz) ou com o jogo a 30
+    Army,         // exercito nas lutas (wotm_army.inc): tanques, caminhoes de missil e helicopteros soltos em levas
+    ArmyTrigger,  // o que solta uma leva: 0 o tempo (ArmyEvery), 1 o caos (ArmyChaos), 2 o que vier primeiro
+    ArmyEvery,    // segundos de luta entre levas (kArmyEvery)
+    ArmyChaos,    // pontos de destruicao por leva (kArmyChaos): pedestre 1, objeto pequeno 1, carro 3, andar de predio 3, predio caido 8
+    ArmyWave,     // veiculos por leva (kArmyWaves)
+    ArmyFfa,      // modos em que o exercito vale: free-for-all (modos 2 e 3), eliminacao (6), endurance (4) e o treino
+    ArmyElim,
+    ArmyEndur,
+    ArmyTrain,
     kKeys
 };
 
@@ -55,8 +64,11 @@ inline constexpr const char *kEnv[kKeys] = {"WOTM_RES",        "WOTM_ASPECT",   
                                             "WOTM_LOCKTOGGLE", "WOTM_ENEMYBARS", "WOTM_DAMAGEPOP",  "WOTM_KBSEPARATE",
                                             "WOTM_PROMPTS",    "WOTM_MENUCONFIRM", "WOTM_CAMERA",    "WOTM_CAMRECENTER", "WOTM_CLOSECAM",
                                             "WOTM_CAMSENS",    "WOTM_CAMINVERT",   "WOTM_RENDERSCALE", "WOTM_MSAA",      "WOTM_TEXFILTER",
-                                            "WOTM_ANNOUNCER",  "WOTM_SKIPINTRO",   "WOTM_VIBRATION",   "WOTM_INTERP"};
-inline constexpr int kDefault[kKeys] = {720, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 5, 0, 100, 0, 0, 1, 0, 1, 1};
+                                            "WOTM_ANNOUNCER",  "WOTM_SKIPINTRO",   "WOTM_VIBRATION",   "WOTM_INTERP",
+                                            "WOTM_ARMY",       "WOTM_ARMY_TRIGGER", "WOTM_ARMY_EVERY", "WOTM_ARMY_CHAOS", "WOTM_ARMY_WAVE",
+                                            "WOTM_ARMY_FFA",   "WOTM_ARMY_ELIM",   "WOTM_ARMY_ENDURANCE", "WOTM_ARMY_TRAINING"};
+inline constexpr int kDefault[kKeys] = {720, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 5, 0, 100, 0, 0, 1, 0, 1, 1,
+                                        0, 2, 60, 50, 3, 1, 1, 1, 0};
 inline constexpr const char *kPromptNames[] = {"auto", "original", "keyboard", "xbox", "playstation", "nintendo"};
 inline constexpr int kPromptStyles = 6;
 enum PromptStyle { PromptAuto, PromptOriginal, PromptKeyboard, PromptXbox, PromptPs, PromptNintendo };
@@ -68,11 +80,15 @@ inline constexpr int kRenderScales[] = {50, 75, 100, 125, 150, 200};
 inline constexpr int kMsaaLevels[] = {0, 2, 4, 8};
 inline constexpr int kTexFilters[] = {0, 1, 2, 4, 8, 16};
 inline constexpr int kRates[] = {0, 60, 120, 144, 165, 180, 240};
+inline constexpr int kArmyEvery[] = {20, 30, 45, 60, 90, 120, 180};   // segundos
+inline constexpr int kArmyChaos[] = {25, 50, 100, 200};              // pontos
+inline constexpr int kArmyWaves[] = {1, 2, 3, 4, 6, 8};              // veiculos
 inline constexpr const char *kAspectNames[] = {"dynamic", "4:3", "16:9", "16:10", "21:9", "32:9"};
 inline constexpr float kAspectRatio[] = {0.f, 4.f / 3.f, 16.f / 9.f, 16.f / 10.f, 21.f / 9.f, 32.f / 9.f};
 inline constexpr int kAspects = 6;
 
-inline std::atomic<int> g_val[kKeys] = {720, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 5, 0, 100, 0, 0, 1, 0, 1, 1};
+inline std::atomic<int> g_val[kKeys] = {720, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 5, 0, 100, 0, 0, 1, 0, 1, 1,
+                                        0, 2, 60, 50, 3, 1, 1, 1, 0};
 // Primeira execucao de um jogador (sem settings.ini, com o arquivo ligado): por cima do kDefault, que segue valendo para os testes
 // (lote e corpus rodam com WOTM_SETTINGS=0), tela cheia sem borda, lock-on alternado, barras dos inimigos, narrador com o grito do
 // monstro e a resolucao do monitor (Res fica pendente ate a janela existir: resolveFirstRunRes, wotm_live.inc). Decisao do dono.
@@ -154,6 +170,10 @@ inline bool parse(Key k, const char *s, int &out)
         return true;
     }
     case Vsync: out = *s == '0' ? 0 : 1; return true;
+    case ArmyTrigger: out = std::clamp(std::atoi(s), 0, 2); return true;
+    case ArmyEvery: { const int v = std::atoi(s); if (v <= 0) return false; out = std::clamp(v, 5, 600); return true; }
+    case ArmyChaos: { const int v = std::atoi(s); if (v <= 0) return false; out = std::clamp(v, 1, 1000); return true; }
+    case ArmyWave: { const int v = std::atoi(s); if (v <= 0) return false; out = std::clamp(v, 1, 16); return true; }
     case Announcer: out = std::clamp(std::atoi(s), 0, 2); return true;
     case Interp: out = std::atoi(s) > 0 || !std::strcmp(s, "on") ? 1 : 0; return true;   // "redraw" (diagnostico da etapa 0) nao liga
     case KbSeparate: out = *s == '1' ? 1 : 0; return true;

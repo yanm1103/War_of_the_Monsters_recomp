@@ -100,7 +100,11 @@ inline bool readLsn(uint32_t lsn, uint32_t sectors, uint8_t *dst)
 void startSoundSystem(uint8_t *, R5900Context *ctx, PS2Runtime *)
 {
     const bool ok = Engine::get().startOutput();
-    std::fprintf(stderr, "[snd] snd_StartSoundSystem: som nativo %s\n", ok ? "ligado (48 kHz)" : "SEM saida de audio (InitAudioDevice falhou?)");
+    const char *mute = std::getenv("WOTM_MUTE");
+    if (ok && mute && *mute && *mute != '0')
+        ::SetMasterVolume(0.f);   // tudo o que sai pelo raylib: jogo, narrador e filmes
+    std::fprintf(stderr, "[snd] snd_StartSoundSystem: som nativo %s%s\n", ok ? "ligado (48 kHz)" : "SEM saida de audio (InitAudioDevice falhou?)",
+                 ok && mute && *mute && *mute != '0' ? ", mudo (WOTM_MUTE)" : "");
     setReturnS32(ctx, 1);
 }
 void stopSoundSystem(uint8_t *, R5900Context *, PS2Runtime *) { Engine::get().stopAll(); }

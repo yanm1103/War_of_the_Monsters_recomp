@@ -120,8 +120,10 @@ static int g_pauseSuppress = 0;
 // Cada opcao e uma chave do wotm_settings.hpp; mudar grava o settings.ini e vale na hora (video na thread da janela, mods e
 // teclado na proxima leitura deles).
 namespace st = wotm::settings;
-enum Tab { TabVideo, TabFeatures, TabCamera, TabControls, kTabs };
-constexpr const char *kTabNames[kTabs] = {"VIDEO", "FEATURES", "CAMERA", "CONTROLS"};
+enum Tab { TabVideo, TabFeatures, TabCamera, TabControls, TabArmy, kTabs };
+constexpr const char *kTabNames[kTabs] = {"VIDEO", "FEATURES", "CAMERA", "CONTROLS", "ARMY"};
+// Centro e meia largura de cada aba no titulo do painel (fracao da largura), medidos pelo renderPanel; o panelHit os le
+static float g_tabCx[kTabs] = {0.20f, 0.35f, 0.50f, 0.65f, 0.80f}, g_tabHw[kTabs] = {0.075f, 0.075f, 0.075f, 0.075f, 0.075f};
 constexpr int kMaxOpts = 9;
 struct Opt { st::Key key; const char *label; const char *hint; };
 struct TabDef { int n; Opt opt[kMaxOpts]; };
@@ -153,6 +155,16 @@ constexpr TabDef kTabDefs[kTabs] = {
       {st::Prompts, "BUTTON ICONS", "AUTO SHOWS THE BUTTONS OF WHATEVER YOU PLAYED WITH LAST"},
       {st::MenuConfirm, "MENU CONFIRM", "WHICH GAMEPAD BUTTON ACCEPTS IN THE MENUS"},
       {st::Vibration, "VIBRATION", "THE GAMEPAD SHAKES WITH HITS AND CRASHES. XINPUT GAMEPADS ONLY"}}},   // e o mapa: ctlRows
+    {9,
+     {{st::Army, "ARMY", "TANKS, MISSILE TRUCKS AND HELICOPTERS JOIN THE FIGHT. VEGAS, METRO AND TOKYO"},
+      {st::ArmyTrigger, "SENT BY", "WHAT CALLS IN EACH WAVE: TIME, DESTRUCTION, OR WHICHEVER COMES FIRST"},
+      {st::ArmyEvery, "EVERY", "SECONDS OF FIGHTING BETWEEN WAVES"},
+      {st::ArmyChaos, "DESTRUCTION", "HOW MUCH THE CITY MUST BE WRECKED TO CALL A WAVE"},
+      {st::ArmyWave, "WAVE SIZE", "VEHICLES IN EACH WAVE. EACH ONE ATTACKS THE CLOSEST MONSTER"},
+      {st::ArmyFfa, "FREE-FOR-ALL", "THE ARMY SHOWS UP IN FREE-FOR-ALL"},
+      {st::ArmyElim, "ELIMINATION", "THE ARMY SHOWS UP IN ELIMINATION"},
+      {st::ArmyEndur, "ENDURANCE", "THE ARMY SHOWS UP IN ENDURANCE"},
+      {st::ArmyTrain, "TRAINING", "THE ARMY SHOWS UP IN TRAINING"}}},
 };
 static int g_tab = TabVideo;
 static int g_optSel[kTabs] = {};
@@ -383,6 +395,10 @@ static int choices(st::Key k, int out[16])
     case st::Display: for (int i = 0; i < 3; ++i) out[i] = i; return 3;
     case st::CamSens: for (int i = 0; i < 10; ++i) out[i] = i + 1; return 10;
     case st::Announcer: for (int i = 0; i < 3; ++i) out[i] = i; return 3;
+    case st::ArmyTrigger: for (int i = 0; i < 3; ++i) out[i] = i; return 3;
+    case st::ArmyEvery: std::copy(std::begin(st::kArmyEvery), std::end(st::kArmyEvery), out); return int(std::size(st::kArmyEvery));
+    case st::ArmyChaos: std::copy(std::begin(st::kArmyChaos), std::end(st::kArmyChaos), out); return int(std::size(st::kArmyChaos));
+    case st::ArmyWave: std::copy(std::begin(st::kArmyWaves), std::end(st::kArmyWaves), out); return int(std::size(st::kArmyWaves));
     case st::Prompts:   // sem o PLAYSTATION: igual ao ORIGINAL (o AUTO ainda o usa com gamepad de PlayStation)
     {
         int n = 0;
@@ -448,6 +464,10 @@ static void valueText(st::Key k, int v, char *buf, size_t sz)
     case st::MenuConfirm: std::snprintf(buf, sz, "%s", v ? "RIGHT BUTTON" : "BOTTOM BUTTON"); break;
     case st::Camera: std::snprintf(buf, sz, "%s", v ? "MODERN" : "CLASSIC"); break;
     case st::CamSens: std::snprintf(buf, sz, "%d", v); break;
+    case st::ArmyTrigger: std::snprintf(buf, sz, "%s", v == 0 ? "TIME" : v == 1 ? "DESTRUCTION" : "WHICHEVER FIRST"); break;
+    case st::ArmyEvery: std::snprintf(buf, sz, "%d SECONDS", v); break;
+    case st::ArmyChaos: std::snprintf(buf, sz, "%s", v <= 25 ? "LITTLE" : v <= 50 ? "SOME" : v <= 100 ? "A LOT" : "HUGE"); break;
+    case st::ArmyWave: std::snprintf(buf, sz, "%d", v); break;
     case st::Announcer:   // a voz do narrador (narrator/) ou o grito do monstro escolhido
         std::snprintf(buf, sz, "%s", v == 2 ? "MONSTER CRY" : v ? "GODZILLA SAVE THE EARTH" : "OFF");
         break;
@@ -1387,11 +1407,31 @@ static void renderPanel(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0,
     std::vector<wotm::TextQuad> q;
     DrawRectangleRounded(Rectangle{4.f, 4.f, W - 8.f, H - 8.f}, 0.06f, 12, Color{0, 0, 0, 175});
 
-    // abas: L1  VIDEO  FEATURES  CAMERA  CONTROLS  R1
-    const float tabY = lineH * 0.7f, tabH = 50.f;
-    const float tabX[kTabs] = {W * 0.22f, W * 0.40f, W * 0.59f, W * 0.78f};
+    // abas: L1  VIDEO  FEATURES  CAMERA  CONTROLS  ARMY  R1, lado a lado pela largura de cada nome entre os icones de L1 e R1 (a
+    // fonte diminui se nao couberem); o panelHit le os centros e as meias larguras de g_tabCx/g_tabHw
+    const float tabY = lineH * 0.7f, titleH = 50.f, gap = W * 0.035f, avail = W * 0.68f;
+    float tabH = titleH, tabW[kTabs], total = 0.f;
+    auto measureTabs = [&] {
+        total = gap * float(kTabs - 1);
+        for (int t = 0; t < kTabs; ++t) total += (tabW[t] = textWidth(tex0, kPW, kPH, kTabNames[t], tabH));
+    };
+    measureTabs();
+    if (total > avail)
+    {
+        tabH *= avail / total;
+        measureTabs();
+    }
+    float tabX[kTabs];
+    float tabLeft = W * 0.5f - total * 0.5f;
+    for (int t = 0; t < kTabs; ++t)
+    {
+        tabX[t] = tabLeft + tabW[t] * 0.5f;
+        g_tabCx[t] = tabX[t] / W;
+        g_tabHw[t] = (tabW[t] + gap) * 0.5f / W;
+        tabLeft += tabW[t] + gap;
+    }
     if (v.training || v.moves)   // treino: so o titulo
-        label(q, ram, tex0, v.moves ? "MOVE LIST" : "TRAINING OPTIONS", W * 0.5f, tabY, tabH, kLit, kPW, kPH);
+        label(q, ram, tex0, v.moves ? "MOVE LIST" : "TRAINING OPTIONS", W * 0.5f, tabY, titleH, kLit, kPW, kPH);
     for (int t = 0; t < kTabs && !v.training && !v.moves; ++t)
     {
         const bool on = t == v.tab;
@@ -1840,12 +1880,11 @@ static void panelHit(float u, float w, const View &v, Hover &hv)
     const float W = float(kPW), H = float(kPH), lineH = H / 8.9f, X = u * W, Y = w * H;
     if (!v.training && !v.moves && std::fabs(Y - lineH * 0.7f) < lineH * 0.5f)
     {
-        const float tabX[kTabs] = {W * 0.22f, W * 0.40f, W * 0.59f, W * 0.78f};
         if (X < W * 0.14f) hv.part = HPrevTab;
         else if (X > W * 0.86f) hv.part = HNextTab;
         else
             for (int t = 0; t < kTabs; ++t)
-                if (std::fabs(X - tabX[t]) < W * 0.09f) { hv.part = HTab; hv.tab = t; }
+                if (std::fabs(X - W * g_tabCx[t]) < W * g_tabHw[t]) { hv.part = HTab; hv.tab = t; }
         return;
     }
     const int tab = std::clamp(v.tab, 0, kTabs - 1);

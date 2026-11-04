@@ -67,6 +67,17 @@ pickup), procurando os ids que o `LevelPickups::createPickup` (`src/game/Pickup.
    arriscado é a textura: espaço livre na VRAM e o `TBP0` do `TEX0` de cada objeto. Relaciona-se com os "arquivos próprios" dos
    monstros custom (`TODO.md`, item 8), que também precisam carregar modelo extra.
 
+## Decisões do dono (2026-11-04)
+- Escopo: as três etapas, nessa ordem (a 3 só depois da 1 e da 2 testadas).
+- Liga/desliga: opção no menu nativo ("Recompiled options"), desligada por padrão.
+- Gatilho escolhível no menu: timer, caos ou os dois.
+- Modos em que vale: configurável no menu (os versus; a aventura fica como é).
+- Alvo: cada veículo ataca o monstro mais próximo.
+- Dano normal; KO pelo exército não dá ponto a nenhum jogador.
+- Pool reciclado: veículo destruído volta escondido ao pool e pode sair na próxima leva.
+- Etapa 3, nas seis fases sem `.FOP`: só helicópteros.
+- Testes ao vivo no segundo monitor e sem som (`WOTM_MONITOR=1`, `WOTM_MUTE=1`, a criar).
+
 ## Como foi medido
 Scripts de rascunho (fora do repo) sobre `tools/ngp.py`: descida genérica pelos filhos de cada tipo de nó (GROUP, LOD, SWITCH,
 TRANSLATE, ROTATE, SCALE, CONTROL, ACTION_DATA, CHAR_INSTANCE, ANIM_XFORM, ANIM_SCALE, INTERACTIVE_STATE, DESTRUCTIBLE), contagem
