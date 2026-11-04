@@ -5,10 +5,11 @@
 //   e o tamanho do mod.
 // - sceCdRead (stub do runtime): fileReadf/fileReada/fileReads e o snd_StreamSafeCdRead leem por ele; o LSN falso vem do mod.
 // O som nativo (wotm_snd.inc, readLsnRaw) le bancos e musicas pelo LSN e consulta o registro antes do disco.
-// Arquivo de mod maior que o do disco: os monstros (MON/*) e as texturas da fase carregam em sequencia acima de 32 MB (RAM alta),
-// entao so empurram o que vem depois; o log da carga ("[wotm] carga da fase") diz a folga de RAM e os texIds usados. Com
-// WOTM_HIGHRAM=0, e para os outros arquivos (fase, SHELL, bancos de som), o jogo carrega em regioes de tamanho fixo e um arquivo
-// maior pode sobrescrever o que vem depois (o log avisa). WOTM_MODS=<pasta> troca a pasta (padrao: mods/ ao lado do ELF, senao a do repo); =0 desliga.
+// Arquivo de mod maior que o do disco: os monstros (MON/*) e as texturas da fase carregam em sequencia acima de 32 MB (RAM alta), o
+// NGP da fase e o menu (SHELL/*) em sequencia de 0xA00000 ate 0x1F10000; um arquivo maior so empurra o que vem depois, e o log confere
+// o fim de cada arquivo de mod ja descompactado contra o teto (checkLoad). RST/*, os .AIC e PTS/* tem tamanho fixo (fixedCap): o jogo
+// recebe so o que cabe. Os .PTR dos monstros: ptrRelocate. Bancos de som, musicas e filmes nao tem teto (som nativo, leitura em partes).
+// WOTM_MODS=<pasta> troca a pasta (padrao: mods/ ao lado do ELF, senao a do repo); =0 desliga.
 #include "wotm_mods.hpp"
 #include "wotm_army_files.hpp"   // MON/ARMY.*: os veiculos de VEGAS para o exercito em qualquer fase
 #include <set>
@@ -21,6 +22,20 @@ PS2Runtime::RecompiledFunction g_origSearch = nullptr, g_origCdRead = nullptr;
 
 inline uint32_t rd32(const uint8_t *rdram, uint32_t a) { uint32_t v; std::memcpy(&v, rdram + (a & PS2_RAM_MASK), 4); return v; }
 inline void wr32(uint8_t *rdram, uint32_t a, uint32_t v) { std::memcpy(rdram + (a & PS2_RAM_MASK), &v, 4); }
+
+constexpr uint32_t kLowCeiling = 0x1F10000u;   // fim da regiao do NGP da fase e do menu (checkLoad)
+constexpr uint32_t kPtsMagic = 0x12282000u, kPtsCap = 0x4000u;
+
+// Arquivos de formato de tamanho fixo, lidos num buffer do tamanho exato: os do resetcom (RST/*.CHR, .MRS, .GBL, .MDR e os .AIC das
+// pastas das fases) em resetcom::m_data[0xC000], e os pontos (PTS/*) num buffer de 0x4000 do topo da MemoryStack, copiados para
+// PointToolKit::points[256] (64 bytes cada, depois de 8 de cabecalho). Maior que isso estoura o objeto: o jogo recebe so o que cabe.
+inline uint32_t fixedCap(const std::string &rel)
+{
+    if (rel.rfind("PTS/", 0) == 0) return kPtsCap;
+    if (rel.rfind("RST/", 0) == 0) return 0xC000u;
+    if (rel.size() > 4 && rel.substr(rel.size() - 4) == ".AIC") return 0xC000u;
+    return 0;
+}
 
 // int fileCdSearchFile(sceCdlFILE *f, char *path); sceCdlFILE = {u32 lsn, u32 size, char name[16], u8 date[8]}
 void searchFile(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
@@ -57,8 +72,10 @@ void searchFile(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
         return;
     const bool onDisc = getRegU32(ctx, 2) != 0;
     const uint32_t discSize = onDisc ? rd32(rdram, fAddr + 4) : 0;
+    const uint32_t cap = fixedCap(m->rel);
+    const uint64_t served = cap && m->size > cap ? cap : m->size;   // formato de tamanho fixo: o jogo le so o que cabe no buffer
     wr32(rdram, fAddr + 0, m->lsn);
-    wr32(rdram, fAddr + 4, uint32_t(m->size));
+    wr32(rdram, fAddr + 4, uint32_t(served));
     if (!onDisc)   // arquivo novo: o nome do sceCdlFILE vem do mod (a original nao achou nada para copiar)
     {
         std::string base = m->rel.substr(m->rel.find_last_of('/') + 1);
@@ -74,11 +91,80 @@ void searchFile(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
             std::fprintf(stderr, "[mods] %s <- %s (%llu bytes; arquivo novo, nao esta no disco)\n", m->rel.c_str(), m->mod.c_str(),
                          (unsigned long long)m->size);
         else
-            std::fprintf(stderr, "[mods] %s <- %s (%llu bytes; disco %u)%s\n", m->rel.c_str(), m->mod.c_str(), (unsigned long long)m->size,
-                         discSize, m->size <= discSize ? ""
-                                   : m->rel.rfind("MON/", 0) == 0 ? " (maior que o do disco: confira a folga no log da carga da fase)"
-                                                                   : " AVISO: maior que o do disco, pode sobrescrever o que o jogo carrega depois");
+        {
+            const std::string &r = m->rel;
+            const char *tail = m->size <= discSize ? ""
+                             : served < m->size ? ""   // sai na linha de baixo
+                             : r.rfind("MON/", 0) == 0 || r.rfind("LVL/", 0) == 0 || r.rfind("SHELL/", 0) == 0
+                                 ? " (maior que o do disco: a carga confere a folga)"
+                             : r.rfind("SND/", 0) == 0 || r.rfind("VAG/", 0) == 0 || r.rfind("MOV/", 0) == 0
+                                 ? " (maior que o do disco; som nativo ou lido em partes, sem teto)"
+                                 : " AVISO: maior que o do disco, pode sobrescrever o que o jogo carrega depois";
+            std::fprintf(stderr, "[mods] %s <- %s (%llu bytes; disco %u)%s\n", r.c_str(), m->mod.c_str(), (unsigned long long)m->size,
+                         discSize, tail);
+        }
+        if (served < m->size)
+            std::fprintf(stderr, "[mods] %s: AVISO: formato de tamanho fixo, o jogo le so os primeiros %u bytes (o mod tem %llu)\n",
+                         m->rel.c_str(), cap, (unsigned long long)m->size);
     }
+}
+
+// Carga de arquivo de mod pelo zipInflateAll (fase e menu, compactados) e pelo fileReadf: confere o fim do arquivo ja descompactado
+// contra o teto da regiao. Embaixo de 32 MB o NGP da fase e o menu (NGP, RTX, TEX e .PTR do SHELL) moram em sequencia a partir de
+// 0xA00000 ate 0x1F10000, onde comecam dados vivos (o buffer do zip fica em 0x1F7F840). A copia do SHELL.RTX/LOAD.RTX que o
+// BootInitUserint descompacta em 0x1B7FFF0 nao e lida por ninguem depois. Acima de 32 MB vale o fim da RAM menos 1 MB (Mecha,
+// kQuadDefs). Os .PTR dos monstros saem no ptrRelocate; RST, AIC e PTS tem tamanho fixo (fixedCap).
+void checkLoad(uint8_t *rdram, const char *what, const std::string &gameName, uint32_t dst, int32_t size)
+{
+    const wotm::mods::File *m = Registry::get().find(Registry::get().aliasOf(Registry::keyFromGame(gameName)));
+    if (!m || size <= 0 || fixedCap(m->rel) || (m->rel.rfind("MON/", 0) == 0 && m->rel.size() > 4 && m->rel.substr(m->rel.size() - 4) == ".PTR"))
+        return;
+    const uint32_t d = dst & 0x1FFFFFFFu, end = d + uint32_t(size);
+    uint32_t ceiling;
+    if (d >= 0xA00000u && d < kLowCeiling)
+        ceiling = kLowCeiling;
+    else if (d >= PS2_GUEST_RAM_SIZE)
+        ceiling = PS2_RAM_SIZE - 0x100000u;
+    else
+        return;
+    static std::set<std::string> logged;   // o menu recarrega o SHELL a cada volta: uma linha por arquivo e endereco
+    if (!logged.insert(m->rel + "@" + std::to_string(d) + "+" + std::to_string(size)).second)
+        return;
+    const double left = (int64_t(ceiling) - int64_t(end)) / 1048576.0;
+    std::fprintf(stderr, "[mods] %s (%s): %s %d bytes em 0x%07X-0x%07X, %.1f MB ate o teto 0x%07X%s\n", m->rel.c_str(), m->mod.c_str(), what,
+                 size, d, end, left, ceiling, end > ceiling ? " -- AVISO: alem do teto, espere corrupcao" : "");
+}
+
+PS2Runtime::RecompiledFunction g_origZip = nullptr, g_origReadf = nullptr;
+
+// int zipInflateAll(char *name, void *dest)
+void zipInflate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
+{
+    if (ctx->pc != wotm::fn::zipInflateAll__FPcPv)
+    {
+        g_origZip(rdram, ctx, rt);
+        return;
+    }
+    const char *p = reinterpret_cast<const char *>(rdram + (getRegU32(ctx, 4) & PS2_RAM_MASK));
+    const std::string name(p, strnlen(p, 256));
+    const uint32_t dst = getRegU32(ctx, 5);
+    g_origZip(rdram, ctx, rt);
+    checkLoad(rdram, "descompactado:", name, dst, int32_t(getRegU32(ctx, 2)));
+}
+
+// int fileReadf(char *name, void *dest)
+void readf(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
+{
+    if (ctx->pc != wotm::fn::fileReadf__FPcPv)
+    {
+        g_origReadf(rdram, ctx, rt);
+        return;
+    }
+    const char *p = reinterpret_cast<const char *>(rdram + (getRegU32(ctx, 4) & PS2_RAM_MASK));
+    const std::string name(p, strnlen(p, 256));
+    const uint32_t dst = getRegU32(ctx, 5);
+    g_origReadf(rdram, ctx, rt);
+    checkLoad(rdram, "lido:", name, dst, int32_t(getRegU32(ctx, 2)));
 }
 
 // int sceCdRead(u32 lsn, u32 sectors, void *buf, sceCdRMode *mode)
@@ -98,6 +184,16 @@ void cdRead(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
         if (warned++ < 16)
             std::fprintf(stderr, "[mods] sceCdRead: LSN %#x (%u setores) nao e de nenhum arquivo de mod; devolvendo zeros\n", lsn, sectors);
         std::memset(rdram + offset, 0, bytes);
+    }
+    else if (const wotm::mods::File *f = Registry::get().findLsn(lsn); f && lsn == f->lsn && bytes >= 8 && f->rel.rfind("PTS/", 0) == 0)
+    {   // pontos alem dos 255 que cabem nos 0x4000 lidos (e no points[256] do PointToolKit): o jogo copiaria lixo para fora do objeto
+        const uint32_t maxN = (uint32_t(std::min<uint64_t>(f->size, kPtsCap)) - 8) / 64;
+        if (rd32(rdram, offset) == kPtsMagic && rd32(rdram, offset + 4) > maxN)
+        {
+            std::fprintf(stderr, "[mods] %s: AVISO: %u pontos, o jogo tem lugar para %u; usando os primeiros\n", f->rel.c_str(),
+                         rd32(rdram, offset + 4), maxN);
+            wr32(rdram, offset + 4, maxN);
+        }
     }
     setReturnS32(ctx, 1);   // o stub tambem le na hora: sceCdSync devolve "pronto"
 }
@@ -216,6 +312,10 @@ void wotmModsInstall(PS2Runtime &runtime, const std::string &elfPath)
     runtime.registerFunction(wotm::fn::sceCdRead, hostLeaf<cdRead>);
     if ((g_origPtrReloc = runtime.lookupFunction(wotm::fn::dbsRelocateViaPtrListFile__Fi10_vramAddrs)))
         runtime.registerFunction(wotm::fn::dbsRelocateViaPtrListFile__Fi10_vramAddrs, &ptrRelocate);
+    if ((g_origZip = runtime.lookupFunction(wotm::fn::zipInflateAll__FPcPv)))
+        runtime.registerFunction(wotm::fn::zipInflateAll__FPcPv, &zipInflate);
+    if ((g_origReadf = runtime.lookupFunction(wotm::fn::fileReadf__FPcPv)))
+        runtime.registerFunction(wotm::fn::fileReadf__FPcPv, &readf);
     std::string names;
     for (const std::string &m : Registry::get().modNames())
         names += (names.empty() ? "" : ", ") + m;

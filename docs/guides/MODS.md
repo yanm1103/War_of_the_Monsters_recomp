@@ -348,8 +348,20 @@ the one of the RANDOM entry (`random`; without it, a mosaic of the game's pictur
   mods folder (`WOTM_MODS=0` included). A mod with its own
   `MON/ARMY.*` wins (`NATIVE.md`, "Army in versus fights").
 - **Log:** `[mods] N arquivo(s) de <mods> em <pasta>` at boot and, on the first search of each file, `[mods] MON/LIZARD0.TEX <-
-  teste_togera (110080 bytes; disco 110080)`, with AVISO when the mod's is bigger (outside `MON/*`, whose loading is contiguous above
-  32 MB).
+  teste_togera (110080 bytes; disco 110080)`.
+- **Mod files bigger than the disc's:** what limits them is where each loader puts the file, not the disc size (stage and menu files
+  are compressed, and the inflated size is what counts).
+  - Contiguous regions: the stage `.NGP` and the menu (`SHELL/*` `.NGP`, `.RTX`, `.TEX`, `.PTR`) load one after the other from
+    0xA00000 up to 0x1F10000, where live data starts (the copy of `SHELL.RTX`/`LOAD.RTX` that `BootInitUserint` inflates at 0x1B7FFF0
+    is never read again); the monsters and the stage's `.RTX`/`.TEX` load above 32 MB. A bigger file only pushes the next ones up. For
+    every mod file the log gives the inflated end and the room left (`checkLoad`, `wotm_mods.inc`):
+    `[mods] LVL/CENTRAL.NGP (meu_mod): descompactado: 8043456 bytes em 0x0A00000-0x11ABBC0, 13.4 MB ate o teto 0x1F10000`, with
+    AVISO past the ceiling.
+  - Fixed-size formats: `RST/*` and the stages' `.AIC` are read into `resetcom::m_data[0xC000]`, and `PTS/*` into a 0x4000 buffer that
+    goes to `PointToolKit::points[256]` (8-byte header, 64 bytes per point). A bigger mod file is handed to the game cut to that size,
+    and a point count above 255 is lowered to 255 (`fixedCap`, `cdRead`). Log: `[mods] PTS/CENTRAL.PUP: AVISO: 600 pontos, o jogo tem
+    lugar para 255; usando os primeiros`.
+  - No limit: sound banks (native sound reads them on the PC side), music, streamed sounds and movies.
 - **Mod `.PTR`** (a skin's or a custom's own model): `dbsRelocateViaPtrListFile` reads the whole file into the game's `MemoryStack`
   (a 512 KB pool) in whole sectors. The retail reserves only 0xD40 bytes before the read (its "Pointer file too big" message compares
   against 0x30D40), so the limit is what the stack has free at that moment. A mod `.PTR` that does not fit is read into the free RAM
@@ -364,8 +376,8 @@ the one of the RANDOM entry (`random`; without it, a mosaic of the game's pictur
 
 ## Caveats
 
-- A mod file bigger than the disc one (`.TEX`, `.RTX`, `.NGP`, `.BNK`): the game loads into fixed-size regions and can overwrite
-  what comes after (the log and `check` warn). With PNG this does not happen: the game's texture does not change size.
+- A mod file bigger than the disc one goes up to the ceiling of its region, and the fixed-size formats are cut (see "Under the hood";
+  the log and `check` warn). With PNG none of this applies: the game's texture does not change size.
 - Custom monsters use the code of one of the game's types; a new type does not exist yet (`TODO.md`, item 8).
 
 Example (`WOTM_MATCH=3,1`, `3,1,2,5,1` and `1,3,1` with AI): Togera's skin as a 4x PNG (1024 × 1024 instead of 256)

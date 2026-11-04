@@ -1204,8 +1204,14 @@ def check(disc, mods, only=None):
                 else:
                     osz = os.path.getsize(orig)
                     note = "%d bytes (disc %d)" % (size, osz)
-                    if size > osz and os.path.splitext(n)[1].upper() in (".TEX", ".RTX", ".NGP", ".BNK"):
-                        note += " WARNING: larger than the disc file; the game loads into fixed regions and may overwrite what comes next"
+                    # fixed-size formats (MODS.md, "Under the hood"): the port hands the game only what fits in its buffer
+                    cap = 0x4000 if rel.upper().startswith("PTS/") else \
+                        0xC000 if rel.upper().startswith("RST/") or n.upper().endswith(".AIC") else 0
+                    if cap and size > cap:
+                        note += " WARNING: fixed-size format, the game reads only the first %d bytes%s" % (
+                            cap, " (255 points)" if cap == 0x4000 else "")
+                    elif size > osz and os.path.splitext(n)[1].upper() in (".TEX", ".RTX", ".NGP"):
+                        note += " (larger than the disc file: the game log shows the room left when it loads)"
             if not off and key:
                 own = owners.get(key, [])
                 i = own.index(mod)
