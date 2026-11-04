@@ -71,7 +71,7 @@ and `skin.json` without `base`), *Base costume* (0 to 3, with each costume's por
 custom the default is the `costume` of `monster.json`), *Name*, *Id* (derived from the name, editable) and "CPUs may pick this skin". It creates the
 `skin.json` in `mods/<mod>/skins/<id>/` and extracts the base costume's textures to the work folder. In the list, the skin is its own group
 at the top ("Skin: NAME (monster/id, base N)"); when selected, the preview becomes the properties panel (Name, Base, CPUs may pick,
-*Mesh* with **Export mesh** and **Import mesh...** (see "New mesh from Blender" below), **Save** rewrites `skin.json`). Right click on the group: **Duplicate skin...** (copies the skin in the mod and in the work folder with the new
+*Mesh* with **Export to Blender**, **Import mesh...** and **Import animations...** (see "Mesh and animations from Blender" below), **Save** rewrites `skin.json`). Right click on the group: **Duplicate skin...** (copies the skin in the mod and in the work folder with the new
 id) and **Delete skin**. With a playable monster costume group selected (e.g. "MON/SHOGUN3"), the header's **Turn into skin...** button (also
 on right click) creates the skin with that monster and costume and moves the group's PNGs to its folder, so the original costume stays untouched in Build; if the mod already has
 those PNGs packed in `MON/`, the window warns and offers to delete them.
@@ -87,24 +87,41 @@ preview becomes the properties panel: Name, Camera, Narrator, *Rules* (the `kind
 `portrait.png` and writes the right `portraitTex` of the costume's `.RTX`; **Remove** goes back to the costume's) and *Look* (how many textures and the own
 model; **Import model files...** copies `.NGP` + `.PTR`, and optional `.TEX`/`.RTX`, to `files/`; **Extract stats** extracts the base
 type's `.CHR` and `.AIC` files to `files/`, where the edited ones become the monster's own; **Extract sounds** extracts the base type's
-sound bank as WAVs to `files/`, and on Build the replaced ones make the monster's own bank; **Export mesh** and **Import mesh...**, below). **Save** rewrites `monster.json`
+sound bank as WAVs to `files/`, and on Build the replaced ones make the monster's own bank; **Export to Blender**, **Import mesh...** and
+**Import animations...**, below). **Save** rewrites `monster.json`
 keeping the other keys. Right click on the group: **New skin for this monster...**, **Duplicate monster...** and **Delete monster** (its
 skins stay and the log warns). On an extracted costume group (playable or boss, e.g. "MON/ASSBOSS1"), right click has **Turn into
 custom monster...**, which moves the group's PNGs to the new monster.
 
-**New mesh from Blender.** A skin or a custom monster can have its own mesh on the base type's skeleton (its animations stay):
-1. **Export mesh** writes the base costume as `<PREFIX><costume>.glb` (e.g. `LIZARD1.glb`) in the work folder: the skin's folder, or
-   `monsters/<id>/files/` for a custom. It holds the meshes (`obj_<address>`), the skeleton (`bone<N>`), the weights, the textures
-   and the idle animation. It never overwrites a `.glb` that is already there.
-2. In Blender: *File > Import > glTF 2.0*, remodel, reweight and re-UV the meshes, keeping the mesh and bone names and the armature
-   where it is, then *File > Export > glTF 2.0* (`.glb`) with the default options (they keep the vertex colors).
-3. **Import mesh...** takes the edited `.glb` and writes the `.NGP` + `.PTR` next to it (replacing the folder's previous pair); a
-   custom gets `"files": true`. **Build mod** sends them to the mod; `.glb` and `.blend` files stay in the work folder.
+**Mesh and animations from Blender.** A skin or a custom monster can have its own mesh and its own versions of the base type's
+animations, on the base type's skeleton:
+1. **Export to Blender** writes the base costume as `<PREFIX><costume>.glb` (e.g. `LIZARD1.glb`) in the work folder: the skin's
+   folder, or `monsters/<id>/files/` for a custom. It holds the meshes (`obj_<address>`), every transform of the skeleton as a bone
+   (`bone<N>` for the ones the mesh is weighted to; `xf_`, `st_` and `sc_` for the others: helpers, locators, scale nodes), the
+   weights, the textures and every animation as an action `a<id>` (`a090` is the idle; the list is in `tools/pose.py --list`). The
+   default pose is the bind pose. It takes about a minute, and never overwrites a `.glb` that is already there.
+2. In Blender, set the scene's frame rate to 60 fps (*Output Properties > Frame Rate*) before *File > Import > glTF 2.0*: the
+   importer places the keys at time x frame rate, and 60 keeps one Blender frame per game frame. Remodel, reweight and re-UV the
+   meshes, and/or edit the actions in pose mode, keeping the mesh and bone names and the armature where it is; then *File > Export >
+   glTF 2.0* (`.glb`) with the default options (they keep the vertex colors and write every action).
+3. **Import mesh...** takes the meshes of the edited `.glb`; **Import animations...** takes its actions (the same `.glb` or another
+   one). Each one rebuilds the `.NGP` + `.PTR` next to it from the base costume plus the last `.glb` given to each of the two
+   (recorded in `.blender.json` in that folder), so one does not undo the other and the files do not grow with every import; a
+   custom gets `"files": true`. **Build mod** sends them to the mod; `.glb` and `.blend` files stay in the work folder. **Revert**
+   on the `.NGP` or `.PTR` goes back to the disc's and forgets both `.glb` files.
 
-Each primitive keeps the texture its material names (`tex<texId>`, one of the costume's); a new UV layout pairs with an edited PNG
-of the same size. Up to 3 bones per vertex (the heaviest kept). The few vertex colors brighter than 1.0 (Magmo costume 2) come back
-at 1.0. The import refuses a mesh whose object uses two palette blocks, and one whose skeleton was moved or rescaled. Details:
-`MODELS_3D.md` (`tools/ngpmesh.py`).
+Mesh: each primitive keeps the texture its material names (`tex<texId>`, one of the costume's); a new UV layout pairs with an edited
+PNG of the same size. Up to 3 bones per vertex (the heaviest kept). The few vertex colors brighter than 1.0 (Magmo costume 2) come
+back at 1.0. The import refuses a mesh whose object uses two palette blocks, and one whose skeleton was moved or rescaled.
+
+Animations: only the actions that differ from the game's are rewritten; the log lists each one (`a090: rebuilt, 161 -> 161 frames,
+1 transforms moved, 127 curves (1 new)`), and the others stay byte for byte. A transform that moved gets new curves (linear,
+16-bit) and the rest of the action keeps the game's. An action may get longer or shorter: the curves that did not move, including
+the event channels (hits, sounds), are stretched to the new length. The game rotates each transform by three angles on its own
+axes: a transform with fewer rotation channels follows the edit as closely as its axes allow, and the log says how far off
+(`fit off by up to ...`). Transforms with no channel in the game cannot move (the log names them). Only actions the base type
+already has are imported: one with a new id is skipped with a warning. Details: `MODELS_3D.md` (`tools/ngpmesh.py`,
+`tools/ngpanim.py`).
 
 ## The kit on the command line (`tools/modkit.py`)
 
@@ -121,9 +138,10 @@ python tools/modkit.py monster portrait my_mod fire_togera retrato.png   # HUD p
 python tools/modkit.py monster model my_mod fire_togera X.NGP X.PTR [X.TEX] [X.RTX]   # own model into files/
 python tools/modkit.py monster stats my_mod fire_togera   # the base type's .CHR and .AIC to edit (own fight numbers and AI)
 python tools/modkit.py monster sounds my_mod fire_togera  # the base type's sound bank as WAVs (own sounds)
-python tools/modkit.py monster mesh export my_mod fire_togera   # the base costume as .glb for Blender ("New mesh from Blender")
-python tools/modkit.py monster mesh import my_mod fire_togera [edited.glb]   # the edited .glb becomes its .NGP + .PTR
-python tools/modkit.py skin mesh export my_mod green          # the same for a skin (skin mesh import my_mod green [edited.glb])
+python tools/modkit.py monster mesh export my_mod fire_togera   # the base costume as .glb for Blender (mesh and animations)
+python tools/modkit.py monster mesh import my_mod fire_togera [edited.glb]   # the edited .glb's meshes into its .NGP + .PTR
+python tools/modkit.py monster anim import my_mod fire_togera [edited.glb]   # the edited .glb's actions into its .NGP + .PTR
+python tools/modkit.py skin mesh export my_mod green          # the same for a skin (skin mesh|anim import my_mod green [edited.glb])
 ```
 
 - A mod is a project: the work folder is `<mods>/_work/<mod>/`, with its `modkit.json`, and one mod's `pack` never takes what
@@ -203,7 +221,8 @@ A skin is a folder in `mods/<mod>/skins/<folder>/` with a `skin.json`:
   - **`.TEX` and/or `.RTX`** (any name, by extension): own textures, with the same texIds as the base (`modkit pack --inject`
     writes them this way).
   - **`.NGP` + `.PTR`** (always both): own model, with the same skeleton and animations as costume 0. A new mesh comes from
-    Blender through **Export mesh** / **Import mesh...** (`skin mesh export|import`; "New mesh from Blender").
+    Blender through **Export to Blender** / **Import mesh...**, and edited animations through **Import animations...**
+    (`skin mesh export|import`, `skin anim import`; "Mesh and animations from Blender").
 - The game sees each skin as one more costume of the monster (`MON/SHOGUN4.*`, `SHOGUN5.*`...; numbers assigned on every boot, in
   mod/id order). Same monster and id in two mods: the last in alphabetical order wins. The log says what got in:
   `[mods] skin ultra-v/roxo ("PURPLE ULTRA V", meu_mod) = traje 4 (SHOGUN4); base 3, 2 png`.

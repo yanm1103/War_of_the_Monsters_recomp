@@ -3,7 +3,7 @@
 #
 # Uso: powershell -ExecutionPolicy Bypass -File tools\build_modkit.ps1 [-Runtime <pasta>]   (o tools\release.ps1 chama sozinho)
 # Precisa do Python 3 no PATH (py ou python). Versoes fixas: PyInstaller, Pillow e numpy abaixo (numpy: o
-# export da malha para o Blender, tools/monglb.py).
+# export da malha e das animacoes para o Blender, tools/monglb.py).
 param([string]$Runtime = '')
 
 $ErrorActionPreference = 'Stop'
@@ -38,7 +38,7 @@ $work = Join-Path $root 'work'
 $ico = Join-Path $repo 'native\wotm.ico'
 Remove-Item -Recurse -Force $dist, $work -ErrorAction SilentlyContinue
 & $py -m PyInstaller --noconfirm --clean --onefile --windowed --name WotM_ModKit --icon $ico --add-data "$ico;." `
-    --paths (Join-Path $repo 'tools') --hidden-import ngp --hidden-import monglb --hidden-import ngpmesh --distpath $dist --workpath $work --specpath $work `
+    --paths (Join-Path $repo 'tools') --hidden-import ngp --hidden-import monglb --hidden-import ngpmesh --hidden-import ngpanim --distpath $dist --workpath $work --specpath $work `
     (Join-Path $repo 'tools\modkit_gui.py')
 if ($LASTEXITCODE) { Fail 'PyInstaller falhou' }
 $exe = Join-Path $dist 'WotM_ModKit.exe'

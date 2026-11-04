@@ -16,8 +16,9 @@ pasta de trabalho (<mods>/_work/<mod>/, com o modkit.json dela), e o pack de um 
   python tools/modkit.py monster model my_mod fire_togera X.NGP X.PTR          # modelo proprio (esqueleto do tipo base)
   python tools/modkit.py monster stats my_mod fire_togera                     # .CHR e .AIC do tipo base para editar (so dele)
   python tools/modkit.py monster sounds my_mod fire_togera                    # sons do banco do tipo base em WAV (banco so dele)
-  python tools/modkit.py monster mesh export my_mod fire_togera               # malha do traje base em .glb para o Blender
+  python tools/modkit.py monster mesh export my_mod fire_togera               # malha e animacoes do traje base em .glb (Blender)
   python tools/modkit.py monster mesh import my_mod fire_togera [editado.glb] # a malha editada vira o .NGP/.PTR do custom
+  python tools/modkit.py monster anim import my_mod fire_togera [editado.glb] # as animacoes editadas tambem
   python tools/modkit.py skin mesh export my_mod green / skin mesh import my_mod green [editado.glb]   # o mesmo numa skin
   python tools/modkit_gui.py                                 # o mesmo com interface (botao "Mod kit" do launcher)
 
@@ -32,8 +33,9 @@ O que cada tipo vira:
   .TEX/.RTX (mesmo tamanho e cores da paleta atual), para a imagem do GS emulado (referencia da checagem VU1).
 - .VPK / .VAG -> <arquivo>.wav; volta pelo tools/snd989.py (mesma taxa e volumes do original).
 - .BNK -> <banco>_sNNN.wav, um por som com amostra; os editados voltam todos num banco so (snd989 bnk-replace).
-- Malha (skin ou custom) -> <PREFIXO><traje>.glb (tools/monglb.py, precisa do numpy); volta pelo tools/ngpmesh.py como .NGP + .PTR.
-  O pack nao leva .glb/.blend (MESH_SRC).
+- Malha e animacoes (skin ou custom) -> <PREFIXO><traje>.glb (tools/monglb.py --edit, precisa do numpy); voltam pelo
+  tools/ngpmesh.py (malha) e tools/ngpanim.py (animacoes) como .NGP + .PTR, remontados do traje do disco com os dois .glb
+  importados (.blender.json na pasta). O pack nao leva .glb/.blend (MESH_SRC).
 O pack so leva o que mudou desde o export (sha1 em modkit.json na pasta de trabalho). Nada do jogo vai para o repo: o kit le o
 disco do usuario e grava nas pastas dele.
 """
@@ -463,6 +465,9 @@ def revert(disc, work, rels):
                 continue
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             shutil.copyfile(fresh, dst)
+            rec = os.path.join(os.path.dirname(dst), BLENDER_REC)
+            if os.path.splitext(rel)[1].upper() in (".NGP", ".PTR") and os.path.exists(rec):
+                os.remove(rec)   # o modelo voltou ao do disco: o proximo import nao repoe o outro .glb
             ent = state["files"].setdefault(rel, {})
             ent["sha1"] = sha1(dst)
             sz = png_size(dst)
@@ -1128,8 +1133,9 @@ def mesh_glb(work, mods, mod, kind, tid):
 
 
 def mesh_export(disc, work, mods, mod, kind, tid):
-    """Malha do traje base em <work>/<pasta>/<PREFIXO><traje>.glb (tools/monglb.py: esqueleto, pesos, texturas e o idle) para
-    remodelar no Blender. Nao sobrescreve um .glb que ja esta la. Devolve o caminho."""
+    """Traje base em <work>/<pasta>/<PREFIXO><traje>.glb para o Blender (tools/monglb.py --edit: malha, esqueleto com uma junta
+    por transformacao do jogo, pesos, texturas e todas as animacoes). Volta pelo mesh import (malha) e pelo anim import
+    (animacoes). Nao sobrescreve um .glb que ja esta la. Devolve o caminho."""
     rel, stem = mesh_target(mods, mod, kind, tid)
     out = mesh_glb(work, mods, mod, kind, tid)
     if os.path.exists(out):
@@ -1143,38 +1149,88 @@ def mesh_export(disc, work, mods, mod, kind, tid):
     except ImportError as e:
         raise SystemExit("mesh export needs numpy (pip install numpy): %s" % e)
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    monglb.main([src, out, "--vertex-alpha"])   # o alfa do vertice volta ao jogo (teste de alfa) mesmo sem mistura
-    print("mesh of %s -> %s" % (stem, out))
-    print("remodel it in Blender keeping the bone names and the armature in place, export it as .glb, then: mesh import "
-          "(MODELS_3D.md, tools/ngpmesh.py)")
+    # --vertex-alpha: o alfa do vertice volta ao jogo (teste de alfa) mesmo sem mistura
+    monglb.main([src, out, "--vertex-alpha", "--edit"])
+    print("%s -> %s" % (stem, out))
+    print("in Blender: remodel the mesh (keep the bone names and the armature in place) and/or pose and key the bones in "
+          "the animations (a<id>); export it as .glb, then: mesh import and/or anim import (MODELS_3D.md)")
     return out
 
 
-def mesh_import(disc, work, mods, mod, kind, tid, glb=None):
-    """O .glb editado (padrao: o do mesh_export) vira o .NGP + .PTR da skin ou do custom, na pasta de trabalho (o pack os leva).
-    Texturas: as do traje base (e os PNGs da pasta)."""
+BLENDER_REC = ".blender.json"   # na pasta de trabalho do modelo: os .glb importados (malha, animacoes); o pack nao leva
+
+
+def _blender_rec(work, rel):
+    return os.path.join(work, *rel.split("/"), BLENDER_REC)
+
+
+def model_import(disc, work, mods, mod, kind, tid, glb=None, what="mesh"):
+    """O .glb editado no Blender (padrao: o do mesh_export) vira o .NGP + .PTR da skin ou do custom, na pasta de trabalho (o pack
+    os leva). what="mesh": a malha (tools/ngpmesh.py); "anims": as animacoes que mudaram (tools/ngpanim.py). O modelo e
+    sempre remontado do traje do disco com os dois: o outro .glb importado antes (guardado em .blender.json) entra de novo,
+    entao importar um nao desfaz o outro e o arquivo nao cresce a cada import. Texturas: as do traje base (e os PNGs)."""
     import tempfile
+    import ngpanim
     import ngpmesh
+    cmd = "%s import" % ("mesh" if what == "mesh" else "anim")
     rel, stem = mesh_target(mods, mod, kind, tid)
-    glb = glb or mesh_glb(work, mods, mod, kind, tid)
+    glb = os.path.abspath(glb or mesh_glb(work, mods, mod, kind, tid))
     if not os.path.isfile(glb):
-        raise SystemExit("mesh import: %s not found (mesh export, edit it in Blender, export the .glb)" % glb)
+        raise SystemExit("%s: %s not found (export it, edit it in Blender, export the .glb)" % (cmd, glb))
     src = disc_file(disc, stem + ".NGP")
     if not src or not disc_file(disc, stem + ".PTR"):
-        raise SystemExit("mesh import: %s.NGP/.PTR are not on the disc" % stem)
-    tmp = tempfile.mkdtemp(prefix="wotm_mesh_")
+        raise SystemExit("%s: %s.NGP/.PTR are not on the disc" % (cmd, stem))
+    rec = _json_obj(_blender_rec(work, rel)) or {}
+    rec["mesh" if what == "mesh" else "anims"] = glb
+    for k in ("mesh", "anims"):
+        if rec.get(k) and not os.path.isfile(rec[k]):
+            print("warning: %s (imported before as %s) is gone; the model goes without it" % (rec[k], k))
+            rec.pop(k)
+    tmp = tempfile.mkdtemp(prefix="wotm_model_")
+    name = os.path.basename(stem)
+    out = os.path.join(tmp, name + ".NGP")
     try:
-        name = os.path.basename(stem)
-        try:
-            ngpmesh.import_glb(src, glb, tmp, name=name, textures=False)
-        except ngpmesh.MeshError as e:
-            raise SystemExit("mesh import: %s" % e)
-        put_model_files(work, rel, {".NGP": os.path.join(tmp, name + ".NGP"), ".PTR": os.path.join(tmp, name + ".PTR")})
+        if rec.get("mesh"):
+            try:
+                ngpmesh.import_glb(src, rec["mesh"], tmp, name=name, textures=False)
+            except ngpmesh.MeshError as e:
+                raise SystemExit("%s: mesh of %s: %s" % (cmd, rec["mesh"], e))
+        anims = {}
+        if rec.get("anims"):
+            try:
+                anims = ngpanim.import_glb(src, rec["anims"], tmp, name=name, into=out if os.path.exists(out) else None)
+            except (ngpanim.AnimError, ngpmesh.MeshError) as e:
+                raise SystemExit("%s: animations of %s: %s" % (cmd, rec["anims"], e))
+            if not anims and what == "anims":
+                rec.pop("anims")
+        if anims:
+            rec["anim_ids"] = sorted(str(k) for k in anims)
+        else:
+            rec.pop("anim_ids", None)
+        if not os.path.exists(out):
+            if what == "anims":
+                print("anim import: no animation differs from the game's; the model was not changed (Revert goes back "
+                      "to the disc's)")
+            else:
+                raise SystemExit("mesh import: nothing to write")
+            return {}
+        put_model_files(work, rel, {".NGP": out, ".PTR": os.path.join(tmp, name + ".PTR")})
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+    with open(_blender_rec(work, rel), "w", encoding="utf-8") as f:
+        json.dump(rec, f, indent=1)
     if kind == "monster":
         files_on(mods, mod, tid, _json_obj(os.path.join(monster_dir(mods, mod, tid), "monster.json")))
     print("send it to the mod: %s" % pack_hint(mod))
+    return anims
+
+
+def mesh_import(disc, work, mods, mod, kind, tid, glb=None):
+    return model_import(disc, work, mods, mod, kind, tid, glb, "mesh")
+
+
+def anim_import(disc, work, mods, mod, kind, tid, glb=None):
+    return model_import(disc, work, mods, mod, kind, tid, glb, "anims")
 
 
 def monster_duplicate(mods, mod, work, cid, new):
@@ -1452,18 +1508,25 @@ def main(argv):
         if len(args) != 2:
             raise SystemExit("pack <mod>: one mod name (not starting with '_' or '.')")
         pack(disc, work_of("pack", args[1]), mods, args[1], opts.get("inject", False))
-    elif args[0] in ("skin", "monster") and len(args) > 1 and args[1] == "mesh":
-        if len(args) not in (5, 6) or args[2] not in ("export", "import") or (args[2] == "export" and len(args) != 5):
-            raise SystemExit("%s mesh export <mod> <id>\n%s mesh import <mod> <id> [edited.glb]" % (args[0], args[0]))
-        w = work_of("%s mesh" % args[0], args[3])
-        if args[2] == "export":
+    elif args[0] in ("skin", "monster") and len(args) > 1 and args[1] in ("mesh", "anim"):
+        ok = (args[1] == "mesh" and len(args) in (5, 6) and args[2] in ("export", "import") and
+              (args[2] == "import" or len(args) == 5)) or (args[1] == "anim" and len(args) in (5, 6) and args[2] == "import")
+        if not ok:
+            raise SystemExit("%s mesh export <mod> <id>\n%s mesh import <mod> <id> [edited.glb]\n%s anim import <mod> <id> "
+                             "[edited.glb]" % (args[0], args[0], args[0]))
+        w = work_of("%s %s" % (args[0], args[1]), args[3])
+        glb = args[5] if len(args) == 6 else None
+        if args[1] == "anim":
+            anim_import(disc, w, mods, args[3], args[0], args[4], glb)
+        elif args[2] == "export":
             mesh_export(disc, w, mods, args[3], args[0], args[4])
         else:
-            mesh_import(disc, w, mods, args[3], args[0], args[4], args[5] if len(args) == 6 else None)
+            mesh_import(disc, w, mods, args[3], args[0], args[4], glb)
     elif args[0] == "skin":
         if len(args) != 5 or args[1] != "new":
             raise SystemExit("skin new <mod> <monster> <id> [--base N] [--name \"GREEN TOGERA\"] [--ai]\n"
-                             "skin mesh export <mod> <id>\nskin mesh import <mod> <id> [edited.glb]")
+                             "skin mesh export <mod> <id>\nskin mesh import <mod> <id> [edited.glb]\n"
+                             "skin anim import <mod> <id> [edited.glb]")
         base = opts.get("base")
         if base is not None:
             try:
@@ -1474,7 +1537,8 @@ def main(argv):
     elif args[0] == "monster":
         use = ("monster new <mod> <id> --base <monster> [--costume N] [--name \"X\"] [--ai] [--camera togera:200 | --camera none] "
                "[--narrator <name>] [--no-textures]\nmonster portrait <mod> <id> <png>\nmonster model <mod> <id> <.NGP> <.PTR> [.TEX] [.RTX]"
-               "\nmonster stats <mod> <id>\nmonster sounds <mod> <id>\nmonster mesh export <mod> <id>\nmonster mesh import <mod> <id> [edited.glb]")
+               "\nmonster stats <mod> <id>\nmonster sounds <mod> <id>\nmonster mesh export <mod> <id>\nmonster mesh import <mod> <id> [edited.glb]"
+               "\nmonster anim import <mod> <id> [edited.glb]")
         if len(args) < 4 or args[1] not in ("new", "portrait", "model", "stats", "sounds"):
             raise SystemExit(use)
         w = work_of("monster " + args[1], args[2])

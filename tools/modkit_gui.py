@@ -1980,21 +1980,27 @@ class App:
                  lambda: self.reselect("monsters/" + cid))
 
     def mesh_row(self, parent, kind, tid, folder, status=True):
-        """Export mesh (.glb para o Blender) e Import mesh... (o .glb editado vira o .NGP/.PTR), com o que a pasta ja tem."""
+        """Export to Blender (.glb com malha e animacoes), Import mesh... e Import animations... (o .glb editado vira o
+        .NGP/.PTR), com o que a pasta ja tem."""
         f = ttk.Frame(parent)
         names = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
         if status:
             model = [n for n in names if os.path.splitext(n)[1].upper() in (".NGP", ".PTR")]
             glb = [n for n in names if n.lower().endswith(".glb")]
             txt = ("own model: %s" % ", ".join(model)) if model else "the base costume's"
+            ids = modkit._json_obj(os.path.join(folder, modkit.BLENDER_REC)).get("anim_ids") if model else None
+            if ids:
+                txt += "; animations changed: %s" % ", ".join(ids)
             if glb:
                 txt += "; for Blender: %s" % ", ".join(glb)
             ttk.Label(f, text=txt, style="Dim.TLabel", wraplength=300, justify="left").pack(anchor="w")
         bf = ttk.Frame(f)
         bf.pack(anchor="w", pady=(4, 0) if status else 0)
-        ttk.Button(bf, text="Export mesh", command=lambda: self.export_mesh(kind, tid)).pack(side="left")
+        ttk.Button(bf, text="Export to Blender", command=lambda: self.export_mesh(kind, tid)).pack(side="left")
         ttk.Button(bf, text="Import mesh...", command=lambda: self.import_mesh(kind, tid)).pack(side="left", padx=(6, 0))
-        ttk.Label(bf, text="(.glb, Blender)", style="Dim.TLabel").pack(side="left", padx=(8, 0))
+        ttk.Button(bf, text="Import animations...",
+                   command=lambda: self.import_mesh(kind, tid, "anims")).pack(side="left", padx=(6, 0))
+        ttk.Label(bf, text="(.glb)", style="Dim.TLabel").pack(side="left", padx=(8, 0))
         return f
 
     def export_mesh(self, kind, tid):
@@ -2002,11 +2008,11 @@ class App:
         if not work:
             return
         key = ("skins/" if kind == "skin" else "monsters/") + tid
-        self.run("Exporting the mesh of %s for Blender..." % tid,
+        self.run("Exporting %s for Blender (mesh and animations)..." % tid,
                  lambda disc=self.disc.get(), mods=self.mods.get(): modkit.mesh_export(disc, work, mods, mod, kind, tid),
                  lambda: self.reselect(key))
 
-    def import_mesh(self, kind, tid):
+    def import_mesh(self, kind, tid, what="mesh"):
         work, mod, mods = self.work(), self.cur_mod(), self.mods.get()
         if not work:
             return
@@ -2019,13 +2025,15 @@ class App:
         kw = {"initialdir": d} if os.path.isdir(d) else {}
         if os.path.isfile(glb):
             kw["initialfile"] = os.path.basename(glb)
-        p = filedialog.askopenfilename(parent=self.root, title="Edited mesh of %s (.glb exported from Blender)" % tid,
+        noun = "mesh" if what == "mesh" else "animations"
+        p = filedialog.askopenfilename(parent=self.root, title="Edited %s of %s (.glb exported from Blender)" % (noun, tid),
                                        filetypes=[("glTF binary", "*.glb *.GLB"), ("All files", "*.*")], **kw)
         if not p:
             return
         key = ("skins/" if kind == "skin" else "monsters/") + tid
-        self.run("Importing the mesh of %s..." % tid,
-                 lambda disc=self.disc.get(): modkit.mesh_import(disc, work, mods, mod, kind, tid, p),
+        fn = modkit.mesh_import if what == "mesh" else modkit.anim_import
+        self.run("Importing the %s of %s..." % (noun, tid),
+                 lambda disc=self.disc.get(): fn(disc, work, mods, mod, kind, tid, p),
                  lambda: self.reselect(key))
 
     def extract_stats(self, cid):

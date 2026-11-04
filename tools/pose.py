@@ -90,7 +90,7 @@ class Item(tuple):
 
     def __new__(cls, node, m, ctx, gs, uv):
         it = tuple.__new__(cls, (node, m, ctx))
-        it.gs, it.uv = gs, uv
+        it.gs, it.uv, it.xf = gs, uv, None
         return it
 
 
@@ -100,6 +100,18 @@ class PoseList(list):
     native/wotm_model.hpp. Um no so e percorrido quando o canal de visibilidade dos ANIM_XFORM acima dele vale 1."""
     emitters = ()
     lights = ()
+    xforms = {}
+
+
+class Xf(tuple):
+    """No de transformacao percorrido (PoseList.xforms): op (3 TRANSLATE, 4 ROTATE, 17 ANIM_XFORM, 30 SCALE, 38 ANIM_SCALE),
+    parent (a transformacao mais proxima acima, ou None), L (matriz local, vetores-linha), world (L * mundo do pai),
+    out (saida do osso que ele liga: skelOutputMatIdx, ou None) e S (a matriz desse osso na pilha do esqueleto), ctx."""
+
+    def __new__(cls, op, parent, L, world, out, S, ctx):
+        x = tuple.__new__(cls, (op, parent, L, world, out, S, ctx))
+        x.op, x.parent, x.L, x.world, x.out, x.S, x.ctx = op, parent, L, world, out, S, ctx
+        return x
 
 
 GS_DEFAULT = (0x44, -1, False, 2)   # ctxDef do jogo: ALPHA_1 0x44, sem teste de alfa, grava Z, teste de Z normal
@@ -231,7 +243,7 @@ class Model:
                     main.val[cv.idx] = cv.eval(t)
                     main.dirty.add(cv.idx)
         items = PoseList()
-        items.emitters, items.lights = [], []
+        items.emitters, items.lights, items.xforms = [], [], {}
         smat = {}
         skel = {}
         owner = {}   # indice da pilha de matrizes -> saida do osso que a gravou (None = identidade de um osso raiz)
@@ -252,6 +264,15 @@ class Model:
             out(ctx, si, mi + 1)
             return si - 1, mi + 1
 
+        tstack = []   # nos de transformacao acima do no visitado (o ultimo e o pai)
+
+        def rec(n, op, L, world, ctx, si, mi2):
+            """items.xforms[no] = Xf: op, pai (transformacao mais proxima acima), matriz local, mundo, saida do osso que ele
+            liga (ou None) e a matriz desse osso na pilha do esqueleto."""
+            bound = si >= 0
+            o = owner.get(mi2) if bound else None
+            items.xforms[n] = Xf(op, tstack[-1] if tstack else None, L, world, o, smat[mi2] if bound else None, ctx)
+
         def visit(n, m, si, mi, ctx, depth, gs=GS_DEFAULT):
             if depth > 80 or not img.ok(n):
                 return
@@ -271,7 +292,9 @@ class Model:
                 uv = [img.f32(n + 0x20), img.f32(n + 0x24)]
                 if (img.u16(n + 0xC) & 0x800) and ctx is not None:
                     uv = [ctx.v(img.s16(n + 0x30 + 2 * j), 0.0) for j in range(2)]
-                items.append(Item(n, m, ctx, gs, tuple(uv)))
+                it = Item(n, m, ctx, gs, tuple(uv))
+                it.xf = tstack[-1] if tstack else None   # a transformacao logo acima (no de Xf em items.xforms)
+                items.append(it)
             elif op == 22:
                 items.emitters.append((n, m))
             elif op == 5:
@@ -287,18 +310,23 @@ class Model:
                     if img.f32(n + 0x24 + 16 * i) > 0.0:
                         visit(img.u32(n + 0x28 + 16 * i), m, si, mi, ctx, depth + 1, gs)
                         break
-            elif op == 3:
-                L = translate(img.f32(n + 0x10), img.f32(n + 0x14), img.f32(n + 0x18))
+            elif op in (3, 4):
+                if op == 3:
+                    L = translate(img.f32(n + 0x10), img.f32(n + 0x14), img.f32(n + 0x18))
+                else:
+                    L = np.array(struct.unpack_from("<16f", img.d, n + 0x10 - img.base)).reshape(4, 4)
                 s2, m2 = skelstep(ctx, L, si, mi)
-                kids(n + 0x1C, img.u32(n + 8), L @ m, s2, m2)
-            elif op == 4:
-                L = np.array(struct.unpack_from("<16f", img.d, n + 0x10 - img.base)).reshape(4, 4)
-                s2, m2 = skelstep(ctx, L, si, mi)
-                kids(n + 0x50, img.u32(n + 8), L @ m, s2, m2)
+                rec(n, op, L, L @ m, ctx, si, m2)
+                tstack.append(n)
+                kids(n + (0x1C if op == 3 else 0x50), img.u32(n + 8), L @ m, s2, m2)
+                tstack.pop()
             elif op == 30:
                 L = scale(img.f32(n + 0x20), img.f32(n + 0x24), img.f32(n + 0x28)) @ translate(
                     img.f32(n + 0x10), img.f32(n + 0x14), img.f32(n + 0x18))
+                rec(n, op, L, L @ m, ctx, -1, mi)
+                tstack.append(n)
                 kids(n + 0x2C, img.u32(n + 8), L @ m)
+                tstack.pop()
             elif op == 6:
                 w, cnt = img.u8(n + 8), img.u8(n + 0xB)
                 if n in self.switch_on:
@@ -361,7 +389,10 @@ class Model:
                     at = img.u32(c.ci + 0xC) + 64 * img.u32(n + 0xC4) if c else 0
                     L = np.array(struct.unpack_from("<16f", img.d, at - img.base)).reshape(4, 4) if c and img.ok(at, 64) else np.eye(4)
                 s2, m2 = skelstep(c, L, si, mi)
+                rec(n, op, L, L @ m, c, si, m2)
+                tstack.append(n)
                 kids(n + 0xCC, img.u32(n + 4), L @ m, s2, m2)
+                tstack.pop()
             elif op == 38:
                 c = ctx
                 def g(off, fb):
@@ -377,7 +408,11 @@ class Model:
                 tx, ty, tz = g(0x18, img.f32(n + 0x30)), g(0x1A, img.f32(n + 0x34)), g(0x1C, img.f32(n + 0x38))
                 pre = translate(img.f32(n + 0x40), img.f32(n + 0x44), img.f32(n + 0x48))
                 post = translate(tx + img.f32(n + 0x50), ty + img.f32(n + 0x54), tz + img.f32(n + 0x58))
-                kids(n + 0x60, img.u32(n + 4), pre @ scale(sx, sy, sz) @ post @ m)
+                L = pre @ scale(sx, sy, sz) @ post
+                rec(n, op, L, L @ m, c, -1, mi)
+                tstack.append(n)
+                kids(n + 0x60, img.u32(n + 4), L @ m)
+                tstack.pop()
             elif op == 39:
                 c2 = img.u32(n + 0xC)
                 if img.ok(c2) and (img.u32(c2) & 63) == 31:

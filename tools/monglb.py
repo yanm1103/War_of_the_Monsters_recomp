@@ -615,6 +615,247 @@ class Exporter:
         return st
 
 
+    # ---- .glb para editar as animacoes (tools/ngpanim.py faz a volta)
+    def export_edit(self, out, keys, fps=60.0, log=print):
+        """Malha, esqueleto e todas as animacoes de `keys` num .glb para o Blender, no formato que o tools/ngpanim.py le de
+        volta. Diferente do export do viewer, a hierarquia espelha a do jogo: um no por transformacao percorrida (ANIM_XFORM
+        "bone<N>" quando liga o osso de saida N, senao "xf_<no>"; TRANSLATE/ROTATE/SCALE fixos "st_<no>"; ANIM_SCALE
+        "sc_<no>"), filho da transformacao logo acima, com a matriz local do jogo em cada quadro (mundo do no = o do jogo; o
+        de um osso e o da pilha do esqueleto, conferido nos 44 .NGP). A pose padrao e a de ligacao (osso = inverso do
+        restPoseInv; o resto, a local do primeiro quadro em que aparece); todas as transformacoes sao juntas da pele, com
+        matriz inversa = inverso do mundo nessa pose (a do osso e o restPoseInv), para o Blender montar uma armadura so.
+        Partes rigidas: no "part_<obj>_<n>" filho da transformacao de cima. Malha skinned sob uma transformacao (Agamo):
+        copias "bone<N>@<obj>" dos ossos sob o no dela, com as mesmas trilhas. Canal de visibilidade em 0 (parte some) =
+        escala 0 no no. Animacao "a<id>" (com "_<k>" quando o id se repete), tempo em segundos (quadro / 60)."""
+        g, img = self.g, self.img
+        sampled = []
+        for k in keys:
+            aid, frames, times = self.sample(k, fps)
+            sampled.append((k, aid, frames, times))
+        skin_flag = {}
+
+        def is_skinned(node):
+            if node not in skin_flag:
+                skin_flag[node] = ngp.decode_mesh(img, node).skinned
+            return skin_flag[node]
+
+        info = {}       # transformacao -> (op, pai, saida do osso, instancia, SKEL_BONE)
+        skinned = {}    # (OBJECT, instancia) -> (slots da paleta {slot: saida}, transformacao de cima)
+        rigid = []      # (OBJECT, ocorrencia, transformacao de cima)
+        self.gs_of = {}
+        for _k, _aid, frames, _t in sampled:
+            for items in frames:
+                for n, x in items.xforms.items():
+                    bone = x.ctx.bones[x.out][0] if x.out is not None else None
+                    cur = (x.op, x.parent, x.out, x.ctx.ci if x.ctx else None, bone)
+                    if n not in info:
+                        info[n] = cur
+                    elif info[n] != cur:
+                        raise ValueError("transformacao %x muda de pai ou de osso entre quadros" % n)
+                seen = {}
+                for it in items:
+                    node, _m, ctx = it
+                    self.gs_of.setdefault(node, it.gs)
+                    if is_skinned(node):
+                        if ctx is not None and (node, ctx.ci) not in skinned:
+                            skinned[(node, ctx.ci)] = (self.mdl.palette_outs(node, ctx) or {}, it.xf)
+                    else:
+                        occ = seen.get(node, 0)
+                        seen[node] = occ + 1
+                        if not any(r[0] == node and r[1] == occ for r in rigid):
+                            rigid.append((node, occ, it.xf))
+
+        def depth(n):
+            d = 0
+            while info[n][1] is not None:
+                n, d = info[n][1], d + 1
+            return d
+
+        order = sorted(info, key=lambda n: (depth(n), n))
+        one_ci = len({v[3] for v in info.values() if v[2] is not None}) <= 1
+
+        def name(n):
+            op, _p, o, ci, _b = info[n]
+            if o is not None:
+                return "bone%d" % o if one_ci else "bone%x_%d" % (ci, o)
+            return {17: "xf_%x", 38: "sc_%x"}.get(op, "st_%x") % n
+
+        def rp(bone):
+            return np.array(struct.unpack_from("<16f", img.d, bone + 0x10 - img.base)).reshape(4, 4)
+
+        # pose de ligacao: a do tools/ngpanim.py (que le de volta), conferida com a estrutura desta travessia
+        import ngpanim
+        gm = ngpanim.Game(self.path)
+        W = {}
+        for n in order:
+            op, par, o, _ci, bone = info[n]
+            if n not in gm.nodes or gm.nodes[n].name != name(n) or gm.nodes[n].parent != par:
+                raise ValueError("transformacao %x: estrutura diferente da do ngpanim" % n)
+            W[n] = np.array(gm.bind[n])
+        root = {"name": "WotM", "rotation": ROOT_Q, "children": []}
+        g.j["nodes"].append(root)
+        g.j["scenes"][0]["nodes"].append(0)
+
+        def add_node(d, parent):
+            g.j["nodes"].append(d)
+            i = len(g.j["nodes"]) - 1
+            g.j["nodes"][parent].setdefault("children", []).append(i)
+            return i
+
+        def with_trs(d, M):
+            t, q, s, err = trs(M)
+            self.stats["erro_trs"] = max(self.stats["erro_trs"], err)
+            d.update({"translation": t, "rotation": q, "scale": s})
+            return d
+
+        gi = {}
+        for n in order:
+            par = info[n][1]
+            P = W[par] if par is not None else np.eye(4)
+            gi[n] = add_node(with_trs({"name": name(n)}, W[n] @ np.linalg.inv(P)), gi[par] if par is not None else 0)
+        bones_of = {}   # instancia -> [(saida, transformacao)]
+        for n in order:
+            if info[n][2] is not None:
+                bones_of.setdefault(info[n][3], []).append((info[n][2], n))
+
+        def bound_parent(n):
+            p = info[n][1]
+            while p is not None and info[p][2] is None:
+                p = info[p][1]
+            return p
+
+        # copias dos ossos sob a transformacao de uma malha skinned com matriz de objeto
+        dups = {}       # (instancia, transformacao de cima) -> {transformacao do osso: no da copia}
+        for (node, ci), (_outs, xf) in sorted(skinned.items()):
+            if xf is None or (ci, xf) in dups:
+                continue
+            d = {}
+            for o, n in bones_of.get(ci, []):
+                bp = bound_parent(n)
+                P = np.linalg.inv(rp(info[bp][4])) if bp is not None else np.eye(4)
+                d[n] = add_node(with_trs({"name": "%s@%x" % (name(n), node)}, W[n] @ np.linalg.inv(P)),
+                                d[bp] if bp in d else gi[xf])
+            dups[(ci, xf)] = d
+
+        # pele: todas as transformacoes (+ um joint fixo para slots sem osso); a copia, os ossos dela
+        fixo = add_node({"name": "static"}, 0)
+
+        def make_skin(joints, ibms, nm):
+            data = struct.pack("<%df" % (16 * len(ibms)), *[float(x) for m in ibms for x in m.T.flatten(order="F")])
+            g.j["accessors"].append({"bufferView": g.view(data), "componentType": 5126, "count": len(ibms), "type": "MAT4"})
+            g.j.setdefault("skins", []).append({"joints": joints, "inverseBindMatrices": len(g.j["accessors"]) - 1,
+                                                "skeleton": 0, "name": nm})
+            return len(g.j["skins"]) - 1
+
+        main_skin = make_skin([gi[n] for n in order] + [fixo],
+                              [rp(info[n][4]) if info[n][2] is not None else np.linalg.inv(W[n]) for n in order] + [np.eye(4)],
+                              "skeleton")
+        jpos = {n: i for i, n in enumerate(order)}
+        dup_skin = {}
+        for key, d in dups.items():
+            ns = [n for _o, n in bones_of[key[0]]]
+            dup_skin[key] = (make_skin([d[n] for n in ns] + [gi[key[1]]], [rp(info[n][4]) for n in ns] + [np.eye(4)],
+                                       "skeleton@%x" % key[1]), {n: i for i, n in enumerate(ns)}, len(ns))
+        for (node, ci), (outs, xf) in sorted(skinned.items()):
+            md = ngp.decode_mesh(img, node)
+            self.stats["sprites_fora"] += len(md.sprites)
+            if not md.tris:
+                continue
+            by_out = {o: n for o, n in bones_of.get(ci, [])}
+            if xf is None:
+                si = main_skin
+                joint_of = {s: jpos[by_out[o]] for s, o in outs.items() if o in by_out}
+                joint_of["fixo"] = len(order)
+            else:
+                si, pos, nfix = dup_skin[(ci, xf)]
+                joint_of = {s: pos[by_out[o]] for s, o in outs.items() if o in by_out}
+                joint_of["fixo"] = nfix
+            g.j["meshes"].append({"name": "obj_%x" % node, "primitives": self.primitives(node, md, joint_of)})
+            g.j["nodes"].append({"name": "obj_%x" % node, "mesh": len(g.j["meshes"]) - 1, "skin": si})
+            g.j["scenes"][0]["nodes"].append(len(g.j["nodes"]) - 1)
+            self.stats["objetos"] += 1
+        for node, occ, xf in rigid:
+            md = ngp.decode_mesh(img, node)
+            self.stats["sprites_fora"] += len(md.sprites)
+            if not md.tris:
+                continue
+            g.j["meshes"].append({"name": "obj_%x" % node, "primitives": self.primitives(node, md)})
+            add_node({"name": "part_%x_%d" % (node, occ), "mesh": len(g.j["meshes"]) - 1}, gi[xf] if xf is not None else 0)
+            self.stats["objetos"] += 1
+        names = [nd["name"] for nd in g.j["nodes"]]
+        if len(set(names)) != len(names):
+            raise ValueError("nomes de no repetidos")
+
+        # animacoes
+        count = {}
+        for _k, aid, _f, _t in sampled:
+            count[aid] = count.get(aid, 0) + 1
+        anims = []
+        for k, aid, frames, times in sampled:
+            n = len(frames)
+            tracks = {}
+            for f, items in enumerate(frames):
+                for nd, x in items.xforms.items():
+                    tracks.setdefault(gi[nd], Track(n)).put(f, x.L)
+                    for (ci, _xf), d in dups.items():
+                        if nd in d:
+                            tracks.setdefault(d[nd], Track(n)).put(f, x.L)
+            for nd in order:
+                if gi[nd] not in tracks:
+                    tracks[gi[nd]] = Track(n)
+            for ni, tr in tracks.items():
+                tr.fill(hidden=any(v is None for v in tr.t))
+            nm = "a%03d" % aid + ("_%d" % k if count[aid] > 1 else "")
+            anims.append(self._edit_anim(nm, aid, k, tracks, times))
+        g.j["animations"] = anims
+        g.j["scenes"][0]["extras"] = {"wotmEdit": 1, "ngp": os.path.basename(self.path), "fps": 60}
+        g.write(out)
+        st = self.stats
+        log("gravado %s: %d objetos, %d triangulos, %d transformacoes (%d ossos), %d animacoes; erro TRS max %.2g; "
+            "chaves %d de %d" % (out, st["objetos"], st["triangulos"], len(order), sum(len(v) for v in bones_of.values()),
+                                 len(anims), st["erro_trs"], st["chaves"], st["chaves_amostradas"]))
+        return st
+
+    def _edit_anim(self, nm, aid, k, tracks, times):
+        """Uma animacao do .glb de edicao: so as trilhas que mudam (ou diferem do valor padrao do no)."""
+        g = self.g
+        channels, samplers = [], []
+        blob = bytearray()
+        mine = []
+        inputs = {}
+
+        def acc(data, ctype, count, typ, **extra):
+            while len(blob) % 4:
+                blob.append(0)
+            g.j["accessors"].append(dict({"byteOffset": len(blob), "componentType": ctype, "count": count, "type": typ}, **extra))
+            blob.extend(data)
+            mine.append(len(g.j["accessors"]) - 1)
+            return mine[-1]
+
+        for idx, (ni, tr) in enumerate(sorted(tracks.items())):
+            nd = g.j["nodes"][ni]
+            for path, vals, comps in (("translation", tr.t, 3), ("rotation", tr.q, 4), ("scale", tr.s, 3)):
+                keep = reduce_keys(vals, TOL[path] * 0.2)
+                self.stats["chaves_amostradas"] += len(vals)
+                if len(keep) == 2 and idx > 0 and const(vals, TOL[path] * 0.2) and (
+                        const([vals[0], nd[path]], TOL[path] * 0.2) or
+                        (path == "rotation" and const([vals[0], [-c for c in nd[path]]], TOL[path] * 0.2))):
+                    continue
+                self.stats["chaves"] += len(keep)
+                key = tuple(keep)
+                if key not in inputs:
+                    ts = [times[i] for i in keep]
+                    inputs[key] = acc(struct.pack("<%df" % len(ts), *ts), 5126, len(ts), "SCALAR", min=[ts[0]], max=[ts[-1]])
+                flat = [x for i in keep for x in vals[i]]
+                outp = acc(struct.pack("<%df" % len(flat), *flat), 5126, len(keep), "VEC%d" % comps)
+                samplers.append({"input": inputs[key], "output": outp, "interpolation": "LINEAR"})
+                channels.append({"sampler": len(samplers) - 1, "target": {"node": ni, "path": path}})
+        bv = g.view(bytes(blob))
+        for a in mine:
+            g.j["accessors"][a]["bufferView"] = bv
+        return {"name": nm, "channels": channels, "samplers": samplers, "extras": {"wotmAnim": aid, "k": k, "frames": len(times)}}
+
+
 # Tolerancia ao tirar chaves: a interpolacao linear entre as chaves que ficam refaz cada quadro amostrado com erro menor
 # que isto (translacao em unidades do jogo; rotacao em componente de quaternion, ~0,06 grau; escala relativa).
 TOL = {"translation": 0.01, "rotation": 5e-4, "scale": 1e-3}
@@ -742,6 +983,11 @@ def main(argv):
         keys = [idle_k] + [a[1] for a in table if a[1] != idle_k and a[1] != layer]
     if "--fps" in argv:
         fps = float(argv[argv.index("--fps") + 1])
+    if "--edit" in argv:   # todas as animacoes, para o Blender (tools/ngpanim.py faz a volta)
+        if "--anims" not in argv:
+            keys = [idle_k] + [a[1] for a in table if a[1] != idle_k and a[1] != layer]
+        ex.export_edit(argv[1], keys, fps)
+        return 0
     anim_dir = argv[argv.index("--anim-dir") + 1] if "--anim-dir" in argv else None
     ex.export(argv[1], keys, fps, split="--split" in argv, anim_dir=anim_dir, uv_layer=layer)
     return 0
