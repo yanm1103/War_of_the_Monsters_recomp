@@ -6,16 +6,12 @@ O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado s
 | # | Item | Depende de | Custo |
 |---|---|---|---|
 | 8 | Mods que adicionam monstros (as skins já existem) | — | médio/alto |
-| 15 | Exército: conferir o rotor do helicóptero fora de Vegas | — | baixo |
 
 ### 8. Mods que adicionam monstros
 Como funciona hoje: `docs/guides/MODS.md` ("Skins", "Monstros custom").
 - **Monstros com arquivos próprios:** campo `files` no `monster.json`, com um tipo livre (6, 12 ou 16) ou remapeando um tipo. Hoje o custom usa o tipo de um monstro do jogo. Modelo novo depende de o `.NGP` voltar pelo kit (hoje ele só sai).
 - **Arquivo de mod maior que o do disco** fora de `MON/*`: o jogo carrega em regiões de tamanho fixo e pode sobrescrever o que vem depois (o log avisa). Abrir espaço por tipo de arquivo.
 - **Aviso do buffer do `.PTR` para skin com `.PTR` próprio:** o log de carga já mostra os texIds e a VRAM. Falta o buffer de 0x30D40 do `.PTR` (`0f091a4:docs/investigacoes/2026-10-23/skins_mod_carga.md`, item 8).
-
-### 15. Exército: rotor do helicóptero fora de Vegas
-O `MON/ARMY.NGP` traz um `ANIM_MGR` próprio com a animação do rotor; ainda não foi visto girando fora de Vegas (ex.: VOLCANO, que só tem helicópteros). Parado fica na pose do arquivo, sem quebra. Por onde começar: foto de perto de um helicóptero em duas horas diferentes. Como funciona: `docs/guides/NATIVE.md`, "Army in versus fights". Contexto: `f70a4f0:docs/investigacoes/2026-11-04/militares_etapa3_carga.md` (seção do rotor).
 
 ## Decomp
 - **Fora do caminho crítico:** oracle para funções com chamadas; cobertura com gameplay para realimentar o `boot_coverage_asm.csv` (`57d4afd:docs/investigacoes/2026-10-19/pendencias_oracle_cobertura.md`, seções 2 e 3).
