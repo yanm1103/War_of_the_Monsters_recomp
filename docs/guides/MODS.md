@@ -15,7 +15,7 @@ discroot/mods/
 ```
 
 Loader rules (`native/wotm_mods.hpp`): a folder starting with `_` or `.` is disabled; when two mods have the same file, the last one
-in alphabetical order wins (you can use `10_base`, `20_extra`); `WOTM_MODS=<folder>` changes the folder and `WOTM_MODS=0` disables everything. The
+in alphabetical order wins (you can use `10_base`, `20_extra`); `WOTM_MODS=<folder>` changes the folder and `WOTM_MODS=0` turns the folder off (the generated army files stay). The
 log (`logs\live.err.log`) lists each file and each texture that came from a mod (`[mods] ...`).
 
 **Project mods** live in `mods/<mod>/` at the repo root and are only original art and configuration (JSON, drawn PNG): Goliath
@@ -341,8 +341,12 @@ the one of the RANDOM entry (`random`; without it, a mosaic of the game's pictur
   at 0x800000, beyond any DVD) and the mod's size; the `sceCdRead` hook serves that range by reading from the PC file. The native sound
   (`readLsnRaw`) reads banks and music through the same range. The native layer that reads the disc by name also looks in `mods/` first:
   `.RTX` palettes (`Scene::loadResources`, which reads the file directly and not from RAM), movies (`wotm_fmv.hpp`), icon, pictures and monster
-  of the save list (`wotm::disc::readFile`). Without any file in `mods/` no hook is installed. A file that does not exist on the disc
+  of the save list (`wotm::disc::readFile`). With no file in the registry (no mod and no generated file) no hook is installed. A file that does not exist on the disc
   is served too ("new file").
+- **Generated files:** the army's vehicles for every stage, `MON/ARMY.NGP/.PTR/.TEX/.RTX`, are built from the disc's `LVL/VEGAS.*` into
+  `cache/army/` and enter the registry as the mod "army (gerado)" (`Registry::addGenerated`, before the scan), with or without the
+  mods folder (`WOTM_MODS=0` included). A mod with its own
+  `MON/ARMY.*` wins (`NATIVE.md`, "Army in versus fights").
 - **Log:** `[mods] N arquivo(s) de <mods> em <pasta>` at boot and, on the first search of each file, `[mods] MON/LIZARD0.TEX <-
   teste_togera (110080 bytes; disco 110080)`, with AVISO when the mod's is bigger (outside `MON/*`, whose loading is contiguous above
   32 MB).

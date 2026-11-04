@@ -85,6 +85,14 @@ Three (file zero) or four (monsters) lists, each a `contagem` followed by `conta
   (2) 16-bit texture ids += highest id of the previous file; (3) GS words: `TBP0` += end of the previous file's textures, and the ones
   marked 0x1B/0x2C/0x24 add the end of the previous file's resources to the low 14-bit field.
 
+## Path nets (`PTS/<STAGE>.FOP`, `PathNet`)
+`InitBeforeDbLoad` loads the stage's `.FOP` into `PathNet::fodder` (0x7CA4D0, 0x3010 bytes); 13 stages have one, and without it
+`exportPoints` builds 2 nodes, (-100, 0, 250) and (100, 0, 250), linked to each other. In RAM: `u16 numNodes` at +0, then up to 256
+nodes from +0x10, 0x30 each: position `xyzw` (+0x00), type `u8` (+0x10: 0 car streets, 1 military helicopter, 2 flying saucer,
+3 tank and truck, VEGAS only), link count `u8` (+0x11), up to 6 links `{u16 node, u8 width, u8 drop}` (+0x12). For the helicopter
+(`HeliVehicleNav`) a segment counts as reached `width·10` before its end, the side drift is limited to `width·10 - 50`, and the
+flight may go down to `drop·10` below the path when chasing a target; VEGAS's helicopter links are `{node, 10..20, 26}`.
+
 ## Level object ids (`dbProcInteractive`)
 Id = high 14 bits of the node's first word. Nodes with opcode 0x1F and 0x27 are always destructible.
 | Range | Meaning |

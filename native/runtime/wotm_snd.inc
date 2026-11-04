@@ -100,7 +100,11 @@ inline bool readLsn(uint32_t lsn, uint32_t sectors, uint8_t *dst)
 void startSoundSystem(uint8_t *, R5900Context *ctx, PS2Runtime *)
 {
     const bool ok = Engine::get().startOutput();
-    std::fprintf(stderr, "[snd] snd_StartSoundSystem: som nativo %s\n", ok ? "ligado (48 kHz)" : "SEM saida de audio (InitAudioDevice falhou?)");
+    const char *mute = std::getenv("WOTM_MUTE");
+    if (ok && mute && *mute && *mute != '0')
+        ::SetMasterVolume(0.f);   // tudo o que sai pelo raylib: jogo, narrador e filmes
+    std::fprintf(stderr, "[snd] snd_StartSoundSystem: som nativo %s%s\n", ok ? "ligado (48 kHz)" : "SEM saida de audio (InitAudioDevice falhou?)",
+                 ok && mute && *mute && *mute != '0' ? ", mudo (WOTM_MUTE)" : "");
     setReturnS32(ctx, 1);
 }
 void stopSoundSystem(uint8_t *, R5900Context *, PS2Runtime *) { Engine::get().stopAll(); }
@@ -318,6 +322,43 @@ inline bool playMonsterCry(int monster)
     std::fprintf(stderr, "[narrador] grito do monstro %d: som %d de %s%s\n", monster, c.sound, c.bank, v ? "" : " (nao tocou)");
     return v != 0;
 }
+// Motor do tanque fora de Vegas (exercito em qualquer fase, wotm_army.inc): o TankSound::updateTankSound toca o som 0 de
+// gSoundBanks[12], o banco da fase, que so em Vegas (VEGAS_S.BNK) tem o motor. Nas outras fases o gancho troca o banco 12 por uma
+// copia do VEGAS_S.BNK so no motor nativo (lida na primeira vez e mantida, como a do Shell do painel) durante a chamada.
+static PS2Runtime::RecompiledFunction g_origTankSound = nullptr;
+inline uint32_t vegasBank()
+{
+    static uint32_t s_h = 0;
+    static bool s_tried = false;
+    if (!s_tried)
+    {
+        s_tried = true;
+        const PS2Runtime::IoPaths &io = PS2Runtime::getIoPaths();
+        std::vector<uint8_t> f;
+        if (wotm::disc::readFile(io.cdRoot, io.cdImage.string(), "SND/VEGAS_S.BNK", f))
+            s_h = Engine::get().loadBankData(f);
+        std::fprintf(stderr, "[snd] motor do tanque fora de Vegas: %s\n", s_h ? "copia do SND/VEGAS_S.BNK carregada" : "VEGAS_S.BNK falhou (sem motor)");
+    }
+    return s_h;
+}
+void tankSound(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
+{
+    constexpr uint32_t kBank12 = wotm::sym::gSoundBanks + 4u * 12u, kLevelId = wotm::sym::shellGame + 0x1203D0u, kVegas = 2u;
+    uint32_t level = 0, bank = 0;
+    std::memcpy(&level, rdram + (kLevelId & PS2_RAM_MASK), 4);
+    const uint32_t h = level != kVegas ? vegasBank() : 0u;
+    if (ctx->pc != wotm::fn::updateTankSound__9TankSoundP10TankPickupi || !h)
+    {
+        g_origTankSound(rdram, ctx, rt);
+        return;
+    }
+    const uint32_t ra = getRegU32(ctx, 31);
+    std::memcpy(&bank, rdram + (kBank12 & PS2_RAM_MASK), 4);
+    std::memcpy(rdram + (kBank12 & PS2_RAM_MASK), &h, 4);
+    g_origTankSound(rdram, ctx, rt);
+    wotmFinishGuestCall(rdram, ctx, rt, ra);   // a troca vale ate o fim, mesmo com a funcao pausada no meio
+    std::memcpy(rdram + (kBank12 & PS2_RAM_MASK), &bank, 4);
+}
 } // namespace wotm_snd_hooks
 
 void wotmSndInstall(PS2Runtime &runtime)
@@ -352,6 +393,8 @@ void wotmSndInstall(PS2Runtime &runtime)
     g_origLoadModule = runtime.lookupFunction(wotm::fn::sceSifLoadModule);   // sceSifLoadModule (stub do runtime)
     if (g_origLoadModule)
         runtime.registerFunction(wotm::fn::sceSifLoadModule, hostLeaf<loadModule>);
+    if ((g_origTankSound = runtime.lookupFunction(wotm::fn::updateTankSound__9TankSoundP10TankPickupi)))
+        runtime.registerFunction(wotm::fn::updateTankSound__9TankSoundP10TankPickupi, &tankSound);
     std::fprintf(stderr, "[snd] som nativo: %zu funcoes do 989snd trocadas\n", sizeof hooks / sizeof hooks[0]);
 }
 #else

@@ -51,6 +51,13 @@ extern "C" {
 
 namespace wotm::fmv {
 
+// WOTM_MUTE=1: o jogo inteiro sem som (testes ao vivo); o som do jogo zera o volume mestre do raylib em wotm_snd.inc
+inline bool muteAll()
+{
+    const char *e = std::getenv("WOTM_MUTE");
+    return e && *e && *e != '0';
+}
+
 // Leitura do disco (pasta ou ISO): wotm_disc.hpp
 using wotm::disc::Source;
 using wotm::disc::seek64;
@@ -361,7 +368,7 @@ private:
             audioState_ = 1;
             const std::vector<uint8_t> rest(audioHdr_.begin() + 8 + hsz + 8, audioHdr_.end());
             audioHdr_.clear();
-            if (IsAudioDeviceReady() && !std::getenv("WOTM_FMV_MUTE")) {
+            if (IsAudioDeviceReady() && !std::getenv("WOTM_FMV_MUTE") && !muteAll()) {
                 SetAudioStreamBufferSizeDefault(kChunk);
                 stream_ = LoadAudioStream(rate_, 16, 2);
                 streamOn_ = IsAudioStreamValid(stream_);

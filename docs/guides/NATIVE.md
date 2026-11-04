@@ -618,6 +618,81 @@ one stays as it was.
   `centralInitAfter` (types 10 to 12) do not show.
 - **Debug menu:** F1 keys 7 and 8 (target and knock down) are for testing the loss of lives.
 
+## Army in versus fights (`wotm_army.inc`, ARMY tab)
+Military vehicles join versus fights in waves: tank (`TankPickup`, type 10, node id 0x1392), missile truck
+(`MissileTruckPickup`, 9, 0x1391) and military helicopter (`HeliPickup`, 12/23, 0x1394/0x139F). On the disc only VEGAS has tanks and
+trucks (8 and 4); VEGAS (5), METRO (12) and TOKYO (6) have helicopters. Every other stage gets VEGAS's 8 tanks, 4 trucks and 5
+helicopters from `MON/ARMY.*` (below). The adventure keeps its own army untouched.
+- **Options (ARMY tab of "Recompiled options", `settings.ini`):** ARMY on/off (off by default); SENT BY: TIME, DESTRUCTION or
+  WHICHEVER FIRST; EVERY (seconds of live fight between waves, `kArmyEvery`); DESTRUCTION (points per wave, `kArmyChaos`: LITTLE 25,
+  SOME 50, A LOT 100, HUGE 200); WAVE SIZE (`kArmyWaves`); and the modes it applies to: FREE-FOR-ALL (modes 2 and 3), ELIMINATION (6),
+  ENDURANCE (4), TRAINING (mode 2 with `wotm_training::g_on`). The pool is built at load, so turning ARMY on mid-fight takes effect
+  on the next stage load; the other options apply at once.
+- **Pool at load:** `LevelPickups::createPickup` only builds military vehicles with `m_gameMode == 1`. The hook pretends mode 1 for the
+  military ids while the stage loads (`+0x120468 == 0`; the `createPickup` calls from `Debris` during the fight come with it at 1)
+  when ARMY and one of the modes of the current `m_gameMode` are on. At the entry of `Shell::InitPlayers` each military pickup of the
+  active list gets bit 0 of `+0x50` (regenerable) and `regenTimer` (+0x4C) = 0x7FFFFFFF, and `turnOffMilitary` parks them hidden
+  (state 7, helicopter 5, `drawMe` 0). With the bit, `kill` keeps the `cs` and `killPickup` moves the node to the `regenList`, where
+  the counter never runs out: a destroyed vehicle waits there for the next wave. `TheGame::ResetLevel` (restart) parks them again
+  on the next frame.
+- **Waves (entry of `TheGame::Update`):** the clock counts `1 / timerGetUpdateRate()` only while the fight is live (no movie, no
+  cinema, `m_playerMask & 7 == 7`, no `gRtReturn`, no fade, `m_inSession`). A wave wakes up to WAVE SIZE parked or destroyed
+  vehicles, in random order. Each goes to a `PathNet::fodder` node of its type (3 for tank and truck, 1 for helicopter; node
+  `+0x10 + 0x30·i`, type at `+0x10`): the one closest to the monsters among those at least 600 away from every live monster (the
+  farthest if none), never within 250 of a vehicle already out. With no free node the vehicle waits for the next wave; with the whole
+  pool out, the wave goes out when one comes back. Waking: off the `regenList` to the head of the active list and virtual `regen`
+  (0x3C), or `hierSetCsDrawMe(cs, 1)` and full health when parked; `regenTimer` back to the maximum, `testCollision` 1,
+  `flags |= 0xA` (helicopter `|= 2`); tank and truck: formation mode, formation and focus 0, ground height by `hdHatTest`,
+  `Vehicle::setPos`, speed 0 and virtual `setTrans` (0x6C); helicopter: `HeliVehicle::setPos`, `hdReparentCsGrid`,
+  `HeliVehicleNav::init`; then `enterState(0)`. A vehicle a monster picked up and dropped (left parked but drawn) goes back to
+  state 0.
+- **`MON/ARMY.*` (`wotm_army_files.hpp`):** at startup, before the mods scan, `wotm_mods.inc` builds `ARMY.NGP`, `ARMY.PTR`,
+  `ARMY.TEX` and `ARMY.RTX` from `LVL/VEGAS.*` of the player's disc (`WOTM_ISO`, else `PS2X_CD_IMAGE`, else the extracted disc next to
+  the ELF) into `cache/army/` next to the ELF (`ARMY.VER` holds the format version; a different one rebuilds) and registers them as a
+  generated mod (`Registry::addGenerated`); a mod's own `MON/ARMY.*` wins. The NGP holds four byte ranges of VEGAS's NGP, checked by
+  CRC32 (the three vehicles' trees, meshes and textures, and the rotor animation), at the same 0x80 alignment; root 0 is a new
+  `ANIM_MGR` (`{7, 1, rotor CHAR_INSTANCE}`) and roots 1..17 are the vehicles' `TRANSLATE` nodes. The PTR is VEGAS's three lists
+  remapped to the new offsets (pointers, texIds 77, 78, 79, 80, 87, 88 to 1..6, palette CBPs to the new RTX). The TEX holds those six
+  textures, and the RTX their six palettes (CT32 16x16 or 8x2).
+- **Load in any stage (hooks):** with ARMY and a mode of the current `m_gameMode` on, outside VEGAS, `MON/ARMY` becomes the last file
+  `k` of the three `fileStatus` lists: the NGP at the entry of `Shell::LoadResTexture` (after the monsters' NGPs, name "ARMY"), the RTX
+  at the entry of `texmResInit` and the TEX at the entry of `texmInit`. Each one is copied to the list's next load address and passed
+  to the game's `fileAddNgpFile`/`fileAddResFile`/`fileAddTexFile`; past the load ceiling (high RAM: RAM size - 1 MB; low RAM:
+  0x1F10000), or with the RTX or TEX index not matching the NGP's, the NGP is taken back out and the stage loads as usual.
+  `dbsRelocateViaPtrListFile(k)` reads `MON/ARMY.PTR` as a monster's and relocates it; `dbInitDb` walks the roots down to
+  `createPickup`, so the pool code above sees them as the stage's own.
+- **Nodes in any stage:** tank and truck ask `PathNet::getClosestPath` for type 3 nodes (only `VEGAS.FOP` has them), the helicopter
+  asks `getClosestNode` for type 1. At `Shell::InitPlayers` the hook counts the `fodder` node types and picks, per vehicle, the type it
+  uses: tank and truck 3, else 0 (the car streets); helicopter 1, else 2 (the flying saucer's). Hooks on both `PathNet` calls swap
+  the asked type for the picked one (only on `fodder`). The six stages without `.FOP` (TRAINING, CANYON1, VOLCANO, DBALL, BIGSHOT,
+  CRUSH) keep `exportPoints`'s 2-node fallback, whose type is left from the previous stage (the hook sets it to 0): tanks and trucks
+  stay parked there.
+- **Helicopter grid:** with no node of type 1 or 2, the first wave with a helicopter appends a 9 x 9 grid of type 1 nodes to
+  `fodder`, 400 apart, centered on the live monsters. Each node sits 150 above the highest ground (`hdHatTest` from 3000 above the
+  lowest monster, never below that monster) of its own point and its 8 neighbors, so the straight flight between nodes clears the
+  slope; points with no ground stay out. Each node links to its 4 grid neighbors with `{id, 10, 40}`. `HeliVehicleNav::followPath`
+  takes a segment as reached `width·10` before its end and allows `width·10 - 50` of side drift, and `elevateTo` goes down to
+  `drop·10` below the path after the target (VEGAS's helicopter links are `{id, 10..20, 26}`; with a width of 250 every segment counts
+  as reached at once and the helicopter never moves). `getSeekPath` takes the link best aligned with the target and stops when it
+  leads back to the previous node, so the grid keeps the nodes over rocks and buildings (higher) instead of leaving holes.
+- **Tank engine sound:** `TankSound::updateTankSound` plays sound 0 of the stage bank (`gSoundBanks[12]`), the engine only in VEGAS's
+  bank. Outside VEGAS the hook in `wotm_snd.inc` loads `SND/VEGAS_S.BNK` once and swaps it into `gSoundBanks[12]` for the call.
+- **Destruction points (entry hooks):** pedestrian killed (`pedsTurnOff`) 1; `Destructible::ChangeState` to a later stage
+  (`a1 >` the current child and the pending state): `hitPointClass` 1 (small object) 1, a building's last stage 8, any other stage 3;
+  `LevelPickups::killPickup` with a `cs`: car (types 2, 15, 26) 3, tanker (3) 4, civil helicopter (11) and subway (27) 5.
+- **Target:** tank, truck and helicopter pick their target with `TheGame::getClosestPlayer`, which only walks the human players. With
+  the army on, the hook returns the closest live monster of all slots (`m_playerNum`, not cloaked, not dead, not out, `m_flags & 2`,
+  drawn), and writes the squared distance, as the original. Only calls from the three vehicles' `updateAttackBehavior` (by `$ra`)
+  change: turrets and the UFO also call it and keep aiming at the human players only. The adventure (mode 1) never has the army.
+- **KO by the army:** the shot carries the vehicle's id (`kind` 5), so `Monster::takeHit` leaves `m_killer` 0 and
+  `StateDeath::transitionInto` takes 1 from the victim's `m_winsThisGame`, as for a fall into water. The `takeHit` hook notes the
+  time of the last army hit on each slot (a hit from a monster clears it); at the entry of `transitionInto`, with no killer and an
+  army hit in the last 4 s, the hook adds the 1 back first: nobody scores and the victim loses nothing.
+- **Log:** `[exercito] arquivos MON/ARMY.*: ...` (cache ready, built, or why not), `MON/ARMY.NGP carregado como arquivo k`,
+  `pool da fase N: ...` (pool, net size and node type per vehicle), the helicopter grid (nodes, how many over obstacles, height
+  range), one line per vehicle woken, per wave (cause, points, army hits on monsters and how often each slot was the chosen target
+  since the previous wave) and per military vehicle destroyed; `KO pelo exercito`.
+
 ## Stage select (`wotm_levelsel.inc`)
 - **Lists:** the `screenLevelSelect` hook (screen 8) swaps the `g_levelList` of the four retail lists (`PO_1PFreeForAll`,
   `PO_MPFreeForAll`, `PO_1PEndurance`, `PO_MPElimination`) for a copy at the top of RAM (`PS2_RAM_SIZE - 0x300`): the retail stages
@@ -708,8 +783,15 @@ one stays as it was.
 | `WOTM_RES=<linhas>`, `WOTM_FULLSCREEN=1`/`2` | height of the native frame (default 720; 224..4320; the PS2 shows 448; `0` or `window` = the height of the window or of the full screen, in pixels, with the window opening at 720) / full screen on open: 1 borderless, 2 exclusive (the monitor switches to its native resolution); F11 toggles between the window and the chosen type; the window opens at the frame size, reduced to fit the monitor (VIDEO tab of "Recompiled options") |
 | `WOTM_RENDERSCALE=<%>`, `WOTM_MSAA=<n>`, `WOTM_TEXFILTER=<f>` | PC graphics (VIDEO tab of "Recompiled options"; section "PC graphics"): frame scale over `WOTM_RES` (default 100; the panel offers 50, 75, 100, 125, 150, 200; above 100 is supersampling, the presentation downscales with bilinear; height up to 8640 and width up to 16384) / MSAA with `n` samples (0, 2, 4, 8; default 0; limited to `GL_MAX_SAMPLES`) / filter of the game textures: `bilinear` (default, the GS one), `trilinear` (mipmaps) or `2x`, `4x`, `8x`, `16x` (anisotropic with trilinear). The replay (`--vu1cmp`) ignores all three |
 | `WOTM_DISC=<pasta>`, `WOTM_ISO=<arquivo>` | force the source of the disc files (`.RTX`, `.PSS`) instead of `PS2X_CD_IMAGE`/the ELF folder |
-| `WOTM_MODS=<pasta>` (`0` turns it off) | folder of mods that override disc files (default: `mods/` next to the ELF; `wotm_mods.inc`, `MODS.md`) |
+| `WOTM_MODS=<pasta>` (`0` turns the folder off) | folder of mods that override disc files (default: `mods/` next to the ELF; the generated `MON/ARMY.*` load without it; `wotm_mods.inc`, `MODS.md`) |
 | `WOTM_FMV_MUTE=1` | movies without audio |
+| `WOTM_ARMY=1` | army in versus fights (ARMY option of the ARMY tab of "Recompiled options", `settings.ini`; section "Army in versus fights") |
+| `WOTM_ARMY_TRIGGER=<0..2>` | what sends a wave: 0 time, 1 destruction, 2 whichever comes first (default) |
+| `WOTM_ARMY_EVERY=<s>` | seconds of live fight between waves (default 60) |
+| `WOTM_ARMY_CHAOS=<n>` | destruction points per wave (default 50) |
+| `WOTM_ARMY_WAVE=<n>` | vehicles per wave (default 3) |
+| `WOTM_ARMY_FFA=0`, `WOTM_ARMY_ELIM=0`, `WOTM_ARMY_ENDURANCE=0`, `WOTM_ARMY_TRAINING=1` | modes the army applies to (free-for-all, elimination and endurance on by default, training off) |
+| `WOTM_MUTE=1` | the whole game without sound: raylib master volume at 0 when the sound system starts (`wotm_snd.inc`, `startSoundSystem`) and movies without audio. For testing without disturbing whoever is working |
 | `WOTM_SKIPINTRO=1` | skips the two boot movies (`intro_m` and `int_main`, only the first time of each; `playMpegMovieWithDB` in `wotm_fmv.hpp`), straight to the title screen. SKIP INTRO MOVIES option of the FEATURES tab of "Recompiled options" (`settings.ini`); read at the first movie, so changing it in the panel takes effect on the next boot |
 | `WOTM_VIBRATION=0` | turns off XInput gamepad vibration (default on; VIBRATION option of the CONTROLS tab of "Recompiled options", `settings.ini`; `wotm_rumble.inc`, "Vibration") |
 | `WOTM_INTERP=0` | turns off frame interpolation (INTERPOLATE FRAMES option of the VIDEO tab, on by default; applies above 60 Hz, or up to 60 with the game at 30, and suspends itself when the redraw does not fit in the period): each presentation draws the blend of the game's last two frames (camera, objects, bones, sky, shadows; HUD and icons attached to the blended camera), one game frame behind the newest. Off in the replay, with the free camera or photo mode, on pause, on a gap in fields or in the clock and in training with spheres or outlines. Particles and debris step back by their velocity; flares, bars and the health icon go to the blended camera, and the fade alpha blends. `PS2X_STATS` counts the blended redraws (`misturados=`). `WOTM_INTERP=redraw`: only redraws the scene on every presentation, without blending (measures the cost of drawing at the monitor rate); with it texId 0 becomes the previous presentation |
@@ -728,7 +810,7 @@ one stays as it was.
 | `WOTM_COOPKILL=<ordem>[@<segundos>]` | exit script (e.g. `231@5`): in the fight, knocks down the players in the given order, one every N seconds (default 6), keeps full the health of those who have not left yet and turns on `WOTM_COOPLOG`. With `WOTM_LIVES=1`, tests each exit order; `tools/coop_mortes.ps1` runs a list of orders and takes a picture of the window at each dump |
 | `WOTM_COOPRETRY=1` | retry test without a keyboard: at the game over of the direct match (dialog 1), a synthetic X at 4 s and at 8 s (the mouse click request in the menus). With `WOTM_COOPKILL` knocking everyone down, co-op logs a `[cooplog] depois do retry` dump |
 | `WOTM_CRASHTEST=1` | crashes on purpose when the boot ends (`wotmBootDone`, `wotm_live.inc`), to check the `[CRASH]` and the named stack that `crashFilter` writes to the log (`wotmCrashTrace`, `wotm_standalone.cpp`, through the `wotm.pdb` next to the exe) |
-| `WOTM_SETTINGS=0` | ignores `settings.ini` (neither reads nor writes; `lote.ps1` and `corpus.ps1` turn it on). Without it, the `settings.ini` next to `save.json` (`wotm_settings.hpp`) stores the options the "Recompiled options" panel changes live (the launcher does not have them): `WOTM_RES`, `WOTM_ASPECT` (`dynamic` or from the list), `WOTM_FULLSCREEN`, `WOTM_HZ`, `WOTM_VSYNC`, `WOTM_LOCKTOGGLE`, `WOTM_ENEMYBARS`, `WOTM_DAMAGEPOP`, `WOTM_KBSEPARATE`, `WOTM_PROMPTS`, `WOTM_MENUCONFIRM`, `WOTM_CAMERA`, `WOTM_CAMRECENTER`, `WOTM_CLOSECAM`, `WOTM_CAMSENS`, `WOTM_CAMINVERT`, `WOTM_RENDERSCALE`, `WOTM_MSAA`, `WOTM_TEXFILTER`, `WOTM_ANNOUNCER`, `WOTM_SKIPINTRO`, `WOTM_VIBRATION`, `WOTM_INTERP`, and the key and button map (`KB_LAYOUT=2`, keys from an earlier layout are ignored and the file rewritten; `KB_<botão>=TECLA[,TECLA]` with keys, `MOUSE_LEFT`..`MOUSE_EXTRA`, `WHEEL_UP`/`WHEEL_DOWN` and the keyboard-only actions `LOCK`, `BLOCK`, `STRAFE_LEFT`/`RIGHT`, `TARGET_NEXT`/`PREV`, `TRIANGLE_CIRCLE`, `CROSS_SQUARE`, `WALK`, `PAD_<botão>=BOTÃO` for player 1 and `PAD2_`..`PAD4_` for the others, only in the file). On open: defaults, then the file, then the defined variables (over the file). **A player's first run** (the file enabled and not existing yet; `kFirstRun`, the owner's decision): over the defaults, `WOTM_FULLSCREEN=1`, `WOTM_LOCKTOGGLE=1`, `WOTM_ENEMYBARS=1`, `WOTM_ANNOUNCER=2` and `WOTM_RES` = the height of the monitor where the window opened (at the first presentation, `wotm_live.inc`), and the file is written; the defaults in the rows of this table still apply with `WOTM_SETTINGS=0` (batch and corpus) |
+| `WOTM_SETTINGS=0` | ignores `settings.ini` (neither reads nor writes; `lote.ps1` and `corpus.ps1` turn it on). Without it, the `settings.ini` next to `save.json` (`wotm_settings.hpp`) stores the options the "Recompiled options" panel changes live (the launcher does not have them): `WOTM_RES`, `WOTM_ASPECT` (`dynamic` or from the list), `WOTM_FULLSCREEN`, `WOTM_HZ`, `WOTM_VSYNC`, `WOTM_LOCKTOGGLE`, `WOTM_ENEMYBARS`, `WOTM_DAMAGEPOP`, `WOTM_KBSEPARATE`, `WOTM_PROMPTS`, `WOTM_MENUCONFIRM`, `WOTM_CAMERA`, `WOTM_CAMRECENTER`, `WOTM_CLOSECAM`, `WOTM_CAMSENS`, `WOTM_CAMINVERT`, `WOTM_RENDERSCALE`, `WOTM_MSAA`, `WOTM_TEXFILTER`, `WOTM_ANNOUNCER`, `WOTM_SKIPINTRO`, `WOTM_VIBRATION`, `WOTM_INTERP`, the `WOTM_ARMY*` keys, and the key and button map (`KB_LAYOUT=2`, keys from an earlier layout are ignored and the file rewritten; `KB_<botão>=TECLA[,TECLA]` with keys, `MOUSE_LEFT`..`MOUSE_EXTRA`, `WHEEL_UP`/`WHEEL_DOWN` and the keyboard-only actions `LOCK`, `BLOCK`, `STRAFE_LEFT`/`RIGHT`, `TARGET_NEXT`/`PREV`, `TRIANGLE_CIRCLE`, `CROSS_SQUARE`, `WALK`, `PAD_<botão>=BOTÃO` for player 1 and `PAD2_`..`PAD4_` for the others, only in the file). On open: defaults, then the file, then the defined variables (over the file). **A player's first run** (the file enabled and not existing yet; `kFirstRun`, the owner's decision): over the defaults, `WOTM_FULLSCREEN=1`, `WOTM_LOCKTOGGLE=1`, `WOTM_ENEMYBARS=1`, `WOTM_ANNOUNCER=2` and `WOTM_RES` = the height of the monitor where the window opened (at the first presentation, `wotm_live.inc`), and the file is written; the defaults in the rows of this table still apply with `WOTM_SETTINGS=0` (batch and corpus) |
 | `WOTM_SAVEJSON=0` | turns off the JSON save (`wotm_save.inc`, "Save as JSON"): the game writes and reads only the `mc0/`/`mc1/` binaries, as on the PS2. Without it, the `save.json` next to the memory card folder (options and unlocks once, `saves` with 20 slots: 0 to 9 on card 1, 10 to 19 on card 2) is the copy that counts |
 | `WOTM_SAVEICON_TEST=1` | shows the save icon (`wotm_saveicon.hpp`, item 6) every 3 s, without saving anything (to check the drawing) |
 | `WOTM_HIGHRAM=0` | monsters, RTX and TEX loaded below 32 MB, right after the stage, as on the PS2. Without it (default) the monster load starts at 0x2000000, in the upper area of the runtime's 64 MB RAM ("64 MB RAM and loading above 32 MB") |
