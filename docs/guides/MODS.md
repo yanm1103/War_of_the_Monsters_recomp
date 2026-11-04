@@ -343,6 +343,9 @@ the one of the RANDOM entry (`random`; without it, a mosaic of the game's pictur
   `.RTX` palettes (`Scene::loadResources`, which reads the file directly and not from RAM), movies (`wotm_fmv.hpp`), icon, pictures and monster
   of the save list (`wotm::disc::readFile`). Without any file in `mods/` no hook is installed. A file that does not exist on the disc
   is served too ("new file").
+- **Generated files:** the army's vehicles for every stage, `MON/ARMY.NGP/.PTR/.TEX/.RTX`, are built from the disc's `LVL/VEGAS.*` into
+  `cache/army/` and enter the registry as the mod "army (gerado)" (`Registry::addGenerated`, before the scan). A mod with its own
+  `MON/ARMY.*` wins (`NATIVE.md`, "Army in versus fights").
 - **Log:** `[mods] N arquivo(s) de <mods> em <pasta>` at boot and, on the first search of each file, `[mods] MON/LIZARD0.TEX <-
   teste_togera (110080 bytes; disco 110080)`, with AVISO when the mod's is bigger (outside `MON/*`, whose loading is contiguous above
   32 MB).

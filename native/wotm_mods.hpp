@@ -127,12 +127,23 @@ public:
         return key(name);
     }
 
-    // Le a pasta mods/ (uma vez). Devolve quantos arquivos entraram.
+    // Arquivo gerado pelo port (ex.: MON/ARMY.*, wotm_army_files.hpp), antes do scan: entra como um mod; um mod de verdade com o
+    // mesmo nome vence
+    void addGenerated(const std::string &rel, const std::filesystem::path &host, const std::string &mod) {
+        std::error_code ec;
+        File &f = m_files[key(rel)];
+        f.rel = key(rel);
+        f.host = host;
+        f.mod = mod;
+        f.size = std::filesystem::file_size(host, ec);
+    }
+
+    // Le a pasta mods/ (uma vez). Devolve quantos arquivos entraram (com os gerados).
     size_t scan(const std::filesystem::path &dir) {
         namespace fs = std::filesystem;
         std::error_code ec;
         m_dir = dir;
-        if (dir.empty() || !fs::is_directory(dir, ec)) { m_ready = true; return 0; }
+        if (dir.empty() || !fs::is_directory(dir, ec)) { assignLsns(); return m_files.size(); }
         std::vector<fs::path> mods;
         for (const auto &e : fs::directory_iterator(dir, ec)) {
             const std::string n = e.path().filename().string();
@@ -170,8 +181,13 @@ public:
             }
             c.costume = k->index;
         }
-        // Faixas de setores na ordem dos nomes (estavel entre execucoes), com um setor de folga entre arquivos
+        assignLsns();
+        return m_files.size() + m_alias.size();
+    }
+    // Faixas de setores na ordem dos nomes (estavel entre execucoes), com um setor de folga entre arquivos
+    void assignLsns() {
         uint32_t next = kFirstLsn;
+        m_byLsn.clear();
         for (auto &[rel, f] : m_files) {
             f.sectors = uint32_t((f.size + 2047) / 2048);
             f.lsn = next;
@@ -179,7 +195,6 @@ public:
             m_byLsn.push_back(&f);
         }
         m_ready = true;
-        return m_files.size() + m_alias.size();
     }
 
     bool ready() const { return m_ready; }

@@ -10,6 +10,7 @@
 // WOTM_HIGHRAM=0, e para os outros arquivos (fase, SHELL, bancos de som), o jogo carrega em regioes de tamanho fixo e um arquivo
 // maior pode sobrescrever o que vem depois (o log avisa). WOTM_MODS=<pasta> troca a pasta (padrao: mods/ ao lado do ELF, senao a do repo); =0 desliga.
 #include "wotm_mods.hpp"
+#include "wotm_army_files.hpp"   // MON/ARMY.*: os veiculos de VEGAS para o exercito em qualquer fase
 #include <set>
 
 namespace wotm_mods_hooks
@@ -132,6 +133,18 @@ void wotmModsInstall(PS2Runtime &runtime, const std::string &elfPath)
         const char *repo = std::getenv("WOTM_REPO");
         if (!modsIn(fs::path(elfPath).parent_path()) && repo && *repo && modsIn(fs::path(repo)))
             dir = fs::path(repo) / "mods";
+    }
+    // Veiculos militares de VEGAS como MON/ARMY.* (exercito em qualquer fase, wotm_army.inc): gerados do disco do usuario numa cache ao
+    // lado do ELF, e servidos como um mod
+    {
+        const fs::path cache = fs::path(elfPath).parent_path() / "cache" / "army";
+        const char *iso = std::getenv("WOTM_ISO");
+        if (!iso) iso = std::getenv("PS2X_CD_IMAGE");
+        std::string log;
+        if (wotm::army_files::ensure(cache, fs::path(elfPath).parent_path(), iso ? iso : "", log))
+            for (const char *f : wotm::army_files::kFiles)
+                Registry::get().addGenerated(std::string("MON/") + f, cache / f, "army (gerado)");
+        std::fprintf(stderr, "[exercito] arquivos MON/ARMY.*: %s\n", log.c_str());
     }
     const size_t n = Registry::get().scan(dir);
     if (n == 0)

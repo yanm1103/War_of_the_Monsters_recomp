@@ -619,9 +619,10 @@ one stays as it was.
 - **Debug menu:** F1 keys 7 and 8 (target and knock down) are for testing the loss of lives.
 
 ## Army in versus fights (`wotm_army.inc`, ARMY tab)
-The stage's own military vehicles join versus fights in waves: tank (`TankPickup`, type 10, node id 0x1392), missile truck
-(`MissileTruckPickup`, 9, 0x1391) and military helicopter (`HeliPickup`, 12/23, 0x1394/0x139F). Only VEGAS has tanks and trucks (8
-and 4); VEGAS (5), METRO (12) and TOKYO (6) have helicopters. The adventure keeps its own army untouched.
+Military vehicles join versus fights in waves: tank (`TankPickup`, type 10, node id 0x1392), missile truck
+(`MissileTruckPickup`, 9, 0x1391) and military helicopter (`HeliPickup`, 12/23, 0x1394/0x139F). On the disc only VEGAS has tanks and
+trucks (8 and 4); VEGAS (5), METRO (12) and TOKYO (6) have helicopters. Every other stage gets VEGAS's 8 tanks, 4 trucks and 5
+helicopters from `MON/ARMY.*` (below). The adventure keeps its own army untouched.
 - **Options (ARMY tab of "Recompiled options", `settings.ini`):** ARMY on/off (off by default); SENT BY: TIME, DESTRUCTION or
   WHICHEVER FIRST; EVERY (seconds of live fight between waves, `kArmyEvery`); DESTRUCTION (points per wave, `kArmyChaos`: LITTLE 25,
   SOME 50, A LOT 100, HUGE 200); WAVE SIZE (`kArmyWaves`); and the modes it applies to: FREE-FOR-ALL (modes 2 and 3), ELIMINATION (6),
@@ -645,6 +646,37 @@ and 4); VEGAS (5), METRO (12) and TOKYO (6) have helicopters. The adventure keep
   `Vehicle::setPos`, speed 0 and virtual `setTrans` (0x6C); helicopter: `HeliVehicle::setPos`, `hdReparentCsGrid`,
   `HeliVehicleNav::init`; then `enterState(0)`. A vehicle a monster picked up and dropped (left parked but drawn) goes back to
   state 0.
+- **`MON/ARMY.*` (`wotm_army_files.hpp`):** at startup, before the mods scan, `wotm_mods.inc` builds `ARMY.NGP`, `ARMY.PTR`,
+  `ARMY.TEX` and `ARMY.RTX` from `LVL/VEGAS.*` of the player's disc (`WOTM_ISO`, else `PS2X_CD_IMAGE`, else the extracted disc next to
+  the ELF) into `cache/army/` next to the ELF (`ARMY.VER` holds the format version; a different one rebuilds) and registers them as a
+  generated mod (`Registry::addGenerated`); a mod's own `MON/ARMY.*` wins. The NGP holds four byte ranges of VEGAS's NGP, checked by
+  CRC32 (the three vehicles' trees, meshes and textures, and the rotor animation), at the same 0x80 alignment; root 0 is a new
+  `ANIM_MGR` (`{7, 1, rotor CHAR_INSTANCE}`) and roots 1..17 are the vehicles' `TRANSLATE` nodes. The PTR is VEGAS's three lists
+  remapped to the new offsets (pointers, texIds 77, 78, 79, 80, 87, 88 to 1..6, palette CBPs to the new RTX). The TEX holds those six
+  textures, and the RTX their six palettes (CT32 16x16 or 8x2).
+- **Load in any stage (hooks):** with ARMY and a mode of the current `m_gameMode` on, outside VEGAS, `MON/ARMY` becomes the last file
+  `k` of the three `fileStatus` lists: the NGP at the entry of `Shell::LoadResTexture` (after the monsters' NGPs, name "ARMY"), the RTX
+  at the entry of `texmResInit` and the TEX at the entry of `texmInit`. Each one is copied to the list's next load address and passed
+  to the game's `fileAddNgpFile`/`fileAddResFile`/`fileAddTexFile`; past the load ceiling (high RAM: RAM size - 1 MB; low RAM:
+  0x1F10000), or with the RTX or TEX index not matching the NGP's, the NGP is taken back out and the stage loads as usual.
+  `dbsRelocateViaPtrListFile(k)` reads `MON/ARMY.PTR` as a monster's and relocates it; `dbInitDb` walks the roots down to
+  `createPickup`, so the pool code above sees them as the stage's own.
+- **Nodes in any stage:** tank and truck ask `PathNet::getClosestPath` for type 3 nodes (only `VEGAS.FOP` has them), the helicopter
+  asks `getClosestNode` for type 1. At `Shell::InitPlayers` the hook counts the `fodder` node types and picks, per vehicle, the type it
+  uses: tank and truck 3, else 0 (the car streets); helicopter 1, else 2 (the flying saucer's). Hooks on both `PathNet` calls swap
+  the asked type for the picked one (only on `fodder`). The six stages without `.FOP` (TRAINING, CANYON1, VOLCANO, DBALL, BIGSHOT,
+  CRUSH) keep `exportPoints`'s 2-node fallback, whose type is left from the previous stage (the hook sets it to 0): tanks and trucks
+  stay parked there.
+- **Helicopter grid:** with no node of type 1 or 2, the first wave with a helicopter appends a 9 x 9 grid of type 1 nodes to
+  `fodder`, 400 apart, centered on the live monsters. Each node sits 150 above the highest ground (`hdHatTest` from 3000 above the
+  lowest monster, never below that monster) of its own point and its 8 neighbors, so the straight flight between nodes clears the
+  slope; points with no ground stay out. Each node links to its 4 grid neighbors with `{id, 10, 40}`. `HeliVehicleNav::followPath`
+  takes a segment as reached `width·10` before its end and allows `width·10 - 50` of side drift, and `elevateTo` goes down to
+  `drop·10` below the path after the target (VEGAS's helicopter links are `{id, 10..20, 26}`; with a width of 250 every segment counts
+  as reached at once and the helicopter never moves). `getSeekPath` takes the link best aligned with the target and stops when it
+  leads back to the previous node, so the grid keeps the nodes over rocks and buildings (higher) instead of leaving holes.
+- **Tank engine sound:** `TankSound::updateTankSound` plays sound 0 of the stage bank (`gSoundBanks[12]`), the engine only in VEGAS's
+  bank. Outside VEGAS the hook in `wotm_snd.inc` loads `SND/VEGAS_S.BNK` once and swaps it into `gSoundBanks[12]` for the call.
 - **Destruction points (entry hooks):** pedestrian killed (`pedsTurnOff`) 1; `Destructible::ChangeState` to a later stage
   (`a1 >` the current child and the pending state): `hitPointClass` 1 (small object) 1, a building's last stage 8, any other stage 3;
   `LevelPickups::killPickup` with a `cs`: car (types 2, 15, 26) 3, tanker (3) 4, civil helicopter (11) and subway (27) 5.
@@ -655,8 +687,10 @@ and 4); VEGAS (5), METRO (12) and TOKYO (6) have helicopters. The adventure keep
   `StateDeath::transitionInto` takes 1 from the victim's `m_winsThisGame`, as for a fall into water. The `takeHit` hook notes the
   time of the last army hit on each slot (a hit from a monster clears it); at the entry of `transitionInto`, with no killer and an
   army hit in the last 4 s, the hook adds the 1 back first: nobody scores and the victim loses nothing.
-- **Log:** `[exercito] pool da fase N: ...` (pool and nodes per type), one line per vehicle woken, per wave (cause, points and how
-  often each slot was the chosen target since the previous wave) and per military vehicle destroyed; `KO pelo exercito`.
+- **Log:** `[exercito] arquivos MON/ARMY.*: ...` (cache ready, built, or why not), `MON/ARMY.NGP carregado como arquivo k`,
+  `pool da fase N: ...` (pool, net size and node type per vehicle), the helicopter grid (nodes, how many over obstacles, height
+  range), one line per vehicle woken, per wave (cause, points, army hits on monsters and how often each slot was the chosen target
+  since the previous wave) and per military vehicle destroyed; `KO pelo exercito`.
 
 ## Stage select (`wotm_levelsel.inc`)
 - **Lists:** the `screenLevelSelect` hook (screen 8) swaps the `g_levelList` of the four retail lists (`PO_1PFreeForAll`,
