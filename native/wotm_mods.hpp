@@ -24,6 +24,15 @@
 
 namespace wotm::mods {
 
+inline std::filesystem::path pathFromUtf8(const std::string &s)
+{
+#ifdef _WIN32
+    return std::filesystem::u8path(s);
+#else
+    return std::filesystem::path(s);
+#endif
+}
+
 // Monstros jogaveis: tipo (MonsterNewNames, m_monsterSel >> 5), nome do jogo e prefixo dos arquivos em MON/
 struct MonsterInfo { int type; const char *name; const char *prefix; };
 inline constexpr MonsterInfo kMonsters[] = {
@@ -599,8 +608,8 @@ private:
                 // "portrait": PNG do retrato do HUD (na pasta do monstro ou na raiz do mod), no lugar da imagem <PREFIXO><traje>.RTX
                 // de texId "portraitTex" (padrao: o do ASSBOSS1, 6; a ultima entrada do .RTX, 128x64)
                 if (const json::Value *po = v.get("portrait"); po && po->type == json::Value::Str && !po->s.empty()) {
-                    fs::path p = s / fs::u8path(po->s);
-                    if (!fs::is_regular_file(p, ec)) p = m / fs::u8path(po->s);
+                    fs::path p = s / pathFromUtf8(po->s);
+                    if (!fs::is_regular_file(p, ec)) p = m / pathFromUtf8(po->s);
                     const json::Value *pt = v.get("portraitTex");
                     c.portraitTex = pt && pt->type == json::Value::Int ? int(pt->i) : (c.type == 13 && c.costume == 1 ? 6 : -1);
                     if (!fs::is_regular_file(p, ec))

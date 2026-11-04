@@ -33,6 +33,26 @@ Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The executable: [doc
 
 Runtime details, environment variables and the release package: [docs/guides/RUNTIME.md](docs/guides/RUNTIME.md) and [docs/guides/NATIVE.md](docs/guides/NATIVE.md).
 
+## Building the native Linux port
+
+The initial target is Linux x86-64 with AVX2, BMI2, POPCNT, and LZCNT CPU support. Install a C++ compiler, CMake, Ninja, Git, Python 3, 7-Zip, pkg-config, FFmpeg development libraries, and the raylib/GLFW Linux build dependencies. On Ubuntu:
+
+```sh
+sudo apt install build-essential cmake ninja-build git python3 p7zip-full pkg-config \
+  libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev \
+  libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev libasound2-dev
+```
+
+Put your own NTSC-U ISO in `ISO/` or `Game/` (or pass its path), then run:
+
+```sh
+tools/setup_runtime.sh [path/to/your.iso]
+tools/build_runtime.sh
+tools/run_live.sh
+```
+
+Generated game code and build outputs stay local in ignored directories. The launcher stores saves and settings under `$XDG_DATA_HOME/WotM` (default `~/.local/share/WotM`). The runtime has booted into both a direct match and the first Adventure fight; full campaign progression, controller support, audible output, and save/reload remain unverified. See [Linux port progress](docs/LINUX_PORT_PROGRESS.md) for current coverage.
+
 ## Building the decompilation (WSL/Ubuntu)
 ```sh
 sudo dpkg --add-architecture i386 && sudo apt update

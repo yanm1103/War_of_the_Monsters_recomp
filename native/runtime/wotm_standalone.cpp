@@ -1,8 +1,7 @@
-// wotm.exe aberto direto (sem argumento: dois cliques, o zip do release). O run_live.ps1 passa o ELF, o cwd, a ISO e redireciona o
-// stderr; aqui o exe acha tudo sozinho (docs/guides/RUNTIME.md, "wotm.exe sem argumento"):
-// - pasta do jogo: a do exe (DLLs, mods/ do zip);
-// - pasta de dados: a do jogo, se der para gravar nela; senao %LOCALAPPDATA%\WotM (zip em Program Files). Nela ficam o SCUS_971.97,
-//   o wotm.ini (iso=<caminho da ISO>), os logs, e, por seguirem a pasta do ELF, mc0/, save.json, settings.ini e screenshots/;
+// wotm aberto direto, sem argumentos. O run_live passa o ELF e a ISO; aqui o executavel acha tudo sozinho:
+// - pasta do jogo: a do executavel (mods/ do pacote);
+// - pasta de dados: a do jogo se gravavel; senao %LOCALAPPDATA%\WotM (Windows), $XDG_DATA_HOME/WotM ou ~/.local/share/WotM (Linux).
+//   Nela ficam o SCUS_971.97, o wotm.ini (iso=<caminho da ISO>), os logs, mc0/, save.json, settings.ini e screenshots/;
 // - primeira execucao (sem o ELF, ou a ISO sumiu do caminho salvo): pede a ISO, tira o SCUS_971.97 dela, confere o SHA1 do NTSC-U e
 //   grava o ELF e o wotm.ini;
 // - mods: <dados>/mods, senao <jogo>/mods (WOTM_MODS);
@@ -28,9 +27,20 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <string>
 #include <system_error>
 #include <vector>
+#ifndef _WIN32
+#include <strings.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#define _stricmp strcasecmp
+#define _fseeki64 fseeko
+constexpr unsigned MB_OK = 0, MB_OKCANCEL = 1, MB_ICONERROR = 0x10, MB_ICONINFORMATION = 0x40;
+constexpr int IDOK = 1, IDCANCEL = 2;
+#endif
 #include "wotm_version.hpp"
 
 void wotmBoot(const char *fmt, ...);   // wotm_live.inc: etapa do boot no log e na tela preta
@@ -133,8 +143,33 @@ int box(const std::wstring &msg, unsigned flags)
 #ifdef _WIN32
     return MessageBoxW(nullptr, msg.c_str(), kTitle, flags);
 #else
+    const std::string text(msg.begin(), msg.end());   // Linux messages contain ASCII; paths are logged separately
+    const char *mode = flags & MB_OKCANCEL ? "--question" : flags & MB_ICONERROR ? "--error" : "--info";
+    auto dialog = [&](const char *program, const char *option) {
+        const pid_t child = fork();
+        if (child == 0)
+        {
+            if (!std::strcmp(program, "zenity"))
+                execlp(program, program, option, "--title", "War of the Monsters", "--text", text.c_str(), nullptr);
+            else
+                execlp(program, program, option, text.c_str(), nullptr);
+            _exit(127);
+        }
+        if (child < 0) return 127;
+        int status = 0;
+        if (waitpid(child, &status, 0) < 0 || !WIFEXITED(status)) return 127;
+        return WEXITSTATUS(status);
+    };
+    if (std::getenv("DISPLAY") || std::getenv("WAYLAND_DISPLAY"))
+    {
+        const int zenity = dialog("zenity", mode);
+        if (zenity != 127) return zenity == 0 ? IDOK : IDCANCEL;
+        const char *kdialog = flags & MB_OKCANCEL ? "--yesno" : flags & MB_ICONERROR ? "--error" : "--msgbox";
+        const int kde = dialog("kdialog", kdialog);
+        if (kde != 127) return kde == 0 ? IDOK : IDCANCEL;
+    }
     (void)flags;
-    return 0;
+    return IDOK;
 #endif
 }
 
@@ -145,6 +180,11 @@ fs::path exeDir()
     const DWORD n = GetModuleFileNameW(nullptr, buf, 4096);
     if (n > 0 && n < 4096)
         return fs::path(buf).parent_path();
+#else
+    std::error_code linkError;
+    const fs::path executable = fs::read_symlink("/proc/self/exe", linkError);
+    if (!linkError)
+        return executable.parent_path();
 #endif
     std::error_code ec;
     return fs::current_path(ec);
@@ -184,7 +224,17 @@ void redirectLog(const fs::path &data)
     open("wotm.log", "wotm.prev.log", stderr);          // as [tags] do nativo e o [CRASH]: o que vai num relato de bug
     open("wotm.out.log", "wotm.out.prev.log", stdout);  // raylib e [hook]
 #else
-    (void)data;
+    struct stat status{};
+    if (fstat(fileno(stderr), &status) == 0 && (S_ISFIFO(status.st_mode) || S_ISREG(status.st_mode)))
+        return;   // preserve run_live.sh and caller redirections
+    auto open = [&](const char *name, const char *prev, FILE *stream) {
+        const fs::path log = data / name;
+        std::error_code ec;
+        if (fs::exists(log, ec)) fs::rename(log, data / prev, ec);
+        if (std::freopen(log.c_str(), "w", stream)) std::setvbuf(stream, nullptr, _IONBF, 0);
+    };
+    open("wotm.log", "wotm.prev.log", stderr);
+    open("wotm.out.log", "wotm.out.prev.log", stdout);
 #endif
 }
 
@@ -209,7 +259,11 @@ fs::path iniIso(const fs::path &ini)
 {
     for (const std::string &line : iniLines(ini))
         if (line.rfind("iso=", 0) == 0 && line.size() > 4)
+#ifdef _WIN32
             return fs::u8path(line.substr(4));
+#else
+            return fs::path(line.substr(4));
+#endif
     return {};
 }
 
@@ -292,7 +346,7 @@ bool isoReadRoot(const fs::path &iso, const char *name, std::vector<uint8_t> &ou
             {
                 const uint8_t len = dir[o];
                 if (len == 0) { o = (o / 2048 + 1) * 2048; continue; }   // registros nao cruzam setores
-                if (o + len > dir.size() || len < 34)
+                if (o + len > dir.size() || len < 34 || dir[o + 32] > len - 33)
                     break;
                 std::string id(reinterpret_cast<const char *>(&dir[o + 33]), dir[o + 32]);
                 if (const auto sc = id.find(';'); sc != std::string::npos)
@@ -331,6 +385,34 @@ fs::path pickIso(const fs::path &startDir)
         return fs::path(file);
 #else
     (void)startDir;
+    if (std::getenv("DISPLAY") || std::getenv("WAYLAND_DISPLAY"))
+    {
+        for (const char *command : {
+                 "zenity --file-selection --title='Select your War of the Monsters (NTSC-U) ISO' --file-filter='PS2 disc image | *.iso' 2>/dev/null",
+                 "kdialog --getopenfilename \"$HOME\" '*.iso|PS2 disc image' 2>/dev/null"})
+        {
+            FILE *pipe = popen(command, "r");
+            if (!pipe) continue;
+            std::string selected;
+            char line[4096];
+            while (std::fgets(line, sizeof line, pipe)) selected += line;
+            const int status = pclose(pipe);
+            while (!selected.empty() && (selected.back() == '\n' || selected.back() == '\r')) selected.pop_back();
+            if (status == 0 && !selected.empty()) return fs::path(selected);
+            if (!WIFEXITED(status) || WEXITSTATUS(status) != 127) return {};
+        }
+    }
+    if (isatty(fileno(stdin)))
+    {
+        // stderr may already point to wotm.log; keep the interactive prompt on the terminal.
+        FILE *terminal = std::fopen("/dev/tty", "w");
+        std::fprintf(terminal ? terminal : stderr, "Enter the path to your NTSC-U disc image (or press Enter to cancel): ");
+        if (terminal) std::fclose(terminal);
+        else std::fflush(stderr);
+        std::string selected;
+        if (std::getline(std::cin, selected) && !selected.empty()) return fs::path(selected);
+    }
+    std::fprintf(stderr, "No ISO picker is available. Run tools/run_live.sh or set PS2X_CD_IMAGE.\n");
 #endif
     return {};
 }
@@ -341,7 +423,11 @@ bool setup(const fs::path &data, const fs::path &elf, fs::path &iso, bool elfOk)
     std::error_code ec;
     std::wstring why = !elfOk ? L"First run: this port needs your own copy of War of the Monsters for PlayStation 2 (NTSC-U, SCUS-97197) "
                                 L"as a disc image (.iso)."
+#ifdef _WIN32
                               : L"The disc image is no longer at:\n" + iso.wstring() + L"\n\nSelect it again.";
+#else
+                              : L"The saved disc image is missing. Select it again.";
+#endif
     wotmBoot("primeira execucao: escolhendo a ISO");
     while (true)
     {
@@ -354,15 +440,23 @@ bool setup(const fs::path &data, const fs::path &elf, fs::path &iso, bool elfOk)
         std::vector<uint8_t> bytes;
         if (!isoReadRoot(pick, kElfName, bytes))
         {
+#ifdef _WIN32
             why = L"This file is not a War of the Monsters (NTSC-U) disc image:\n" + pick.wstring() +
                   L"\n\nNo SCUS_971.97 was found in it. Only the North American release (SCUS-97197) is supported.";
+#else
+            why = L"This file has no SCUS_971.97. Select the North American release (SCUS-97197).";
+#endif
             continue;
         }
         const std::string got = sha1(bytes);
         if (got != kElfSha1)
         {
+#ifdef _WIN32
             why = L"The disc image has a SCUS_971.97 that does not match the NTSC-U release (SCUS-97197):\n" + pick.wstring() +
                   L"\n\nIt may be a different version or a modified image. Only the original North American release is supported.";
+#else
+            why = L"This SCUS_971.97 does not match the original NTSC-U release (SCUS-97197).";
+#endif
             std::fprintf(stderr, "[wotm] SHA1 do %s na ISO: %s (esperado %s)\n", kElfName, got.c_str(), kElfSha1);
             continue;
         }
@@ -374,13 +468,21 @@ bool setup(const fs::path &data, const fs::path &elf, fs::path &iso, bool elfOk)
             f.close();
             if (!f || (fs::rename(tmp, elf, ec), ec))
             {
+#ifdef _WIN32
                 box(L"Could not write " + elf.wstring(), MB_OK | MB_ICONERROR);
+#else
+                box(L"Could not write the extracted game executable.", MB_OK | MB_ICONERROR);
+#endif
                 return false;
             }
         }
         if (!iniSetIso(data / "wotm.ini", pick))
         {
+#ifdef _WIN32
             box(L"Could not write " + (data / "wotm.ini").wstring(), MB_OK | MB_ICONERROR);
+#else
+            box(L"Could not write wotm.ini.", MB_OK | MB_ICONERROR);
+#endif
             return false;
         }
         iso = pick;
@@ -496,6 +598,7 @@ std::filesystem::path wotmStandalonePrepare()
     std::error_code ec;
     const fs::path game = exeDir();
     fs::path data = game;
+#ifdef _WIN32
     if (!writable(game))
     {
         const char *local = std::getenv("LOCALAPPDATA");
@@ -513,6 +616,27 @@ std::filesystem::path wotmStandalonePrepare()
             return {};
         }
     }
+#else
+    const char *xdg = std::getenv("XDG_DATA_HOME");
+    const char *home = std::getenv("HOME");
+    if (xdg && *xdg && fs::path(xdg).is_absolute())
+        data = fs::path(xdg) / "WotM";
+    else if (home && *home)
+        data = fs::path(home) / ".local/share/WotM";
+    else
+    {
+        box(L"No XDG_DATA_HOME or HOME directory is available for game data.", MB_OK | MB_ICONERROR);
+        return {};
+    }
+    fs::create_directories(data, ec);
+    if (!writable(data))
+    {
+        box(L"The XDG data directory cannot be written to.", MB_OK | MB_ICONERROR);
+        return {};
+    }
+#endif
+    if (!std::getenv("WOTM_ASSET_DIR") && fs::is_directory(game / "assets", ec))
+        setEnv("WOTM_ASSET_DIR", narrow(game / "assets"));
     redirectLog(data);
     std::fprintf(stderr, "[wotm] War of the Monsters Recompiled %s\n", WOTM_VERSION);   // primeira linha do log: casa o relato com o PDB
     wotmBoot("pasta de dados: %s", utf8(data).c_str());   // o primeiro wotmBoot escreve a linha do sistema e liga o filtro de queda
@@ -548,7 +672,11 @@ std::filesystem::path wotmStandalonePrepare()
     const std::string isoNarrow = narrow(iso);
     if (isoNarrow.empty())
     {
+#ifdef _WIN32
         box(L"The disc image path cannot be opened: " + iso.wstring() + L"\n\nMove the .iso to a folder with a simpler name.", MB_OK | MB_ICONERROR);
+#else
+        box(L"The disc image path cannot be opened. Move the .iso to a folder with a simpler name.", MB_OK | MB_ICONERROR);
+#endif
         return {};
     }
     setEnv("PS2X_CD_IMAGE", isoNarrow);

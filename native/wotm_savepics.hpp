@@ -346,7 +346,7 @@ public:   // enquadramento tambem usado pela selecao de monstros de 3 e 4 jogado
     struct Framing {
         uint32_t mon;
         int costume;
-        float zoom, shiftX, shiftY, fwd = 0.f;
+        float zoom, shiftX, shiftY, fwd;
     };
     static constexpr Framing kFraming[] = {
         {3, -1, 1.35f, 0.f, 0.f, 0.18f},   // Togera

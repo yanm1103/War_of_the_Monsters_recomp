@@ -10,13 +10,16 @@
 // (T8 64x64, paleta tbp 519 do SHELL.RTX; bola, quadrado, triangulo e X em quadrantes de 32), no lugar dos do Kenney.
 #include "../wotm_prompts.h"
 #include "wotm_model.hpp"   // decodeT8, unzipIe
+#include "wotm_assets.hpp"
 
-// Sem windows.h (briga com os nomes do raylib): so o que le um recurso do proprio executavel
+#ifdef _WIN32
+// Read the embedded Windows resource without including windows.h (which conflicts with raylib).
 extern "C" __declspec(dllimport) void *__stdcall GetModuleHandleA(const char *);
 extern "C" __declspec(dllimport) void *__stdcall FindResourceA(void *module, const char *name, const char *type);
 extern "C" __declspec(dllimport) void *__stdcall LoadResource(void *module, void *res);
 extern "C" __declspec(dllimport) void *__stdcall LockResource(void *data);
 extern "C" __declspec(dllimport) unsigned long __stdcall SizeofResource(void *module, void *res);
+#endif
 
 namespace wotm_prompts
 {
@@ -30,20 +33,20 @@ static bool loadAtlas()
 {
     if (g_tried) return g_atlas.id != 0;
     g_tried = true;
+#ifdef _WIN32
     void *mod = GetModuleHandleA(nullptr);
     void *res = FindResourceA(mod, "WOTM_PROMPTS", reinterpret_cast<const char *>(static_cast<uintptr_t>(10)));   // RT_RCDATA
     void *h = res ? LoadResource(mod, res) : nullptr;
     const unsigned char *data = h ? static_cast<const unsigned char *>(LockResource(h)) : nullptr;
     const int size = res ? static_cast<int>(SizeofResource(mod, res)) : 0;
-    if (!data || size <= 0)
-    {
-        std::fprintf(stderr, "[prompts] atlas WOTM_PROMPTS nao esta no executavel: ficam os icones do jogo\n");
-        return false;
-    }
-    Image img = LoadImageFromMemory(".png", data, size);
+    Image img = data && size > 0 ? LoadImageFromMemory(".png", data, size) : Image{};
+#else
+    const std::string path = wotm::assets::file("prompts.png");
+    Image img = LoadImage(path.c_str());
+#endif
     if (!img.data)
     {
-        std::fprintf(stderr, "[prompts] atlas WOTM_PROMPTS ilegivel: ficam os icones do jogo\n");
+        std::fprintf(stderr, "[prompts] prompt atlas unavailable: game button icons will be used\n");
         return false;
     }
     g_atlas = LoadTextureFromImage(img);
