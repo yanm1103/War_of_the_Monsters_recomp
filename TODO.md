@@ -9,7 +9,13 @@ O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado s
 
 ### 8. Mods que adicionam monstros
 Como funciona hoje: `docs/guides/MODS.md` ("Skins", "Monstros custom").
-- **Monstros com arquivos próprios:** campo `files` no `monster.json`, com um tipo livre (6, 12 ou 16) ou remapeando um tipo. Hoje o custom usa o tipo de um monstro do jogo. Modelo novo depende de o `.NGP` voltar pelo kit (hoje ele só sai).
+Levantamento (tipo livre descartado em favor de remapear por instância; níveis do kit; medidas): `docs/investigacoes/2026-11-04/monstro_novo.md`. Ordem proposta:
+- **`.CHR` e `.AIC` por instância:** gancho em `charreset::setCharacter` e `AiReset::setAi` que troca o nome pelo do custom (`customOf`). Pequeno.
+- **Kit L1, malha nova no esqueleto de um monstro do jogo:** escritor de VIF começando por `encode(decode(pkt)) == pkt` nos 44 `.NGP`; só monstros de um bloco de paleta. ~1 a 2 semanas.
+- **Banco de som por instância:** segundo banco no som nativo, handle trocado em volta dos `MonsterSound::*` do custom. Médio.
+- **Kit L2, animações no mesmo esqueleto:** trocar as existentes, depois acrescentar; pede exportar um nó por ANIM_XFORM no `monglb.py`. ~1 a 2 semanas.
+- **`"special"` no `monster.json`** (ponteiro em +0x7980 depois do `initDynamics`).
+- **L3, esqueleto novo** (3 a 6 semanas): só se ainda fizer falta depois dos anteriores.
 
 ## Decomp
 - **Fora do caminho crítico:** oracle para funções com chamadas; cobertura com gameplay para realimentar o `boot_coverage_asm.csv` (`57d4afd:docs/investigacoes/2026-10-19/pendencias_oracle_cobertura.md`, seções 2 e 3).
