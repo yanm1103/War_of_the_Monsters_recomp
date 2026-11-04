@@ -101,6 +101,64 @@ void cdRead(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
     }
     setReturnS32(ctx, 1);   // o stub tambem le na hora: sceCdSync devolve "pronto"
 }
+
+// .PTR de mod (skin ou custom com modelo proprio): o dbsRelocateViaPtrListFile le o "mon/<nome>.ptr" inteiro na MemoryStack do jogo
+// (pool de 512 KB). O retail so reserva 0xD40 bytes antes da leitura (o printf "Prepare for crash" compara com 0x30D40), entao o teto
+// real e o que a pilha tem livre naquela hora (hi1 menos o inicio do buffer), em setores inteiros (o fileReadf le setores de 2 KB). O
+// .PTR que nao cabe e lido na RAM livre logo acima do fim da carga (os arquivos da fase e dos monstros), e a pilha volta como estava.
+PS2Runtime::RecompiledFunction g_origPtrReloc = nullptr;
+
+void ptrRelocate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
+{
+    constexpr uint32_t kFn = wotm::fn::dbsRelocateViaPtrListFile__Fi10_vramAddrs, kMs = wotm::sym::x_11MemoryStack_global,
+                       kFs = wotm::sym::fileStatus;
+    const uint32_t idx = getRegU32(ctx, 4), ngpN = rdram[kFs + 0x74];
+    if (ctx->pc != kFn || idx == 0 || idx >= ngpN || ngpN > 13)
+    {
+        g_origPtrReloc(rdram, ctx, rt);
+        return;
+    }
+    char name[9] = {};
+    for (int c = 0; c < 8; ++c)
+        name[c] = char(std::toupper(rdram[kFs + 0xB1 + 9 * idx + c]));
+    const std::string rel = std::string("MON/") + name + ".PTR";
+    const wotm::mods::File *m = Registry::get().find(Registry::get().aliasOf(rel));
+    if (!m)
+    {   // .PTR do disco: o retail cabe
+        g_origPtrReloc(rdram, ctx, rt);
+        return;
+    }
+    const uint32_t low = rd32(rdram, kMs + 4), hi1 = rd32(rdram, kMs + 0x10);
+    const uint32_t buf = ((((low + 3) & ~3u) + 4) + 15) & ~15u;
+    const uint64_t need = (m->size + 2047) & ~uint64_t(2047);
+    const uint64_t room = hi1 > buf ? hi1 - buf : 0;
+    if (need <= room)
+    {
+        std::fprintf(stderr, "[mods] %s (%s): %llu bytes, cabe na pilha do jogo (%llu KB livres)\n", rel.c_str(), m->mod.c_str(),
+                     (unsigned long long)m->size, (unsigned long long)(room / 1024));
+        g_origPtrReloc(rdram, ctx, rt);
+        return;
+    }
+    // fim da carga: o maior endereco de carga das tres listas do fileStatus (.TEX, .NGP, .RTX), como no wotmCheckLoadEnd
+    const uint32_t texN = rdram[kFs + 0x38], resN = rdram[kFs + 0xB0];
+    uint32_t end = rd32(rdram, kFs + 0x3C + 4 * ngpN);
+    if (texN <= 13) end = std::max(end, rd32(rdram, kFs + 4 * texN));
+    if (resN <= 13) end = std::max(end, rd32(rdram, kFs + 0x78 + 4 * resN));
+    const uint32_t scratch = (std::max<uint32_t>(end & 0x1FFFFFFFu, PS2_GUEST_RAM_SIZE) + 0xFFFF) & ~0xFFFFu;
+    if (uint64_t(scratch) + need + 0x20 > uint64_t(PS2_RAM_SIZE) - 0x100000u)
+    {
+        std::fprintf(stderr, "[mods] %s (%s): %llu bytes, AVISO: nao cabe na pilha do jogo (%llu KB livres) nem acima da carga (0x%07X); "
+                     "a leitura vai sobrescrever o que vem depois\n", rel.c_str(), m->mod.c_str(), (unsigned long long)m->size,
+                     (unsigned long long)(room / 1024), scratch);
+        g_origPtrReloc(rdram, ctx, rt);
+        return;
+    }
+    std::fprintf(stderr, "[mods] %s (%s): %llu bytes, maior que a pilha do jogo (%llu KB livres): lido em 0x%07X, acima da carga\n",
+                 rel.c_str(), m->mod.c_str(), (unsigned long long)m->size, (unsigned long long)(room / 1024), scratch);
+    wr32(rdram, kMs + 4, scratch);   // o pushMark da funcao grava a marca ali; o popMark devolve low = scratch e a marca antiga
+    g_origPtrReloc(rdram, ctx, rt);
+    wr32(rdram, kMs + 4, low);
+}
 } // namespace wotm_mods_hooks
 
 void wotmModsInstall(PS2Runtime &runtime, const std::string &elfPath)
@@ -156,6 +214,8 @@ void wotmModsInstall(PS2Runtime &runtime, const std::string &elfPath)
     }
     runtime.registerFunction(wotm::fn::fileCdSearchFile__FP10sceCdlFILEPc, hostLeaf<searchFile>);
     runtime.registerFunction(wotm::fn::sceCdRead, hostLeaf<cdRead>);
+    if ((g_origPtrReloc = runtime.lookupFunction(wotm::fn::dbsRelocateViaPtrListFile__Fi10_vramAddrs)))
+        runtime.registerFunction(wotm::fn::dbsRelocateViaPtrListFile__Fi10_vramAddrs, &ptrRelocate);
     std::string names;
     for (const std::string &m : Registry::get().modNames())
         names += (names.empty() ? "" : ", ") + m;

@@ -350,6 +350,12 @@ the one of the RANDOM entry (`random`; without it, a mosaic of the game's pictur
 - **Log:** `[mods] N arquivo(s) de <mods> em <pasta>` at boot and, on the first search of each file, `[mods] MON/LIZARD0.TEX <-
   teste_togera (110080 bytes; disco 110080)`, with AVISO when the mod's is bigger (outside `MON/*`, whose loading is contiguous above
   32 MB).
+- **Mod `.PTR`** (a skin's or a custom's own model): `dbsRelocateViaPtrListFile` reads the whole file into the game's `MemoryStack`
+  (a 512 KB pool) in whole sectors. The retail reserves only 0xD40 bytes before the read (its "Pointer file too big" message compares
+  against 0x30D40), so the limit is what the stack has free at that moment. A mod `.PTR` that does not fit is read into the free RAM
+  right after the end of the load instead (`ptrRelocate`, `wotm_mods.inc`), and the stack is left as it was. Log:
+  `[mods] MON/LIZARD5.PTR (meu_mod): 614400 bytes, maior que a pilha do jogo (357 KB livres): lido em 0x23B0000, acima da carga`
+  (or `cabe na pilha do jogo`).
 - **PNG** (`native/wotm_texmods.hpp`, `Scene::modTexture`): the game keeps loading the disc's `.TEX`/`.RTX`; the native drawing swaps the
   image in `textureId` (objects) and in `residentTexture` (screen quads: enemy bars, font). The disc texId comes from the
   offset of the `texInfo[id]` packet inside the loaded file (`fileStatus.texAddr`/`resAddr`, name in `names`); the
