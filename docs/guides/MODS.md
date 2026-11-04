@@ -183,7 +183,10 @@ A skin is a folder in `mods/<mod>/skins/<folder>/` with a `skin.json`:
     keeps its texture, even in the same fight.
   - **`.TEX` and/or `.RTX`** (any name, by extension): own textures, with the same texIds as the base (`modkit pack --inject`
     writes them this way).
-  - **`.NGP` + `.PTR`** (always both): own model, with the same skeleton and animations as costume 0.
+  - **`.NGP` + `.PTR`** (always both): own model, with the same skeleton and animations as costume 0. A new mesh comes from
+    Blender: `python tools/monglb.py disc/MON/LIZARD0.NGP LIZARD0.glb` exports the costume, the meshes are remodeled and
+    reweighted keeping the bone names, and `python tools/ngpmesh.py disc/MON/LIZARD0.NGP edited.glb <skin folder>` writes the pair
+    (`MODELS_3D.md`).
 - The game sees each skin as one more costume of the monster (`MON/SHOGUN4.*`, `SHOGUN5.*`...; numbers assigned on every boot, in
   mod/id order). Same monster and id in two mods: the last in alphabetical order wins. The log says what got in:
   `[mods] skin ultra-v/roxo ("PURPLE ULTRA V", meu_mod) = traje 4 (SHOGUN4); base 3, 2 png`.
