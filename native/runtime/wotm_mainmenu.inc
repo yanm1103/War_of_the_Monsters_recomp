@@ -14,7 +14,7 @@
 // fica fora do currentSelection (g_extraRow, como o "quit game"); o X nela abre o painel de opcoes do port no lugar da lista, sem trocar de tela, e o
 // triangulo (ou O) fecha. Com o painel aberto (e 20 quadros depois de fechar) o jogo nao ve entrada nenhuma: o painel le os
 // dispositivos direto (wotm_padsel::readDevice), na thread do EE, dentro do gancho do screenGetInput.
-// Painel: abas VIDEO / FEATURES / CAMERA / CONTROLS (L1/R1), cima/baixo escolhem a linha, esquerda/direita/X
+// Painel: abas VIDEO / FEATURES / CAMERA / CONTROLS / ARMY / CHEATS (L1/R1), cima/baixo escolhem a linha, esquerda/direita/X
 // trocam o valor, que vale na hora e e gravado no settings.ini (wotm_settings.hpp; o video e aplicado na thread da janela pelo
 // applyVideoSettings do wotm_live.inc). Desenhado numa textura propria no telao inteiro (a faixa visivel abaixo da tarja do menu).
 // Aba CONTROLS (rola): teclado separado, qual mapa a lista mostra (teclado ou gamepads), uma linha por botao do PS2 (X espera a tecla
@@ -31,6 +31,7 @@ static void frame(uint8_t *rdram);
 static uint32_t input(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t code);
 constexpr uint32_t kScreen = 10;
 }
+int wotmSetAllUnlocks(uint8_t *rdram, bool open);   // wotm_save.inc: aba CHEATS (destravar ou travar tudo)
 namespace wotm_pausemenu   // wotm_pausemenu.inc (incluido depois)
 {
 static void install(PS2Runtime &runtime);
@@ -85,6 +86,7 @@ struct View
     uint32_t screenObj = 0;               // telao (objeto do filme, shell->m_movieScreen): onde o painel e desenhado
     bool training = false;                // pausa: o painel do modo treino (TRAINING OPTIONS) no lugar das abas
     bool moves = false;                   // pausa: a lista de golpes (MOVE LIST), tambem sem abas
+    int arm = -1;                         // aba CHEATS: linha esperando o segundo X (g_cheatArm)
 };
 static std::mutex g_m;
 static View g_view;
@@ -120,10 +122,10 @@ static int g_pauseSuppress = 0;
 // Cada opcao e uma chave do wotm_settings.hpp; mudar grava o settings.ini e vale na hora (video na thread da janela, mods e
 // teclado na proxima leitura deles).
 namespace st = wotm::settings;
-enum Tab { TabVideo, TabFeatures, TabCamera, TabControls, TabArmy, kTabs };
-constexpr const char *kTabNames[kTabs] = {"VIDEO", "FEATURES", "CAMERA", "CONTROLS", "ARMY"};
+enum Tab { TabVideo, TabFeatures, TabCamera, TabControls, TabArmy, TabCheats, kTabs };
+constexpr const char *kTabNames[kTabs] = {"VIDEO", "FEATURES", "CAMERA", "CONTROLS", "ARMY", "CHEATS"};
 // Centro e meia largura de cada aba no titulo do painel (fracao da largura), medidos pelo renderPanel; o panelHit os le
-static float g_tabCx[kTabs] = {0.20f, 0.35f, 0.50f, 0.65f, 0.80f}, g_tabHw[kTabs] = {0.075f, 0.075f, 0.075f, 0.075f, 0.075f};
+static float g_tabCx[kTabs] = {0.20f, 0.32f, 0.44f, 0.56f, 0.68f, 0.80f}, g_tabHw[kTabs] = {0.06f, 0.06f, 0.06f, 0.06f, 0.06f, 0.06f};
 constexpr int kMaxOpts = 9;
 struct Opt { st::Key key; const char *label; const char *hint; };
 struct TabDef { int n; Opt opt[kMaxOpts]; };
@@ -165,6 +167,7 @@ constexpr TabDef kTabDefs[kTabs] = {
       {st::ArmyElim, "ELIMINATION", "THE ARMY SHOWS UP IN ELIMINATION"},
       {st::ArmyEndur, "ENDURANCE", "THE ARMY SHOWS UP IN ENDURANCE"},
       {st::ArmyTrain, "TRAINING", "THE ARMY SHOWS UP IN TRAINING"}}},
+    {0, {}},   // CHEATS: linhas proprias (kCheatDefs), sem chave do settings.ini
 };
 static int g_tab = TabVideo;
 static int g_optSel[kTabs] = {};
@@ -176,6 +179,8 @@ static int visRows(int tab) { return tab == TabVideo ? 9 : kVisRows; }
 // botao do PS2 por linha e a volta ao padrao
 constexpr int kCtlOpt = -10, kCtlDevice = -2, kCtlReset = -3;   // kCtlOpt - i: opcao i da aba
 constexpr int kMaxCtlRows = kMaxOpts + 2 + st::kBinds;
+// Centro das setas da linha (fracao da largura), medidos pelo renderPanel (a da esquerda acompanha o valor); o panelHit le
+static float g_rowArrowL[kMaxCtlRows] = {}, g_rowArrowR = 0.9f;
 constexpr const char *kBindLabels[st::kBinds] = {"D-PAD UP", "D-PAD DOWN", "D-PAD LEFT", "D-PAD RIGHT", "CROSS",     "CIRCLE",     "SQUARE",
                                                  "TRIANGLE", "L1",         "R1",         "L2",          "R2",        "L1 AND R1",  "START",
                                                  "SELECT",   "L3",         "R3",         "STICK UP",    "STICK DOWN", "STICK LEFT", "STICK RIGHT",
@@ -357,10 +362,88 @@ static bool trainStep(int r, int dir, bool wrap)
     }
 }
 
+// Aba CHEATS: as trapacas do menu F1 (bits de g_wotmCheats, wotm_cheats.h; a thread do EE as aplica nos jogadores humanos) e o destrave
+// do save inteiro. As trapacas nao vao para o settings.ini: valem ate fechar o jogo, como no F1. Vencer e derrubar sao pedidos que o
+// proximo Monster::update de um jogador consome: so na pausa da luta (no menu, o pedido dispararia na luta seguinte). UNLOCK e LOCK
+// EVERYTHING pedem um segundo X (g_cheatArm; outra linha, outra aba ou o triangulo desarmam) e mudam o save (wotmSetAllUnlocks).
+enum CheatRow { ChInvincible, ChStamina, ChSpecial, ChCloak, ChGod, ChWin, ChKillWho, ChKill, ChUnlock, ChLock, kCheatRows };
+using CheatDef = TrainDef;
+constexpr CheatDef kCheatDefs[kCheatRows] = {
+    {"INVINCIBLE", "PLAYERS LOSE NO HEALTH. HITS STILL PUSH THEM AROUND"},
+    {"STAMINA", "KEEPS THE STAMINA OF THE PLAYERS FULL, OR AT THE RAGE LEVEL"},
+    {"SPECIAL ALWAYS READY", "THE SPECIAL ATTACK OF THE PLAYERS IS ALWAYS AVAILABLE"},
+    {"CLOAK", "THE PLAYERS STAY INVISIBLE, AS WITH THE CLOAK POWER-UP"},
+    {"GOD MODE", "NO DAMAGE AND NO REACTION TO HITS. HEALTH, STAMINA AND SPECIAL STAY FULL"},
+    {"WIN THE FIGHT", "KNOCKS OUT EVERY CPU MONSTER WHEN THE FIGHT GOES ON"},
+    {"KNOCK OUT TARGET", "WHO THE NEXT LINE KNOCKS OUT"},
+    {"KNOCK OUT", "THE TARGET FALLS AND LOSES A LIFE WHEN THE FIGHT GOES ON"},
+    {"UNLOCK EVERYTHING", "EVERY MONSTER, COSTUME AND STAGE OF THE UNLOCKS SCREEN, WITHOUT SPENDING TOKENS"},
+    {"LOCK EVERYTHING", "BACK TO THE UNLOCKS OF A NEW SAVE. YOUR TOKENS STAY"},
+};
+static int g_cheatArm = -1;   // linha esperando o segundo X (ChUnlock, ChLock); -1 nenhuma
+static bool cheatAction(int r) { return r == ChWin || r == ChKill || r == ChUnlock || r == ChLock; }
+static bool cheatLocked(int r, bool inPause) { return !inPause && (r == ChWin || r == ChKill); }
+static uint32_t cheatBit(int r)
+{
+    switch (r)
+    {
+    case ChInvincible: return kCheatInvincible;
+    case ChSpecial: return kCheatSpecial;
+    case ChCloak: return kCheatCloak;
+    case ChGod: return kCheatGod;
+    default: return 0;
+    }
+}
+static std::string cheatValue(int r)
+{
+    const uint32_t c = g_wotmCheats.load(std::memory_order_relaxed);
+    if (const uint32_t bit = cheatBit(r)) return (c & bit) ? "ON" : "OFF";
+    if (r == ChStamina)
+    {
+        static const char *const kSt[3] = {"NORMAL", "ALWAYS FULL", "ALWAYS RAGE"};
+        return kSt[std::min<uint32_t>((c & kCheatStaminaMask) / kCheatStamina1, 2u)];
+    }
+    if (r == ChKillWho)
+    {
+        static const char *const kWho[5] = {"ALL PLAYERS", "PLAYER 1", "PLAYER 2", "PLAYER 3", "PLAYER 4"};
+        return kWho[std::clamp(g_wotmCheatKillWho.load(), 0, 4)];
+    }
+    return std::string();
+}
+// Esquerda/direita (dir -1/+1) e X (wrap) nas linhas com valor: ligado/desligado da a volta; STAMINA e o alvo param nas pontas, o X da a
+// volta (como o stepValue). Devolve se mudou.
+static bool cheatStep(int r, int dir, bool wrap)
+{
+    if (const uint32_t bit = cheatBit(r))
+    {
+        g_wotmCheats.fetch_xor(bit);
+        return true;
+    }
+    auto step = [&](int cur, int n) {
+        const int v = cur + dir;
+        return wrap ? (v + n) % n : std::clamp(v, 0, n - 1);
+    };
+    if (r == ChStamina)
+    {
+        uint32_t c = g_wotmCheats.load();
+        const int cur = int(std::min<uint32_t>((c & kCheatStaminaMask) / kCheatStamina1, 2u)), v = step(cur, 3);
+        if (v == cur) return false;
+        while (!g_wotmCheats.compare_exchange_weak(c, (c & ~kCheatStaminaMask) | uint32_t(v) * kCheatStamina1)) {}
+        return true;
+    }
+    if (r == ChKillWho)
+    {
+        const int cur = std::clamp(g_wotmCheatKillWho.load(), 0, 4), v = step(cur, 5);
+        g_wotmCheatKillWho = v;
+        return v != cur;
+    }
+    return false;
+}
+
 static int tabRows(int tab)
 {
     int r[kMaxCtlRows];
-    return tab == TabControls ? ctlRows(g_bindMap < 0, r) : kTabDefs[tab].n;
+    return tab == TabControls ? ctlRows(g_bindMap < 0, r) : tab == TabCheats ? int(kCheatRows) : kTabDefs[tab].n;
 }
 static std::string bindValue(int b, int map)
 {
@@ -546,6 +629,7 @@ static void readPanel(bool out[kPanelActs])
 static void openPanel()
 {
     g_open = true;
+    g_cheatArm = -1;
     g_showPreview = true;
     readPanel(g_panelPrev);   // o X que abriu ainda esta apertado: so conta o proximo
 }
@@ -570,6 +654,7 @@ static void openPausePanel(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtim
     g_pauseOpen = true;
     g_pauseTraining = training;
     g_pauseMoves = moves;
+    g_cheatArm = -1;
     if (moves)
         g_moveSel = std::clamp(g_moveSel, 0, std::max(0, moveRows() - 1));
     g_pauseSuppress = 0;
@@ -668,6 +753,44 @@ static void controlsInput(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime
     }
 }
 
+// Aba CHEATS, linha r: muda o valor, faz o pedido (vencer, derrubar) ou arma e confirma o destrave
+static void cheatsInput(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, const bool e[kPanelActs], int r)
+{
+    if (cheatLocked(r, g_where == InPause))
+        return;
+    if (!cheatAction(r))
+    {
+        if ((e[PLeft] || e[PRight] || e[POk]) && cheatStep(r, e[PLeft] ? -1 : 1, e[POk]))
+        {
+            std::fprintf(stderr, "[debug] painel: %s = %s (trapacas 0x%x)\n", kCheatDefs[r].label, cheatValue(r).c_str(), g_wotmCheats.load());
+            panelSfx(rdram, ctx, runtime, e[POk] ? 8 : (e[PLeft] ? 2 : 4));
+        }
+        return;
+    }
+    if (!e[POk])
+        return;
+    if (r == ChWin)
+    {
+        g_wotmCheatWin = true;
+        std::fprintf(stderr, "[debug] painel: vencer a luta pedido\n");
+    }
+    else if (r == ChKill)
+    {
+        const int who = std::clamp(g_wotmCheatKillWho.load(), 0, 4);
+        g_wotmCheatKill = who ? (1u << (who - 1)) : 0xFu;
+        std::fprintf(stderr, "[debug] painel: derrubar pedido (%s)\n", cheatValue(ChKillWho).c_str());
+    }
+    else if (g_cheatArm != r)
+        g_cheatArm = r;
+    else
+    {
+        const int n = wotmSetAllUnlocks(rdram, r == ChUnlock);
+        g_cheatArm = -1;
+        std::fprintf(stderr, "[debug] painel: %s, %d entradas do destrave mudaram\n", r == ChUnlock ? "destravar tudo" : "travar tudo", n);
+    }
+    panelSfx(rdram, ctx, runtime, 8);
+}
+
 // KEYBOARD (teclado separado) na pausa: travado. Numa luta de 1 jogador, OWN PLAYER mandaria o teclado para o jogador 2, que nao
 // existe, e quem joga no teclado perderia o monstro e a saida da pausa
 static bool lockedOpt(st::Key k, bool inPause) { return inPause && k == st::KbSeparate; }
@@ -728,6 +851,15 @@ static bool panelInput(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             e[POk] |= hv.part == HRow;
         }
     }
+    // confirmacao da aba CHEATS: sair da linha desarma; o triangulo desarma sem fechar o painel
+    if (g_cheatArm >= 0 && (training || moves || g_tab != TabCheats || g_optSel[TabCheats] != g_cheatArm))
+        g_cheatArm = -1;
+    if (g_cheatArm >= 0 && e[PBack])
+    {
+        g_cheatArm = -1;
+        panelSfx(rdram, ctx, runtime, 6);
+        return false;
+    }
     if (e[PBack])
     {
         panelSfx(rdram, ctx, runtime, 6);
@@ -772,6 +904,7 @@ static bool panelInput(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     if (e[PPrev] || e[PNext])
     {
         g_tab = (g_tab + (e[PNext] ? 1 : kTabs - 1)) % kTabs;
+        g_cheatArm = -1;
         panelSfx(rdram, ctx, runtime, e[PNext] ? 4 : 2);
         return false;
     }
@@ -790,7 +923,13 @@ static bool panelInput(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         int &top = g_top[g_tab];
         if (sel < top) top = sel;
         if (sel >= top + visRows(g_tab)) top = sel - visRows(g_tab) + 1;
+        g_cheatArm = -1;
         panelSfx(rdram, ctx, runtime, e[PDown] ? 4 : 2);
+        return false;
+    }
+    if (g_tab == TabCheats)
+    {
+        cheatsInput(rdram, ctx, runtime, e, std::clamp(sel, 0, n - 1));
         return false;
     }
     if (g_tab == TabControls && sel >= t.n)
@@ -831,6 +970,7 @@ static void publishPause()
     v.bindMap = g_bindMap;
     v.capture = g_capture;
     v.preview = g_showPreview;
+    v.arm = g_cheatArm;
     v.training = g_pauseTraining;
     v.moves = g_pauseMoves;
     if (v.training)
@@ -1073,6 +1213,7 @@ static void frame(uint8_t *rdram)
     v.bindMap = g_bindMap;
     v.capture = g_capture;
     v.preview = g_showPreview;
+    v.arm = g_cheatArm;
     v.screenObj = rd32(rdram, wotm_padsel::kMovieScreen) & 0x1FFFFFFFu;
     std::lock_guard<std::mutex> lk(g_m);
     g_view = v;
@@ -1320,7 +1461,7 @@ static RenderTexture2D g_prt{};
 // esquerda; a direita, a previa da opcao selecionada (wotm_preview.hpp).
 struct PanelLayout
 {
-    float step, rowH, labX, valX, dx, rowRight;   // passo entre linhas, altura das letras, nome, valor (+- dx: setas), fim da faixa
+    float step, rowH, labX, rowRight;   // passo entre linhas, altura das letras, nome, fim da faixa (o valor encosta nela)
     int vis;                                      // linhas visiveis
     bool preview;
     Rectangle box;                                // caixa da previa
@@ -1331,17 +1472,17 @@ static PanelLayout panelLayout(int tab, bool preview, bool training = false)
 {
     const float W = float(kPW), H = float(kPH), lineH = H / 8.9f;
     if (training)   // sem abas: o titulo e as 11 linhas, mais juntas, comecando mais acima
-        return {lineH * 0.63f, 46.f, W * 0.08f, W * 0.66f, W * 0.20f, W * 0.97f, int(kTrainRows), false, {}, lineH * 1.85f};
+        return {lineH * 0.63f, 46.f, W * 0.08f, W * 0.97f, int(kTrainRows), false, {}, lineH * 1.85f};
     if (tab == TabVideo && !preview)   // previa escondida: as 9 linhas com as colunas das outras abas
-        return {lineH * kVideoStep, 46.f, W * 0.10f, W * 0.66f, W * 0.19f, W * 0.97f, visRows(tab), false, {}};
+        return {lineH * kVideoStep, 46.f, W * 0.10f, W * 0.97f, visRows(tab), false, {}};
     if (tab == TabVideo)
     {
         // caixa em 4:3, centrada na altura das 9 linhas
         const float bw = W * 0.30f, bh = bw * 0.75f, mid = lineH * 2.2f + lineH * kVideoStep * 4.f;
-        return {lineH * kVideoStep, 46.f, W * 0.06f, W * 0.51f, W * 0.12f, W * 0.645f, visRows(tab), true,
+        return {lineH * kVideoStep, 46.f, W * 0.06f, W * 0.645f, visRows(tab), true,
                 Rectangle{W * 0.665f, mid - bh * 0.5f - 20.f, bw, bh}};
     }
-    return {lineH, 54.f, W * 0.10f, W * 0.66f, W * 0.19f, W * 0.97f, visRows(tab), false, {}};
+    return {lineH, 54.f, W * 0.10f, W * 0.97f, visRows(tab), false, {}};
 }
 
 // Previa da opcao (so na aba VIDEO): qual desenho cada opcao usa
@@ -1407,32 +1548,52 @@ static void renderPanel(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0,
     std::vector<wotm::TextQuad> q;
     DrawRectangleRounded(Rectangle{4.f, 4.f, W - 8.f, H - 8.f}, 0.06f, 12, Color{0, 0, 0, 175});
 
-    // abas: L1  VIDEO  FEATURES  CAMERA  CONTROLS  ARMY  R1, lado a lado pela largura de cada nome entre os icones de L1 e R1 (a
-    // fonte diminui se nao couberem); o panelHit le os centros e as meias larguras de g_tabCx/g_tabHw
-    const float tabY = lineH * 0.7f, titleH = 50.f, gap = W * 0.035f, avail = W * 0.68f;
-    float tabH = titleH, tabW[kTabs], total = 0.f;
-    auto measureTabs = [&] {
-        total = gap * float(kTabs - 1);
-        for (int t = 0; t < kTabs; ++t) total += (tabW[t] = textWidth(tex0, kPW, kPH, kTabNames[t], tabH));
+    // abas: L1  < CAMERA  CONTROLS  ARMY > R1, no tamanho cheio entre os icones de L1 e R1: as que nao cabem ficam escondidas (setinha
+    // do lado em que ha mais) e a faixa anda para mostrar a aba escolhida; o panelHit le os centros e as meias larguras de
+    // g_tabCx/g_tabHw (as escondidas ficam fora do painel)
+    const float tabY = lineH * 0.7f, titleH = 50.f, tabH = titleH, gap = W * 0.035f, avail = W * 0.62f;
+    float tabW[kTabs];
+    for (int t = 0; t < kTabs; ++t) tabW[t] = textWidth(tex0, kPW, kPH, kTabNames[t], tabH);
+    auto lastFrom = [&](int first) {   // ultima aba que cabe comecando em first
+        float sum = tabW[first];
+        int last = first;
+        while (last + 1 < kTabs && sum + gap + tabW[last + 1] <= avail) sum += gap + tabW[++last];
+        return last;
     };
-    measureTabs();
-    if (total > avail)
-    {
-        tabH *= avail / total;
-        measureTabs();
-    }
+    auto span = [&](int a, int b) {
+        float s = gap * float(b - a);
+        for (int t = a; t <= b; ++t) s += tabW[t];
+        return s;
+    };
+    static int s_tabFirst = 0;   // janela (renderPanel e panelHit rodam na thread da janela)
+    const int curTab = std::clamp(v.tab, 0, kTabs - 1);
+    s_tabFirst = std::clamp(s_tabFirst, 0, kTabs - 1);
+    if (curTab < s_tabFirst) s_tabFirst = curTab;
+    while (curTab > lastFrom(s_tabFirst)) ++s_tabFirst;
+    while (s_tabFirst > 0 && span(s_tabFirst - 1, lastFrom(s_tabFirst)) <= avail) --s_tabFirst;   // no fim, enche pela esquerda
+    const int tabLast = lastFrom(s_tabFirst);
     float tabX[kTabs];
-    float tabLeft = W * 0.5f - total * 0.5f;
+    float tabLeft = W * 0.5f - span(s_tabFirst, tabLast) * 0.5f;
     for (int t = 0; t < kTabs; ++t)
     {
-        tabX[t] = tabLeft + tabW[t] * 0.5f;
-        g_tabCx[t] = tabX[t] / W;
+        const bool shown = t >= s_tabFirst && t <= tabLast;
+        tabX[t] = shown ? tabLeft + tabW[t] * 0.5f : -W;
+        g_tabCx[t] = shown ? tabX[t] / W : -10.f;
         g_tabHw[t] = (tabW[t] + gap) * 0.5f / W;
-        tabLeft += tabW[t] + gap;
+        if (shown) tabLeft += tabW[t] + gap;
     }
     if (v.training || v.moves)   // treino: so o titulo
         label(q, ram, tex0, v.moves ? "MOVE LIST" : "TRAINING OPTIONS", W * 0.5f, tabY, titleH, kLit, kPW, kPH);
-    for (int t = 0; t < kTabs && !v.training && !v.moves; ++t)
+    else
+    {   // ha abas escondidas: setinha apagada do lado delas
+        const Color a = gsToRgb(kDim);
+        const float s = 14.f, xl = W * 0.165f, xr = W * 0.835f;
+        if (s_tabFirst > 0)
+            DrawTriangle(Vector2{xl - s, tabY}, Vector2{xl + s * 0.7f, tabY + s}, Vector2{xl + s * 0.7f, tabY - s}, a);
+        if (tabLast < kTabs - 1)
+            DrawTriangle(Vector2{xr + s, tabY}, Vector2{xr - s * 0.7f, tabY - s}, Vector2{xr - s * 0.7f, tabY + s}, a);
+    }
+    for (int t = s_tabFirst; t <= tabLast && !v.training && !v.moves; ++t)
     {
         const bool on = t == v.tab;
         label(q, ram, tex0, kTabNames[t], tabX[t], tabY, tabH, on ? kLit : kDim, kPW, kPH);
@@ -1459,7 +1620,7 @@ static void renderPanel(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0,
     DrawRectangleRec(Rectangle{W * 0.04f, lineH * 1.4f, W * 0.92f, 3.f}, Color{90, 80, 66, 120});
 
     // linhas da aba: nome, valor, dica e se o valor tem setas (escolha na lista)
-    enum { KOpt, KDevice, KReset, KBind, KCapture };
+    enum { KOpt, KDevice, KReset, KBind, KCapture, KCheat };
     // mdir/mbtn/mtail: linha da MOVE LIST: direcao (teclado numerico) e botoes do comando saem como icones, mtail e o texto depois deles
     struct PRow { std::string label, value; const char *hint; bool arrows; int kind; int bind = -1; bool locked = false; int8_t mdir = 0; uint8_t mbtn = 0; std::string mtail; };
     PRow rows[kMaxCtlRows];
@@ -1504,6 +1665,26 @@ static void renderPanel(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0,
         for (int i = 0; i < kTrainRows; ++i)
             rows[n++] = i == TrClear ? PRow{kTrainDefs[i].label, "", kTrainDefs[i].hint, false, KReset}
                                      : PRow{kTrainDefs[i].label, trainValue(i), kTrainDefs[i].hint, true, KOpt};
+    else if (tab == TabCheats)
+    {
+        int open = 0;   // entradas do destrave abertas agora (0..46, as do wotmSetAllUnlocks)
+        for (uint32_t i = 0; i < 47; ++i)
+            open += ram.u32(wotm::sym::monsterSelectMode + i * 0x2Cu + 4u) != 0;
+        const bool blink = std::fmod(GetTime(), 0.8) < 0.5;
+        for (int i = 0; i < kCheatRows; ++i)
+        {
+            const CheatDef &d = kCheatDefs[i];
+            if (cheatLocked(i, inPause))
+                rows[n++] = PRow{d.label, "", "ONLY IN THE PAUSE MENU OF A FIGHT", false, KCheat, -1, true};
+            else if (i == v.arm)
+                rows[n++] = PRow{d.label, blink ? "CONFIRM" : "",
+                                 i == ChUnlock ? "CONFIRM AGAIN TO UNLOCK EVERYTHING IN YOUR SAVE" : "CONFIRM AGAIN TO LOCK EVERYTHING IN YOUR SAVE", false, KCheat};
+            else if (cheatAction(i))
+                rows[n++] = PRow{d.label, i == ChUnlock ? std::to_string(open) + " OF 47 OPEN" : "", d.hint, false, KCheat};
+            else
+                rows[n++] = PRow{d.label, cheatValue(i), d.hint, true, KOpt};
+        }
+    }
     else if (tab != TabControls)
         for (int i = 0; i < t.n; ++i) rows[n++] = optRow(t.opt[i]);
     else
@@ -1527,7 +1708,7 @@ static void renderPanel(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0,
         }
     }
     // nome a esquerda, valor a direita (setas na selecionada); so kVisRows linhas a partir de v.top
-    const float rowH = L.rowH, valX = L.valX, labX = L.labX, dx = L.dx;   // o telao e inclinado: valor perto do nome
+    const float rowH = L.rowH, labX = L.labX;
     const int top = std::clamp(v.top, 0, std::max(0, n - L.vis));
     for (int i = top; i < std::min(n, top + L.vis); ++i)
     {
@@ -1584,18 +1765,26 @@ static void renderPanel(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0,
             labelLeft(q, ram, tex0, pr.label.c_str(), labX, cy, rowH, on ? kLit : kDim, kPW, kPH);
             labW = textWidth(tex0, kPW, kPH, pr.label.c_str(), rowH);
         }
+        // valor encostado a direita (no lugar da seta da direita fica a vaga dela, para o valor nao andar ao escolher a linha); as setas
+        // abracam o valor; o fio vai do nome ate a seta da esquerda. Valor longo ("LSHIFT OR RSHIFT"): letras menores ate caber.
+        constexpr float s = 20.f, aw = 1.7f * s, ag = 16.f;   // meia altura, largura e folga da seta
+        const float tipR = L.rowRight - 36.f, valR = tipR - aw - ag;
+        const float minL = labX + labW + 40.f + aw + ag;   // o valor comeca depois do nome, um fio curto e a seta da esquerda
+        const int phys = pr.kind == KBind && v.bindMap >= 0 ? st::pad(st::Bind(pr.bind), v.bindMap) : 0;
+        const float vw = textWidth(tex0, kPW, kPH, pr.value.c_str(), rowH);
+        const float vh = vw > valR - minL ? std::max(rowH * 0.5f, rowH * std::max(valR - minL, 1.f) / vw) : rowH;
+        const float valW = phys > 0 ? 86.f : vw * vh / rowH, valL = valR - valW;
+        const float tipL = valL - ag - aw;   // ponta da seta da esquerda
+        g_rowArrowL[std::min(i, kMaxCtlRows - 1)] = (tipL + aw * 0.5f) / W;
+        g_rowArrowR = (tipR - aw * 0.5f) / W;
         // fio do nome ao valor: com a inclinacao do telao, guia o olho pela linha
-        const float lx1 = labX + labW + 24.f, lx2 = valX - dx - 36.f;
+        const float lx1 = labX + labW + 24.f, lx2 = (pr.arrows ? tipL : valL) - 14.f;
         if (lx2 > lx1 && !pr.value.empty() && !v.moves)
             DrawRectangleRec(Rectangle{lx1, cy - 1.f, lx2 - lx1, 2.f}, Color{110, 96, 78, static_cast<unsigned char>(on ? 140 : 70)});
-        // valor longo ("LSHIFT / RSHIFT"): letras menores para caber entre as setas
-        const float vw = textWidth(tex0, kPW, kPH, pr.value.c_str(), rowH), maxW = 2.f * dx - 70.f;
-        const float vh = vw > maxW ? rowH * maxW / vw : rowH;
         // botao do gamepad: o icone dele no estilo escolhido (no teclado, o do PS2)
-        const int phys = pr.kind == KBind && v.bindMap >= 0 ? st::pad(st::Bind(pr.bind), v.bindMap) : 0;
         const int style = wotm_prompts::currentStyle();
-        const bool valIcon = phys > 0 && wotm_prompts::drawCell2d(wotm_prompts::padCell(phys, style == st::PromptKeyboard ? st::PromptPs : style), valX, cy,
-                                                                  86.f, on ? 1.f : 0.6f);
+        const bool valIcon = phys > 0 && wotm_prompts::drawCell2d(wotm_prompts::padCell(phys, style == st::PromptKeyboard ? st::PromptPs : style),
+                                                                  valR - 43.f, cy, 86.f, on ? 1.f : 0.6f);
         if (v.moves && pr.value == "*")
         {   // favorito da MOVE LIST: estrela de cinco pontas alinhada a direita (a fonte do jogo nao tem o simbolo)
             const float cx = L.rowRight - 40.f, R = rowH * 0.55f, r = R * 0.42f;
@@ -1613,13 +1802,12 @@ static void renderPanel(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0,
             }
         }
         else if (!pr.value.empty() && !valIcon)
-            label(q, ram, tex0, pr.value.c_str(), valX, cy, vh, on && !pr.locked ? kLit : kDim, kPW, kPH);
+            label(q, ram, tex0, pr.value.c_str(), valL + valW * 0.5f, cy, vh, on && !pr.locked ? kLit : kDim, kPW, kPH);
         if (on && pr.arrows)
         {
             const Color a = gsToRgb(kLit);
-            const float s = 20.f;
-            DrawTriangle(Vector2{valX - dx - s, cy}, Vector2{valX - dx + s * 0.7f, cy + s}, Vector2{valX - dx + s * 0.7f, cy - s}, a);
-            DrawTriangle(Vector2{valX + dx + s, cy}, Vector2{valX + dx - s * 0.7f, cy - s}, Vector2{valX + dx - s * 0.7f, cy + s}, a);
+            DrawTriangle(Vector2{tipL, cy}, Vector2{tipL + aw, cy + s}, Vector2{tipL + aw, cy - s}, a);
+            DrawTriangle(Vector2{tipR, cy}, Vector2{tipR - aw, cy - s}, Vector2{tipR - aw, cy + s}, a);
         }
     }
     // rolagem: setinhas na borda direita quando ha linhas acima ou abaixo
@@ -1665,6 +1853,13 @@ static void renderPanel(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0,
     {
         if (kind == KReset) wotm_legend::post({{ok, {}, "CLEAR"}, {back, {}, "BACK"}}, la, bar);
         else wotm_legend::post({{left, right, "CHANGE"}, {back, {}, "BACK"}}, la, bar);
+    }
+    else if (kind == KCheat && v.opt == v.arm)
+        wotm_legend::post({{ok, {}, "CONFIRM"}, {back, {}, "CANCEL"}}, la, bar);
+    else if (kind == KCheat && !rows[v.opt].locked)
+    {
+        static const char *const kDo[kCheatRows] = {"", "", "", "", "", "WIN", "", "KNOCK OUT", "UNLOCK", "LOCK"};
+        wotm_legend::post({{tabs1, tabs2, "TABS"}, {ok, {}, kDo[std::clamp(v.opt, 0, kCheatRows - 1)]}, {back, {}, "BACK"}}, la, bar);
     }
     else if (kind == KCapture)
     {
@@ -1880,8 +2075,8 @@ static void panelHit(float u, float w, const View &v, Hover &hv)
     const float W = float(kPW), H = float(kPH), lineH = H / 8.9f, X = u * W, Y = w * H;
     if (!v.training && !v.moves && std::fabs(Y - lineH * 0.7f) < lineH * 0.5f)
     {
-        if (X < W * 0.14f) hv.part = HPrevTab;
-        else if (X > W * 0.86f) hv.part = HNextTab;
+        if (X < W * 0.18f) hv.part = HPrevTab;   // L1 e a setinha das abas escondidas
+        else if (X > W * 0.82f) hv.part = HNextTab;
         else
             for (int t = 0; t < kTabs; ++t)
                 if (std::fabs(X - W * g_tabCx[t]) < W * g_tabHw[t]) { hv.part = HTab; hv.tab = t; }
@@ -1894,8 +2089,9 @@ static void panelHit(float u, float w, const View &v, Hover &hv)
     if (i < 0 || i >= L.vis || first + i >= n || X < W * 0.03f || X > L.rowRight)
         return;
     hv.prow = first + i;
-    const float valX = L.valX, dx = L.dx;
-    hv.part = X > valX - dx - 70.f && X < valX - dx * 0.45f ? HRowLeft : X > valX + dx * 0.45f && X < valX + dx + 70.f ? HRowRight : HRow;
+    // setas onde o renderPanel as pos (a da esquerda acompanha a largura do valor)
+    const float xl = W * g_rowArrowL[std::min(hv.prow, kMaxCtlRows - 1)], xr = W * g_rowArrowR;
+    hv.part = std::fabs(X - xl) < 45.f ? HRowLeft : std::fabs(X - xr) < 45.f ? HRowRight : HRow;
 }
 
 // A lista no plano dos itens do jogo: do topo do primeiro ao pe do ultimo, centrada na coluna deles. Dentro do BeginMode3D do quadro.

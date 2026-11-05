@@ -671,8 +671,8 @@ namespace wotm_save
     }
 
     // RAM -> JSON. Sem `options`, so tokens e destraves (as opcoes do arquivo ficam: o menu de opcoes pode estar com valores ainda
-    // nao aceitos).
-    void ramToJson(const uint8_t *rdram, bool options, const char *why)
+    // nao aceitos). sweetTooth 0 ou 1 reescreve unlocks.mechaSweetTooth (que vale mais que o agamo.skins[3]); -1 deixa como esta.
+    void ramToJson(const uint8_t *rdram, bool options, const char *why, int sweetTooth = -1)
     {
         std::vector<uint8_t> b;
         if (!ramToBlock(rdram, b))
@@ -696,6 +696,8 @@ namespace wotm_save
         settingsToJson(b, j);
         if (keepOpt)
             j.at("options") = kept;
+        if (sweetTooth >= 0)
+            j.at("unlocks").at("mechaSweetTooth") = Value::boolean(sweetTooth != 0);
         saveJson(j, why);
         g_snap = snapOf(rdram);
         g_wotmSaveCount.fetch_add(1, std::memory_order_relaxed);
@@ -1454,4 +1456,28 @@ namespace wotm_save
         std::fprintf(stderr, "[wotm] save em JSON: %s (WOTM_SAVEJSON=0 desliga); opcoes, destraves e tokens gravados sozinhos, sem as "
                      "telas do cartao\n", g_json.string().c_str());
     }
+
+    // Aba CHEATS do painel: abre as entradas 0..46 (a 47 nenhum codigo le) ou volta ao destrave de um save novo, o state do ELF
+    // (trajes 1 e 2 de Togera, Preytor, Congar, Robo-47, Agamo, Ultra-V, Magmo e Kineticlops). Os tokens ficam. Sem o JSON, so a RAM
+    // (o jogo grava no cartao quando grava as opcoes). Devolve quantas entradas mudaram.
+    constexpr uint64_t kNewSaveOpen = 0x333333330ull;   // bit i = entrada i aberta num save novo
+    int setAllUnlocks(uint8_t *rdram, bool open)
+    {
+        int changed = 0;
+        for (uint32_t i = 0; i < 47; ++i)
+        {
+            const uint32_t a = wotm::sym::monsterSelectMode + i * kSelStride + kSelState;
+            const uint32_t v = (open || ((kNewSaveOpen >> i) & 1u)) ? 1u : 0u;
+            if (ramU32(rdram, a) != v)
+            {
+                w32(rdram, a, v);
+                ++changed;
+            }
+        }
+        if (g_on)
+            ramToJson(rdram, false, open ? "destravar tudo" : "travar tudo", open ? 1 : 0);
+        return changed;
+    }
 }
+
+int wotmSetAllUnlocks(uint8_t *rdram, bool open) { return wotm_save::setAllUnlocks(rdram, open); }

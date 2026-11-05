@@ -86,6 +86,7 @@ void wotmBoot(const char *fmt, ...);   // wotm_live.inc: etapa do boot no log e 
 std::atomic<uint32_t> g_wotmCheats{0};
 std::atomic<bool> g_wotmCheatWin{false};
 std::atomic<uint32_t> g_wotmCheatKill{0};
+std::atomic<int> g_wotmCheatKillWho{1};
 
 // Camera livre de debug (F5): a janela (wotm_freecam.inc) move a pose, a thread do EE a poe no _cs da vista 0 (freeCamWrite).
 #include "wotm_freecam.h"
