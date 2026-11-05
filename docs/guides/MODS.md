@@ -157,6 +157,15 @@ way. The import writes `.NGP`, `.PTR`, `.TEX`, `.RTX` and the new PNGs to `files
 the `.NGP` goes back to the base type's skeleton. A part that scales, appears or disappears in some action (a growing claw, a
 weapon shown only in one move) has to be a rigid mesh parented to a bone: scaling a bone does not reach the weighted meshes.
 
+**A rigged model from elsewhere.** A model that already has a skeleton (a Collada `.dae` with a skinned mesh) can take the base
+type's animations instead of new ones: export the base costume (**Export to Blender**, e.g. `LIZARD0.glb`), write a bone map
+(which model joint follows which base bone; `tools/rigmaps/biped_togera.json` covers the 3ds Max Biped, `Bip01_*`, on Togera)
+and run `python tools/retarget.py LIZARD0.glb model.dae map.json rig.glb`; then **Import rig...** with `rig.glb`. The map can
+start from another one (`{"extends": "biped_togera.json", ...}`) and change only the tail or add a `mouth` locator where the
+fire comes out. The base's layers (looking around, flinches) keep only rotations, as the game adds them on top of the main
+animation (`MODELS_3D.md`, "New skeleton"). The game lights monsters brightly: a texture made for another game may need
+darkening to keep its look.
+
 ## The kit on the command line (`tools/modkit.py`)
 
 ```
