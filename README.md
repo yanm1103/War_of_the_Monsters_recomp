@@ -51,7 +51,7 @@ tools/build_runtime.sh
 tools/run_live.sh
 ```
 
-Generated game code and build outputs stay local in ignored directories. The launcher stores saves and settings under `$XDG_DATA_HOME/WotM` (default `~/.local/share/WotM`). The runtime has booted into both a direct match and the first Adventure fight; full campaign progression, controller support, audible output, and save/reload remain unverified. See [Linux port progress](docs/LINUX_PORT_PROGRESS.md) for current coverage.
+Generated game code and build outputs stay local in ignored directories. The launcher stores saves and settings under `$XDG_DATA_HOME/WotM` (default `~/.local/share/WotM`). On X11, borderless mode requests fullscreen on the selected monitor through EWMH without changing the active display mode. Linux checks cover direct and Adventure fights, boot FMVs with audible output, mapped gamepad input, and campaign save/load across a restart. Full campaign progression, physical controller behavior, Windows regression, and non-X11 window managers remain unverified. See [Linux port progress](docs/LINUX_PORT_PROGRESS.md) for current coverage. To bring Windows updates into the Linux branch, follow [Linux port maintenance](docs/LINUX_MAINTENANCE.md).
 
 ## Building the decompilation (WSL/Ubuntu)
 ```sh

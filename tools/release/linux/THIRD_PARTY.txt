@@ -1,0 +1,27 @@
+Third-party notices for the Linux preview
+
+War of the Monsters Recompiled
+  Project code is licensed under GPL-3.0; see LICENSE.
+  The game remains property of its respective rights holders. This package does not include an ISO, retail ELF, or disc files.
+
+PS2Recomp runtime
+  GPL-3.0; see PS2Recomp-LICENSE.md.
+
+raylib and GLFW
+  raylib is licensed under zlib/libpng terms; see raylib-LICENSE.txt.
+  GLFW is licensed under zlib/libpng terms; see GLFW-LICENSE.md.
+
+FFmpeg 7.1
+  The bundled libavcodec, libavutil, and libswscale shared libraries are built from the official FFmpeg 7.1 source with GPL, version-3, and nonfree components disabled. They are licensed under LGPL 2.1 or later; see FFmpeg-LICENSE.md and LGPL-2.1.txt. The exact source archive, signature, and build flags accompany the AppImage.
+
+GCC C++ runtime
+  GCC's libstdc++ and libgcc runtime code is statically linked into wotm with the GCC Runtime Library Exception; see GCC-Runtime-copyright.txt and LICENSE.
+
+Oswald font
+  Oswald-Medium.ttf is licensed under the SIL Open Font License; see Oswald_OFL.txt.
+
+Native prompt atlas
+  See prompts_LICENSE.txt.
+
+AppImage runtime
+  The generated AppImage includes the AppImage runtime. See AppImageKit-LICENSE.txt.

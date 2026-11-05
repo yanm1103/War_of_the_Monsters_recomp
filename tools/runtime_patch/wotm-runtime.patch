@@ -197,7 +197,7 @@ index 0000000..0947e18
 +    }
 +}
 diff --git a/ps2xRuntime/CMakeLists.txt b/ps2xRuntime/CMakeLists.txt
-index 589d768..650398d 100644
+index 589d768..f5d7b1c 100644
 --- a/ps2xRuntime/CMakeLists.txt
 +++ b/ps2xRuntime/CMakeLists.txt
 @@ -393,6 +393,7 @@ add_library(ps2_runtime STATIC
@@ -286,7 +286,7 @@ index 589d768..650398d 100644
  endif()
  
  if(PS2X_DEFAULT_BOOT_ELF_DEFINE)
-@@ -499,6 +526,7 @@ endif()
+@@ -499,13 +526,26 @@ endif()
  
  if(MSVC)
      target_compile_options(ps2EntryRunner PRIVATE /FS)
@@ -294,7 +294,7 @@ index 589d768..650398d 100644
  endif()
  
  target_include_directories(ps2_runtime PUBLIC
-@@ -506,6 +534,13 @@ target_include_directories(ps2_runtime PUBLIC
+     ${CMAKE_CURRENT_SOURCE_DIR}/include
      ${CMAKE_CURRENT_SOURCE_DIR}/src/lib/Kernel
 +    ${CMAKE_CURRENT_SOURCE_DIR}/src/lib
  )
@@ -305,10 +305,15 @@ index 589d768..650398d 100644
 +    target_include_directories(${PS2X_GAME_CODE_TARGET} BEFORE PRIVATE "${PS2X_RUNNER_DIR}")
 +endif()
 +
++if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND GLFW_BUILD_X11)
++    find_package(X11 REQUIRED)
++    target_compile_definitions(ps2_runtime PRIVATE WOTM_X11_FULLSCREEN)
++    target_link_libraries(ps2_runtime PUBLIC X11::X11)
++endif()
  target_link_libraries(ps2_runtime PUBLIC ps2_host_backend ffmpeg ps2_iop)
  target_link_libraries(ps2EntryRunner
      PRIVATE
-@@ -557,6 +591,9 @@ endif()
+@@ -557,6 +597,9 @@ endif()
  if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
      EnableFastReleaseMode(ps2_runtime)
      EnableFastReleaseMode(ps2EntryRunner)
@@ -318,7 +323,7 @@ index 589d768..650398d 100644
  
      if(WIN32 AND NOT PS2X_SHOW_WINDOWS_CONSOLE)
          if(MSVC)
-@@ -608,3 +645,92 @@ endif()
+@@ -608,3 +651,92 @@ endif()
  install(DIRECTORY include/
      DESTINATION include
  )
@@ -412,7 +417,7 @@ index 589d768..650398d 100644
 +    ps2x_stage_ffmpeg_runtime_dlls(wotm)
 +endif()
 diff --git a/ps2xRuntime/cmake/ReleaseMode.cmake b/ps2xRuntime/cmake/ReleaseMode.cmake
-index 92ef0d5..8d7346f 100644
+index 92ef0d5..6d014de 100644
 --- a/ps2xRuntime/cmake/ReleaseMode.cmake
 +++ b/ps2xRuntime/cmake/ReleaseMode.cmake
 @@ -4,6 +4,26 @@ check_ipo_supported(RESULT IPO_SUPPORTED OUTPUT IPO_ERROR)

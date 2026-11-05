@@ -1,0 +1,21 @@
+FFmpeg 7.1.0 (official release archive, tag n7.1)
+Source URL: https://ffmpeg.org/releases/ffmpeg-7.1.tar.xz
+SHA-256: 40973d44970dbc83ef302b0609f2e74982be2d85916dd2ee7472d30678a7abe6
+Release-signing key fingerprint: FCF986EA15E6E293A5644F10B4322F04D67658D8
+
+The archive signature was verified with FFmpeg's published release-signing key. Build configuration:
+
+--prefix=/usr --libdir=/usr/lib --disable-static --enable-shared
+--disable-gpl --disable-version3 --disable-nonfree --disable-autodetect
+--disable-programs --disable-doc --disable-debug --disable-everything
+--enable-avcodec --enable-avformat --enable-avutil --enable-swresample
+--enable-swscale --enable-decoder=mpeg2video --enable-parser=mpegvideo
+--enable-protocol=file --enable-runtime-cpudetect
+
+The AppImage ships only libavcodec.so.61, libavutil.so.59, and libswscale.so.8.
+The other FFmpeg libraries are build-time dependencies and are not included unless
+an executable dependency requires them. Configure reports LGPL version 2.1 or later.
+
+For offline packaging, set WOTM_FFMPEG_SOURCE_DIR to a directory containing
+ffmpeg-7.1.tar.xz, its detached .asc signature, and ffmpeg-devel.asc. The build
+still checks the pinned SHA-256 and signing-key fingerprint before use.

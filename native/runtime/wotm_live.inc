@@ -566,6 +566,11 @@ static void captureFriendlyBorderless()
 }
 #endif
 
+// X11 WMs can ignore GLFW's floating-only borderless state; request EWMH fullscreen without changing the display mode.
+#ifdef WOTM_X11_FULLSCREEN
+extern "C" bool wotmX11FullscreenRequest(void *handle, bool fullscreen);
+#endif
+
 // Tela cheia no monitor da janela (proporcao do monitor; com WOTM_ASPECT fixo o quadro fica com faixas) ou de volta a janela.
 static void setFullscreen(bool on)
 {
@@ -583,6 +588,10 @@ static void setFullscreen(bool on)
     {
         ToggleBorderlessWindowed();
         ClearWindowState(FLAG_WINDOW_TOPMOST);   // raylib 5.5 places borderless windows on top
+#ifdef WOTM_X11_FULLSCREEN
+        if (!wotmX11FullscreenRequest(GetWindowHandle(), true))
+            std::fprintf(stderr, "[native] X11: nao foi possivel enviar o pedido de tela cheia EWMH\n");
+#endif
 #ifdef _WIN32
         captureFriendlyBorderless();
 #endif
@@ -591,7 +600,13 @@ static void setFullscreen(bool on)
     if (IsWindowFullscreen())
         ToggleFullscreen();   // volta com o tamanho do monitor
     else
+    {
         ToggleBorderlessWindowed();
+#ifdef WOTM_X11_FULLSCREEN
+        if (!wotmX11FullscreenRequest(GetWindowHandle(), false))
+            std::fprintf(stderr, "[native] X11: nao foi possivel enviar o pedido de saida da tela cheia EWMH\n");
+#endif
+    }
     fitWindow();   // o raylib volta ao tamanho de antes, que e o 960x720 do runtime (ou o do monitor) quando a sessao abriu em tela cheia
 }
 

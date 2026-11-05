@@ -28,6 +28,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -36,6 +37,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <raylib.h>
 #define _stricmp strcasecmp
 #define _fseeki64 fseeko
 constexpr unsigned MB_OK = 0, MB_OKCANCEL = 1, MB_ICONERROR = 0x10, MB_ICONINFORMATION = 0x40;
@@ -44,6 +46,62 @@ constexpr int IDOK = 1, IDCANCEL = 2;
 #include "wotm_version.hpp"
 
 void wotmBoot(const char *fmt, ...);   // wotm_live.inc: etapa do boot no log e na tela preta
+
+#ifdef WOTM_X11_FULLSCREEN
+#define GLFW_EXPOSE_NATIVE_X11
+#define Font X11Font  // Xlib's typedef collides with raylib's Font in this translation unit.
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
+#include <X11/Xatom.h>
+#undef Font
+
+extern "C" bool wotmX11FullscreenRequest(void *handle, bool fullscreen)
+{
+    if (!handle)
+        return false;
+    Display *display = glfwGetX11Display();
+    const Window window = glfwGetX11Window(static_cast<GLFWwindow *>(handle));
+    if (!display || window == None)
+        return false;
+
+    const Window root = DefaultRootWindow(display);
+    const Atom supportedAtom = XInternAtom(display, "_NET_SUPPORTED", True);
+    const Atom fullscreenAtom = XInternAtom(display, "_NET_WM_STATE_FULLSCREEN", True);
+    if (supportedAtom == None || fullscreenAtom == None)
+        return false;
+    Atom actualType = None;
+    int actualFormat = 0;
+    unsigned long count = 0, remaining = 0;
+    unsigned char *supported = nullptr;
+    if (XGetWindowProperty(display, root, supportedAtom, 0, 1024, False, XA_ATOM, &actualType, &actualFormat,
+                           &count, &remaining, &supported) != Success || actualType != XA_ATOM || actualFormat != 32)
+    {
+        if (supported)
+            XFree(supported);
+        return false;
+    }
+    bool hasFullscreen = false;
+    const auto *atoms = reinterpret_cast<const Atom *>(supported);
+    for (unsigned long i = 0; i < count; ++i)
+        hasFullscreen |= atoms[i] == fullscreenAtom;
+    XFree(supported);
+    if (!hasFullscreen)
+        return false;
+
+    XEvent event{};
+    event.xclient.type = ClientMessage;
+    event.xclient.display = display;
+    event.xclient.window = window;
+    event.xclient.message_type = XInternAtom(display, "_NET_WM_STATE", False);
+    event.xclient.format = 32;
+    event.xclient.data.l[0] = fullscreen ? 1 : 0;  // EWMH ADD or REMOVE
+    event.xclient.data.l[1] = fullscreenAtom;
+    event.xclient.data.l[3] = 1;                   // source: application
+    const bool sent = XSendEvent(display, root, False, SubstructureRedirectMask | SubstructureNotifyMask, &event) != 0;
+    XFlush(display);
+    return sent;
+}
+#endif
 
 namespace {
 
@@ -136,6 +194,140 @@ std::string narrow(const fs::path &p)
 #endif
 }
 
+#ifndef _WIN32
+int fallbackMessage(const std::string &text, bool question)
+{
+    if (!std::getenv("DISPLAY") && !std::getenv("WAYLAND_DISPLAY"))
+        return IDOK;
+    InitWindow(900, 300, "War of the Monsters");
+    if (!IsWindowReady())
+        return IDCANCEL;
+    SetTargetFPS(60);
+    int result = IDCANCEL;
+    const Rectangle okay{590, 240, 140, 40}, cancel{750, 240, 110, 40};
+    while (!WindowShouldClose())
+    {
+        if (IsKeyPressed(KEY_ENTER) || IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+            CheckCollisionPointRec(GetMousePosition(), okay))
+        {
+            result = IDOK;
+            break;
+        }
+        if (IsKeyPressed(KEY_ESCAPE) || (question && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
+            CheckCollisionPointRec(GetMousePosition(), cancel)))
+            break;
+        BeginDrawing();
+        ClearBackground(RAYWHITE);
+        std::istringstream words(text);
+        std::vector<std::string> lines;
+        std::string word, line;
+        while (words >> word)
+        {
+            const std::string candidate = line.empty() ? word : line + " " + word;
+            if (!line.empty() && MeasureText(candidate.c_str(), 20) > 836)
+            {
+                lines.push_back(line);
+                line = word;
+            }
+            else
+                line = candidate;
+        }
+        if (!line.empty())
+            lines.push_back(line);
+        int y = 44;
+        for (const std::string &part : lines)
+        {
+            if (y + 20 >= int(okay.y) - 8)
+                break;
+            DrawText(part.c_str(), 32, y, 20, DARKGRAY);
+            y += 28;
+        }
+        DrawRectangleRec(okay, LIGHTGRAY);
+        DrawText(question ? "Continue" : "OK", int(okay.x + 28), int(okay.y + 10), 20, DARKGRAY);
+        if (question)
+        {
+            DrawRectangleRec(cancel, LIGHTGRAY);
+            DrawText("Cancel", int(cancel.x + 20), int(cancel.y + 10), 20, DARKGRAY);
+        }
+        EndDrawing();
+    }
+    CloseWindow();
+    return result;
+}
+
+fs::path fallbackIsoPicker()
+{
+    InitWindow(900, 300, "Select your War of the Monsters ISO");
+    if (!IsWindowReady())
+        return {};
+    SetTargetFPS(60);
+    std::string selected;
+    bool accepted = false;
+    const Rectangle input{32, 130, 828, 48}, okay{590, 220, 140, 40}, cancel{750, 220, 110, 40};
+    while (!WindowShouldClose())
+    {
+        if (IsFileDropped())
+        {
+            const FilePathList dropped = LoadDroppedFiles();
+            if (dropped.count > 0 && dropped.paths[0])
+                selected = dropped.paths[0];
+            UnloadDroppedFiles(dropped);
+        }
+        if ((IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL)) && IsKeyPressed(KEY_V))
+        {
+            if (const char *clipboard = GetClipboardText())
+            {
+                selected = clipboard;
+                while (!selected.empty() && (selected.back() == '\n' || selected.back() == '\r'))
+                    selected.pop_back();
+                if (selected.size() >= 2 && selected.front() == '\"' && selected.back() == '\"')
+                    selected = selected.substr(1, selected.size() - 2);
+            }
+        }
+        for (int ch = GetCharPressed(); ch > 0; ch = GetCharPressed())
+            if (ch >= 32 && ch <= 126 && selected.size() < 4096)
+                selected.push_back(char(ch));
+        if (IsKeyPressed(KEY_BACKSPACE) && !selected.empty())
+        {
+            size_t start = selected.size() - 1;
+            while (start > 0 && (static_cast<unsigned char>(selected[start]) & 0xC0) == 0x80)
+                --start;
+            selected.erase(start);
+        }
+        const bool click = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+        if ((IsKeyPressed(KEY_ENTER) || (click && CheckCollisionPointRec(GetMousePosition(), okay))) && !selected.empty())
+        {
+            accepted = true;
+            break;
+        }
+        if (IsKeyPressed(KEY_ESCAPE) || (click && CheckCollisionPointRec(GetMousePosition(), cancel)))
+            break;
+        BeginDrawing();
+        ClearBackground(RAYWHITE);
+        DrawText("Choose your own NTSC-U War of the Monsters disc image (.iso).", 32, 32, 22, DARKGRAY);
+        DrawText("Drag the ISO here, paste its absolute path with Ctrl+V, or type the path.", 32, 80, 18, GRAY);
+        DrawRectangleRec(input, RAYWHITE);
+        DrawRectangleLinesEx(input, 2, DARKGRAY);
+        std::string shown = selected;
+        if (shown.size() > 100)
+        {
+            size_t start = shown.size() - 97;
+            while (start < shown.size() && (static_cast<unsigned char>(shown[start]) & 0xC0) == 0x80)
+                ++start;
+            shown = "..." + shown.substr(start);
+        }
+        DrawText(shown.c_str(), int(input.x + 10), int(input.y + 13), 20, DARKGRAY);
+        DrawRectangleRec(okay, LIGHTGRAY);
+        DrawText("Select", int(okay.x + 35), int(okay.y + 10), 20, DARKGRAY);
+        DrawRectangleRec(cancel, LIGHTGRAY);
+        DrawText("Cancel", int(cancel.x + 20), int(cancel.y + 10), 20, DARKGRAY);
+        EndDrawing();
+    }
+    CloseWindow();
+    return accepted ? fs::path(selected) : fs::path();
+}
+#endif
+
 int box(const std::wstring &msg, unsigned flags)
 {
     std::fprintf(stderr, "[wotm] %ls\n", msg.c_str());
@@ -168,8 +360,16 @@ int box(const std::wstring &msg, unsigned flags)
         const int kde = dialog("kdialog", kdialog);
         if (kde != 127) return kde == 0 ? IDOK : IDCANCEL;
     }
-    (void)flags;
-    return IDOK;
+    if (isatty(fileno(stdin)))
+    {
+        if (FILE *terminal = std::fopen("/dev/tty", "w"))
+        {
+            std::fprintf(terminal, "%s\n", text.c_str());
+            std::fclose(terminal);
+        }
+        return IDOK;
+    }
+    return fallbackMessage(text, (flags & MB_OKCANCEL) != 0);
 #endif
 }
 
@@ -412,7 +612,9 @@ fs::path pickIso(const fs::path &startDir)
         std::string selected;
         if (std::getline(std::cin, selected) && !selected.empty()) return fs::path(selected);
     }
-    std::fprintf(stderr, "No ISO picker is available. Run tools/run_live.sh or set PS2X_CD_IMAGE.\n");
+    if (std::getenv("DISPLAY") || std::getenv("WAYLAND_DISPLAY"))
+        return fallbackIsoPicker();
+    std::fprintf(stderr, "No ISO picker or graphical display is available. Run tools/run_live.sh or set PS2X_CD_IMAGE.\n");
 #endif
     return {};
 }
