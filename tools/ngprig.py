@@ -273,6 +273,7 @@ class Rig:
         def joint_above(i):
             return next((a for a in ancestors(i) if a in jset), None)
         game_units = any(nodes[a].get("name") == "WotM" for k in jset for a in ancestors(k))
+        self.game_units = game_units
         self.front = front or ("+y" if game_units else "-y")
         cache = {}
         W0 = [ed.world(i, None, 0.0, cache) for i in range(len(nodes))]
@@ -469,12 +470,15 @@ class Rig:
 
         # ---- locators
         locs = {}
-        for i, nd in enumerate(nodes):
+        # empties first: a bone named like an alias ("head", "chest") is a locator only when no empty takes that id
+        for i in sorted(range(len(nodes)), key=lambda i: i in jset):
+            nd = nodes[i]
             lid = _locator_id(nd.get("name"))
             if lid is None or "mesh" in nd:
                 continue
             if lid in locs:
-                log("warning: locator %#x named twice (%s); the first kept" % (lid, nd.get("name")))
+                if not (i in jset and locs[lid] not in jset):
+                    log("warning: locator %#x named twice (%s); the first kept" % (lid, nd.get("name")))
                 continue
             locs[lid] = i
 
@@ -868,12 +872,15 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
     # ---- animations: (id, frames, {channel: values}, loop, header, ctx)
     anims = []
     worst_all = []
+    steps = []   # median spacing of each action's keys
     ids = sorted(set(rig.clips) | (set(base.anims) if fill else set()))
     for aid in ids:
         ba = base.anims.get(aid)
         if aid in rig.clips:
             nm, clip, loop = rig.clips[aid]
             ts = rig.ed.key_times(clip, range(len(rig.ed.nodes)))
+            if len(ts) > 2:
+                steps.append(sorted(b - a for a, b in zip(ts, ts[1:]))[(len(ts) - 1) // 2])
             frames = int(round(ts[-1] * FPS)) + 1 if ts else 1
             if frames < 2:
                 frames = ba["frames"] if ba else 2
@@ -940,6 +947,9 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
             log("%s: animation %d, %d frames%s" % (nm, aid, frames, ", looping" if loop else ""))
     if worst_all:
         log("warning: channels off the .glb (rotation / units): %s" % "; ".join(worst_all))
+    if rig.game_units and steps and sorted(steps)[len(steps) // 2] > 1.5 / FPS:
+        log("warning: the actions have a key every %.3f s; a .glb from the kit keeps one per game frame (1/60 s) only when "
+            "Blender's scene is at 60 fps before the import (fast moves lose detail)" % sorted(steps)[len(steps) // 2])
     skin_scaled = sorted(rig.scaled & {J[j].name for js, _t in blocks for j in js})
     if skin_scaled:
         log("warning: actions scale joints the skin follows; the game's skeleton has no scale, so the skin keeps its "

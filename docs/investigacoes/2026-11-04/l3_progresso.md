@@ -66,15 +66,26 @@ Erros encontrados e corrigidos no caminho:
   quebrava aqui (o texId das peças vivas não era montado); corrigido. Monview: pose igual à do ROBOT0 (a textura é a do
   Togera, porque o monview não lê os PNGs). No jogo (`WOTM_MATCH=robrig,3,1`, 110 s): `LIZARD6.TEX t13/t14 <- png`, sem
   queda, 99,83% casados em média (mínimo 98,9%), nenhuma divergência dentro do arquivo novo.
+- Rig do Blender do zero (`build/l3/biped.py`, Blender 5.1 em fundo: `blender -b --factory-startup --python biped.py --
+  saida.glb`): bípede de caixas, 16 ossos, Z para cima, virado para -Y, ~2 m, pesos 1 por osso (meio a meio nas juntas),
+  9 empties `hand_l`... presos a ossos, ações `a090` e `a120` (cena a 30 fps). O ngprig gera em menos de 1 s: escala 58,3
+  para a altura da base, 9 localizadores do .glb e 7 postos onde a base tem, 151 animações (149 em repouso). Os ossos
+  `head` e `chest` têm nome de apelido de localizador: agora os empties têm preferência sobre ossos de mesmo nome. Monview e
+  `ngpanim` conferem a pose (simétrica; a pose de zumbi do idle é do script de teste). No jogo (`biped`, 110 s): PNG da cor
+  aplicado, sem queda, 99,93% casados.
+- Volta pelo Blender de um export do kit (`build/l3/roundtrip.py`: importa o `LIZARD0_edit.glb` e exporta de novo): os
+  eixos dos ossos mudam, mas o ngprig não depende deles. Com a cena a 60 fps antes da importação, os 16 localizadores ficam
+  a no máximo 0,064 unidade dos do Togera nas anims 0, 22, 30, 60, 90, 120 e 150 (igual ao arquivo direto). Com a cena
+  no padrão de 24 fps, perdem até 14 unidades nos golpes rápidos (reamostragem); o MODS.md já manda pôr 60 fps, e o ngprig
+  agora avisa quando um .glb do kit chega com chaves mais espaçadas que 1/60 s (o export direto não dispara o aviso).
+- Os scripts de conferência ficam em `build/l3/` (fora do repo): `loccmp.py` (localizadores no mundo, duas NGP) e
+  `clawcmp.py` (vértices das peças rígidas no mundo).
 
 ## Pendente (próximos passos, na ordem)
 
-1. **Rig do Blender do zero**: script do Blender 5.1 (`C:/Program Files/Blender Foundation/Blender 5.1`) que monte um bípede
-   simples virado para -Y em metros, com `loc_*`, ações a090/a120; mais a volta Blender de um export do kit (eixos dos ossos
-   mudam na importação: conferir que o ngprig não depende deles).
-2. Kit: `modkit.py monster rig <mod> <id> <rig.glb>` e botão "Import rig..." na GUI; `pose.py`/`wotm_model.hpp` com mais de
+1. Kit: `modkit.py monster rig <mod> <id> <rig.glb>` e botão "Import rig..." na GUI; `pose.py`/`wotm_model.hpp` com mais de
    64 saídas, se precisar.
-3. Docs (MODS.md, MODELS_3D.md seção "New skeleton", TOOLS.md, FORMATS.md se faltar campo) e tirar o L3 do `TODO.md`.
+2. Docs (MODS.md, MODELS_3D.md seção "New skeleton", TOOLS.md, FORMATS.md se faltar campo) e tirar o L3 do `TODO.md`.
 
 ## Relato do sub-agente (o que do jogo depende do esqueleto)
 
