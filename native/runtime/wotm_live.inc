@@ -388,6 +388,8 @@ inline long __stdcall crashFilter(ExcPointers *e)
 // Ligado no primeiro wotmBoot (antes da janela, do ELF e dos ganchos) e de novo no primeiro quadro nativo, caso uma biblioteca o
 // tenha trocado no meio
 static void installCrashFilter() { SetUnhandledExceptionFilter(crashFilter); }
+#else
+static void installCrashFilter() {}
 #endif
 struct State
 {
