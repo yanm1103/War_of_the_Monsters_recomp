@@ -82,8 +82,10 @@ The base `.NGP` keeps everything outside its main `CHAR_INSTANCE` (type code, sh
 - **Channels:** 6 per joint, 9 per live rigid part (rotation, translation, scale), then 6 contact channels (ids 0x802..0x805,
   0x816, 0x817) from the height of those locators and the 7 AnimPappy channels (ids 1..7) copied from the base animation with
   the same id, stretched to the new length. The sounds come from that animation's header.
-- **Layers:** a base animation with no curve on a translation channel (Togera: 18 of them, 5, 36-38, 150-156, 166, 251-256:
-  looking around, flinches, leans) is a layer the game adds on top of the main animation, channel by channel. Its new
+- **Layers:** a base animation with no curve on a translation channel, or whose translation curves are all 0 on channels
+  the idle (90) keeps away from 0 (Togera: no curve, 18 of them, 5, 36-38, 150-156, 166, 251-256: looking around, flinches,
+  leans; Ultra-V: zero curves, 18 of them, the same with 140 in place of 166), is a layer the game adds on top of the main
+  animation, channel by channel. Its new
   animation holds only the rotation channels that leave the rest (rest angles are 0, so the values are deltas), and one
   static 0 when none does. Writing the full pose there adds the rest again for every active layer (with three active layers
   each translation comes out 4×: the body stretches).

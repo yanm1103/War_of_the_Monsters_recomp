@@ -17,8 +17,8 @@ CHAR_INSTANCE is replaced by a new one built from the .glb:
   second and solved into the channels; the hand and foot contact channels (footsteps, dust) come from the height of the
   contact locators, the sounds and the AnimPappy channels (ids 1..7, throws) from the base's animation with that id. Every
   id the base has and the .glb lacks gets the rest pose for the base's length (`--no-fill`: left out; the game then has no
-  animation for that move); a base animation with no translation curve is a layer the game adds on top of the main one,
-  so its new one holds only the rotations that leave the rest;
+  animation for that move); a base animation with no translation curve, or only zero ones on channels the idle keeps away
+  from 0, is a layer the game adds on top of the main one, so its new one holds only the rotations that leave the rest;
 - locators: empties (or joints) named `loc_<hex id>` or by alias (`hand_l` 0x802, `hand_r` 0x803, `foot_l` 0x804,
   `foot_r` 0x805, `grabbed` 0x806, `grab` 0x807, `impale` 0x808, `chest` 0x809, `hold` 0x80A, `mouth` 0x80B, `head` 0x80C,
   `look` 0x80E, `extra1` 0x816, `extra2` 0x817), under the joint they follow; the orientation is the empty's when it was
@@ -185,20 +185,40 @@ class BaseInfo:
         # animations of the main instance, first slot of each id
         ch = img.u32(self.ci + 0x20)
         actx = img.u32(self.ci + 0x10)
-        # a layer (looking around, flinches, leans) animates no translation: the game adds it on top of the main animation
+        # a layer (looking around, flinches, leans) is added by the game on top of the main animation: it animates no
+        # translation (Togera) or only zeros on translation channels that the idle keeps away from 0 (Ultra-V: deltas)
         tch = set()
         for n, nd in g.nodes.items():
             if nd.op == 17 and nd.ci == self.ci:
                 tch.update(i for i in g.xform(n)["tidx"] if i >= 0)
+        all_anims = list(g.anims())
+        idle_t = {}
+        idle_an = next((an for aid, _k, _st, _et, _n, an in all_anims if aid == 90), None)
+        if idle_an is not None:
+            for _a, c in g.curves(idle_an):
+                if c.idx in tch:
+                    idle_t[c.idx] = c.eval(img.f32(idle_an + 4))
+
+        def is_layer(an):
+            if not tch:
+                return False
+            tc = [c for _a, c in g.curves(an) if c.idx in tch]
+            if not tc:
+                return True
+            st, et = img.f32(an + 4), img.f32(an + 8)
+            steps = max(1, min(64, int(et - st)))
+            if any(abs(c.eval(st + (et - st) * i / steps)) > 1e-3 for c in tc for i in range(steps + 1)):
+                return False
+            return any(abs(idle_t.get(c.idx, 0.0)) > 1e-2 for c in tc)
         self.anims = {}
-        for aid, k, st, et, _n, an in g.anims():
+        for aid, k, st, et, _n, an in all_anims:
             if aid in self.anims:
                 continue
             self.anims[aid] = {"k": k, "st": st, "frames": int(math.floor(et - st + 1e-6)) + 1, "an": an,
                                "head": bytes(img.d[an - BASE:an - BASE + 0x18]),
                                "ctx": bytes(img.d[actx + 60 * k - BASE:actx + 60 * k + 60 - BASE]),
                                "loop": img.u8(actx + 60 * k + 0x29),
-                               "layer": bool(tch) and not any(c.idx in tch for _a, c in g.curves(an))}
+                               "layer": is_layer(an)}
         if 90 not in self.anims:
             raise RigError("%s has no idle (90)" % os.path.basename(path))
         mp = img.u32(ch + 8)
