@@ -649,6 +649,53 @@ namespace
             WRITE8(sw + 8, uint8_t(want));
     }
 
+    // Eliminacao com 0 continues (tela 11, sempre ligado): screenElimOptions2P anda o cursor por 0..4 (esquerda: > 0 desce 1, senao
+    // vai a 4; direita: < 4 sobe 1, senao vai a 0) e confirma cursor + 1 em m_elimination e nos dois m_continues, indo a selecao (6).
+    // O switch do numero (shell +0x414) tem 6 filhos: os digitos 1 a 5 e, no 5, o 0 (textura 142 do SHELL, a mesma regiao do 0 da
+    // tela 12). Aqui o cursor 5 e o 0, e o passo anda pelos valores 0..5 (valor = (cursor + 1) % 6). Com o cursor em 5 a original
+    // roda com 0 (o "1"); se ela confirmou, os tres campos ficam com 0. A luta de 2 do retail ja trata 0 continues (a primeira morte
+    // vai ao dialogo 0xB, EvaluateMultiPlayerBattleStatusNoAI), e a de 3 e 4 tambem (wotm_modes4.inc).
+    constexpr uint32_t kElimOptions = wotm::fn::screenElimOptions2P__Fv;
+    constexpr uint32_t kElimCursor = wotm::sym::currentSelection + 11 * 4;   // currentSelection[11]
+    PS2Runtime::RecompiledFunction g_origElimOptions = nullptr;
+    uint32_t g_elimRa = 0, g_elimBefore = 0;
+    bool g_elimPending = false, g_elimFake = false;
+
+    void elimOptionsWithZero(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        constexpr int kGameMax = 4, kZero = 5, kValues = 6;
+        if (ctx->pc == kElimOptions)
+        {
+            g_elimRa = GPR_U32(ctx, 31);
+            g_elimBefore = std::min(READ32(kElimCursor), uint32_t(kZero));
+            g_elimPending = true;
+            g_elimFake = g_elimBefore == uint32_t(kZero);
+            WRITE32(kElimCursor, g_elimFake ? 0u : g_elimBefore);
+        }
+        g_origElimOptions(rdram, ctx, runtime);
+        if (!g_elimPending || ctx->pc != g_elimRa)
+            return;   // parou no meio (retomada cai aqui de novo e termina o servico)
+        g_elimPending = false;
+        const int before = int(g_elimBefore), eff = g_elimFake ? 0 : before, after = int(READ32(kElimCursor));
+        if (g_elimFake && READ32(wotm::sym::currScreen) == 6u)
+        {
+            WRITE32(kShell + 0x2B48, 0);   // m_elimination
+            WRITE32(kShell + 0x2B40, 0);   // m_continues[0..1]
+            WRITE32(kShell + 0x2B44, 0);
+            std::fprintf(stderr, "[wotm] tela 11: eliminacao com 0 continues\n");
+        }
+        const bool dec = (eff >= 1 && after == eff - 1) || (eff == 0 && after == kGameMax);
+        const bool inc = (eff < kGameMax && after == eff + 1) || (eff == kGameMax && after == 0);
+        const int value = (before + 1) % kValues;
+        const int want = dec ? (value + kValues - 2) % kValues : inc ? value % kValues : before;   // cursor = (valor + 5) % 6
+        if (want == after)
+            return;
+        WRITE32(kElimCursor, uint32_t(want));
+        const uint32_t sw = READ32(kShell + 0x414);
+        if (sw && (READ8(sw) & 0x3F) == 6 && READ8(sw + 0xB) > want)   // SWITCH_NODE, numKids
+            WRITE8(sw + 8, uint8_t(want));                              // whichChild
+    }
+
     // Trapacas de debug (menu F1 do wotm_live.inc, ou WOTM_CHEATS no inicio): aplicadas na thread do EE, na entrada de Monster::update
     // (0x15B488) de cada jogador (m_monsters[0 .. m_numPlayers-1]), antes da logica do quadro dele. A janela so escreve g_wotmCheats.
     //   invencivel: Monster::takeDamage (0x15FE40) volta na entrada quando a vitima e um jogador (nem o dano forcado passa).
@@ -2887,6 +2934,8 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
         runtime.registerFunction(kFfaOptions1P, &ffaOptions1PWithZero);
     if ((g_origFfaOptions2P = runtime.lookupFunction(kFfaOptions2P)))
         runtime.registerFunction(kFfaOptions2P, &ffaOptions2PMore);
+    if ((g_origElimOptions = runtime.lookupFunction(kElimOptions)))
+        runtime.registerFunction(kElimOptions, &elimOptionsWithZero);
     // Trapacas de debug (menu F1): sempre instaladas; WOTM_CHEATS=inv,stam,furia,esp,cloak,deus liga desde o inicio
     if ((g_origMonsterUpdate = runtime.lookupFunction(kMonsterUpdate)) && (g_origTakeDamage = runtime.lookupFunction(kTakeDamage)))
     {
