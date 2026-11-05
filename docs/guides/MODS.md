@@ -257,7 +257,8 @@ A skin is a folder in `mods/<mod>/skins/<folder>/` with a `skin.json`:
   of `monster.json` applies.
 - `id`: lowercase letters, digits and `_` (without it, the folder name). The save stores `"ultra-v/roxo"`.
 - `name`: what the select screen shows. `base`: disc costume (0 to 3) that provides whatever the folder does not bring, and the costume's sounds.
-  `ai`: whether drawn AIs can use it (default no).
+  `ai`: whether drawn AIs can use it (default no). `narrator`: `narrator/<nome>.mp3` spoken when the skin is confirmed in a select
+  screen (empty, or the file missing: the custom's `narrator`, then the type's).
 - A mod skin is always unlocked: it does not go through the unlock screen.
 - What goes in the folder, from the simplest to the most complete:
   - **PNGs only**: model and textures of the base costume; the PNGs replace the textures. Name as in the base costume's export
@@ -327,7 +328,13 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   monster, and `JELLY.CHR`'s sits between Jelly's legs; Togera's at 2x (Goliath) and 3x (Jelly) behaves like a regular
   monster's. `FINAL.CHR`'s already works. The port reads the camera from the `from`'s `.CHR` (from `mods/` or from the disc) and puts it on the monster on every
   POV change (log `[custom] jelly: camera do RST/LIZARD.CHR, distancias x3.00 (POV 0: ...)`).
-- `narrator`: `narrator/<nome>.mp3` spoken on confirmation (empty = the type's).
+- `narrator`: `narrator/<nome>.mp3` spoken on confirmation (empty = the type's). It also serves the custom's skins that have no
+  `narrator` of their own.
+- `costumeName`: the name of the custom's own costume in the select screen's costume list, next to its skins (`"GODZILLA 90s"`;
+  empty = "FROM MOD <mod>").
+- `logo`: a 2:1 PNG with the name drawn (in the monster's folder or at the mod root; the game's are 256 × 128, 512 × 256 keeps it
+  sharp in a large window), shown where the game shows its monsters' logos: under the model in the select screen and above the
+  stage picture in the save list. Without it, the name in text (the save list never falls back to the base type's logo).
 - `files`: the model's own files, in a subfolder of the monster (`true` = `files/`, or its name) with `<any name>.NGP` and
   `.PTR` (and `.TEX`/`.RTX`, optional): they become a mod costume of its own (like an implicit skin, costume 4 to 99), which becomes the default
   costume; the JSON's `costume` provides what the files do not bring (sounds, whatever is missing). Without the folder, the log warns and the disc costume stays.
@@ -403,7 +410,9 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   (`"portraitTex"`: the texId in the `.RTX`; default 6 for `ASSBOSS1`). It also applies to the adventure's boss, which uses the same file.
   The HUD draws the portrait upside down from the image, as the disc's own are stored (Togera's `lizard0_rtx_t0003.png`): save the
   PNG flipped top to bottom, normal on the left half and hurt on the right; the disc's monsters face right.
-  Log: `[mods] ASSBOSS1.RTX t6 <- Goliath Prime/goliathprime.png`.
+  Log: `[mods] ASSBOSS1.RTX t6 <- Goliath Prime/goliathprime.png`. `"portrait"` covers only the custom's own costume: a skin of the
+  custom takes the portrait of its own `.RTX` (a rig skin: the base type's), so it brings its own as a skin PNG
+  (`lizard0_rtx_t0003.png` in the skin folder, same rules).
 - Not yet: animations ASSBOSS lacks (climbing, some blocks and counterattacks; `18bb1d2:docs/investigacoes/2026-10-23/goliath_codigo.md`,
   section 3) make the game hold the previous pose; elimination and minigames were not tested with him; the adventure save does not store a
   custom (the adventure does not offer the slot).

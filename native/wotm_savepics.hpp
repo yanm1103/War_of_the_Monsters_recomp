@@ -25,12 +25,13 @@
 
 namespace wotm::savepics {
 
-enum Kind : uint8_t { kLevel = 0, kLogo = 1, kMonster = 2 };
+enum Kind : uint8_t { kLevel = 0, kLogo = 1, kMonster = 2, kCustomLogo = 3 };
 
 // Em coordenadas da tela do jogo (640 x 224, a faixa 4:3 da janela)
 struct Pic {
     Kind kind;
-    uint32_t id;   // fase (kLevels do wotm_save.inc), monstro (sel >> 5) ou, em kMonster, monstro | traje << 8
+    uint32_t id;   // fase (kLevels do wotm_save.inc), monstro (sel >> 5), em kMonster monstro | traje << 8, em kCustomLogo o
+                   // indice do custom em Registry::customs()
     float x0, y0, x1, y1;
     uint8_t a;     // 255 = opaco
 };
@@ -126,6 +127,29 @@ inline void clear() {
 #include <memory>
 
 namespace wotm::savepics {
+
+// Logo de um monstro custom ("logo" do monster.json; selecao e lista de saves). Thread da janela: carregado uma vez por arquivo,
+// com mipmaps (o PNG e maior que o tamanho na tela).
+inline const Texture2D *customLogo(const std::filesystem::path &p) {
+    static std::map<std::string, Texture2D> cache;
+    if (p.empty()) return nullptr;
+    auto it = cache.find(p.string());
+    if (it == cache.end()) {
+        Texture2D t = LoadTexture(p.string().c_str());
+        if (t.id) {
+            GenTextureMipmaps(&t);
+            SetTextureFilter(t, TEXTURE_FILTER_TRILINEAR);
+        } else {
+            std::fprintf(stderr, "[mods] logo %s ilegivel\n", p.string().c_str());
+        }
+        it = cache.emplace(p.string(), t).first;
+    }
+    return it->second.id ? &it->second : nullptr;
+}
+inline const Texture2D *customLogo(uint32_t index) {
+    const std::vector<mods::Custom> &cs = mods::Registry::get().customs();
+    return index < cs.size() ? customLogo(cs[index].logo) : nullptr;
+}
 
 // ---- leitura do disco (thread da janela) ----
 namespace detail {
@@ -253,6 +277,8 @@ public:
             if (p.kind == kLevel) {
                 for (size_t i = 0; i < std::size(kLevelPics); ++i)
                     if (kLevelPics[i].level == p.id) t = &level_[i];
+            } else if (p.kind == kCustomLogo) {
+                t = customLogo(p.id);
             } else {
                 for (size_t i = 0; i < std::size(kLogoPics); ++i)
                     if (kLogoPics[i].monster == p.id) t = &logo_[i];

@@ -128,20 +128,22 @@ static bool cry(int monster, const std::filesystem::path &bank = {})
     return true;
 }
 
-// Nome do monstro (indice do jogo, m_monsterSel >> 5)
-static void announce(int monster)
+// Monstro confirmado (indice do jogo, m_monsterSel >> 5) num traje: o "narrator" da skin (skin.json), depois o do custom `cu`
+// (monster.json), depois o do tipo. Com MONSTER CRY, o grito do banco proprio do custom ou o do tipo.
+static void announceCostume(int monster, int costume, const wotm::mods::Custom *cu = nullptr)
 {
-    if (!cry(monster))
-        play(namesOf(monster));
-}
-// Monstro custom: o "narrator" do monster.json e, sem o arquivo, o do tipo (com MONSTER CRY, o grito do banco proprio dele ou o do tipo)
-static void announce(const std::string &name, int monster, const std::filesystem::path &bank = {})
-{
-    if (cry(monster, bank))
+    if (cry(monster, cu ? cu->bank : std::filesystem::path{}))
         return;
+    const wotm::mods::Skin *k = costume >= 4 ? wotm::mods::Registry::get().skinByIndex(monster, costume) : nullptr;
     const char *const *t = namesOf(monster);
-    const char *names[4] = {name.empty() ? nullptr : name.c_str(), nullptr, nullptr, nullptr};
-    for (int i = 0, k = names[0] ? 1 : 0; t[i] && k < 3; ++i) names[k++] = t[i];
+    const char *names[5] = {};
+    int n = 0;
+    if (k && !k->narrator.empty())
+        names[n++] = k->narrator.c_str();
+    if (cu && !cu->narrator.empty())
+        names[n++] = cu->narrator.c_str();
+    for (int i = 0; t[i] && n < 4; ++i)
+        names[n++] = t[i];
     play(names);
 }
 

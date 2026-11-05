@@ -971,6 +971,7 @@ static int customStep(Pick &k, const bool *e, bool cpu, bool adventure, bool eli
             return 0;
         k.ready = true;
         std::fprintf(stderr, "[padsel] custom: %s (base %s, traje %d)\n", cu->id.c_str(), cu->typeName.c_str(), k.costume);
+        wotm_narrator::announceCostume(cu->type, k.costume, cu);
         return 8;
     }
     if (!e[Ok])
@@ -1075,7 +1076,7 @@ static void selectStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
                 {
                     k.ready = true;
                     sound = 8;
-                    wotm_narrator::announce(monsterOfCol(rdram, k.col));
+                    wotm_narrator::announceCostume(monsterOfCol(rdram, k.col), k.costume);
                 }
             }
             if (e[Back]) back = true;
@@ -1088,7 +1089,7 @@ static void selectStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
                 k.costume = 0;
                 k.ready = true;
                 sound = 8;
-                wotm_narrator::announce(monsterOfCol(rdram, k.col));
+                wotm_narrator::announceCostume(monsterOfCol(rdram, k.col), k.costume);
             }
             if (e[Back]) back = true;
             continue;
@@ -1104,7 +1105,7 @@ static void selectStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         {
             k.ready = true;
             sound = 8;
-            wotm_narrator::announce(monsterOfCol(rdram, k.col));
+            wotm_narrator::announceCostume(monsterOfCol(rdram, k.col), k.costume);
         }
         if (e[Back]) back = true;
     }
@@ -1421,12 +1422,13 @@ static void soloSync(uint8_t *rdram)
             std::fprintf(stderr, "[padsel] pronto (%s): coluna %d, m_monsterSel %s, traje %u\n", soloLabel(pn, n, i), col,
                          monsterName(rd32(rdram, pn[i].monsterDst)), rd32(rdram, pn[i].costumeDst));
             const uint32_t msel = rd32(rdram, pn[i].monsterDst);
+            const int costume = int(rd32(rdram, pn[i].costumeDst));
             if (!g_soloPrimed)
                 ;
             else if (const wotm::mods::Custom *cu = g_soloCustomPick[i] ? customAt(g_soloCustomPick[i] - 1) : nullptr)
-                wotm_narrator::announce(cu->narrator, cu->type, cu->bank);
+                wotm_narrator::announceCostume(cu->type, costume, cu);
             else
-                wotm_narrator::announce(col >= 1 && col <= 10 ? monsterOfCol(rdram, col) : int(msel >> 5));
+                wotm_narrator::announceCostume(col >= 1 && col <= 10 ? monsterOfCol(rdram, col) : int(msel >> 5), costume);
         }
         g_soloDonePrev[i] = done;
     }
@@ -1699,7 +1701,8 @@ static void fillCustom(View &v, int p, int k, int costume)
     v.selModCount[p] = int(l.size()) - 1;
     v.selCostumeIdx[p] = int(std::find(l.begin(), l.end(), costume) - l.begin());
     v.selBase[p] = baseCostume(cu->type, costume);
-    const std::string nm = costume == cu->costume ? "FROM MOD " + cu->mod : costumeName(cu->type, costume);
+    const std::string nm = costume != cu->costume ? costumeName(cu->type, costume)
+                           : cu->costumeName.empty() ? "FROM MOD " + cu->mod : cu->costumeName;
     std::snprintf(v.selCostumeName[p], sizeof v.selCostumeName[p], "%s", nm.c_str());
     for (char *q = v.selCostumeName[p]; *q; ++q) *q = char(std::toupper(static_cast<unsigned char>(*q)));
 }
@@ -2984,11 +2987,13 @@ static void drawSelect(const View &v)
         const char *name = v.selCustom[p] >= 0 ? customName(v.selCustom[p]) : monsterName(v.selMonster[p]);
         const float nameY = y + boxH * (v.selNoCostume ? 0.82f : 0.76f);
         const uint32_t lmon = v.selMonster[p] >> 5;
-        const Texture2D *logo = v.selCustom[p] < 0 && lmon < std::size(g_logo) && g_logo[lmon].id ? &g_logo[lmon] : nullptr;
-        if (logo)   // o logo do jogo (2:1) no lugar do nome; sem logo (custom, chefes), o nome em texto
+        const wotm::mods::Custom *lcu = v.selCustom[p] >= 0 ? customAt(v.selCustom[p]) : nullptr;
+        const Texture2D *logo = lcu ? wotm::savepics::customLogo(lcu->logo)
+                                : v.selCustom[p] < 0 && lmon < std::size(g_logo) && g_logo[lmon].id ? &g_logo[lmon] : nullptr;
+        if (logo)   // o logo do jogo (2:1) ou o "logo" do custom no lugar do nome; sem logo (custom sem, chefes), o nome em texto
         {
             // o Congar (1), o Agamo (10) e o Ultra-V (4) tem mais margem vazia em volta do desenho: maiores para ficarem do tamanho dos outros
-            const float big = lmon == 1 || lmon == 10 ? 1.35f : lmon == 4 ? 1.15f : 1.f;
+            const float big = lcu ? 1.f : lmon == 1 || lmon == 10 ? 1.35f : lmon == 4 ? 1.15f : 1.f;
             const float lw = std::min(boxW * (v.selReady[p] ? 0.94f : 0.72f) * big, boxH * 0.34f * big), lh = lw * 0.5f;
             DrawTexturePro(*logo, Rectangle{0.f, 0.f, float(logo->width), float(logo->height)},
                            Rectangle{cx - lw * 0.5f, nameY - lh * 0.5f, lw, lh}, Vector2{0.f, 0.f}, 0.f, WHITE);

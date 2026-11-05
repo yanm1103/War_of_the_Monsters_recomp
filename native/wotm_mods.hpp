@@ -99,9 +99,11 @@ struct Custom {
     std::string cameraFrom;    // MonsterLongNames do .CHR da camera ("lizard"); vazio = a do proprio tipo
     float cameraScale = 1.f;    // distancias da camera emprestada
     std::string narrator;       // narrator/<nome>.mp3 (vazio = o do tipo)
+    std::string costumeName;    // nome do traje proprio na selecao (vazio = "FROM MOD <mod>")
     bool ai = false;            // uma CPU pode usar (quadro de CPU da selecao)
     std::filesystem::path portrait;   // PNG do retrato do HUD (vazio = o do .RTX)
     int portraitTex = -1;       // texId do retrato no <PREFIXO><traje>.RTX
+    std::filesystem::path logo;   // PNG 2:1 do logo (selecao e lista de saves; vazio = o nome em texto)
     std::string mod;
     std::filesystem::path dir;
 };
@@ -116,6 +118,7 @@ struct Skin {
     std::string name;           // o que a selecao mostra
     int base = 0;               // traje do disco que da o que falta (e os sons do traje)
     bool ai = false;            // as IAs sorteadas podem usar
+    std::string narrator;       // narrator/<nome>.mp3 ao confirmar a skin (vazio = o do custom ou o do tipo)
     int index = 0;              // traje no jogo (4..99), so nesta execucao
     bool own = false;           // os arquivos proprios de um custom ("files"): e o traje padrao dele, nao uma skin da lista
     std::string mod;
@@ -331,7 +334,7 @@ private:
         return {};
     }
 
-    // mods/<mod>/skins/<pasta>/skin.json (MODS.md, "Skins"): {"monster", "id", "name", "base", "ai"}. Cada skin vira o traje
+    // mods/<mod>/skins/<pasta>/skin.json (MODS.md, "Skins"): {"monster", "id", "name", "base", "ai", "narrator"}. Cada skin vira o traje
     // <PREFIXO><n> (n = 4, 5, ... por monstro, na ordem mod/id; so nesta execucao: o save guarda "monstro/id"). O que a pasta traz
     // (.NGP+.PTR, .TEX, .RTX, PNGs) e dela; o que falta e o arquivo do traje base (m_alias).
     void scanSkins(const std::vector<std::filesystem::path> &mods) {
@@ -393,6 +396,7 @@ private:
                 }
                 const json::Value *ai = v.get("ai");
                 k.ai = ai && ai->asBool(false);
+                if (const json::Value *na = v.get("narrator"); na && na->type == json::Value::Str) k.narrator = lower(na->s);
                 k.mod = m.filename().string();
                 k.dir = s;
                 Skin &slot = byKey[k.monsterName + "/" + k.id];
@@ -519,7 +523,7 @@ private:
             std::fprintf(stderr, "[mods] monstro %s: %s (RST/%s)\n", c.id.c_str(), what.c_str(), c.resetStem.c_str());
     }
 
-    // mods/<mod>/monsters/<pasta>/monster.json: {"id", "name", "base", "costume", "camera": {"from", "scale" (%)}, "narrator", "ai",
+    // mods/<mod>/monsters/<pasta>/monster.json: {"id", "name", "base", "costume", "camera": {"from", "scale" (%)}, "narrator", "costumeName", "logo", "ai",
     // "special", ...}.
     // Mesmo id em dois mods: vence o ultimo em ordem alfabetica, como os arquivos.
     void scanCustoms(const std::vector<std::filesystem::path> &mods) {
@@ -585,6 +589,7 @@ private:
                         c.cameraScale = float(sc->i) / 100.f;
                 }
                 if (const json::Value *na = v.get("narrator"); na && na->type == json::Value::Str) c.narrator = lower(na->s);
+                if (const json::Value *cn = v.get("costumeName"); cn && cn->type == json::Value::Str) c.costumeName = cn->s;
                 if (const json::Value *ki = v.get("kind"); ki && ki->type == json::Value::Str) c.kind = lower(ki->s);
                 if (const json::Value *sr = v.get("specialRoar")) c.specialRoar = sr->asBool(false);
                 if (const json::Value *sp = v.get("special"); sp && sp->type == json::Value::Str) {
@@ -611,6 +616,15 @@ private:
                         std::fprintf(stderr, "[mods] monstro %s: \"portrait\" sem \"portraitTex\" (texId do retrato no .RTX)\n", where.c_str());
                     else
                         c.portrait = p;
+                }
+                // "logo": PNG 2:1 com o nome desenhado (como os 256x128 do SHELL.TEX), na pasta do monstro ou na raiz do mod
+                if (const json::Value *lo = v.get("logo"); lo && lo->type == json::Value::Str && !lo->s.empty()) {
+                    fs::path p = s / fs::u8path(lo->s);
+                    if (!fs::is_regular_file(p, ec)) p = m / fs::u8path(lo->s);
+                    if (fs::is_regular_file(p, ec))
+                        c.logo = p;
+                    else
+                        std::fprintf(stderr, "[mods] monstro %s: \"logo\" %s nao achado\n", where.c_str(), lo->s.c_str());
                 }
                 const json::Value *ai = v.get("ai");
                 c.ai = ai && ai->asBool(false);
