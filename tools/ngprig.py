@@ -1133,9 +1133,9 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
         o.u32(a + 4, len(kid_specs))
         o.f(a + 0xC, 1.0)
         o.s16(a + 0x10, -1)
-        for q in range(3):
-            o.s16(a + 0x12 + 2 * q, x["ridx"][q])
-            o.s16(a + 0x18 + 2 * q, x["tidx"][q])
+        for c in range(3):
+            o.s16(a + 0x12 + 2 * c, x["ridx"][c])
+            o.s16(a + 0x18 + 2 * c, x["tidx"][c])
         o.s16(a + 0x1E, x["ridx"][0])
         o.f(a + 0x2C, 1.0)
         for c in range(3):

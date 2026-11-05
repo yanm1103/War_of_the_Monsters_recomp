@@ -43,25 +43,33 @@ Erros encontrados e corrigidos no caminho:
 - A pose de ligação do kit tira a escala dos nós de escala, e as garras do Togera saíam fora do lugar. Agora a malha rígida
   vem do idle.
 
+## 2026-11-05: peças rígidas vivas e primeira luta
+
+- Peça rígida que escala ou se move em relação à junta em alguma ação (a garra que cresce do Togera) agora vai como o jogo
+  faz: ANIM_XFORM próprio (sem SKEL_BONE; o jogo tem vários assim, o Robo-47 tem 18) → ANIM_SCALE (só escala, pivô 0) →
+  GROUP → OBJECT rígido por textura (cabeçalho do corpo com `+0x68 = -1`, `polyPkt` no pacote com a tag DMA). A escala de
+  osso não chega à pele (o esqueleto do jogo não tem escala); o ngprig avisa quando uma ação escala junta da pele.
+- Comparação da garra (vértices no mundo, `clawcmp.py` de rascunho) com a base: igual até 0,1 nas anims 22 e 90; monview
+  igual à base, e o enquadramento também (a diferença de antes sumiu com as garras fora da paleta).
+- No jogo: mod `teste_l3` no runtime (`discroot/mods/teste_l3/monsters/rigliz`, base togera, `files`), `WOTM_MATCH=rigliz,3,1`
+  + `WOTM_AIVSAI` + `WOTM_VU1CHECK=1`, 110 s: carrega (LIZARD5, 3 MB em 0x2000000, 28 MB até o teto), luta sem queda nem
+  congelamento, checagem média 99,78% casados (a mesma luta sem mod, Togera x Togera: 99,87%).
+- Bug achado pela checagem e corrigido: na refatoração do ANIM_XFORM o laço dos canais reaproveitava a variável do índice e
+  todo ANIM_XFORM saía com `matrixIdx` 2. A pele não sentia (cada osso é calculado na hora), as garras saíam com a matriz
+  errada só no VU1 (o monview e o ngpanim reconstroem pelos canais).
+- Achado à parte (não é do L3): nas lutas com o Togera do disco, as garras rígidas dele divergem (o nativo desenha uns 16
+  triângulos que o VU1 não desenha, flags 0x311, sob o LOD de 4 níveis). As garras do rig novo, num GROUP sem LOD, casam.
+
 ## Pendente (próximos passos, na ordem)
 
-1. **Diferenças no monview**: na anim 22 a garra que cresce (escala animada do `sc_`) não aparece, porque as peças rígidas
-   perdem a escala animada. Opção: escala por canal não existe no ANIM_XFORM; avaliar um OBJECT rígido de verdade sob a junta
-   (ANIM_SCALE + rígido, como o jogo faz) ou aceitar. O enquadramento do monview também sai diferente (o boneco aparece mais
-   alto e à direita); conferir se é a esfera do GROUP/LOD (o monview enquadra por ela?) ou o deslocamento da raiz.
-2. **Abrir no jogo** como monstro custom (`monster.json` com `files`): ps2EntryRunner com `WOTM_VU1CHECK`, depois uma luta
-   `WOTM_MATCH` + `WOTM_AIVSAI`. Ler o log ([custom], [mods] png, contatos/passos). Testes ao vivo com `WOTM_MONITOR=1`,
-   `WOTM_MUTE=1`, `WOTM_FULLSCREEN=0`, `WOTM_RES=224`.
-3. **Esqueleto de outro monstro**: Robo-47 ou Agamo (`--edit`) sobre a base Togera. Exercita texturas novas (PNG do .glb) e
+1. **Esqueleto de outro monstro**: Robo-47 ou Agamo (`--edit`) sobre a base Togera. Exercita texturas novas (PNG do .glb) e
    localizadores com outra orientação. Congar não serve de base, mas serve de rig.
-4. **Rig do Blender do zero**: script do Blender 5.1 (`C:/Program Files/Blender Foundation/Blender 5.1`) que monte um bípede
+2. **Rig do Blender do zero**: script do Blender 5.1 (`C:/Program Files/Blender Foundation/Blender 5.1`) que monte um bípede
    simples virado para -Y em metros, com `loc_*`, ações a090/a120; mais a volta Blender de um export do kit (eixos dos ossos
    mudam na importação: conferir que o ngprig não depende deles).
-5. Tamanho: o NGP sai com ~3 MB (o corpo antigo fica morto no arquivo). Conferir o limite do carregador de monstro (MODS.md,
-   "Mod files bigger than the disc's"); se apertar, reaproveitar a faixa do corpo antigo.
-6. Kit: `modkit.py monster rig <mod> <id> <rig.glb>` e botão "Import rig..." na GUI; `pose.py`/`wotm_model.hpp` com mais de
+3. Kit: `modkit.py monster rig <mod> <id> <rig.glb>` e botão "Import rig..." na GUI; `pose.py`/`wotm_model.hpp` com mais de
    64 saídas, se precisar.
-7. Docs (MODS.md, MODELS_3D.md seção "New skeleton", TOOLS.md, FORMATS.md se faltar campo) e tirar o L3 do `TODO.md`.
+4. Docs (MODS.md, MODELS_3D.md seção "New skeleton", TOOLS.md, FORMATS.md se faltar campo) e tirar o L3 do `TODO.md`.
 
 ## Relato do sub-agente (o que do jogo depende do esqueleto)
 
