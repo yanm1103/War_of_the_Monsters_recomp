@@ -16,3 +16,5 @@ extern std::atomic<bool> g_wotmCheatWin;          // pedido de "vencer a luta" (
 // Pedido de "matar": mascara de jogadores (bit i = m_monsters[i], i 0..3; 0 = nenhum pedido). Consumido no quadro seguinte:
 // cada jogador vivo da mascara leva um takeDamage que o derruba (o caminho normal da morte: vidas, renascer, sair).
 extern std::atomic<uint32_t> g_wotmCheatKill;
+// Alvo do "matar" no menu F1 e na aba CHEATS do painel: 0 todos os jogadores, 1..4 so P1..P4
+extern std::atomic<int> g_wotmCheatKillWho;

@@ -2286,7 +2286,7 @@ static bool wotmDrawNative(const uint8_t *rdram)
     {   // menu de debug (F1 abre/fecha; com ele aberto, 1..8 alternam ou disparam). Setas e Enter sao do pad (ps2_pad.cpp): nao servem aqui.
         // So escreve g_wotmCheats; quem aplica e a thread do EE (monsterUpdateCheats, wotm_overrides.cpp).
         static bool open = false;
-        static int killWho = 1;    // alvo da tecla 8: 0 todos os jogadores, 1..4 so P1..P4 (a tecla 7 alterna)
+        const int killWho = std::clamp(g_wotmCheatKillWho.load(), 0, 4);   // alvo da tecla 8 (a tecla 7 alterna; o mesmo da aba CHEATS)
         if (IsKeyPressed(KEY_F1))
             open = !open;
         uint32_t c = g_wotmCheats.load(std::memory_order_relaxed);
@@ -2300,7 +2300,7 @@ static bool wotmDrawNative(const uint8_t *rdram)
             if (IsKeyPressed(KEY_FOUR)) n ^= kCheatCloak;
             if (IsKeyPressed(KEY_FIVE)) n ^= kCheatGod;
             if (IsKeyPressed(KEY_SIX)) g_wotmCheatWin = true;
-            if (IsKeyPressed(KEY_SEVEN)) killWho = (killWho + 1) % 5;
+            if (IsKeyPressed(KEY_SEVEN)) g_wotmCheatKillWho = (killWho + 1) % 5;
             if (IsKeyPressed(KEY_EIGHT)) g_wotmCheatKill = killWho ? (1u << (killWho - 1)) : 0xFu;
             if (n != c)
             {

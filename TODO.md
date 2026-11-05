@@ -3,7 +3,6 @@
 O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado sai deste arquivo: a história vai para a mensagem do commit e o que passou a existir vai para o doc de referência (no presente). Regras dos docs: `CLAUDE.md`, "Documentação".
 
 ## Port
-- **Aba de cheats no "Recompiled options":** os cheats do menu F1 (`g_wotmCheats`, `NATIVE.md`, "Runtime: debug menu (F1) and cheats"), mais "desbloquear tudo" e "travar tudo", os dois com confirmação. Painel em `native/runtime/wotm_mainmenu.inc`; os desbloqueios ficam no save (`wotm_save.inc`).
 - **Eliminação com zero respawns:** permitir 0 continues na tela 11, que hoje oferece de 1 a 5 (cursor 0..4 mais um em `m_elimination`, `screenElimOptions2P` de `src/game/screen.cpp`; pela variável, `WOTM_MODE=6:0`). Regras da eliminação em `wotm_modes4.inc` (`NATIVE.md`, "Elimination and minigames with 3 and 4").
 - **Customs de tipo chefe na eliminação:** a seleção recusa Goliath, Jelly, Cerebulon e Mecha (o diálogo 8 só conhece as colunas 1 a 10). Dá para entrar como carga extra pelo caminho das IAs, como os repetidos (`wotm_elimcostume.inc`; `MODS.md`, "Elimination"), mas o fileStatus só tem vaga para 2 extras.
 
