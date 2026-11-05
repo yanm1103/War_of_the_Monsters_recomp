@@ -2981,7 +2981,7 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
     if (g_matchMode == 1 && g_matchLevel >= 0 && (g_origDialogAdventure = runtime.lookupFunction(wotm::fn::displayDialog__Fi)))
         runtime.registerFunction(wotm::fn::displayDialog__Fi, &dialogAdventure);   // depois do da pausa (wotm_pausemenu.inc)
     wotmCustomInstall(runtime);  // depois das skins: embrulha o SetAIMonster delas
-    wotmArmyInstall(runtime);   // antes do treino: o takeHit dele fica por fora
+    if (!std::getenv("WOTM_NOARMYHOOKS")) wotmArmyInstall(runtime);   // antes do treino: o takeHit dele fica por fora (WOTM_NOARMYHOOKS=1: diagnostico, sem nenhum gancho do exercito)
     wotmTrainingInstall(runtime);   // por ultimo: o gancho mais de fora do update/takeHit/takeDamage (ve o dano que as trapacas deixam)
     if (g_minRate > 0)
         std::fprintf(stderr, "[wotm] updateRate >= %d (dt <= 1/%d) para o jogo inteiro (WOTM_RATEMIN)\n", g_minRate, g_minRate);
