@@ -1385,11 +1385,13 @@ public:
     // Textura de particula: texId (indice do texInfo global) + TEX0 da tabela de particulas (psm/CBP). 0 = nao decodificou.
     // Particles::kDustTexId = a textura composta de poeira/fumaca (dustTexture).
     // WOTM_FXNOGRAY=1: sem a rampa cinza quando a paleta nao esta nos .RTX carregados (diagnostico).
-    unsigned particleTexture(const Ram &ram, uint32_t texId, uint64_t tex0) {
+    // tint (Particles::s_tint, a cor do fogo do sistema em desenho): copia com o RGB recolorido (Particles::tinted), uma por cor.
+    unsigned particleTexture(const Ram &ram, uint32_t texId, uint64_t tex0, uint32_t tint = Particles::s_tint) {
         if (texId == Particles::kDustTexId) return dustTexture(ram);
         if (!texId || texId >= 1000) return 0;
         const gs::Tex0 t0 = gs::Tex0::decode(tex0);
-        const uint64_t key = (uint64_t(texId) << 40) | (uint64_t(t0.cbp) << 12) | (uint64_t(t0.csa) << 4) | t0.cpsm | (1ull << 61);
+        uint64_t key = (uint64_t(texId) << 40) | (uint64_t(t0.cbp) << 12) | (uint64_t(t0.csa) << 4) | t0.cpsm | (1ull << 61);
+        if (tint) key ^= (1ull << 62) | (uint64_t(tint & 0xFFFFFFu) * 0x9E3779B97F4A7C15ull & 0x3FFFFFFFFFFFFFFFull);
         const auto it = tex_.find(key);
         if (it != tex_.end()) return it->second.id;
         static const bool gray = std::getenv("WOTM_FXNOGRAY") == nullptr;
@@ -1399,6 +1401,8 @@ public:
         Texture2D t{};
         bool ok = decodeUploadTex(ram, ptr, t0, px, w, h, gray, true) && w && h && px.size() >= size_t(w) * h;
         modParticle(ram, texId, tex0, ok, px, w, h);
+        if (ok && tint)
+            for (uint32_t &c : px) c = Particles::tinted(c, tint);
         if (ok) {
             Image img{px.data(), int(w), int(h), 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8};
             t = LoadTextureFromImage(img);

@@ -73,6 +73,8 @@ inline const char *specialNeeds(int type) {
     }
 }
 
+constexpr uint32_t kFireSet = 0x01000000u;   // bit de "fireColor" presente (a cor #000000 tambem vale)
+
 // Monstro custom (mods/<mod>/monsters/<pasta>/monster.json; MODS.md, "Monstros custom"): um monstro novo na selecao (casa
 // CUSTOM), que usa o codigo de um tipo do jogo (`base`) e o modelo e os arquivos dele, ou os proprios ("files": uma subpasta com
 // .NGP+.PTR(+.TEX/.RTX), que vira um traje de mod so dele, como uma skin implicita).
@@ -100,7 +102,11 @@ struct Custom {
     float cameraScale = 1.f;    // distancias da camera emprestada
     std::string narrator;       // narrator/<nome>.mp3 (vazio = o do tipo)
     std::string costumeName;    // nome do traje proprio na selecao (vazio = "FROM MOD <mod>")
-    bool ai = false;            // uma CPU pode usar (quadro de CPU da selecao)
+    // "fireColor": cor do fogo do traje proprio e das skins sem a sua (kFireSet | 0xRRGGBB; 0 = a do jogo). Os efeitos de
+    // particula do Togera (bafo, bola de fogo, explosao, crowd control) criados por este monstro trocam o verde por ela
+    // (wotm_custom.inc marca, wotm_fx.hpp pinta)
+    uint32_t fireColor = 0;
+    bool ai = false;           // uma CPU pode usar (quadro de CPU da selecao)
     std::filesystem::path portrait;   // PNG do retrato do HUD (vazio = o do .RTX)
     int portraitTex = -1;       // texId do retrato no <PREFIXO><traje>.RTX
     std::filesystem::path logo;   // PNG 2:1 do logo (selecao e lista de saves; vazio = o nome em texto)
@@ -119,7 +125,8 @@ struct Skin {
     int base = 0;               // traje do disco que da o que falta (e os sons do traje)
     bool ai = false;            // as IAs sorteadas podem usar
     std::string narrator;       // narrator/<nome>.mp3 ao confirmar a skin (vazio = o do custom ou o do tipo)
-    int index = 0;              // traje no jogo (4..99), so nesta execucao
+    uint32_t fireColor = 0;     // "fireColor": cor do fogo (kFireSet | 0xRRGGBB; 0 = a do custom ou a do jogo)
+    int index = 0;             // traje no jogo (4..99), so nesta execucao
     bool own = false;           // os arquivos proprios de um custom ("files"): e o traje padrao dele, nao uma skin da lista
     std::string mod;
     std::filesystem::path dir;
@@ -326,6 +333,16 @@ private:
         for (char &c : s) c = char(std::tolower(static_cast<unsigned char>(c)));
         return s;
     }
+    // "fireColor": "#RRGGBB" -> kFireSet | 0xRRGGBB (0 = sem cor propria)
+    static uint32_t fireColor(const json::Value &v, const std::string &where) {
+        const json::Value *fc = v.get("fireColor");
+        if (!fc) return 0;
+        const std::string s = fc->type == json::Value::Str ? fc->s : std::string();
+        if (s.size() == 7 && s[0] == '#' && s.find_first_not_of("0123456789abcdefABCDEF", 1) == std::string::npos)
+            return kFireSet | uint32_t(std::stoul(s.substr(1), nullptr, 16));
+        std::fprintf(stderr, "[mods] %s: \"fireColor\" tem de ser \"#RRGGBB\"; ignorado\n", where.c_str());
+        return 0;
+    }
     // Filho de `dir` com esse nome, sem olhar maiusculas
     static std::filesystem::path child(const std::filesystem::path &dir, const std::string &name) {
         std::error_code ec;
@@ -397,6 +414,7 @@ private:
                 const json::Value *ai = v.get("ai");
                 k.ai = ai && ai->asBool(false);
                 if (const json::Value *na = v.get("narrator"); na && na->type == json::Value::Str) k.narrator = lower(na->s);
+                k.fireColor = fireColor(v, "skin " + where);
                 k.mod = m.filename().string();
                 k.dir = s;
                 Skin &slot = byKey[k.monsterName + "/" + k.id];
@@ -590,6 +608,7 @@ private:
                 }
                 if (const json::Value *na = v.get("narrator"); na && na->type == json::Value::Str) c.narrator = lower(na->s);
                 if (const json::Value *cn = v.get("costumeName"); cn && cn->type == json::Value::Str) c.costumeName = cn->s;
+                c.fireColor = fireColor(v, "monstro " + where);
                 if (const json::Value *ki = v.get("kind"); ki && ki->type == json::Value::Str) c.kind = lower(ki->s);
                 if (const json::Value *sr = v.get("specialRoar")) c.specialRoar = sr->asBool(false);
                 if (const json::Value *sp = v.get("special"); sp && sp->type == json::Value::Str) {

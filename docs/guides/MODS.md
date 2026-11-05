@@ -258,7 +258,8 @@ A skin is a folder in `mods/<mod>/skins/<folder>/` with a `skin.json`:
 - `id`: lowercase letters, digits and `_` (without it, the folder name). The save stores `"ultra-v/roxo"`.
 - `name`: what the select screen shows. `base`: disc costume (0 to 3) that provides whatever the folder does not bring, and the costume's sounds.
   `ai`: whether drawn AIs can use it (default no). `narrator`: `narrator/<nome>.mp3` spoken when the skin is confirmed in a select
-  screen (empty, or the file missing: the custom's `narrator`, then the type's).
+  screen (empty, or the file missing: the custom's `narrator`, then the type's). `fireColor`: the colour of the fire (`"#FF7A1E"`;
+  empty = the custom's `fireColor`, then the game's); see `fireColor` under "Custom monsters".
 - A mod skin is always unlocked: it does not go through the unlock screen.
 - What goes in the folder, from the simplest to the most complete:
   - **PNGs only**: model and textures of the base costume; the PNGs replace the textures. Name as in the base costume's export
@@ -332,6 +333,16 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   `narrator` of their own.
 - `costumeName`: the name of the custom's own costume in the select screen's costume list, next to its skins (`"GODZILLA 90s"`;
   empty = "FROM MOD <mod>").
+- `fireColor`: `"#RRGGBB"`, the colour of Togera's green fire on this monster (own costume and skins without their own
+  `fireColor`). The particle effects Togera makes (breath core, cloud and sparks; the fireball's muzzle flash, impact and sparks;
+  crowd control: presets 8, 36, 51, 80, 81, 95, 132, 148) created by this monster are drawn with the colour in place of the green: the
+  saturated part takes the colour and the white core stays white, at the same brightness, in the vertex colours and in a recoloured copy of
+  the particle texture (the breath's is green itself). Another Togera in the same fight stays green: each effect is tagged when
+  created with the monster that made it (`FireBreath::Activate`/`TestCollis`, the fireball's owner in `Weapon::DetonateWeapon`,
+  `StateCrowdControl::transitionInto`). Log: `[custom] fogo: preset 51 na cor #FF7A1E`. Only in the native drawing (not in the emulated
+  GS of `ps2EntryRunner`). Two green pieces are not particles and stay in the model files: the fireball's body is the texture
+  `lizard0_t0001.png` (a recoloured PNG in the skin or in `files/`), and the crowd control swirl is the model with id 0x63 in
+  `LIZARD0.NGP`, with green vertex colours (`0d800d`) that have to be recoloured in the skin's `.NGP`.
 - `logo`: a 2:1 PNG with the name drawn (in the monster's folder or at the mod root; the game's are 256 × 128, 512 × 256 keeps it
   sharp in a large window), shown where the game shows its monsters' logos: under the model in the select screen and above the
   stage picture in the save list. Without it, the name in text (the save list never falls back to the base type's logo).

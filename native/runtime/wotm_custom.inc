@@ -1411,6 +1411,110 @@ namespace wotm_custom
             std::fprintf(stderr, "[custom] %s: especial do %s\n", cu->id.c_str(), who);
         }
     }
+    // Cor do fogo ("fireColor" da skin ou do custom; MODS.md): os efeitos do Togera criados por um monstro com cor propria saem
+    // dela. Os ganchos de quem os cria guardam o monstro (g_fxOwner): FireBreath::Activate e TestCollis (o bafo e o acerto dele),
+    // Weapon::DetonateWeapon (a explosao da bola de fogo; o dono e o m_ownerId) e StateCrowdControl::transitionInto. O gancho dos
+    // dois particleCreateFx grava, no indice de fx[] que ele devolve, o preset + 1 e a cor, ou 0 (g_wotmFxTint; o desenho,
+    // wotm_fx.hpp, pinta enquanto o preset de fx[i] for o mesmo). So os presets do Togera: poeira, fumaca e clarao branco ficam.
+    constexpr uint32_t kFxPos = wotm::fn::particleCreateFx__FP8_fvectorifPA3_ff, kFxMat = wotm::fn::particleCreateFx__FP8_fvectorPA3_fifT0T1bf;
+    constexpr uint32_t kBreathActivate = wotm::fn::Activate__10FireBreathfffffff, kBreathCollis = wotm::fn::TestCollis__10FireBreath,
+                       kDetonate = wotm::fn::DetonateWeapon__6WeaponR9_hdResult, kCrowdInto = wotm::fn::transitionInto__17StateCrowdControl;
+    constexpr uint32_t kBreathOwner = 0x4, kWeaponOwnerId = 0x120, kCrowdOwner = 0xC;
+    PS2Runtime::RecompiledFunction g_origFxPos = nullptr, g_origFxMat = nullptr, g_origBreathActivate = nullptr, g_origBreathCollis = nullptr,
+                                   g_origDetonate = nullptr, g_origCrowdInto = nullptr;
+    uint32_t g_fxOwner = 0;   // monstro dono dos efeitos criados agora (0 = nenhum)
+
+    bool togeraFx(uint32_t preset)
+    {
+        switch (preset)
+        {
+        case 8:     // LizardBreathCore
+        case 36:    // LizardFlashBang
+        case 51:    // LizardBreath
+        case 80:    // LizardHit
+        case 81:    // LizardHitSparks
+        case 95:    // LizardSpecialHit
+        case 132:   // LizardCrowdControl1
+        case 148:   // LizardBreathSparks
+            return true;
+        default:
+            return false;
+        }
+    }
+    // A cor do fogo do monstro: a da skin do traje, ou a do custom dono dela; 0 = a do jogo
+    uint32_t fireColorOf(uint8_t *rdram, uint32_t m)
+    {
+        const int costume = m ? monsterCostume(rdram, m) : -1;
+        if (costume < 4)
+            return 0;
+        const wotm::mods::Registry &r = wotm::mods::Registry::get();
+        const wotm::mods::Skin *k = r.skinByIndex(int(cRd32(rdram, m + kTypeBits) >> 5), costume);
+        if (!k)
+            return 0;
+        if (k->fireColor)
+            return k->fireColor;
+        const wotm::mods::Custom *cu = k->custom.empty() ? nullptr : r.custom(k->custom);
+        return cu ? cu->fireColor : 0;
+    }
+    void fxCreate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t entry, PS2Runtime::RecompiledFunction orig)
+    {
+        const int presetReg = entry == kFxPos ? 5 : 6;   // (pos, id, ...) / (pos, mat, id, ...); fora do GPR_U32, que nao poe parenteses
+        const uint32_t preset = ctx->pc == entry ? GPR_U32(ctx, presetReg) : ~0u;
+        const uint32_t owner = g_fxOwner;
+        orig(rdram, ctx, runtime);
+        const uint32_t idx = GPR_U32(ctx, 2);
+        static const bool dbg = [] { const char *e = std::getenv("WOTM_FXCREATELOG"); return e && *e && *e != '0'; }();
+        if (dbg && preset != ~0u)
+            std::fprintf(stderr, "[fx] criado fx[%u] preset %u por 0x%08X, dono 0x%08X\n", idx, preset, GPR_U32(ctx, 31), owner);
+        if (preset == ~0u || idx >= 100)
+            return;
+        const uint32_t color = owner && togeraFx(preset) ? fireColorOf(rdram, owner) : 0;
+        g_wotmFxTint[idx].store(color ? ((preset + 1) << 24 | (color & 0xFFFFFFu)) : 0, std::memory_order_relaxed);
+        if (color)
+        {
+            static std::set<uint64_t> logged;   // uma linha por preset e cor
+            if (logged.insert(uint64_t(preset) << 32 | color).second)
+                std::fprintf(stderr, "[custom] fogo: preset %u na cor #%06X\n", preset, color & 0xFFFFFFu);
+        }
+    }
+    void fxPos(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { fxCreate(rdram, ctx, runtime, kFxPos, g_origFxPos); }
+    void fxMat(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { fxCreate(rdram, ctx, runtime, kFxMat, g_origFxMat); }
+    // Roda `orig` com g_fxOwner = m (o anterior volta no fim: as chamadas se aninham)
+    void withFxOwner(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, PS2Runtime::RecompiledFunction orig)
+    {
+        const uint32_t prev = g_fxOwner;
+        g_fxOwner = m;
+        orig(rdram, ctx, runtime);
+        g_fxOwner = prev;
+    }
+    void breathActivate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t m = ctx->pc == kBreathActivate ? READ32(GPR_U32(ctx, 4) + kBreathOwner) : 0;
+        withFxOwner(rdram, ctx, runtime, m, g_origBreathActivate);
+    }
+    void breathCollis(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t m = ctx->pc == kBreathCollis ? READ32(GPR_U32(ctx, 4) + kBreathOwner) : 0;
+        withFxOwner(rdram, ctx, runtime, m, g_origBreathCollis);
+    }
+    void crowdInto(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t m = ctx->pc == kCrowdInto ? READ32(GPR_U32(ctx, 4) + kCrowdOwner) : 0;
+        withFxOwner(rdram, ctx, runtime, m, g_origCrowdInto);
+    }
+    void detonate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        uint32_t m = 0;
+        if (ctx->pc == kDetonate)
+            if (const uint32_t id = READ32(GPR_U32(ctx, 4) + kWeaponOwnerId))
+            {
+                const uint32_t o = wotm_modes4::call(rdram, ctx, runtime, kGetInteractive, {id});
+                for (uint32_t i = 0; o && i < 8; ++i)   // so um monstro da luta (o dono pode ser um veiculo, uma torre)
+                    if (READ32(kGameObj + kMonsters + 4 * i) == o)
+                        m = o;
+            }
+        withFxOwner(rdram, ctx, runtime, m, g_origDetonate);
+    }
 } // namespace wotm_custom
 
 // O custom de um Monster com o traje dos arquivos proprios (ou uma skin dele); nullptr = monstro do jogo. O banco de som proprio
@@ -1461,6 +1565,18 @@ void wotmCustomInstall(PS2Runtime &runtime)
         runtime.registerFunction(kTakeDamage, &takeDamage);
     if ((g_origInitDynamics = runtime.lookupFunction(kInitDynamics)))
         runtime.registerFunction(kInitDynamics, &initDynamics);
+    if ((g_origFxPos = runtime.lookupFunction(kFxPos)))
+        runtime.registerFunction(kFxPos, &fxPos);
+    if ((g_origFxMat = runtime.lookupFunction(kFxMat)))
+        runtime.registerFunction(kFxMat, &fxMat);
+    if ((g_origBreathActivate = runtime.lookupFunction(kBreathActivate)))
+        runtime.registerFunction(kBreathActivate, &breathActivate);
+    if ((g_origBreathCollis = runtime.lookupFunction(kBreathCollis)))
+        runtime.registerFunction(kBreathCollis, &breathCollis);
+    if ((g_origDetonate = runtime.lookupFunction(kDetonate)))
+        runtime.registerFunction(kDetonate, &detonate);
+    if ((g_origCrowdInto = runtime.lookupFunction(kCrowdInto)))
+        runtime.registerFunction(kCrowdInto, &crowdInto);
     if (const char *e = std::getenv("WOTM_ANIMLOG"); e && *e && *e != '0')
     {
         if ((g_origAnimStart = runtime.lookupFunction(kAnimStartFn)))

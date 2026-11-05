@@ -94,6 +94,7 @@ std::atomic<int> g_wotmCheatKillWho{1};
 std::atomic<bool> g_wotmFreeCam{false};
 std::atomic<bool> g_wotmFreeCamPad{false};
 std::atomic<float> g_wotmMechaReticle{0.f};   // retícula da camera da torre do Mecha (wotm_custom.inc grava, wotm_live.inc desenha)
+std::atomic<uint32_t> g_wotmFxTint[100];      // cor do fogo por fx[i] (wotm_custom.inc grava, Particles::tintTags le)
 std::mutex g_wotmFreeCamM;
 WotmFreeCamPose g_wotmFreeCamPose;
 

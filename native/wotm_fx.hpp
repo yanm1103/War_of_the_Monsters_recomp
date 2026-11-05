@@ -935,6 +935,7 @@ struct FxSystem {
     uint32_t type = 0;
     int n = 0;             // numParticles
     float key = 0;         // ordem de desenho (maior = mais longe = antes)
+    uint32_t tint = 0;     // "fireColor" do monstro que o criou (0x01RRGGBB; 0 = as cores do jogo); Particles::tintTags
 };
 
 // Eixos da camera para montar os quadrados: right/up no plano da tela, back = -frente, profundidade(p) = depth . (p, 1)
@@ -948,7 +949,11 @@ public:
     using TexFn = std::function<unsigned(uint32_t texId, uint64_t tex0)>;
 
     std::vector<FxSystem> systems;
-    float wide = 1.f;   // largura da tela / largura 4:3 (Scene::wide): teste de visao com os planos laterais da tela larga
+    // Cor do fogo por sistema ("fireColor" de skin/custom; MODS.md): o runtime (wotm_custom.inc) grava, na criacao de cada fx[i], o
+    // preset + 1 no byte alto e 0xRRGGBB embaixo, ou 0. Vale enquanto o preset de fx[i] for o gravado (sistema recriado por outro
+    // caminho sai sem cor). nullptr fora do runtime (viewer, monview).
+    static inline const std::atomic<uint32_t> *tintTags = nullptr;
+    float wide = 1.f;  // largura da tela / largura 4:3 (Scene::wide): teste de visao com os planos laterais da tela larga
     bool fovCull = true;     // collect recorta pela vista do jogo (inViewFov); false = camera livre pausada
     bool frameGate = true;   // collect sem particulas em quadro sem particleDraw (flareSlot); false = recoleta da camera livre pausada
     // Sprites que o jogo pausado nao tem (modo foto, wotm_photo.inc: fogo do Agamo simulado com o wotm_flame.hpp quando o emissor
@@ -1189,6 +1194,9 @@ public:
             s.index = i;
             s.type = ram.u32(b + fxoff::type);
             s.n = int32_t(ram.u32(b + fxoff::numParticles));
+            if (tintTags)
+                if (const uint32_t t = tintTags[i].load(std::memory_order_relaxed); t && (t >> 24) == ram.u32(b + fxoff::fxId) + 1)
+                    s.tint = 0x01000000u | (t & 0xFFFFFFu);
             const int maxN = int32_t(ram.u32(b + fxoff::maxParticles));
             const bool built = (ram.u32(b + fxoff::infoAttribs) & 0x400) != 0;
             const int minN = s.type == FX_SPRINE ? 2 : 1;
@@ -1669,11 +1677,11 @@ public:
             const uint32_t b = s.base, p = ram.u32(b + fxoff::pos), a = ram.u32(b + fxoff::age);
             const uint32_t ti = ram.u32(b + fxoff::texInfoIndex);
             const uint32_t tinfo = fxaddr::textureInfo + 8 * (ti & 127);
-            std::fprintf(stderr, "[fx] #%u preset %u %s n=%d alpha=%02x cores=%u@%u texInfo=%u (n=%d idx=%u) cpf=%u vida=%d | p0 %.1f %.1f %.1f tam %.2f idade %d\n",
+            std::fprintf(stderr, "[fx] #%u preset %u %s n=%d alpha=%02x cores=%u@%u texInfo=%u (n=%d idx=%u) cpf=%u vida=%d | p0 %.1f %.1f %.1f tam %.2f idade %d cor %06X\n",
                          s.index, ram.u32(b + fxoff::fxId), fxTypeName(s.type), s.n, ram.u32(b + fxoff::alphaContext),
                          ram.u32(b + fxoff::numColors), ram.u32(b + fxoff::colorIndex), ti, ram.s16(tinfo), ram.u16(tinfo + 2),
                          ram.u32(b + fxoff::colorsPerFrame), ram.s16(b + fxoff::lifetime),
-                         ram.f32(p), ram.f32(p + 4), ram.f32(p + 8), ram.f32(p + 12), ram.s16(a));
+                         ram.f32(p), ram.f32(p + 4), ram.f32(p + 8), ram.f32(p + 12), ram.s16(a), s.tint & 0xFFFFFFu);
         }
     }
 
@@ -2360,7 +2368,33 @@ private:
     static uint8_t blendFor(uint32_t alpha) { return alpha ? uint8_t(alpha & 0xFF) : kGsAlphaNormal; }
 
     // RGBAQ do GS (0x80 = 1,0) cru: o modo GS do shader (shaderNormal) faz texel * Cv / 128 e At * Av / 16384
-    static void vcolor(uint32_t c) { rlColor4ub(uint8_t(c & 255), uint8_t((c >> 8) & 255), uint8_t((c >> 16) & 255), uint8_t(c >> 24)); }
+public:
+    // Cor do fogo do sistema em desenho (FxSystem::tint; so a thread de apresentacao desenha). O TexFn a le para dar a textura
+    // recolorida (Scene::particleTexture): a do bafo do Togera ja e verde, nao so a cor de vertice.
+    static inline uint32_t s_tint = 0;
+    struct TintScope {
+        explicit TintScope(uint32_t t) { s_tint = t; }
+        ~TintScope() { s_tint = 0; }
+    };
+    // O verde do Togera vira a cor pedida (0x01RRGGBB) com o mesmo brilho: v = canal maior, s = saturacao; a parte saturada vai
+    // para a cor (normalizada para canal maior 1) e a parte branca (o miolo) continua branca. Alfa intacto.
+    static uint32_t tinted(uint32_t c, uint32_t t) {
+        const float ch[3] = {float(c & 255), float((c >> 8) & 255), float((c >> 16) & 255)};
+        const float v = std::max({ch[0], ch[1], ch[2]}), mn = std::min({ch[0], ch[1], ch[2]});
+        if (!(v > 0.f)) return c;
+        const float s = (v - mn) / v;
+        const float T[3] = {float((t >> 16) & 255), float((t >> 8) & 255), float(t & 255)};
+        const float tm = std::max({T[0], T[1], T[2], 1.f});
+        uint32_t out = c & 0xFF000000u;
+        for (int k = 0; k < 3; ++k)
+            out |= uint32_t(std::clamp(v * (1.f - s + s * T[k] / tm) + 0.5f, 0.f, 255.f)) << (8 * k);
+        return out;
+    }
+private:
+    static void vcolor(uint32_t c) {
+        if (s_tint) c = tinted(c, s_tint);
+        rlColor4ub(uint8_t(c & 255), uint8_t((c >> 8) & 255), uint8_t((c >> 16) & 255), uint8_t(c >> 24));
+    }
 
     // Quadro de textura do texSprite (texSpritePacketBuild)
     static uint32_t texFrame(const Ram &ram, uint32_t b, int i, int age) {
@@ -2484,6 +2518,7 @@ private:
     }
 
     void drawSystem(const Ram &ram, const FxSystem &s, const TexFn &texture, const FxView &view) {
+        const TintScope tintScope(s.tint);
         const uint32_t b = s.base;
         const uint32_t pos = ram.u32(b + fxoff::pos), vel = ram.u32(b + fxoff::vel), age = ram.u32(b + fxoff::age);
         const uint32_t ti = ram.u32(b + fxoff::texInfoIndex) & 127;
