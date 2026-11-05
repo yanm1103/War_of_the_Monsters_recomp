@@ -9,7 +9,10 @@ CHAR_INSTANCE is replaced by a new one built from the .glb:
   are free); per joint a SKEL_BONE (bind pose = the .glb's rest pose) and an ANIM_XFORM with 3 rotation and 3 translation
   channels and the rest rotation as pre-rotation (rest angles 0);
 - mesh: the skinned meshes (3 bones per vertex, the heaviest kept) and the rigid ones (on the joint above them), in blocks
-  of at most 32 bones (one OBJECT per block and up to 5 textures; a bone used by two blocks gets a second output);
+  of at most 32 bones (one OBJECT per block and up to 5 textures; a bone used by two blocks gets a second output). A rigid
+  mesh that scales or moves against that joint in some action (a claw that grows, a part shown only in some moves) gets
+  its own ANIM_XFORM and ANIM_SCALE under the joint and a rigid OBJECT per texture, as the game's own parts do (bone
+  scale does not reach skinned meshes: the game's skeleton has no scale);
 - animations: every action `a<id>` (ids up to 299; `a<id>_loop` / `a<id>_once` force the loop flag), sampled at 60 per
   second and solved into the channels; the hand and foot contact channels (footsteps, dust) come from the height of the
   contact locators, the sounds and the AnimPappy channels (ids 1..7, throws) from the base's animation with that id. Every
@@ -94,6 +97,12 @@ def orth(m):
     y = [c / ny for c in y]
     z = _cross(x, y)
     return [x + [0.0], y + [0.0], z + [0.0], [m[3][0], m[3][1], m[3][2], 1.0]]
+
+
+def split_scale(L):
+    """Row matrix L = diag(s) . R . T -> (s, R with T; None when a scale is 0)."""
+    s = [_norm(L[r][:3]) for r in range(3)]
+    return s, orth(L)
 
 
 def rot_only(m):
@@ -234,7 +243,7 @@ def _clip_id(name):
 
 
 class Joint:
-    __slots__ = ("node", "name", "parent", "kids", "rest", "local", "idx", "out", "dups", "pre", "t0")
+    __slots__ = ("node", "name", "parent", "kids", "rest", "local", "idx", "out", "dups", "pre", "t0", "det0")
 
     def __init__(self, node, name):
         self.node, self.name, self.parent, self.kids = node, name, None, []
@@ -293,6 +302,28 @@ class Rig:
         Y = eye() if self.front == "+y" else [[-1.0, 0.0, 0.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0],
                                                [0.0, 0.0, 0.0, 1.0]]
         C0 = mul(Y, A)
+        # the local axes: inside the kit's "WotM" root they already are the game's; in a Blender scene they turn like the world
+        self.Cr = eye() if game_units else inv(C0)
+        self.C = C0   # scaled below, once the size is known (live_local only runs after that)
+
+        def live(ni, holder):
+            """Whether a rigid mesh moves or scales against the joint that holds it in some action (else it can ride
+            the joint's palette slot)."""
+            nodes_k = [ni, holder] + ancestors(ni)
+            ref = None
+            for clip in ed.clips.values():
+                cache = {}
+                ts = ed.key_times(clip, nodes_k) or [0.0]
+                for t in ts:
+                    Wn = ed.world(ni, clip, t, cache)
+                    Wh = ed.world(holder, clip, t, cache)
+                    L = mul(inv(Wh), Wn) if abs(ngpanim.det3(Wh)) > 1e-12 else Wn
+                    if ref is None:
+                        ref = L
+                    elif max(abs(L[r][c] - ref[r][c]) for r in range(3) for c in range(3)) > 1e-3 or \
+                            max(abs(L[r][3] - ref[r][3]) for r in range(3)) > 1e-3 * (1.0 + _norm([ref[r][3] for r in range(3)])):
+                        return True
+            return False
 
         # ---- meshes at rest (game axes, unscaled): corners (pos, normal, uv16, rgba, ((node, w), ...)) by material
         mats = j.get("materials", [])
@@ -300,26 +331,34 @@ class Rig:
         prims = []          # (material key, [triangle of corners])
         coll_pts = []       # [[points]] of the coll* meshes
         hidden_rigid = []
+        self.rigid = []     # live rigid meshes: {"node", "holder", "name", "prims"}, corners in the mesh's own axes
         for ni, nd in enumerate(nodes):
             if "mesh" not in nd:
                 continue
             mesh = j["meshes"][nd["mesh"]]
             is_coll = (nd.get("name") or mesh.get("name") or "").lower().startswith("coll")
             skin = skins[nd["skin"]] if "skin" in nd else None
+            is_live = False
             if skin is not None:
                 ibm = glb.accessor(skin["inverseBindMatrices"]) if "inverseBindMatrices" in skin else None
                 M = [mul(W0[k], ngpmesh._col(ibm[q]) if ibm else eye()) for q, k in enumerate(skin["joints"])]
                 holder = None
             else:
                 holder = steady_joint(ni)
-                if abs(ngpanim.det3(W0[ni])) < 1e-12 or abs(ngpanim.det3(W_idle(ni))) < 1e-12:
+                is_live = not is_coll and holder is not None and live(ni, holder)
+                if is_live:
+                    # drawn by its own OBJECT under an ANIM_XFORM + ANIM_SCALE of its own: corners in its axes (game's)
+                    Wm = mul(inv(C0), inv(self.Cr))
+                elif abs(ngpanim.det3(W0[ni])) < 1e-12 or abs(ngpanim.det3(W_idle(ni))) < 1e-12:
                     hidden_rigid.append(nd.get("name"))
                     continue
-                # idle's first frame, moved with the holder back to its rest
-                Wm = W_idle(ni)
-                if holder is not None:
-                    Wm = mul(mul(W0[holder], inv(W_idle(holder))), Wm)
+                else:
+                    # idle's first frame, moved with the holder back to its rest
+                    Wm = W_idle(ni)
+                    if holder is not None:
+                        Wm = mul(mul(W0[holder], inv(W_idle(holder))), Wm)
             pts = []
+            live_prims = []
             for prim in mesh.get("primitives", []):
                 if prim.get("mode", 4) != 4:
                     raise RigError("mesh %s: primitive mode %d (triangles only)" % (nd.get("name"), prim["mode"]))
@@ -387,12 +426,14 @@ class Rig:
                     tris.append(tri)
                     pts += [c[0] for c in tri]
                 if not is_coll and tris:
-                    prims.append((self._mat_key(mats, prim), tris))
+                    (live_prims if is_live else prims).append((self._mat_key(mats, prim), tris))
             if is_coll and pts:
                 coll_pts.append(pts)
+            if live_prims:
+                self.rigid.append({"node": ni, "holder": holder, "name": nd.get("name") or "node%d" % ni,
+                                   "prims": live_prims})
         if hidden_rigid:
-            log("warning: rigid meshes scaled to 0 at rest or in the idle's first frame, left out (a part that only "
-                "shows in some moves cannot hide in a skinned body): %s" % ", ".join(map(str, hidden_rigid)))
+            log("warning: rigid meshes scaled to 0 at rest and in every action, left out: %s" % ", ".join(map(str, hidden_rigid)))
         if not prims:
             raise RigError("no mesh to draw in the .glb")
 
@@ -415,8 +456,6 @@ class Rig:
             log("warning: the rest mesh goes from z %.1f to %.1f; the game puts z 0 on the ground" % (min(allz), max(allz)))
         S = [[s, 0.0, 0.0, 0.0], [0.0, s, 0.0, 0.0], [0.0, 0.0, s, lift], [0.0, 0.0, 0.0, 1.0]]
         self.C = mul(S, C0)
-        # the local axes: inside the kit's "WotM" root they already are the game's; in a Blender scene they turn like the world
-        self.Cr = eye() if game_units else inv(C0)
         for _k, tris in prims:
             for t in tris:
                 for c in t:
@@ -448,6 +487,8 @@ class Rig:
                     for k, _w in c[4]:
                         if k is not None:
                             need.add(k)
+        for r in self.rigid:
+            need.add(r["holder"])
         loc_holder = {}
         for lid, i in locs.items():
             hj = steady_joint(i)
@@ -499,11 +540,14 @@ class Rig:
             if jt.parent is not None:
                 self.joints[jt.parent].kids.append(jt.idx)
         self.jx = jx
+        self.scaled = set()   # joints some action scales (pose(); the skin cannot follow)
         for jt in self.joints:
-            R = orth(self.game_row(W0[jt.node]))
+            G = self.game_row(W0[jt.node])
+            R = orth(G)
             if R is None:
                 raise RigError("joint %s is scaled to 0 at rest" % jt.name)
             jt.rest = R
+            jt.det0 = abs(ngpanim.det3(G)) / s ** 3
         for jt in self.joints:
             P = self.joints[jt.parent].rest if jt.parent is not None else eye()
             jt.local = mul(jt.rest, inv(P))
@@ -524,6 +568,15 @@ class Rig:
                 R = [B[0][:3] + [0.0], B[1][:3] + [0.0], B[2][:3] + [0.0], R[3]]
             self.locs[lid] = (hj, mul(R, inv(self.joints[hj].rest)))
         self.coll_pts = coll_pts
+        for r in self.rigid:
+            r["holder"] = jx[r["holder"]]
+            r["tris"] = [(key, [[(c[0], c[1], c[2], c[3]) for c in t] for t in tris]) for key, tris in r["prims"]]
+            del r["prims"]
+            # at rest: as the idle's first frame shows it (the kit's bind pose drops the scale of the scale nodes)
+            r["rest"] = self.live_local(r, idle, 0.0) if idle is not None else self.live_local(r, None, 0.0)
+        if self.rigid:
+            log("rigid parts with an animated scale or offset, each with its own OBJECT: %s" % ", ".join(
+                "%s (on %s)" % (r["name"], self.joints[r["holder"]].name) for r in self.rigid))
         self.clips = {}
         for nm, clip in ed.clips.items():
             aid, loop = _clip_id(nm)
@@ -585,10 +638,21 @@ class Rig:
         """Game world (row form, rotation only) of every joint at time t of the clip; a joint scaled to 0 keeps its rest."""
         cache = {}
         out = []
+        s3 = self.scale ** 3
         for jt in self.joints:
-            R = orth(self.game_row(self.ed.world(jt.node, clip, t, cache)))
+            G = self.game_row(self.ed.world(jt.node, clip, t, cache))
+            if abs(abs(ngpanim.det3(G)) / s3 - jt.det0) > 0.05 * jt.det0:
+                self.scaled.add(jt.name)
+            R = orth(G)
             out.append(R if R is not None else jt.rest)
         return out
+
+    def live_local(self, r, clip, t, cache=None):
+        """A live rigid mesh's local matrix (row form, with its scale) against its joint's game pose at time t."""
+        cache = {} if cache is None else cache
+        G = self.game_row(self.ed.world(r["node"], clip, t, cache))
+        H = orth(self.game_row(self.ed.world(self.joints[r["holder"]].node, clip, t, cache)))
+        return mul(G, inv(H if H is not None else self.joints[r["holder"]].rest))
 
 
 # ---------------------------------------------------------------- palette blocks and objects
@@ -739,8 +803,9 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
                     by_slot[s] = enc
             objects.append((b, chunk, by_slot))
 
-    # ---- channels: 6 per joint, then the contacts and the AnimPappy ones
-    nch = 6 * nj
+    # ---- channels: 6 per joint, 9 per live rigid part (its ANIM_XFORM and ANIM_SCALE), then the contacts and AnimPappy
+    RG = rig.rigid
+    nch = 6 * nj + 9 * len(RG)
     contact_ch = {}
     for lid in CONTACT_IDS:
         contact_ch[lid] = nch
@@ -760,6 +825,16 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
         b0 = 6 * jt.idx
         xf.append({"bits": 1, "pre": jt.pre, "post": eye(), "ridx": [b0, b0 + 1, b0 + 2], "r0": [0.0, 0.0, 0.0],
                    "tidx": [b0 + 3, b0 + 4, b0 + 5], "t0": jt.t0})
+    for k, r in enumerate(RG):
+        b0 = 6 * nj + 9 * k
+        angular |= {b0, b0 + 1, b0 + 2}
+        s0, R0 = split_scale(r["rest"])
+        if R0 is None:   # hidden at rest: the axes of the joint
+            R0 = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], r["rest"][3][:3] + [1.0]]
+        r["s0"], r["local0"] = s0, R0
+        r["sidx"] = [b0 + 6, b0 + 7, b0 + 8]
+        xf.append({"bits": 1, "pre": rot_only(R0), "post": eye(), "ridx": [b0, b0 + 1, b0 + 2], "r0": [0.0, 0.0, 0.0],
+                   "tidx": [b0 + 3, b0 + 4, b0 + 5], "t0": list(R0[3][:3])})
 
     # ---- locators: the rig's plus the base's it lacks (scaled, on the nearest joint)
     locs = dict(rig.locs)
@@ -808,11 +883,30 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
         if loop is None:
             loop = bool(ba["loop"]) if ba else aid in ngpanim.LOOPING_IDS
         vals = {}
-        prev = [[0.0, 0.0, 0.0] for _ in J]
+        prev = [[0.0, 0.0, 0.0] for _ in xf]
+        for r in RG:
+            r.pop("last", None)
         worst = [0.0, 0.0, None, 0]
         lz = {lid: [] for lid in contact_locs}
         for f in range(frames if clip is not None else 1):
             W = rig.pose(clip, f / FPS) if clip is not None else [jt.rest for jt in J]
+            for k, r in enumerate(RG):
+                Lm = rig.live_local(r, clip, f / FPS) if clip is not None else r["rest"]
+                s, R = split_scale(Lm)
+                if R is None:   # scaled to 0 on some axis: hidden, the rest of the transform held from the last frame
+                    R = r.get("last", r["local0"])
+                r["last"] = R
+                q = nj + k
+                rr, t, L = ngpanim.solve_xform(xf[q], R, prev[q])
+                prev[q] = rr
+                b0 = 6 * nj + 9 * k
+                for c in range(3):
+                    vals.setdefault(b0 + c, []).append(-rr[c])
+                    vals.setdefault(b0 + 3 + c, []).append(t[c])
+                    vals.setdefault(b0 + 6 + c, []).append(s[c])
+                dr, dp = ngpanim.mat_diff(L, R)
+                if dr > worst[0] or dp > worst[1]:
+                    worst = [max(dr, worst[0]), max(dp, worst[1]), r["name"], f]
             for jt in J:
                 P = W[jt.parent] if jt.parent is not None else eye()
                 Lt = mul(W[jt.idx], inv(P))
@@ -846,6 +940,10 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
             log("%s: animation %d, %d frames%s" % (nm, aid, frames, ", looping" if loop else ""))
     if worst_all:
         log("warning: channels off the .glb (rotation / units): %s" % "; ".join(worst_all))
+    skin_scaled = sorted(rig.scaled & {J[j].name for js, _t in blocks for j in js})
+    if skin_scaled:
+        log("warning: actions scale joints the skin follows; the game's skeleton has no scale, so the skin keeps its "
+            "size: %s" % ", ".join(skin_scaled))
     filled = [a[0] for a in anims if a[0] not in rig.clips]
     if filled:
         log("%d animations of the base held at the rest pose (no action in the .glb): %s" % (
@@ -923,6 +1021,18 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
         log("object %d: block %d, textures %s, %d triangles, %d sub-packets" % (
             oi, b, ",".join(map(str, tids)), sum(len(v) for v in by_slot.values()), len(pkts)))
 
+    # live rigid parts: one rigid OBJECT per texture (polyPkt = the packet with its DMA tag; no animPktPtr entry)
+    for r in RG:
+        r["objs"] = []
+        by_tex = {}
+        for key, ts in r["tris"]:
+            by_tex.setdefault(key_tex[key], []).extend(ts)
+        for t, ts in sorted(by_tex.items()):
+            a = rigid_object(o, mb, tmpl, base, t, tex_ctx[t], ts)
+            if a is not None:
+                r["objs"].append(a)
+        log("rigid part %s: %d objects, %d triangles" % (r["name"], len(r["objs"]), sum(len(v) for v in by_tex.values())))
+
     # animation character: map, angular bits, animations, control nodes
     ids_map = sorted([(lid, contact_ch[lid]) for lid in CONTACT_IDS] + [(pid, pappy_ch[pid]) for pid in PAPPY_IDS])
     mp = o.alloc(4 + 4 * len(ids_map), 4)
@@ -934,7 +1044,7 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
     ch = o.alloc(0xC + 4 * na, 16)
     o.u16(ch, na)
     o.u16(ch + 2, nch)
-    o.u16(ch + 4, nj)
+    o.u16(ch + 4, len(xf))
     o.ptr(ch + 8, mp)
     abits = [0] * ((nch + 7) // 8)
     for c in angular:
@@ -979,13 +1089,18 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
 
     # instance state: channel values, dirty bits, atMat (rest locals)
     val = o.alloc(4 * nch, 4)
-    for jt in J:
-        for q in range(3):
-            o.f(val + 4 * (6 * jt.idx + 3 + q), jt.t0[q])
+    for q, x in enumerate(xf):
+        for c in range(3):
+            o.f(val + 4 * x["tidx"][c], x["t0"][c])
+    for r in RG:
+        for c in range(3):
+            o.f(val + 4 * r["sidx"][c], r["s0"][c])
     dirty = o.alloc(nch // 8 + 1, 4)
-    atm = o.alloc(64 * nj, 16)
+    atm = o.alloc(64 * len(xf), 16)
     for jt in J:
         o.mat(atm + 64 * jt.idx, jt.local)
+    for k, r in enumerate(RG):
+        o.mat(atm + 64 * (nj + k), r["local0"])
     amp = o.alloc(4 * len(outs), 4)
     for i, (_j, b, s) in enumerate(outs):
         o.ptr(amp + 4 * i, blk_addr[b] + 0x10 + 0x40 * s)
@@ -1003,10 +1118,17 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
                 kid_specs.append(("loc", lid, L))
         if jt.idx == rig.main:
             kid_specs.append(("coll",))
+        for k, r in enumerate(RG):
+            if r["holder"] == jt.idx and r["objs"]:
+                kid_specs.append(("rigid", k))
         for c in jt.kids:
             kid_specs.append(("joint", c))
+        return xf_node(jt.idx, jt.idx == rig.main, kid_specs)
+
+    def xf_node(q, is_main, kid_specs):
+        """ANIM_XFORM q (channels and defaults from xf[q], atMat q) with its children."""
         a = o.alloc(0xD0 + 4 * len(kid_specs), 16)
-        x = xf[jt.idx]
+        x = xf[q]
         o.u32(a, 17)
         o.u32(a + 4, len(kid_specs))
         o.f(a + 0xC, 1.0)
@@ -1016,14 +1138,14 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
             o.s16(a + 0x18 + 2 * q, x["tidx"][q])
         o.s16(a + 0x1E, x["ridx"][0])
         o.f(a + 0x2C, 1.0)
-        for q in range(3):
-            o.f(a + 0x30 + 4 * q, jt.t0[q])
+        for c in range(3):
+            o.f(a + 0x30 + 4 * c, x["t0"][c])
         o.f(a + 0x3C, 1.0)
-        o.mat(a + 0x40, jt.pre)
+        o.mat(a + 0x40, x["pre"])
         o.mat(a + 0x80, eye())
         mb.d[a + 0xC1 - BASE] = 0x3F
-        o.u16(a + 0xC2, 1 | (4 if jt.idx == rig.main else 0))
-        o.u32(a + 0xC4, jt.idx)
+        o.u16(a + 0xC2, 1 | (4 if is_main else 0))
+        o.u32(a + 0xC4, q)
         for k, spec in enumerate(kid_specs):
             o.ptr(a + 0xCC + 4 * k, emit(spec))
         return a
@@ -1051,6 +1173,35 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
             t = o.alloc(0x20, 16)
             o.u32(t, 3)
             o.ptr(a + 0xC, t)
+            return a
+        if kind == "rigid":
+            return xf_node(nj + spec[1], False, [("scale", spec[1])])
+        if kind == "scale":
+            # ANIM_SCALE: L = T(a) . S(s) . T(t + b) with a = b = t = 0; all three scales hide the part at 0
+            r = RG[spec[1]]
+            a = o.alloc(0x64, 16)
+            o.u32(a, 38)
+            o.u32(a + 4, 1)
+            o.f(a + 0xC, 1.0)
+            o.s16(a + 0x10, -1)
+            for c in range(3):
+                o.s16(a + 0x12 + 2 * c, r["sidx"][c])
+                o.s16(a + 0x18 + 2 * c, -1)
+                o.f(a + 0x20 + 4 * c, r["s0"][c])
+            o.f(a + 0x3C, 1.0)
+            grp = o.alloc(0x20 + 4 * len(r["objs"]), 16)
+            o.u32(grp, 1)
+            o.u16(grp + 8, len(r["objs"]))
+            o.u16(grp + 0xA, 1)
+            ctr = [sum(ob[1][c] for ob in r["objs"]) / len(r["objs"]) for c in range(3)]
+            rad = max(math.dist(ctr, ob[1]) + ob[2] for ob in r["objs"])
+            o.f(grp + 0xC, rad * rad)
+            for c in range(3):
+                o.f(grp + 0x10 + 4 * c, ctr[c])
+            o.f(grp + 0x1C, rad)
+            for k, ob in enumerate(r["objs"]):
+                o.ptr(grp + 0x20 + 4 * k, ob[0])
+            o.ptr(a + 0x60, grp)
             return a
         if kind == "loc":
             r = o.alloc(0x60, 16)
@@ -1163,6 +1314,56 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
         stem, len(mb.d), nj, len(outs), len(obj_addr), na, nch))
     return {"joints": nj, "outputs": len(outs), "objects": len(obj_addr), "animations": na, "channels": nch,
             "textures": sorted(new_tex)}
+
+
+def _fbits(v):
+    return struct.unpack("<I", struct.pack("<f", v))[0]
+
+
+def rigid_object(o, mb, tmpl, base, tex_id, ctx, tris):
+    """A rigid OBJECT (one texture) for triangles of corners (position, normal, uv16, rgba) in its own axes:
+    (address, sphere center, radius), None when every triangle is degenerate. The header is the body's OBJECT with
+    no animPktPtr entry (+0x68 = -1); polyPkt points at the packet, which starts with its DMA RET tag."""
+    enc = []
+    for t in tris:
+        e = tuple((tuple(_fbits(c) for c in cn[0]) + (_fbits(1.0),), cn[1], cn[2], cn[3]) for cn in t)
+        if e[0][0] == e[1][0] or e[1][0] == e[2][0] or e[0][0] == e[2][0]:
+            continue
+        enc.append(e)
+    if not enc:
+        return None
+    pkt = vifpkt.Packet(False)
+    for k, sp in enumerate(ngpmesh.build_packets(enc, base.gif_first, base.gif_rest)):
+        b = sp.batches[0]
+        b.pos = [p[:3] for p in b.pos]
+        b.mscal = None
+        if k:   # the texture is loaded once, by the packet's first section
+            g = b.sections[0].gif
+            b.sections[0].gif = g[:3] + (g[3] & ~0x7FFF,)
+        pkt.batches.append(b)
+    blob = vifpkt.encode(pkt)
+    start = o.alloc(len(blob), 0x80)
+    o.raw(start, blob)
+    a = o.alloc(0x70 + 0x30, 16)
+    o.raw(a, bytes(mb.d[tmpl - BASE:tmpl + 0x70 - BASE]))
+    o.ptr(a + 4, start)
+    nverts = sum(len(s.idx) for b in pkt.batches for s in b.sections)
+    bits = mb.u32(tmpl + 0xC)
+    o.u32(a + 0xC, (bits & ~(0x1FFF << 16)) | (min(nverts, 0x1FFF) << 16))
+    ctr, rad = sphere([c[0] for t in tris for c in t])
+    for c in range(3):
+        o.f(a + 0x10 + 4 * c, ctr[c])
+    o.f(a + 0x1C, rad)
+    o.f(a + 8, rad * rad)
+    for k in range(MAX_TEX):
+        o.u16(a + 0x50 + 2 * k, tex_id if k == 0 else 0)
+    o.u16(a + 0x5A, 1)
+    mb.ptr[1].append(a + 0x50 - BASE)
+    o.raw(a + 0x70, ctx)
+    mb.ptr[2].append(a + 0x70 - BASE)
+    o.u32(a + 0x64, 0)
+    o.u32(a + 0x68, 0xFFFFFFFF)
+    return a, ctr, rad
 
 
 def add_textures(data, tp, tmpl_id, new_ids):
