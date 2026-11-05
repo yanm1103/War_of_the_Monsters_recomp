@@ -750,7 +750,7 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
     top = max(p.texId for p in tp["packets"])
     key_tex = {}
     new_tex = {}                   # texId -> (PNG bytes, what)
-    for key, _ts in rig.prims:
+    for key, _ts in rig.prims + [kt for r in rig.rigid for kt in r["tris"]]:
         if key in key_tex:
             continue
         if key[0] == "tex" and key[1] in base.tex_ctx:

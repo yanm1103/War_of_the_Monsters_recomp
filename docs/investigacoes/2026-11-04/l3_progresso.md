@@ -59,17 +59,22 @@ Erros encontrados e corrigidos no caminho:
   errada só no VU1 (o monview e o ngpanim reconstroem pelos canais).
 - Achado à parte (não é do L3): nas lutas com o Togera do disco, as garras rígidas dele divergem (o nativo desenha uns 16
   triângulos que o VU1 não desenha, flags 0x311, sob o LOD de 4 níveis). As garras do rig novo, num GROUP sem LOD, casam.
+- Esqueleto do Robo-47 (`monglb --edit` do ROBOT0) sobre a base Togera (`build/l3/t2`, mod `teste_l3/robrig`): 46 juntas,
+  20 saídas, 19 peças rígidas vivas (as que o Robo-47 esconde e mostra pelo canal de visibilidade, que o kit exporta como
+  escala 0; antes elas ficariam presas na junta e sempre visíveis), 16 localizadores do próprio .glb, 162 animações, 460
+  canais. Textura nova: o PNG do .glb vira o texId 13 (`rigrob_t0013.png`) e um material sem imagem vira o 14. O ngprig
+  quebrava aqui (o texId das peças vivas não era montado); corrigido. Monview: pose igual à do ROBOT0 (a textura é a do
+  Togera, porque o monview não lê os PNGs). No jogo (`WOTM_MATCH=robrig,3,1`, 110 s): `LIZARD6.TEX t13/t14 <- png`, sem
+  queda, 99,83% casados em média (mínimo 98,9%), nenhuma divergência dentro do arquivo novo.
 
 ## Pendente (próximos passos, na ordem)
 
-1. **Esqueleto de outro monstro**: Robo-47 ou Agamo (`--edit`) sobre a base Togera. Exercita texturas novas (PNG do .glb) e
-   localizadores com outra orientação. Congar não serve de base, mas serve de rig.
-2. **Rig do Blender do zero**: script do Blender 5.1 (`C:/Program Files/Blender Foundation/Blender 5.1`) que monte um bípede
+1. **Rig do Blender do zero**: script do Blender 5.1 (`C:/Program Files/Blender Foundation/Blender 5.1`) que monte um bípede
    simples virado para -Y em metros, com `loc_*`, ações a090/a120; mais a volta Blender de um export do kit (eixos dos ossos
    mudam na importação: conferir que o ngprig não depende deles).
-3. Kit: `modkit.py monster rig <mod> <id> <rig.glb>` e botão "Import rig..." na GUI; `pose.py`/`wotm_model.hpp` com mais de
+2. Kit: `modkit.py monster rig <mod> <id> <rig.glb>` e botão "Import rig..." na GUI; `pose.py`/`wotm_model.hpp` com mais de
    64 saídas, se precisar.
-4. Docs (MODS.md, MODELS_3D.md seção "New skeleton", TOOLS.md, FORMATS.md se faltar campo) e tirar o L3 do `TODO.md`.
+3. Docs (MODS.md, MODELS_3D.md seção "New skeleton", TOOLS.md, FORMATS.md se faltar campo) e tirar o L3 do `TODO.md`.
 
 ## Relato do sub-agente (o que do jogo depende do esqueleto)
 
