@@ -393,7 +393,8 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   the adventure and puts the name on the HUD. Also: X+Square does the boss spin (`StateTopSpin`, instead of the regular monsters'
   `StateCrowdControl`; the full hit counts against the nearest AI), the turret does not follow the enemy all the time (the boss's "look" turns the
   whole torso; with lock-on it aims) and the dart (impale) becomes a regular hit on whoever lacks the stuck (0x8E) or pull-out (0x90) animation (it would
-  otherwise freeze; the struggle 0x8F that `StateImpaled::transitionOK` also asks for is unused, and Togera, Zorgulon and Cerebulon have none). Investigations (closed): `git show 18bb1d2:docs/investigacoes/2026-10-23/goliath_topspin.md`, `goliath_lockon.md`, `goliath_impale.md`.
+  otherwise freeze; the 0x8F that `StateImpaled::transitionOK` also asks for is unused, the struggle being 0x10F/0x110, and Togera, Zorgulon and
+  Cerebulon have no 0x8F). Investigations (closed): `git show 18bb1d2:docs/investigacoes/2026-10-23/goliath_topspin.md`, `goliath_lockon.md`, `goliath_impale.md`.
 - **HUD portrait:** the one of `ASSBOSS1.RTX` (texId 6) is a placeholder, with Congar's face. `"portrait": "goliathprime.png"` (in the monster's
   folder or at the mod root; 128 × 64 or bigger with the same aspect ratio, e.g. 512 × 256) replaces the portrait image of the custom's costume
   (`"portraitTex"`: the texId in the `.RTX`; default 6 for `ASSBOSS1`). It also applies to the adventure's boss, which uses the same file.

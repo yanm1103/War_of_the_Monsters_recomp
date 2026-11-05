@@ -412,7 +412,7 @@ namespace wotm_custom
     // Dardo (StateJavelin): o Weapon::DetonateWeapon chama o Monster::attachPickupImpaler na vitima, que entra no StateImpaled pelo
     // enterNewState sem o transitionOK (que pede as anims 0x8E, 0x8F e 0x90). O StateImpaled::update fica na 0x8E (preso; o debater
     // alterna 0x10F/0x110 e volta a ela) e so sai com a 0x90 no fim; sem ela (ASSBOSS0/1, JELLY) a vitima travava para sempre. A 0x8F
-    // ninguem usa: Togera, Zorgulon e Cerebulon (LIZARD, ALIEN, FINAL) nao a tem e sao empalados no retail. Sem a 0x8E ou a 0x90, o gancho faz o que o retail
+    // ninguem usa (o debater e a 0x10F/0x110): Togera, Zorgulon e Cerebulon (LIZARD, ALIEN, FINAL) nao a tem e sao empalados no retail. Sem a 0x8E ou a 0x90, o gancho faz o que o retail
     // faz com pickup invalido: killPickup(it, 1) e volta. O golpe do objeto (dispatchHit) chega como um comum. Investigacao: 18bb1d2:docs/investigacoes/2026-10-23/goliath_impale.md.
     constexpr uint32_t kImpale = wotm::fn::attachPickupImpaler__7MonsterGQ2t10LinkedList1ZP6Pickup8IteratorP8_fvector,
                        kKillPickup = wotm::fn::killPickup__12LevelPickupsGQ2t10LinkedList1ZP6Pickup8Iteratori;
