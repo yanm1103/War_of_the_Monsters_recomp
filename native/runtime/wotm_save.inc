@@ -952,10 +952,33 @@ namespace wotm_save
         std::memcpy(b, rdram + ((wotm::sym::GameLevelLongNames_006ED120 + lvl * 18) & 0x1FFFFFFu), 18);   // GameLevelLongNames[28][18]
         return b;
     }
+    // O custom dono do traje de um save (os arquivos proprios ou uma skin dele); nullptr num monstro do jogo
+    const wotm::mods::Custom *customOfCostume(uint32_t mon, uint32_t costume)
+    {
+        if (costume < 4)
+            return nullptr;
+        const wotm::mods::Registry &r = wotm::mods::Registry::get();
+        const wotm::mods::Skin *k = r.skinByIndex(static_cast<int>(mon), static_cast<int>(costume));
+        return k && !k->custom.empty() ? r.custom(k->custom) : nullptr;
+    }
+    // Nome do monstro do save: o do jogo ("Togera") ou o do custom com a capitalizacao dos do jogo ("Goliath Prime")
+    std::string monsterTitle(uint32_t mon, uint32_t costume)
+    {
+        if (const wotm::mods::Custom *cu = customOfCostume(mon, costume))
+        {
+            std::string n = cu->name;
+            for (size_t i = 0; i < n.size(); ++i)
+            {
+                const unsigned char ch = static_cast<unsigned char>(n[i]);
+                n[i] = char(i == 0 || n[i - 1] == ' ' ? std::toupper(ch) : std::tolower(ch));
+            }
+            return n;
+        }
+        return mon < std::size(kMonsterTitle) ? kMonsterTitle[mon] : "?";
+    }
     std::string rowTitle(const uint8_t *rdram, const Row &r)
     {
-        const uint32_t mon = r.sel >> 5;
-        return std::string(mon < std::size(kMonsterTitle) ? kMonsterTitle[mon] : "?") + " at " + levelTitle(rdram, r.level);
+        return monsterTitle(r.sel >> 5, r.costume) + " at " + levelTitle(rdram, r.level);
     }
     // A fase do save e a proxima a jogar (Shell::EvaluateOnePlayerStoryStatus soma 1 antes de perguntar): concluidas = fase - 1.
     int levelsDone(const Row &r) { return std::clamp(static_cast<int>(r.level) - 1, 0, kStoryLevels); }
@@ -1064,10 +1087,16 @@ namespace wotm_save
             const float k = inLevel ? 0.7f : 1.0f, aspect = 1.5f / (720.f / 224.f);
             const uint8_t a = static_cast<uint8_t>(255.f * std::clamp((static_cast<float>(g_vsyncs - m.openedAt) - 6.f) / 12.f, 0.f, 1.f));
             const float lw = 170.f * k, lh = lw * aspect * 0.5f, ly0 = static_cast<float>(Y(24));
-            if (wotm::savepics::hasLogo(mon))
+            // um custom: o "logo" dele ou o nome em texto (nunca o logo do tipo base)
+            const wotm::mods::Custom *cu = customOfCostume(mon, show->costume);
+            const std::vector<wotm::mods::Custom> &cs = wotm::mods::Registry::get().customs();
+            if (cu && !cu->logo.empty())
+                pics.push_back({wotm::savepics::kCustomLogo, static_cast<uint32_t>(cu - cs.data()), kLeftCenter - lw * 0.5f, ly0,
+                                kLeftCenter + lw * 0.5f, ly0 + lh, a});
+            else if (!cu && wotm::savepics::hasLogo(mon))
                 pics.push_back({wotm::savepics::kLogo, mon, kLeftCenter - lw * 0.5f, ly0, kLeftCenter + lw * 0.5f, ly0 + lh, a});
             else
-                text(rdram, ctx, rt, mon < std::size(kMonsterTitle) ? kMonsterTitle[mon] : "?", kLeftCenter, Y(40), fName, true);
+                text(rdram, ctx, rt, monsterTitle(mon, show->costume), kLeftCenter, Y(40), fName, true);
             text(rdram, ctx, rt, "on " + levelTitle(rdram, show->level), kLeftCenter, Y(66), fName, true);
             const float pw = 220.f * k, ph = pw * aspect * 0.5f, px0 = kLeftCenter - pw * 0.5f, py0 = static_cast<float>(Y(82));
             if (wotm::savepics::hasLevel(show->level))

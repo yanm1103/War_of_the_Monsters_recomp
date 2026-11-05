@@ -1,0 +1,42 @@
+{
+  "comment": "3ds Max Biped (Bip01_*) on Togera's skeleton (MON/LIZARD0 exported by the kit). Togera: bone30 pelvis, bone13 chest (the arms hang from it), bone2 neck, bone1 head, bone0 jaw; right arm bone7-6-4-3, left bone12-11-9-8; right leg bone17-15-14, left bone21-19-18; tail bone29 to bone22.",
+  "bones": {
+    "Bip01_Pelvis": {"from": "bone30", "move": true},
+    "Bip01_Spine": {"from": ["bone30", "bone13", 0.5]},
+    "Bip01_Spine1": {"from": "bone13"},
+    "Bip01_Neck": {"from": ["bone13", "bone2", 0.34]},
+    "Bip01_Neck1": {"from": ["bone13", "bone2", 0.67]},
+    "Bip01_Neck2": {"from": "bone2"},
+    "Bip01_Head": {"from": "bone1"},
+    "Bip01_Jaw": {"from": "bone0"},
+    "Bip01_R_Clavicle": {"from": "bone7"},
+    "Bip01_R_UpperArm": {"from": "bone6", "align": ["Bip01_R_Forearm", "bone4"]},
+    "Bip01_R_Forearm": {"from": "bone4", "align": ["Bip01_R_Hand", "bone3"]},
+    "Bip01_R_ForeTwist": {"from": "bone4"},
+    "Bip01_R_Hand": {"from": "bone3"},
+    "Bip01_L_Clavicle": {"from": "bone12"},
+    "Bip01_L_UpperArm": {"from": "bone11", "align": ["Bip01_L_Forearm", "bone9"]},
+    "Bip01_L_Forearm": {"from": "bone9", "align": ["Bip01_L_Hand", "bone8"]},
+    "Bip01_L_ForeTwist": {"from": "bone9"},
+    "Bip01_L_Hand": {"from": "bone8"},
+    "Bip01_R_Thigh": {"from": "bone17"},
+    "Bip01_R_Calf": {"from": "bone15"},
+    "Bip01_R_Foot": {"from": "bone14", "level": true},
+    "Bip01_L_Thigh": {"from": "bone21"},
+    "Bip01_L_Calf": {"from": "bone19"},
+    "Bip01_L_Foot": {"from": "bone18", "level": true}
+  },
+  "chains": [
+    {"joints": ["Bip01_Tail", "Bip01_Tail1", "Bip01_Tail2", "Bip01_Tail3", "Bip01_Tail4", "Bip01_Tail5", "Bip01_Tail6",
+                "Bip01_Tail7", "Bip01_Tail8", "Bip01_Tail9", "Bip01_Tail10", "Bip01_Tail11", "Bip01_Tail12", "Bip01_Tail13"],
+     "from": ["bone29", "bone28", "bone27", "bone26", "bone25", "bone24", "bone23", "bone22"]}
+  ],
+  "locators": {
+    "hand_r": {"joint": "Bip01_R_Hand", "at": ["Bip01_R_Finger1", "Bip01_R_Finger2"]},
+    "hold": {"joint": "Bip01_R_Hand", "at": ["Bip01_R_Finger11", "Bip01_R_Finger21"]},
+    "hand_l": {"joint": "Bip01_L_Hand", "at": ["Bip01_L_Finger1", "Bip01_L_Finger2"]},
+    "grab": {"joint": "Bip01_L_Hand", "at": ["Bip01_L_Finger11", "Bip01_L_Finger21"]},
+    "foot_r": {"joint": "Bip01_R_Foot", "at": ["Bip01_R_Foot"]},
+    "foot_l": {"joint": "Bip01_L_Foot", "at": ["Bip01_L_Foot"]}
+  }
+}

@@ -17,7 +17,8 @@ CHAR_INSTANCE is replaced by a new one built from the .glb:
   second and solved into the channels; the hand and foot contact channels (footsteps, dust) come from the height of the
   contact locators, the sounds and the AnimPappy channels (ids 1..7, throws) from the base's animation with that id. Every
   id the base has and the .glb lacks gets the rest pose for the base's length (`--no-fill`: left out; the game then has no
-  animation for that move);
+  animation for that move); a base animation with no translation curve is a layer the game adds on top of the main one,
+  so its new one holds only the rotations that leave the rest;
 - locators: empties (or joints) named `loc_<hex id>` or by alias (`hand_l` 0x802, `hand_r` 0x803, `foot_l` 0x804,
   `foot_r` 0x805, `grabbed` 0x806, `grab` 0x807, `impale` 0x808, `chest` 0x809, `hold` 0x80A, `mouth` 0x80B, `head` 0x80C,
   `look` 0x80E, `extra1` 0x816, `extra2` 0x817), under the joint they follow; the orientation is the empty's when it was
@@ -184,6 +185,11 @@ class BaseInfo:
         # animations of the main instance, first slot of each id
         ch = img.u32(self.ci + 0x20)
         actx = img.u32(self.ci + 0x10)
+        # a layer (looking around, flinches, leans) animates no translation: the game adds it on top of the main animation
+        tch = set()
+        for n, nd in g.nodes.items():
+            if nd.op == 17 and nd.ci == self.ci:
+                tch.update(i for i in g.xform(n)["tidx"] if i >= 0)
         self.anims = {}
         for aid, k, st, et, _n, an in g.anims():
             if aid in self.anims:
@@ -191,7 +197,8 @@ class BaseInfo:
             self.anims[aid] = {"k": k, "st": st, "frames": int(math.floor(et - st + 1e-6)) + 1, "an": an,
                                "head": bytes(img.d[an - BASE:an - BASE + 0x18]),
                                "ctx": bytes(img.d[actx + 60 * k - BASE:actx + 60 * k + 60 - BASE]),
-                               "loop": img.u8(actx + 60 * k + 0x29)}
+                               "loop": img.u8(actx + 60 * k + 0x29),
+                               "layer": bool(tch) and not any(c.idx in tch for _a, c in g.curves(an))}
         if 90 not in self.anims:
             raise RigError("%s has no idle (90)" % os.path.basename(path))
         mp = img.u32(ch + 8)
@@ -871,6 +878,8 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
 
     # ---- animations: (id, frames, {channel: values}, loop, header, ctx)
     anims = []
+    layers = []
+    layer_rot = angular - {pappy_ch[1], pappy_ch[2], pappy_ch[3]}
     worst_all = []
     steps = []   # median spacing of each action's keys
     ids = sorted(set(rig.clips) | (set(base.anims) if fill else set()))
@@ -940,6 +949,12 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
         for pid in PAPPY_IDS:
             v = base.curve_at(aid, pid, frames)
             vals[pappy_ch[pid]] = v if v is not None else [0.0] * frames
+        if ba and ba["layer"]:
+            # added to the main animation: only the rotations that leave the rest (rest angles are 0), as deltas
+            vals = {c: v for c, v in vals.items() if c in layer_rot and max(abs(x) for x in v) > 1e-3}
+            if not vals:
+                vals = {0: [0.0] * frames}
+            layers.append(aid)
         anims.append((aid, frames, vals, loop, ba))
         if clip is not None and (worst[0] > 1e-3 or worst[1] > 1e-3):
             worst_all.append("%s %.2g/%.2g at %s, frame %d" % (nm, worst[0], worst[1], worst[2], worst[3]))
@@ -954,6 +969,9 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
     if skin_scaled:
         log("warning: actions scale joints the skin follows; the game's skeleton has no scale, so the skin keeps its "
             "size: %s" % ", ".join(skin_scaled))
+    if layers:
+        log("%d layers the game adds on top of the main animation (rotations only, from the rest): %s" % (
+            len(layers), " ".join(str(a) for a in layers)))
     filled = [a[0] for a in anims if a[0] not in rig.clips]
     if filled:
         log("%d animations of the base held at the rest pose (no action in the .glb): %s" % (

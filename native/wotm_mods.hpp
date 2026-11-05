@@ -73,6 +73,8 @@ inline const char *specialNeeds(int type) {
     }
 }
 
+constexpr uint32_t kFireSet = 0x01000000u;   // bit de "fireColor" presente (a cor #000000 tambem vale)
+
 // Monstro custom (mods/<mod>/monsters/<pasta>/monster.json; MODS.md, "Monstros custom"): um monstro novo na selecao (casa
 // CUSTOM), que usa o codigo de um tipo do jogo (`base`) e o modelo e os arquivos dele, ou os proprios ("files": uma subpasta com
 // .NGP+.PTR(+.TEX/.RTX), que vira um traje de mod so dele, como uma skin implicita).
@@ -95,12 +97,19 @@ struct Custom {
     std::filesystem::path bank;
     std::string kind;         // regras proprias do port ("kind": "mecha" = escudo e laser, wotm_custom.inc); vazio = as do tipo
     int special = 0;          // tipo cujo golpe especial o custom usa ("special": "congar"; wotm_custom.inc); 0 = o do tipo
-    std::string cameraFrom;     // MonsterLongNames do .CHR da camera ("lizard"); vazio = a do proprio tipo
+    bool specialRoar = false;   // "specialRoar": o especial comeca com o grito dele (o som do cinema de entrada; wotm_custom.inc)
+    std::string cameraFrom;    // MonsterLongNames do .CHR da camera ("lizard"); vazio = a do proprio tipo
     float cameraScale = 1.f;    // distancias da camera emprestada
     std::string narrator;       // narrator/<nome>.mp3 (vazio = o do tipo)
-    bool ai = false;            // uma CPU pode usar (quadro de CPU da selecao)
+    std::string costumeName;    // nome do traje proprio na selecao (vazio = "FROM MOD <mod>")
+    // "fireColor": cor do fogo do traje proprio e das skins sem a sua (kFireSet | 0xRRGGBB; 0 = a do jogo). Os efeitos de
+    // particula do Togera (bafo, bola de fogo, explosao, crowd control) criados por este monstro trocam o verde por ela
+    // (wotm_custom.inc marca, wotm_fx.hpp pinta)
+    uint32_t fireColor = 0;
+    bool ai = false;           // uma CPU pode usar (quadro de CPU da selecao)
     std::filesystem::path portrait;   // PNG do retrato do HUD (vazio = o do .RTX)
     int portraitTex = -1;       // texId do retrato no <PREFIXO><traje>.RTX
+    std::filesystem::path logo;   // PNG 2:1 do logo (selecao e lista de saves; vazio = o nome em texto)
     std::string mod;
     std::filesystem::path dir;
 };
@@ -115,7 +124,9 @@ struct Skin {
     std::string name;           // o que a selecao mostra
     int base = 0;               // traje do disco que da o que falta (e os sons do traje)
     bool ai = false;            // as IAs sorteadas podem usar
-    int index = 0;              // traje no jogo (4..99), so nesta execucao
+    std::string narrator;       // narrator/<nome>.mp3 ao confirmar a skin (vazio = o do custom ou o do tipo)
+    uint32_t fireColor = 0;     // "fireColor": cor do fogo (kFireSet | 0xRRGGBB; 0 = a do custom ou a do jogo)
+    int index = 0;             // traje no jogo (4..99), so nesta execucao
     bool own = false;           // os arquivos proprios de um custom ("files"): e o traje padrao dele, nao uma skin da lista
     std::string mod;
     std::filesystem::path dir;
@@ -322,6 +333,16 @@ private:
         for (char &c : s) c = char(std::tolower(static_cast<unsigned char>(c)));
         return s;
     }
+    // "fireColor": "#RRGGBB" -> kFireSet | 0xRRGGBB (0 = sem cor propria)
+    static uint32_t fireColor(const json::Value &v, const std::string &where) {
+        const json::Value *fc = v.get("fireColor");
+        if (!fc) return 0;
+        const std::string s = fc->type == json::Value::Str ? fc->s : std::string();
+        if (s.size() == 7 && s[0] == '#' && s.find_first_not_of("0123456789abcdefABCDEF", 1) == std::string::npos)
+            return kFireSet | uint32_t(std::stoul(s.substr(1), nullptr, 16));
+        std::fprintf(stderr, "[mods] %s: \"fireColor\" tem de ser \"#RRGGBB\"; ignorado\n", where.c_str());
+        return 0;
+    }
     // Filho de `dir` com esse nome, sem olhar maiusculas
     static std::filesystem::path child(const std::filesystem::path &dir, const std::string &name) {
         std::error_code ec;
@@ -330,7 +351,7 @@ private:
         return {};
     }
 
-    // mods/<mod>/skins/<pasta>/skin.json (MODS.md, "Skins"): {"monster", "id", "name", "base", "ai"}. Cada skin vira o traje
+    // mods/<mod>/skins/<pasta>/skin.json (MODS.md, "Skins"): {"monster", "id", "name", "base", "ai", "narrator"}. Cada skin vira o traje
     // <PREFIXO><n> (n = 4, 5, ... por monstro, na ordem mod/id; so nesta execucao: o save guarda "monstro/id"). O que a pasta traz
     // (.NGP+.PTR, .TEX, .RTX, PNGs) e dela; o que falta e o arquivo do traje base (m_alias).
     void scanSkins(const std::vector<std::filesystem::path> &mods) {
@@ -392,6 +413,8 @@ private:
                 }
                 const json::Value *ai = v.get("ai");
                 k.ai = ai && ai->asBool(false);
+                if (const json::Value *na = v.get("narrator"); na && na->type == json::Value::Str) k.narrator = lower(na->s);
+                k.fireColor = fireColor(v, "skin " + where);
                 k.mod = m.filename().string();
                 k.dir = s;
                 Skin &slot = byKey[k.monsterName + "/" + k.id];
@@ -518,7 +541,7 @@ private:
             std::fprintf(stderr, "[mods] monstro %s: %s (RST/%s)\n", c.id.c_str(), what.c_str(), c.resetStem.c_str());
     }
 
-    // mods/<mod>/monsters/<pasta>/monster.json: {"id", "name", "base", "costume", "camera": {"from", "scale" (%)}, "narrator", "ai",
+    // mods/<mod>/monsters/<pasta>/monster.json: {"id", "name", "base", "costume", "camera": {"from", "scale" (%)}, "narrator", "costumeName", "logo", "ai",
     // "special", ...}.
     // Mesmo id em dois mods: vence o ultimo em ordem alfabetica, como os arquivos.
     void scanCustoms(const std::vector<std::filesystem::path> &mods) {
@@ -584,7 +607,10 @@ private:
                         c.cameraScale = float(sc->i) / 100.f;
                 }
                 if (const json::Value *na = v.get("narrator"); na && na->type == json::Value::Str) c.narrator = lower(na->s);
+                if (const json::Value *cn = v.get("costumeName"); cn && cn->type == json::Value::Str) c.costumeName = cn->s;
+                c.fireColor = fireColor(v, "monstro " + where);
                 if (const json::Value *ki = v.get("kind"); ki && ki->type == json::Value::Str) c.kind = lower(ki->s);
+                if (const json::Value *sr = v.get("specialRoar")) c.specialRoar = sr->asBool(false);
                 if (const json::Value *sp = v.get("special"); sp && sp->type == json::Value::Str) {
                     const MonsterInfo *b = customBase(lower(sp->s));
                     if (b && b->type != c.type && *specialNeeds(b->type))
@@ -609,6 +635,15 @@ private:
                         std::fprintf(stderr, "[mods] monstro %s: \"portrait\" sem \"portraitTex\" (texId do retrato no .RTX)\n", where.c_str());
                     else
                         c.portrait = p;
+                }
+                // "logo": PNG 2:1 com o nome desenhado (como os 256x128 do SHELL.TEX), na pasta do monstro ou na raiz do mod
+                if (const json::Value *lo = v.get("logo"); lo && lo->type == json::Value::Str && !lo->s.empty()) {
+                    fs::path p = s / fs::u8path(lo->s);
+                    if (!fs::is_regular_file(p, ec)) p = m / fs::u8path(lo->s);
+                    if (fs::is_regular_file(p, ec))
+                        c.logo = p;
+                    else
+                        std::fprintf(stderr, "[mods] monstro %s: \"logo\" %s nao achado\n", where.c_str(), lo->s.c_str());
                 }
                 const json::Value *ai = v.get("ai");
                 c.ai = ai && ai->asBool(false);

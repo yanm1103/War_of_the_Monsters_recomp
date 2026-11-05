@@ -157,6 +157,16 @@ way. The import writes `.NGP`, `.PTR`, `.TEX`, `.RTX` and the new PNGs to `files
 the `.NGP` goes back to the base type's skeleton. A part that scales, appears or disappears in some action (a growing claw, a
 weapon shown only in one move) has to be a rigid mesh parented to a bone: scaling a bone does not reach the weighted meshes.
 
+**A rigged model from elsewhere.** A model that already has a skeleton (a Collada `.dae` with a skinned mesh) can take the base
+type's animations instead of new ones: export the base costume (**Export to Blender**, e.g. `LIZARD0.glb`), write a bone map
+(which model joint follows which base bone; `tools/rigmaps/biped_togera.json` covers the 3ds Max Biped, `Bip01_*`, on Togera)
+and run `python tools/retarget.py LIZARD0.glb model.dae map.json rig.glb`; then **Import rig...** with `rig.glb`. The map can
+start from another one (`{"extends": "biped_togera.json", ...}`) and change only the tail, add a `mouth` locator where the
+fire comes out or close a jaw the model's bind pose leaves open (`"turn"`). Each joint keeps the tilt it has in the model's
+bind pose, so a foot that is not flat there stays tilted in every move; the Biped map lays the feet flat (`"level"`). The base's layers (looking around, flinches) keep only rotations, as the game adds them on top of the main
+animation (`MODELS_3D.md`, "New skeleton"). The game lights monsters brightly: a texture made for another game may need
+darkening to keep its look.
+
 ## The kit on the command line (`tools/modkit.py`)
 
 ```
@@ -195,7 +205,7 @@ python tools/modkit.py skin mesh export my_mod green          # the same for a s
 | `.TEX` | `<file>_tNNNN.png` (one per texture) | the PNG as is |
 | `.RTX` | `<file>_rtx_tNNNN.png` (portraits, screens, fonts) | the PNG as is |
 | `.VPK` / `.VAG` | `<file>.wav` | `.VPK`/`.VAG` (same rate and volumes as the original) |
-| `.BNK` | `<bank>_sNNN.wav` (one per sound with a sample) | the bank with all edited sounds replaced (a sample another sound also uses: the edited one gets its own copy and the other keeps the original) |
+| `.BNK` | `<bank>_sNNN.wav` (one per sound with a sample; a sound made of layers, several TONEs each with its own delay, pitch and sample, comes out as the mono mix the game plays) | the bank with all edited sounds replaced (a sample another sound also uses: the edited one gets its own copy and the other keeps the original; a layered sound becomes a single layer with the WAV, full volume envelope, no delay) |
 | others | copy | copy |
 
 ## Textures as PNG
@@ -247,7 +257,9 @@ A skin is a folder in `mods/<mod>/skins/<folder>/` with a `skin.json`:
   of `monster.json` applies.
 - `id`: lowercase letters, digits and `_` (without it, the folder name). The save stores `"ultra-v/roxo"`.
 - `name`: what the select screen shows. `base`: disc costume (0 to 3) that provides whatever the folder does not bring, and the costume's sounds.
-  `ai`: whether drawn AIs can use it (default no).
+  `ai`: whether drawn AIs can use it (default no). `narrator`: `narrator/<nome>.mp3` spoken when the skin is confirmed in a select
+  screen (empty, or the file missing: the custom's `narrator`, then the type's). `fireColor`: the colour of the fire (`"#FF7A1E"`;
+  empty = the custom's `fireColor`, then the game's); see `fireColor` under "Custom monsters".
 - A mod skin is always unlocked: it does not go through the unlock screen.
 - What goes in the folder, from the simplest to the most complete:
   - **PNGs only**: model and textures of the base costume; the PNGs replace the textures. Name as in the base costume's export
@@ -303,6 +315,9 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
 
 - `id`: lowercase letters, digits and `_` (without it, the folder name). It is what `WOTM_MATCH` accepts (`WOTM_MATCH=goliath,3,1`).
 - `name`: what the select screen and the HUD show. The HUD has 11 letters: it uses the last word that fits, in lowercase ("goliath").
+  The custom's skins show it too (the skin's own `name` is for the select screen). The game keeps one HUD name per type, set from
+  the monster the camera follows: with it on a custom, the custom's name; on a monster of the game (any costume or skin of its
+  own), the disc name.
 - `base`: the game type, by name or prefix: the ten playable monsters (`togera`, `LIZARD`...) or a boss that is a `Monster` (`kCustomBases`,
   `native/wotm_mods.hpp`): `assboss` (13, Goliath), `jelly` (14, Cerebulon's second phase) and `final` (15, Cerebulon, the last
   phase). A custom with a playable base runs that monster's code and AI; only Goliath was tested (to change only the look, use
@@ -314,7 +329,23 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   monster, and `JELLY.CHR`'s sits between Jelly's legs; Togera's at 2x (Goliath) and 3x (Jelly) behaves like a regular
   monster's. `FINAL.CHR`'s already works. The port reads the camera from the `from`'s `.CHR` (from `mods/` or from the disc) and puts it on the monster on every
   POV change (log `[custom] jelly: camera do RST/LIZARD.CHR, distancias x3.00 (POV 0: ...)`).
-- `narrator`: `narrator/<nome>.mp3` spoken on confirmation (empty = the type's).
+- `narrator`: `narrator/<nome>.mp3` spoken on confirmation (empty = the type's). It also serves the custom's skins that have no
+  `narrator` of their own.
+- `costumeName`: the name of the custom's own costume in the select screen's costume list, next to its skins (`"GODZILLA 90s"`;
+  empty = "FROM MOD <mod>").
+- `fireColor`: `"#RRGGBB"`, the colour of Togera's green fire on this monster (own costume and skins without their own
+  `fireColor`). The particle effects Togera makes (breath core, cloud and sparks; the fireball's muzzle flash, impact and sparks;
+  crowd control: presets 8, 36, 51, 80, 81, 95, 132, 148) created by this monster are drawn with the colour in place of the green: the
+  saturated part takes the colour and the white core stays white, at the same brightness, in the vertex colours and in a recoloured copy of
+  the particle texture (the breath's is green itself). Another Togera in the same fight stays green: each effect is tagged when
+  created with the monster that made it (`FireBreath::Activate`/`TestCollis`, the fireball's owner in `Weapon::DetonateWeapon`,
+  `StateCrowdControl::transitionInto`). Log: `[custom] fogo: preset 51 na cor #FF7A1E`. Only in the native drawing (not in the emulated
+  GS of `ps2EntryRunner`). Two green pieces are not particles and stay in the model files: the fireball's body is the texture
+  `lizard0_t0001.png` (a recoloured PNG in the skin or in `files/`), and the crowd control swirl is the model with id 0x63 in
+  `LIZARD0.NGP`, with green vertex colours (`0d800d`) that have to be recoloured in the skin's `.NGP`.
+- `logo`: a 2:1 PNG with the name drawn (in the monster's folder or at the mod root; the game's are 256 × 128, 512 × 256 keeps it
+  sharp in a large window), shown where the game shows its monsters' logos: under the model in the select screen and above the
+  stage picture in the save list. Without it, the name in text (the save list never falls back to the base type's logo).
 - `files`: the model's own files, in a subfolder of the monster (`true` = `files/`, or its name) with `<any name>.NGP` and
   `.PTR` (and `.TEX`/`.RTX`, optional): they become a mod costume of its own (like an implicit skin, costume 4 to 99), which becomes the default
   costume; the JSON's `costume` provides what the files do not bring (sounds, whatever is missing). Without the folder, the log warns and the disc costume stays.
@@ -333,7 +364,10 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   `.CHR`, it applies to the custom's costume and skins only; a game monster of the same type in the same fight keeps the disc's. The
   same bank serves in 3 and 4 player fights, where the game loads the low-res `_LS` banks (same numbering). Log: `[mods] monstro
   fire_togera: som LIZARD_S.BNK` and `[snd] fire_togera: banco de som proprio LIZARD_S.BNK no handle 0x10001`; with `PS2X_SND_LOG=1`
-  each `Play banco` line shows the bank's handle.
+  each `Play banco` line shows the bank's handle. The narrator's MONSTER CRY option plays the cry from this bank too.
+  Togera's sounds, by number: 1 death (the 120 animation), 2 cry (fight entry cinematic), 3 pain, 4 jump, 5 and 6 the fireball (launch,
+  explosion), 7 the fire breath (a loop while the special lasts), 10 to 12 the three victories, 13 taunt, 14 and 15 the other two
+  deaths, 0 crowd control, 17 entering counter block.
 - `kind`: the port's own rules for the monster (`wotm_custom.inc`). Only `"mecha"` for now (below); empty = the type's.
 - `special`: another monster's special attack, by its in-game name like `base` (`"special": "congar"`); empty = the base type's. Every
   `Monster` carries the states of all the specials; `Monster::initDynamics` points the monster at its type's one (+0x7980) and the
@@ -347,6 +381,9 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   Preytor's bugs, Magmo's lava rocks, Agamo's head, Zorgulon's disc, Goliath's cannon shells): on another body they do not start, hold
   the monster in the windup or crash the game, so the port keeps the base's special and logs why. Log: `[custom] fire_togera: especial
   do congar`. In the kit window: **Special** in the monster's group.
+- `specialRoar`: `true` = the special starts with the monster's cry (`MonsterSound::playSignatureSound`, the fight entry cinematic's
+  sound, from its own bank when it has one), when it enters the special's state. Togera's fire breath has no cry of its own. Log:
+  `[custom] godzilla: grito no especial`.
 - `ai`: whether a CPU can use it (default no); without it the select screen shows "PLAYERS ONLY" in the CPU's box. With `"ai": true` the CPU can
   pick it in the select screen's CUSTOM slot; the launcher only offers customs to the player. A custom with a playable base fights as a CPU
   (`WOTM_MATCH=1,moddedtogera,1`, with `"base": "togera"`: walks, attacks, breathes fire and loses the round like a Togera), and Jelly and
@@ -376,12 +413,17 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   `SetAIMonster` turned him off), takes damage from them (`takeHit` only accepted hits from player 1), loads the boss sound bank outside
   the adventure and puts the name on the HUD. Also: X+Square does the boss spin (`StateTopSpin`, instead of the regular monsters'
   `StateCrowdControl`; the full hit counts against the nearest AI), the turret does not follow the enemy all the time (the boss's "look" turns the
-  whole torso; with lock-on it aims) and the dart (impale) becomes a regular hit on whoever lacks the impaled animations (it would
-  otherwise freeze). Investigations (closed): `git show 18bb1d2:docs/investigacoes/2026-10-23/goliath_topspin.md`, `goliath_lockon.md`, `goliath_impale.md`.
+  whole torso; with lock-on it aims) and the dart (impale) becomes a regular hit on whoever lacks the stuck (0x8E) or pull-out (0x90) animation (it would
+  otherwise freeze; the 0x8F that `StateImpaled::transitionOK` also asks for is unused, the struggle being 0x10F/0x110, and Togera, Zorgulon and
+  Cerebulon have no 0x8F). Investigations (closed): `git show 18bb1d2:docs/investigacoes/2026-10-23/goliath_topspin.md`, `goliath_lockon.md`, `goliath_impale.md`.
 - **HUD portrait:** the one of `ASSBOSS1.RTX` (texId 6) is a placeholder, with Congar's face. `"portrait": "goliathprime.png"` (in the monster's
   folder or at the mod root; 128 × 64 or bigger with the same aspect ratio, e.g. 512 × 256) replaces the portrait image of the custom's costume
   (`"portraitTex"`: the texId in the `.RTX`; default 6 for `ASSBOSS1`). It also applies to the adventure's boss, which uses the same file.
-  Log: `[mods] ASSBOSS1.RTX t6 <- Goliath Prime/goliathprime.png`.
+  The HUD draws the portrait upside down from the image, as the disc's own are stored (Togera's `lizard0_rtx_t0003.png`): save the
+  PNG flipped top to bottom, normal on the left half and hurt on the right; the disc's monsters face right.
+  Log: `[mods] ASSBOSS1.RTX t6 <- Goliath Prime/goliathprime.png`. `"portrait"` covers only the custom's own costume: a skin of the
+  custom takes the portrait of its own `.RTX` (a rig skin: the base type's), so it brings its own as a skin PNG
+  (`lizard0_rtx_t0003.png` in the skin folder, same rules).
 - Not yet: animations ASSBOSS lacks (climbing, some blocks and counterattacks; `18bb1d2:docs/investigacoes/2026-10-23/goliath_codigo.md`,
   section 3) make the game hold the previous pose; elimination and minigames were not tested with him; the adventure save does not store a
   custom (the adventure does not offer the slot).

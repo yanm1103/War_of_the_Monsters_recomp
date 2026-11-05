@@ -378,12 +378,10 @@ def export(disc, work, pats, dest=None):
             b = snd989.read_bnk(src)
             stem = os.path.splitext(os.path.basename(rel))[0].lower()
             n = 0
-            for i, s in enumerate(b["sounds"]):
-                tones = [g for g in s["grains"] if g["type"] in (1, 9)]
-                if not tones:
+            for i in range(len(b["sounds"])):
+                rate, chans = snd989.render_sound(b, i)   # camadas: a mistura como o jogo toca
+                if not chans:
                     continue
-                chans = [snd989.adpcm_decode(b["samples"], g["sample"])[0] for g in tones[:2]]
-                rate = round(snd989.tone_rate(tones[0]["note"], tones[0]["fine"]))
                 snd989.write_wav(os.path.join(out, "%s_s%03d.wav" % (stem, i)), rate, chans)
                 n += 1
             print("%s -> %d sounds as WAV (%s_sNNN.wav)" % (rel, n, stem))

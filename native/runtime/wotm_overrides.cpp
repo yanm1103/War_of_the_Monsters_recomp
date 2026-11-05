@@ -94,6 +94,7 @@ std::atomic<int> g_wotmCheatKillWho{1};
 std::atomic<bool> g_wotmFreeCam{false};
 std::atomic<bool> g_wotmFreeCamPad{false};
 std::atomic<float> g_wotmMechaReticle{0.f};   // retícula da camera da torre do Mecha (wotm_custom.inc grava, wotm_live.inc desenha)
+std::atomic<uint32_t> g_wotmFxTint[100];      // cor do fogo por fx[i] (wotm_custom.inc grava, Particles::tintTags le)
 std::mutex g_wotmFreeCamM;
 WotmFreeCamPose g_wotmFreeCamPose;
 
@@ -235,6 +236,7 @@ namespace
     constexpr int kMatchMaxAIs = 7;
     int g_matchMonsters[kMatchMaxAIs + 1] = {-1, -1, -1, -1, -1, -1, -1, -1};   // jogador, depois as IAs
     int g_matchCostumes[kMatchMaxAIs + 1] = {-1, -1, -1, -1, -1, -1, -1, -1};   // -1: o menor figurino livre
+    bool g_matchCustom[kMatchMaxAIs + 1] = {};   // monstro custom pelo id: o traje dele vale mesmo repetido (ha um so)
     int g_matchAIs = 0, g_matchLevel = -1;
     // WOTM_PLAYERS=2: os dois primeiros monstros da WOTM_MATCH sao os jogadores 1 e 2 (m_monsterSel[1], m_costume[1], m_numPlayers 2:
     // tela dividida, como o free for all de 2 jogadores do menu); com WOTM_AIVSAI=1 os dois ficam com a IA. WOTM_PLAYERS=3 ou 4: os
@@ -289,7 +291,7 @@ namespace
         for (int i = 0; i < total; ++i)
             costumes[i] = -1;
         for (int i = 0; i < total; ++i)
-            if (g_matchCostumes[i] >= 0 && !taken(i, g_matchCostumes[i]))
+            if (g_matchCostumes[i] >= 0 && (g_matchCustom[i] || !taken(i, g_matchCostumes[i])))
                 costumes[i] = g_matchCostumes[i];   // 4 ou mais: traje de mod (MON/<PREFIXO><n>.* servido por mods/)
         for (int i = 0; i < total; ++i)
             for (int c = g_matchMonsters[i] == 13 ? 1 : 0; costumes[i] < 0; ++c)   // Goliath: o traje 0 e um prototipo (wotm_custom.inc)
@@ -2809,10 +2811,12 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
     if (const char *e = std::getenv("WOTM_MATCH"))
     {
         int v[kMatchMaxAIs + 2], c[kMatchMaxAIs + 2], n = 0;
+        const wotm::mods::Custom *cus[kMatchMaxAIs + 2] = {};
         const char *p = e;
         for (char *end; n < kMatchMaxAIs + 2; p = end + 1)
         {
             c[n] = -1;
+            cus[n] = nullptr;
             v[n++] = static_cast<int>(std::strtol(p, &end, 10));
             if (end == p && std::isalpha(static_cast<unsigned char>(*p)))   // "<id do monstro custom>" (mods/<mod>/monsters/, wotm_custom.inc)
             {
@@ -2824,6 +2828,7 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
                 {
                     v[n - 1] = cu->type;
                     c[n - 1] = cu->costume;
+                    cus[n - 1] = cu;
                     end = const_cast<char *>(t);
                 }
                 else
@@ -2879,7 +2884,17 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
         {
             g_matchAIs = n - 1 - g_matchPlayers;
             for (int i = 0; i < n - 1; ++i)
-                g_matchMonsters[i] = v[i], g_matchCostumes[i] = c[i];
+            {
+                // IA so com custom de "ai": true, como o quadro de CPU da selecao; sem ele, o traje do disco do tipo
+                if (cus[i] && i >= g_matchPlayers && !cus[i]->ai)
+                {
+                    std::fprintf(stderr, "[wotm] WOTM_MATCH: %s nao tem \"ai\": true no monster.json; a IA %d fica com o traje %d do disco\n",
+                                 cus[i]->id.c_str(), i - g_matchPlayers + 1, cus[i]->diskCostume);
+                    c[i] = cus[i]->diskCostume;
+                    cus[i] = nullptr;
+                }
+                g_matchMonsters[i] = v[i], g_matchCostumes[i] = c[i], g_matchCustom[i] = cus[i] != nullptr;
+            }
             g_matchLevel = v[n - 1];
         }
         if (g_matchLevel >= 0)

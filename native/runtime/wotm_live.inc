@@ -325,6 +325,8 @@ static void wotmBootPresent(uint32_t eePc, uint64_t vsync)
 #include <filesystem>
 #include "wotm_freecam.inc"   // camera livre de debug (F5)
 extern std::atomic<float> g_wotmMechaReticle;   // wotm_overrides.cpp: peso da camera da torre do Mecha (0 = sem retícula)
+extern std::atomic<uint32_t> g_wotmFxTint[100];   // wotm_overrides.cpp: cor do fogo por fx[i] (wotm_custom.inc grava)
+static const bool g_wotmFxTintLinked = (wotm::Particles::tintTags = g_wotmFxTint, true);
 #include "wotm_prompts.inc"   // icones de botao 2D (Kenney) no lugar dos 3D do jogo
 #include "wotm_trainview.inc"   // modo treino: volumes, esferas dos golpes, painel de dano e numeros do HUD
 #define WOTM_HAVE_NATIVE 1
