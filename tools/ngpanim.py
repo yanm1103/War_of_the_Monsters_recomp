@@ -13,11 +13,17 @@ animation whose clip differs from the game's is rebuilt:
 - walking the game's hierarchy top-down, each ANIM_XFORM's local matrix is solved into its channels (pre/post rotation
   removed, PRH angles unwrapped from frame to frame, translation); an axis without a channel keeps the node's value and the
   rest goes to the children; a joint scaled to 0 hides its part (visibility channel);
+  an ANIM_SCALE takes its scale from the matrix diagonal and the translation from the rest;
 - moved nodes get new curves (linear 16-bit, or static), unmoved ones keep the game's; event channels (contacts, sounds)
   follow the new length;
 - the animation goes to the end of the file (new `_animation`, its `animCtx` control node repointed with a new `prevKey`).
 
-Clips with ids the monster does not have are reported and skipped. Only the standard library: it runs inside the mod kit.
+A clip `a<id>` with an id the monster lacks (up to 299, the size of `Monster::m_anims`) becomes a new animation: every channel the
+.glb drives, the others (events, unsolved nodes) held at the first frame of the idle (90); `_animCharacter` (with `animations[]`
+and the angular bits it reaches by an s16 offset) and `animCtx[]` move to the end of the file with one more slot each, and the
+pointers to them are repointed. Its control node loops when most of the disc's monsters loop that id (`LOOPING_IDS`);
+`a<id>_loop` / `a<id>_once` force it. Something has to play it: a punch slot of the custom's own `.CHR` (`tools/chr_punch.py`).
+Only the standard library: it runs inside the mod kit.
 Formats: docs/FORMATS.md ("Animation"); the game-side walk mirrors tools/pose.py.
 """
 import bisect
@@ -398,6 +404,14 @@ class Game:
                 "vidx": img.s16(n + 0x10), "bits": img.u16(n + 0xC2), "pre": self.mat(n + 0x40), "post": self.mat(n + 0x80),
                 "first": img.s16(n + 0x1E), "mask": img.u8(n + 0xC1), "vis0": img.f32(n + 0xC)}
 
+    def scale_node(self, n):
+        """Fields of an ANIM_SCALE: L = T(a) . S(s) . T(t + b), s/t from channels or the node's defaults."""
+        img = self.img
+        return {"vidx": img.s16(n + 0x10), "sidx": [img.s16(n + 0x12 + 2 * j) for j in range(3)],
+                "tidx": [img.s16(n + 0x18 + 2 * j) for j in range(3)], "s0": [img.f32(n + 0x20 + 4 * j) for j in range(3)],
+                "t0": [img.f32(n + 0x30 + 4 * j) for j in range(3)], "a": [img.f32(n + 0x40 + 4 * j) for j in range(3)],
+                "b": [img.f32(n + 0x50 + 4 * j) for j in range(3)]}
+
     def xform_L(self, n, c, vals=None):
         """The ANIM_XFORM's local matrix: rebuilt from the channels when one of them was written (dirty), else atMat."""
         img = self.img
@@ -419,6 +433,20 @@ class Game:
             if x["tidx"][j] >= 0:
                 t[j] = get(x["tidx"][j], t[j])
         return compose(x, r, t)
+
+
+def scale_L(x, s, t):
+    a, b = x["a"], x["b"]
+    return mul(mul(translate(*a), scale(*s)), translate(t[0] + b[0], t[1] + b[1], t[2] + b[2]))
+
+
+def solve_scale(x, Lt):
+    """An ANIM_SCALE's s and t (all three, channel or not) closest to the local matrix Lt (rotation dropped)."""
+    s = [math.copysign(math.sqrt(sum(Lt[r][c] ** 2 for c in range(3))), Lt[r][r] or 1.0) for r in range(3)]
+    s = [s[j] if x["sidx"][j] >= 0 else x["s0"][j] for j in range(3)]
+    t = [Lt[3][j] - x["a"][j] * s[j] - x["b"][j] for j in range(3)]
+    t = [t[j] if x["tidx"][j] >= 0 else x["t0"][j] for j in range(3)]
+    return s, t
 
 
 def compose(x, r, t):
@@ -716,6 +744,85 @@ class Writer:
         b.put32(actx + 60 * k + 0x30, pk)
         return a
 
+    def new_animation(self, game, aid, n_frames, curves, tmpl):
+        """A new _animation with id `aid` (header bits copied from `tmpl`), not yet in the character: extend() adds it."""
+        b = self.b
+        nch = len(curves)
+        a = self.alloc(0x18 + 4 * nch, 16)
+        o = a - BASE
+        struct.pack_into("<IffHHHhh", b.d, o, (aid << 18) | (game.img.u32(tmpl) & 0x3FFFF), 0.0, float(n_frames - 1),
+                         nch, 0, 0, -1, -1)
+        for i, c in enumerate(curves):
+            struct.pack_into("<I", b.d, o + 0x18 + 4 * i, c)
+            b.ptr[0].append(o + 0x18 + 4 * i)
+        return a
+
+    def extend(self, game, added, tmpl_k):
+        """Appends the new animations [(address, loop)] to the main instance: _animCharacter (with animations[] and,
+        above 16 channels, the angular bits it reaches by an s16 offset) and animCtx[] move to the end of the file, one
+        control node per animation (a copy of slot tmpl_k's with its own prevKey); every pointer to the old ones is
+        repointed. The old blocks stay where they were, unused."""
+        b = self.b
+        ci = game.main
+        old_ch, old_ctx = b.u32(ci + 0x20), b.u32(ci + 0x10)
+        na, nch = b.u16(old_ch), b.u16(old_ch + 2)
+        n = na + len(added)
+        if n > 0xFFFF:
+            raise AnimError("too many animations")
+        bits_off = struct.unpack_from("<h", b.d, old_ch + 6 - BASE)[0]
+        bits = None
+        if nch > 16:
+            nb = (nch + 7) // 8
+            bits = self.alloc(nb, 4)
+            src = old_ch + bits_off - BASE
+            b.d[bits - BASE:bits - BASE + nb] = b.d[src:src + nb]
+        ch_size, ctx_size = 0xC + 4 * na, 60 * na
+        new_ch = self.alloc(0xC + 4 * n, 16)
+        b.d[new_ch - BASE:new_ch - BASE + ch_size] = b.d[old_ch - BASE:old_ch - BASE + ch_size]
+        struct.pack_into("<H", b.d, new_ch - BASE, n)
+        if bits is not None:
+            off = bits - new_ch
+            if off < -0x8000:
+                raise AnimError("angular channel bits out of reach")
+            struct.pack_into("<h", b.d, new_ch + 6 - BASE, off)
+        new_ctx = self.alloc(60 * n, 4)
+        b.d[new_ctx - BASE:new_ctx - BASE + ctx_size] = b.d[old_ctx - BASE:old_ctx - BASE + ctx_size]
+        # pointer slots inside the moved blocks move with them; slots pointing at them are repointed
+        ptrs = b.ptr[0]
+        moved = []
+        for p in ptrs:
+            a = p + BASE
+            if old_ch <= a < old_ch + ch_size:
+                moved.append(a - old_ch + new_ch - BASE)
+            elif old_ctx <= a < old_ctx + ctx_size:
+                moved.append(a - old_ctx + new_ctx - BASE)
+        ptrs += moved
+        for p in ptrs:
+            if p == 0 or p + 4 > len(b.d):
+                continue
+            v = struct.unpack_from("<I", b.d, p)[0]
+            if v == old_ch:
+                struct.pack_into("<I", b.d, p, new_ch)
+            elif old_ctx <= v < old_ctx + ctx_size:
+                struct.pack_into("<I", b.d, p, v - old_ctx + new_ctx)
+        tmpl = b.d[old_ctx + 60 * tmpl_k - BASE:old_ctx + 60 * tmpl_k - BASE + 60]
+        for i, (a, loop) in enumerate(added):
+            k = na + i
+            slot = new_ch + 0xC + 4 * k
+            b.put32(slot, a)
+            ptrs.append(slot - BASE)
+            struct.pack_into("<H", b.d, a + 0x10 - BASE, k)   # animIdx (the game sets it again on load)
+            e = new_ctx + 60 * k
+            b.d[e - BASE:e - BASE + 60] = tmpl
+            pk = self.alloc(max(4, 2 * b.u16(a + 0xC)), 4)
+            b.put32(e + 4, a)
+            b.put32(e + 0x30, pk)
+            b.d[e + 0x28 - BASE] = 0                   # active
+            b.d[e + 0x29 - BASE] = 1 if loop else 0    # loop
+            struct.pack_into("<H", b.d, e + 0x2A - BASE, 0)   # iterations
+            ptrs += [e + 4 - BASE, e + 0x30 - BASE]
+        return new_ch, new_ctx
+
 
 def retime(w, game, cv, addr, st, s, n_frames):
     """Copy of an event/other curve with its times scaled by s from st: static as is, stepped keys moved, others sampled."""
@@ -728,15 +835,27 @@ def retime(w, game, cv, addr, st, s, n_frames):
 
 # ---------------------------------------------------------------- the import
 
+# ids whose animation loops in most of the disc's monsters (control node flag, animCtx[k] +0x29): the default of a new one
+LOOPING_IDS = {1, 2, 3, 6, 7, 8, 9, 33, 34, 58, 59, 60, 61, 62, 63, 74, 77, 89, 90, 95, 96, 101, 103, 104, 106, 110, 113,
+               114, 142, 143, 145, 161, 172, 173, 174, 176, 181, 209, 250, 263, 265, 266}
+MAX_ID = 299   # Monster::m_anims has 300 handles (MonsterInit: animationGetHandle for ids 0..0x12B)
+
+
 def _clip_key(name, game_anims):
-    m = re.fullmatch(r"a(\d+)(?:_(\d+))?(?:\..*)?", name or "")
+    """An existing slot k, ("new", id, loop) for an id the monster lacks, -1 for a clip naming a slot that does not
+    exist, None for a clip that is not a<id>."""
+    m = re.fullmatch(r"a(\d+)(?:_(\d+|loop|once))?(?:\..*)?", name or "")
     if not m:
         return None
     aid = int(m.group(1))
-    if m.group(2) is not None:
-        k = int(m.group(2))
+    suf = m.group(2)
+    if suf is not None and suf.isdigit():
+        k = int(suf)
         return k if any(a[1] == k and a[0] == aid for a in game_anims) else -1
-    return next((a[1] for a in game_anims if a[0] == aid), -1)
+    k = next((a[1] for a in game_anims if a[0] == aid), None)
+    if k is not None:
+        return k
+    return ("new", aid, aid in LOOPING_IDS if suf is None else suf == "loop")
 
 
 # what counts as "not edited": rotation part (matrix entries) and translation (game units) of every transform
@@ -789,20 +908,34 @@ def import_glb(ngp_path, glb_path, out_dir, name=None, log=print, into=None):
     ganims = game.anims()
     by_k = {a[1]: a for a in ganims}
     clips = {}
-    unknown = []
+    new_clips = {}     # id -> (name, clip, loop)
+    unknown, too_high = [], []
     for nm, clip in ed.clips.items():
         k = _clip_key(nm, ganims)
         if k is None:
+            continue
+        if isinstance(k, tuple):
+            _new, aid, loop = k
+            if aid > MAX_ID:
+                too_high.append(nm)
+            elif aid not in new_clips:
+                new_clips[aid] = (nm, clip, loop)
             continue
         if k < 0:
             unknown.append(nm)
             continue
         clips[k] = (nm, clip)
     if unknown:
-        log("warning: clips with no animation of that id in %s (new animations are not supported yet), skipped: %s" % (
+        log("warning: clips naming a slot %s does not have, skipped: %s" % (
             os.path.basename(ngp_path), ", ".join(sorted(unknown))))
-    if not clips:
+    if too_high:
+        log("warning: animation ids go up to %d (the monster keeps one handle per id), skipped: %s" % (
+            MAX_ID, ", ".join(sorted(too_high))))
+    if not clips and not new_clips:
         raise AnimError("no clip a<id> in the .glb")
+    # a new animation starts from this one: its channels the .glb does not drive (events, scale nodes) stay at its first
+    # frame, and its control node is the model for the new one's
+    tmpl = next((a for a in ganims if a[0] == 90), ganims[0])
 
     # time scale: Blender keys at time * frame rate on import and writes frame / frame rate on export; a frame rate changed
     # in between stretches every clip alike
@@ -826,23 +959,34 @@ def import_glb(ngp_path, glb_path, out_dir, name=None, log=print, into=None):
     w = Writer(base)
     done = {}
     xf_of = {n: game.xform(n) for n, nd in gnodes.items() if nd.op == 17}
-    chan_owner = {}   # channel -> ANIM_XFORM
-    for n, x in xf_of.items():
-        for i in x["ridx"] + x["tidx"] + [x["vidx"]]:
-            if i >= 0:
-                chan_owner[i] = n
-    for k in sorted(clips):
-        nm, clip = clips[k]
-        aid, _k, st, et, nch0, an = by_k[k]
-        n0 = int(math.floor(et - st + 1e-6)) + 1
+    sc_of = {n: game.scale_node(n) for n, nd in gnodes.items() if nd.op == 38}
+    sc_of = {n: x for n, x in sc_of.items() if any(i >= 0 for i in x["sidx"] + x["tidx"] + [x["vidx"]])}
+
+    def chans(n):
+        x = xf_of.get(n) or sc_of[n]
+        return [i for i in x.get("ridx", x.get("sidx")) + x["tidx"] + [x["vidx"]] if i >= 0]
+    chan_owner = {}   # channel -> ANIM_XFORM or ANIM_SCALE
+    for n in list(xf_of) + list(sc_of):
+        for i in chans(n):
+            chan_owner[i] = n
+    jobs = [(k, clips[k][0], clips[k][1], None) for k in sorted(clips)]
+    jobs += [(None, nm, clip, (aid, loop)) for aid, (nm, clip, loop) in sorted(new_clips.items())]
+    added = []         # [(new _animation, loop)]
+    for k, nm, clip, new in jobs:
+        if new is None:
+            aid, _k, st, et, nch0, an = by_k[k]
+            n0 = int(math.floor(et - st + 1e-6)) + 1
+        else:
+            aid, loop = new
+            an, st, n0 = tmpl[5], 0.0, None
         keys = ed.key_times(clip, mapped.values())
         if not keys:
-            log("%s: no keys, kept" % nm)
+            log("%s: no keys, %s" % (nm, "kept" if new is None else "skipped"))
             continue
         n_new = int(round(keys[-1] * tscale * FPS)) + 1
         # not edited? compare at the clip's own key times (where the export sampled), on the game's frame grid
         # (local matrices: a world compare would blow the export's key rounding up along long arms, e.g. a far locator)
-        same = abs(n_new - n0) <= 1
+        same = new is None and abs(n_new - n0) <= 1
         if same:
             for t in keys:
                 tg = targets(clip, t)
@@ -869,16 +1013,17 @@ def import_glb(ngp_path, glb_path, out_dir, name=None, log=print, into=None):
             continue
         frames = n_new
         if frames < 2:
-            log("%s: a single frame; kept" % nm)
+            log("%s: a single frame; %s" % (nm, "kept" if new is None else "skipped"))
             continue
         # solve frame by frame, top-down
         vals = {}          # channel -> [value per frame]
         moved = set()
         worst = [0.0, 0.0, None, 0]
         fixed_moved = set()
-        s = (frames - 1) / float(n0 - 1) if n0 > 1 else 1.0
+        s = (frames - 1) / float(n0 - 1) if new is None and n0 > 1 else 1.0
         # continuity starts from the game's own values at frame 0 (its angles are not wrapped to +-pi)
-        c0 = {cv.idx: cv.eval(st) for _a, cv in game.curves(an)}
+        c0 = {cv.idx: cv.eval(game.img.f32(an + 4)) for _a, cv in game.curves(an)}
+        pose0 = game.anim_pose(an, 0.0) if new is not None else None   # what the template shows where the .glb says nothing
         init = game.contexts()[game.main].val
         prev_r, prev_t = {}, {}
         for n, x in xf_of.items():
@@ -886,16 +1031,55 @@ def import_glb(ngp_path, glb_path, out_dir, name=None, log=print, into=None):
                          for j, i in enumerate(x["ridx"])]
             prev_t[n] = [c0.get(i, init[i] if 0 <= i < len(init) else x["t0"][j]) if i >= 0 else x["t0"][j]
                          for j, i in enumerate(x["tidx"])]
+        prev_s = {}
+        for n, x in sc_of.items():
+            prev_s[n] = ([c0.get(i, init[i] if 0 <= i < len(init) else x["s0"][j]) if i >= 0 else x["s0"][j]
+                          for j, i in enumerate(x["sidx"])],
+                         [c0.get(i, init[i] if 0 <= i < len(init) else x["t0"][j]) if i >= 0 else x["t0"][j]
+                          for j, i in enumerate(x["tidx"])])
         animated = {n for n, x in xf_of.items() if any(i >= 0 for i in x["ridx"] + x["tidx"] + [x["vidx"]])}
+        animated |= set(sc_of)
         for f in range(frames):
             tg = targets(clip, f / FPS / tscale)
-            orig = game.anim_pose(an, f / s)
+            orig = pose0 if new is not None else game.anim_pose(an, f / s)
             m = {}
             for n in game.order:
                 nd = gnodes[n]
                 P = m.get(nd.parent, eye()) if nd.parent is not None else eye()
                 W = tg.get(n) if n in mapped else None
                 o = orig.get(n)
+                if n in sc_of:
+                    x = sc_of[n]
+                    sv, tv = prev_s[n]
+                    if W is None:   # hidden: the visibility channel, else all three scales at 0
+                        vis = 0.0
+                        if x["vidx"] < 0 and all(i >= 0 for i in x["sidx"]):
+                            sv = [0.0, 0.0, 0.0]
+                    else:
+                        sv, tv = solve_scale(x, mul(W, inv(P)))
+                        prev_s[n] = (sv, tv)
+                        vis = 1.0
+                    L = scale_L(x, sv, tv)
+                    for j in range(3):
+                        if x["sidx"][j] >= 0:
+                            vals.setdefault(x["sidx"][j], []).append(sv[j])
+                        if x["tidx"][j] >= 0:
+                            vals.setdefault(x["tidx"][j], []).append(tv[j])
+                    if x["vidx"] >= 0:
+                        vals.setdefault(x["vidx"], []).append(vis)
+                    vis_now = vis != 0.0 and any(v != 0.0 for v in sv)
+                    if shown(o) != vis_now:
+                        moved.add(n)
+                    elif vis_now:
+                        dr, dp = mat_diff(L, o[0])
+                        if dr > SAME_ROT or dp > SAME_POS:
+                            moved.add(n)
+                    if W is not None:
+                        dr, dp = mat_diff(L, mul(W, inv(P)))
+                        if dr > worst[0] or dp > worst[1]:
+                            worst = [max(dr, worst[0]), max(dp, worst[1]), nd.name, f]
+                    m[n] = mul(L, P)
+                    continue
                 if n in animated:
                     x = xf_of[n]
                     if not rebuilds(x):
@@ -949,6 +1133,25 @@ def import_glb(ngp_path, glb_path, out_dir, name=None, log=print, into=None):
         if fixed_moved:
             log("warning: %s: %s cannot move in the game (no channel); their motion goes nowhere" % (
                 nm, ", ".join(sorted(fixed_moved))))
+        if new is not None:
+            # every channel the solve wrote, the rest of the template's channels held at its first frame
+            new_curves, written = [], set()
+            t0 = game.img.f32(an + 4)
+            for _addr, cv in game.curves(an):
+                if cv.idx in written:
+                    continue
+                new_curves.append(w.curve(cv.idx, st, vals[cv.idx]) if cv.idx in vals else w.static(cv.idx, cv.eval(t0)))
+                written.add(cv.idx)
+            for i in sorted(vals):
+                if i not in written:
+                    new_curves.append(w.curve(i, st, vals[i]))
+                    written.add(i)
+            added.append((w.new_animation(game, aid, frames, new_curves, an), loop))
+            done[aid] = (0, frames, len(animated))
+            log("%s: new animation %d, %d frames%s, %d curves%s" % (
+                nm, aid, frames, ", looping" if loop else "", len(new_curves),
+                "; fit off by up to %.2g (rotation) / %.2g units at %s, frame %d" % tuple(worst) if worst[2] and (worst[0] > 1e-3 or worst[1] > 1e-3) else ""))
+            continue
         if not moved and frames == n0:
             continue
         # the curves: moved transforms get new ones, the rest keeps the game's (retimed when the length changed)
@@ -970,9 +1173,8 @@ def import_glb(ngp_path, glb_path, out_dir, name=None, log=print, into=None):
                 new_curves.append(retime(w, game, cv, addr, st, s, frames))
             written.add(cv.idx)
         for n in sorted(moved):
-            x = xf_of[n]
-            for i in x["ridx"] + x["tidx"] + [x["vidx"]]:
-                if i >= 0 and i not in written and i in vals:
+            for i in chans(n):
+                if i not in written and i in vals:
                     new_curves.append(w.curve(i, st, vals[i]))
                     written.add(i)
         w.animation(game, k, an, frames, new_curves)
@@ -983,6 +1185,8 @@ def import_glb(ngp_path, glb_path, out_dir, name=None, log=print, into=None):
     if not done:
         log("no clip differs from the game's animations; nothing written")
         return done
+    if added:
+        w.extend(game, added, tmpl[1])
     ngpmesh.write(base, out_dir, name or os.path.splitext(os.path.basename(ngp_path))[0], textures=False)
     return done
 

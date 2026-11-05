@@ -83,7 +83,7 @@ Jelly it defaults to Togera's at 200% and 300%), *Narrator* (the `narrator/*.mp3
 It creates the `monster.json` in `mods/<mod>/monsters/<id>/` and, with "Own look", writes `"files": true` and extracts the costume's textures to
 `monsters/<id>/files/` in the work folder: on Build the edited PNGs go to the monster's `files/` folder and apply only to it (the
 disc costume stays untouched). In the list, the monster is a group at the top ("Monster: NAME (custom id, base X costume N)"); when selected, the
-preview becomes the properties panel: Name, Camera, Narrator, *Rules* (the `kind`), CPUs, *HUD portrait* (**Set...** copies the image to
+preview becomes the properties panel: Name, Camera, Narrator, *Rules* (the `kind`), *Special* (the `special`), CPUs, *HUD portrait* (**Set...** copies the image to
 `portrait.png` and writes the right `portraitTex` of the costume's `.RTX`; **Remove** goes back to the costume's) and *Look* (how many textures and the own
 model; **Import model files...** copies `.NGP` + `.PTR`, and optional `.TEX`/`.RTX`, to `files/`; **Extract stats** extracts the base
 type's `.CHR` and `.AIC` files to `files/`, where the edited ones become the monster's own; **Extract sounds** extracts the base type's
@@ -119,9 +119,18 @@ Animations: only the actions that differ from the game's are rewritten; the log 
 16-bit) and the rest of the action keeps the game's. An action may get longer or shorter: the curves that did not move, including
 the event channels (hits, sounds), are stretched to the new length. The game rotates each transform by three angles on its own
 axes: a transform with fewer rotation channels follows the edit as closely as its axes allow, and the log says how far off
-(`fit off by up to ...`). Transforms with no channel in the game cannot move (the log names them). Only actions the base type
-already has are imported: one with a new id is skipped with a warning. Details: `MODELS_3D.md` (`tools/ngpmesh.py`,
-`tools/ngpanim.py`).
+(`fit off by up to ...`). Transforms with no channel in the game cannot move (the log names them). Details: `MODELS_3D.md`
+(`tools/ngpmesh.py`, `tools/ngpanim.py`).
+
+New animations: an action named with an id the base type does not have (`a299`; ids go up to 299, and `tools/pose.py --list`
+shows the ones taken) is added to the model (`a299: new animation 299, 181 frames, 141 curves`). The easy way is to duplicate an
+existing action in Blender, rename it and edit it; a bone the action does not key stays in the default (bind) pose. It loops when
+the game's monsters loop that id; `a299_loop` and `a299_once` choose. A new animation has none of the event channels of the
+game's (hand and foot contacts: footsteps, dust, splashes). The game plays an animation only where its code or data asks for
+that id: for a custom monster, the punch table of its own `.CHR` (`files/`, above) picks the animation of each punch, and
+`python tools/chr_punch.py <file.CHR> <pos> <type> <id>` changes it (`pos` and `type` as `tools/chr_dump.py` prints them). The
+hit window of the slot is a fraction of the animation, so it follows a longer or shorter one. `WOTM_ANIMLOG=1` logs every
+animation a monster of the fight starts (`[anim] 2401 m0 fire_togera tipo 3 anim 299 (transition)`).
 
 ## The kit on the command line (`tools/modkit.py`)
 
@@ -296,6 +305,18 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   fire_togera: som LIZARD_S.BNK` and `[snd] fire_togera: banco de som proprio LIZARD_S.BNK no handle 0x10001`; with `PS2X_SND_LOG=1`
   each `Play banco` line shows the bank's handle.
 - `kind`: the port's own rules for the monster (`wotm_custom.inc`). Only `"mecha"` for now (below); empty = the type's.
+- `special`: another monster's special attack, by its in-game name like `base` (`"special": "congar"`); empty = the base type's. Every
+  `Monster` carries the states of all the specials; `Monster::initDynamics` points the monster at its type's one (+0x7980) and the
+  port, right after it, points it at the one asked for and runs its `init`, so the buttons, the CPU and the training mode use it. The
+  special plays the monster's own animations 160 (windup), 161 (loop) and 162 (winddown): to make them look like the other monster's,
+  import new ones with those ids ("New animations", above). Type tests inside the special still see the base type (only a Raptros
+  sets the victim on fire). It applies to the custom's own costume and its skins (it needs `files`, like the `.CHR`) and to boss-based
+  customs outside the adventure. Accepted: Congar's roar, Togera's and Raptros's fire, Kineticlops's shock, and Jelly's and Cerebulon's
+  shock (the port's Jelly rules come with it: Triangle + Circle on a player's controller, aimed at the nearest enemy). The others use a
+  model that only their owner's `.NGP` brings and the game registers from it (Robo-47's shock wave effect, Ultra-V's hook ball,
+  Preytor's bugs, Magmo's lava rocks, Agamo's head, Zorgulon's disc, Goliath's cannon shells): on another body they do not start, hold
+  the monster in the windup or crash the game, so the port keeps the base's special and logs why. Log: `[custom] fire_togera: especial
+  do congar`. In the kit window: **Special** in the monster's group.
 - `ai`: whether a CPU can use it (default no); without it the select screen shows "PLAYERS ONLY" in the CPU's box. With `"ai": true` the CPU can
   pick it in the select screen's CUSTOM slot; the launcher only offers customs to the player. A custom with a playable base fights as a CPU
   (`WOTM_MATCH=1,moddedtogera,1`, with `"base": "togera"`: walks, attacks, breathes fire and loses the round like a Togera), and Jelly and

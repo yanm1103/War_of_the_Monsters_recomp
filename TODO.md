@@ -10,8 +10,6 @@ O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado s
 ### 8. Mods que adicionam monstros
 Como funciona hoje: `docs/guides/MODS.md` ("Skins", "Monstros custom").
 Levantamento (tipo livre descartado em favor de remapear por instância; níveis do kit; medidas): `docs/investigacoes/2026-11-04/monstro_novo.md`. Ordem proposta:
-- **Kit L2, acrescentar animações** (trocar as existentes já está no kit, `MODS.md`, "Mesh and animations from Blender"): ação com id novo vira `_animation` nova; pede mover `_animCharacter` (com o `animations[]` embutido) e o `animCtx` para o fim do `.NGP` (`tools/ngpanim.py`, `Writer.animation`), e só serve com algo que toque o id novo (`"special"`, abaixo).
-- **`"special"` no `monster.json`** (ponteiro em +0x7980 depois do `initDynamics`).
 - **L3, esqueleto novo** (3 a 6 semanas): só se ainda fizer falta depois dos anteriores.
 
 ## Decomp

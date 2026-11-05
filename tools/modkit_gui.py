@@ -12,7 +12,7 @@ Save to folder..., Remove. Skins: "New skin..." (dialogo: monstro, traje base co
 dela na lista ("Skin: ...") mostra as propriedades do skin.json no lugar da previa (Save regrava), e o botao direito duplica ou apaga;
 "Turn into skin..." num traje extraido (MON/SHOGUN3) leva os PNGs dele para uma skin nova. Monstros custom: "New monster..."
 (dialogo: tipo base, traje, nome, id, camera, narrador, CPUs, texturas proprias) cria o monster.json e extrai o traje para
-monsters/<id>/files/; o grupo dele ("Monster: ...") mostra as propriedades (camera, narrador, regras, retrato do HUD, modelo
+monsters/<id>/files/; o grupo dele ("Monster: ...") mostra as propriedades (camera, narrador, regras, especial, retrato do HUD, modelo
 proprio) e o botao direito duplica, apaga ou cria uma skin dele; "Turn into custom monster..." num traje extraido. Embaixo: "Build mod" (modkit pack so da pasta do mod), "Check mods" (modkit check), abrir a pasta dos mods
 e a de trabalho; o log tem divisoria arrastavel. Pastas, ultimo mod, editores e altura do log ficam em ~/.wotm_modkit.json. Precisa
 do Pillow (pip install pillow) para as miniaturas.
@@ -1586,6 +1586,7 @@ class App:
     }
     OWN_CAMERA = "(the base's own)"
     BASE_RULES = "(the base's)"
+    BASE_SPECIAL = "(the base's own)"
 
     def selected_monster(self):
         """Id do custom cujo grupo esta escolhido (sozinho); None senao."""
@@ -1824,12 +1825,19 @@ class App:
         ttk.Label(p, text="Rules").grid(row=5, column=0, sticky="w", padx=(0, 8), pady=2)
         ttk.Combobox(p, textvariable=kind, values=[self.BASE_RULES] + list(modkit.KINDS), width=28, state="readonly").grid(
             row=5, column=1, sticky="w", pady=2)
+        # golpe especial de outro monstro ("special"): o estado dele, com as animacoes 160..162 do proprio modelo
+        sb_ = modkit.base_name(str(data.get("special", ""))) if data.get("special") else None
+        special = tk.StringVar(value=self.base_label(sb_) if sb_ else self.BASE_SPECIAL)
+        ttk.Label(p, text="Special").grid(row=6, column=0, sticky="w", padx=(0, 8), pady=2)
+        ttk.Combobox(p, textvariable=special, values=[self.BASE_SPECIAL] + [t for t, b in self.BASES if b not in modkit.SPECIAL_NEEDS],
+                     width=28, state="readonly").grid(
+            row=6, column=1, sticky="w", pady=2)
         ai = tk.BooleanVar(value=bool(data.get("ai")))
-        ttk.Checkbutton(p, text="CPUs may pick this monster", variable=ai).grid(row=6, column=1, sticky="w", pady=(4, 0))
+        ttk.Checkbutton(p, text="CPUs may pick this monster", variable=ai).grid(row=7, column=1, sticky="w", pady=(4, 0))
         # retrato do HUD
-        ttk.Label(p, text="HUD portrait").grid(row=7, column=0, sticky="nw", padx=(0, 8), pady=(8, 2))
+        ttk.Label(p, text="HUD portrait").grid(row=8, column=0, sticky="nw", padx=(0, 8), pady=(8, 2))
         pf = ttk.Frame(p)
-        pf.grid(row=7, column=1, sticky="w", pady=(8, 2))
+        pf.grid(row=8, column=1, sticky="w", pady=(8, 2))
         por = data.get("portrait") if isinstance(data.get("portrait"), str) else ""
         pimg = os.path.join(mdir, por) if por else ""
         self._portrait_img = None
@@ -1846,9 +1854,9 @@ class App:
         if por:
             ttk.Button(pf, text="Remove", command=lambda: self.remove_portrait(cid)).pack(side="left", padx=(4, 0))
         # aparencia: PNGs proprios e modelo proprio
-        ttk.Label(p, text="Look").grid(row=8, column=0, sticky="nw", padx=(0, 8), pady=(8, 2))
+        ttk.Label(p, text="Look").grid(row=9, column=0, sticky="nw", padx=(0, 8), pady=(8, 2))
         lf = ttk.Frame(p)
-        lf.grid(row=8, column=1, sticky="w", pady=(8, 2))
+        lf.grid(row=9, column=1, sticky="w", pady=(8, 2))
         wfiles = os.path.join(self.work(), "monsters", cid, "files")
         names = sorted(os.listdir(wfiles)) if os.path.isdir(wfiles) else []
         npng = sum(1 for n in names if modkit.PNG_RE.match(n))
@@ -1878,12 +1886,14 @@ class App:
                   style="Dim.TLabel").pack(side="left", padx=(8, 0))
         self.mesh_row(lf, "monster", cid, wfiles, status=False).pack(anchor="w", pady=(4, 0))
         bf = ttk.Frame(p)
-        bf.grid(row=9, column=1, sticky="w", pady=(4, 0))
+        bf.grid(row=10, column=1, sticky="w", pady=(4, 0))
         ttk.Button(bf, text="Save", style="Accent.TButton",
-                   command=lambda: self.save_monster_props(cid, name.get(), cam_from, cam_scale, narr.get(), kind.get(), ai.get())).pack(side="left")
+                   command=lambda: self.save_monster_props(cid, name.get(), cam_from, cam_scale, narr.get(), kind.get(), ai.get(),
+                                                           special.get())).pack(side="left")
         ttk.Button(bf, text="New skin for it...", command=lambda: self.new_skin(preset=cid)).pack(side="left", padx=(6, 0))
         p.columnconfigure(1, weight=1)
-        self._monster_panel_vars = dict(name=name, cam_from=cam_from, cam_scale=cam_scale, narr=narr, kind=kind, ai=ai)   # para testes
+        self._monster_panel_vars = dict(name=name, cam_from=cam_from, cam_scale=cam_scale, narr=narr, kind=kind, ai=ai,
+                                        special=special)   # para testes
 
     def reselect(self, key):
         """Depois de mudar o monster.json/skin.json: o painel rele e o grupo continua escolhido."""
@@ -1894,7 +1904,7 @@ class App:
             self.work_tree.selection_set([gid])
         self.show_preview()
 
-    def save_monster_props(self, cid, name, cam_from, cam_scale, narrator, kind, ai):
+    def save_monster_props(self, cid, name, cam_from, cam_scale, narrator, kind, ai, special=None):
         mod, mods = self.cur_mod(), self.mods.get()
         data = self.monster_data(cid)
         if not mod or not data:
@@ -1911,7 +1921,10 @@ class App:
             data["camera"] = {"from": cam[0], "scale": cam[1]}
         else:
             data.pop("camera", None)
-        for k, v in (("narrator", narrator.strip().lower()), ("kind", "" if kind == self.BASE_RULES else kind)):
+        sp = next((b for t, b in self.BASES if t == special), None) if special is not None else data.get("special")
+        if sp == modkit.base_name(str(data.get("base", ""))):
+            sp = None   # o do proprio tipo
+        for k, v in (("narrator", narrator.strip().lower()), ("kind", "" if kind == self.BASE_RULES else kind), ("special", sp or "")):
             if v:
                 data[k] = v
             else:

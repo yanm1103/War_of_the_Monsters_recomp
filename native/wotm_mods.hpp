@@ -57,6 +57,22 @@ inline const MonsterInfo *customBase(const std::string &s) {
     return nullptr;
 }
 
+// Golpe especial de outro tipo ("special" do monster.json): vazio = serve; senao, o objeto do .NGP do dono que ele usa. O banco de
+// dados registra esses modelos a partir do monstro que os traz (efeito, insetos, cabeca, disco, projeteis); num corpo de outro tipo
+// eles nao existem e o golpe nao comeca, prende o monstro no preparo ou derruba o jogo.
+inline const char *specialNeeds(int type) {
+    switch (type) {
+    case 2: return "a onda de choque (SpecFxAnim do ROBOT)";
+    case 4: return "a bola do gancho (OgreMace, do SHOGUN)";
+    case 5: return "os insetos (HomingBug, do MANTIS)";
+    case 8: return "as rochas de lava (armas do LAVA)";
+    case 10: return "a cabeca (pickup do ROCK)";
+    case 11: return "o disco (anexo do ALIEN)";
+    case 13: return "as balas do canhao (armas do ASSBOSS)";
+    default: return "";
+    }
+}
+
 // Monstro custom (mods/<mod>/monsters/<pasta>/monster.json; MODS.md, "Monstros custom"): um monstro novo na selecao (casa
 // CUSTOM), que usa o codigo de um tipo do jogo (`base`) e o modelo e os arquivos dele, ou os proprios ("files": uma subpasta com
 // .NGP+.PTR(+.TEX/.RTX), que vira um traje de mod so dele, como uma skin implicita).
@@ -78,6 +94,7 @@ struct Custom {
     // instancia); vazio = o do tipo
     std::filesystem::path bank;
     std::string kind;         // regras proprias do port ("kind": "mecha" = escudo e laser, wotm_custom.inc); vazio = as do tipo
+    int special = 0;          // tipo cujo golpe especial o custom usa ("special": "congar"; wotm_custom.inc); 0 = o do tipo
     std::string cameraFrom;     // MonsterLongNames do .CHR da camera ("lizard"); vazio = a do proprio tipo
     float cameraScale = 1.f;    // distancias da camera emprestada
     std::string narrator;       // narrator/<nome>.mp3 (vazio = o do tipo)
@@ -501,7 +518,8 @@ private:
             std::fprintf(stderr, "[mods] monstro %s: %s (RST/%s)\n", c.id.c_str(), what.c_str(), c.resetStem.c_str());
     }
 
-    // mods/<mod>/monsters/<pasta>/monster.json: {"id", "name", "base", "costume", "camera": {"from", "scale" (%)}, "narrator", "ai"}.
+    // mods/<mod>/monsters/<pasta>/monster.json: {"id", "name", "base", "costume", "camera": {"from", "scale" (%)}, "narrator", "ai",
+    // "special", ...}.
     // Mesmo id em dois mods: vence o ultimo em ordem alfabetica, como os arquivos.
     void scanCustoms(const std::vector<std::filesystem::path> &mods) {
         namespace fs = std::filesystem;
@@ -567,6 +585,17 @@ private:
                 }
                 if (const json::Value *na = v.get("narrator"); na && na->type == json::Value::Str) c.narrator = lower(na->s);
                 if (const json::Value *ki = v.get("kind"); ki && ki->type == json::Value::Str) c.kind = lower(ki->s);
+                if (const json::Value *sp = v.get("special"); sp && sp->type == json::Value::Str) {
+                    const MonsterInfo *b = customBase(lower(sp->s));
+                    if (b && b->type != c.type && *specialNeeds(b->type))
+                        std::fprintf(stderr, "[mods] monstro %s: o especial do %s usa %s, que so o modelo dele traz; fica o do tipo\n",
+                                     where.c_str(), b->name, specialNeeds(b->type));
+                    else if (b && b->type != c.type)
+                        c.special = b->type;
+                    else if (!b)
+                        std::fprintf(stderr, "[mods] monstro %s: \"special\" %s nao e um monstro (togera, congar, ..., assboss, jelly, final); fica o do tipo\n",
+                                     where.c_str(), sp->s.c_str());
+                }
                 // "portrait": PNG do retrato do HUD (na pasta do monstro ou na raiz do mod), no lugar da imagem <PREFIXO><traje>.RTX
                 // de texId "portraitTex" (padrao: o do ASSBOSS1, 6; a ultima entrada do .RTX, 128x64)
                 if (const json::Value *po = v.get("portrait"); po && po->type == json::Value::Str && !po->s.empty()) {
