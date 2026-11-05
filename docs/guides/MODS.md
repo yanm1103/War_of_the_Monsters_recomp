@@ -313,6 +313,9 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
 
 - `id`: lowercase letters, digits and `_` (without it, the folder name). It is what `WOTM_MATCH` accepts (`WOTM_MATCH=goliath,3,1`).
 - `name`: what the select screen and the HUD show. The HUD has 11 letters: it uses the last word that fits, in lowercase ("goliath").
+  The custom's skins show it too (the skin's own `name` is for the select screen). The game keeps one HUD name per type, set from
+  the monster the camera follows: with it on a custom, the custom's name; on a monster of the game (any costume or skin of its
+  own), the disc name.
 - `base`: the game type, by name or prefix: the ten playable monsters (`togera`, `LIZARD`...) or a boss that is a `Monster` (`kCustomBases`,
   `native/wotm_mods.hpp`): `assboss` (13, Goliath), `jelly` (14, Cerebulon's second phase) and `final` (15, Cerebulon, the last
   phase). A custom with a playable base runs that monster's code and AI; only Goliath was tested (to change only the look, use

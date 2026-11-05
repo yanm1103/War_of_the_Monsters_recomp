@@ -159,7 +159,9 @@ namespace wotm_custom
         }
         return -1;
     }
-    // O custom de um Monster da luta: pelo tipo e pelo traje do arquivo; sem traje achado, o primeiro do tipo
+    // O custom de um Monster da luta, pelo tipo e pelo traje do arquivo. Traje de mod (4+): o custom dono dos arquivos proprios
+    // ou da skin; a skin de um monstro do jogo nao e custom. Traje do disco: o custom sem "files" nesse traje. Sem traje achado,
+    // o primeiro custom do tipo, so nos chefes (num jogavel e o monstro do jogo).
     const wotm::mods::Custom *customOf(uint8_t *rdram, uint32_t m)
     {
         const uint32_t type = m ? cRd32(rdram, m + kTypeBits) >> 5 : 0;
@@ -167,8 +169,44 @@ namespace wotm_custom
             return nullptr;
         const int costume = monsterCostume(rdram, m);
         const wotm::mods::Registry &r = wotm::mods::Registry::get();
+        if (costume >= 4)
+            if (const wotm::mods::Skin *k = r.skinByIndex(int(type), costume))
+                return k->custom.empty() ? nullptr : r.custom(k->custom);
         const wotm::mods::Custom *cu = costume >= 0 ? r.customByType(int(type), costume) : nullptr;
-        return cu ? cu : r.customByType(int(type));
+        return cu || wotm::mods::monsterInfo(int(type)) ? cu : r.customByType(int(type));
+    }
+
+    // O nome do disco de cada tipo no MonsterNewNames, guardado antes da primeira troca: o setPov o devolve quando o monstro da
+    // camera e um jogavel que nao e custom (a entrada e uma so por tipo).
+    std::string g_diskName[17];
+    bool g_diskNameSaved[17] = {};
+    void writeShownName(uint8_t *rdram, uint32_t type, const std::string &shown)
+    {
+        if (type >= 17)
+            return;
+        static std::string last[17];
+        if (last[type] != shown)
+        {
+            std::fprintf(stderr, "[custom] nome na tela do tipo %u: \"%s\"\n", type, shown.c_str());
+            last[type] = shown;
+        }
+        for (const uint32_t names : {wotm::sym::MonsterNewNames_006E8958, wotm::sym::MonsterNewNames_006E8D90, wotm::sym::MonsterNewNames_006EAA78,
+                                     wotm::sym::MonsterNewNames_006ED318, wotm::sym::MonsterNewNames_006EFEC8})
+        {
+            char *e = reinterpret_cast<char *>(rdram + ((names + type * 12) & 0x01FFFFFFu));
+            if (!g_diskNameSaved[type])
+            {
+                g_diskName[type].assign(e, strnlen(e, 12));
+                g_diskNameSaved[type] = true;
+            }
+            std::memset(e, 0, 12);
+            std::memcpy(e, shown.data(), std::min<size_t>(shown.size(), 11));
+        }
+    }
+    void restoreShownName(uint8_t *rdram, uint32_t type)
+    {
+        if (type < 17 && g_diskNameSaved[type])
+            writeShownName(rdram, type, g_diskName[type]);
     }
 
     // Nome na tela ("%s CRUSHED", "%s WINS"): a entrada do tipo nas 5 copias do MonsterNewNames[17][12] ("assboss", "jelly",
@@ -191,13 +229,7 @@ namespace wotm_custom
             for (char ch : n)
                 shown += char(std::tolower(static_cast<unsigned char>(ch)));
         }
-        for (const uint32_t names : {wotm::sym::MonsterNewNames_006E8958, wotm::sym::MonsterNewNames_006E8D90, wotm::sym::MonsterNewNames_006EAA78,
-                                     wotm::sym::MonsterNewNames_006ED318, wotm::sym::MonsterNewNames_006EFEC8})
-        {
-            char *e = reinterpret_cast<char *>(rdram + ((names + type * 12) & 0x01FFFFFFu));
-            std::memset(e, 0, 12);
-            std::memcpy(e, shown.data(), shown.size());
-        }
+        writeShownName(rdram, type, shown);
     }
 
     void loadBankCommon(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t entry, PS2Runtime::RecompiledFunction orig)
@@ -399,6 +431,8 @@ namespace wotm_custom
         const wotm::mods::Custom *cu = type ? customOf(rdram, m) : nullptr;
         if (cu && cu->files.empty() == false)
             setShownName(rdram, type, cu->typeName.c_str(), cu);
+        else if (!cu && type && wotm::mods::monsterInfo(int(type)))
+            restoreShownName(rdram, type);
         const char *base =cu && !cu->cameraFrom.empty() ? cu->cameraFrom.c_str() : type == 13 && !cu ? kCamBaseDefault : nullptr;
         if (base)
         {
