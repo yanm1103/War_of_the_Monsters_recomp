@@ -15,7 +15,10 @@ that `modkit.py monster rig` (tools/ngprig.py) takes.
     in the world as its source bone turns from its rest (with [a, b, f], a blend of the two turns at f); "move" also carries
     the bone's change of position (scaled by the ratio of the two rest heights); "align" first turns the joint so that the
     direction to child_joint is the source's direction to child_bone (the model is posed like the source before the motion
-    goes in, e.g. arms from a T-pose to the source's).
+    goes in, e.g. arms from a T-pose to the source's); "level": true lays the joint's underside flat on the ground at rest
+    (a foot the model's bind pose leaves tilted; the plane through the lowest point of each cell of a grid over the vertices
+    it carries, toes included); "turn": [x, y, z] turns it at rest by those degrees about the game axes (+x lifts what
+    faces forward: closes a jaw the bind pose leaves open).
   - "chains": [{"joints": [...], "from": [...]}]: two chains of different lengths (tails), matched by their position along
     the chain.
   - "locators": {alias or loc_<hex>: {"joint": joint, "at": [x, y, z] | [joint, ...]}}: a point in the model's units (before
@@ -419,10 +422,11 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
     for name, spec in cfg.get("bones", {}).items():
         f = spec["from"]
         if isinstance(f, str):
-            bones[jid(name)] = {"a": src.node(f), "b": None, "f": 0.0, "move": bool(spec.get("move")), "align": spec.get("align")}
+            bones[jid(name)] = {"a": src.node(f), "b": None, "f": 0.0, "move": bool(spec.get("move")), "align": spec.get("align"),
+                                "level": bool(spec.get("level")), "turn": spec.get("turn")}
         else:
             bones[jid(name)] = {"a": src.node(f[0]), "b": src.node(f[1]), "f": float(f[2]), "move": bool(spec.get("move")),
-                                "align": spec.get("align")}
+                                "align": spec.get("align"), "level": bool(spec.get("level")), "turn": spec.get("turn")}
     src_of = {}   # source bone -> model joint (for the locators)
     for j, b in bones.items():
         if b["b"] is None:
@@ -452,6 +456,67 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
         dfs(r)
     L0 = [mul(inv(G0[j["parent"]]), G0[i]) if j["parent"] is not None else G0[i] for i, j in enumerate(J)]
     A = [None] * nj
+
+    def axis_turn(deg):
+        """Turns about the game's x, y and z (degrees, in that order): +x lifts what faces forward."""
+        Q = eye()
+        for ax, d in enumerate(deg):
+            c, s_ = math.cos(math.radians(d)), math.sin(math.radians(d))
+            a, b = [k for k in range(3) if k != ax]
+            if ax == 1:
+                a, b = b, a
+            R = eye()
+            R[a][a], R[a][b], R[b][a], R[b][b] = c, -s_, s_, c
+            Q = mul(R, Q)
+        return Q
+
+    def level_turn(i, Ai):
+        """The turn that lays the sole of joint i flat: the plane through the underside of the vertices it carries (with
+        its unmapped joints below, toes included), as they sit with the joint at Ai."""
+        sub, stack = set(), [i]
+        while stack:
+            k = stack.pop()
+            sub.add(k)
+            stack += [c for c in kids.get(k, []) if c not in bones]
+        K = mul(Ai, inv(G0[i]))
+        pts = {}
+        for _img, tri in mdl.tris:
+            for p, _n, _uv, wj in tri:
+                if sum(w for j, w in wj.items() if j in sub) > 0.5:
+                    q = apply(K, to_game_p(p))
+                    pts[tuple(round(c, 3) for c in q)] = q
+        pts = list(pts.values())
+        if len(pts) >= 3:   # the underside: the lowest point of each cell of an 8x8 grid over the footprint
+            lo = [min(q[c] for q in pts) for c in (0, 1)]
+            span = [max(max(q[c] for q in pts) - lo[c], 1e-6) for c in (0, 1)]
+            cell = {}
+            for q in pts:
+                k = tuple(min(7, int(8 * (q[c] - lo[c]) / span[c])) for c in (0, 1))
+                if k not in cell or q[2] < cell[k][2]:
+                    cell[k] = q
+            pts = list(cell.values())
+        if len(pts) < 3:
+            raise RetargetError("map: %s carries no mesh to level" % J[i]["name"])
+        # z = a x + b y + c, least squares
+        sx = sy = sz = sxx = sxy = syy = sxz = syz = 0.0
+        for x, y, z in pts:
+            sx, sy, sz = sx + x, sy + y, sz + z
+            sxx, sxy, syy = sxx + x * x, sxy + x * y, syy + y * y
+            sxz, syz = sxz + x * z, syz + y * z
+        n = float(len(pts))
+        M = [[sxx, sxy, sx], [sxy, syy, sy], [sx, sy, n]]
+        r = [sxz, syz, sz]
+
+        def det(m):
+            return (m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+                    + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]))
+        d = det(M)
+        if abs(d) < 1e-9:
+            return eye()
+        a, b = [det([[r[q] if c == col else M[q][c] for c in range(3)] for q in range(3)]) / d for col in (0, 1)]
+        nrm = _unit([-a, -b, 1.0])
+        log("level %s: sole tilted %.1f degrees, laid flat" % (J[i]["name"], math.degrees(math.acos(max(-1.0, min(1.0, nrm[2]))))))
+        return rot_between(nrm, [0.0, 0.0, 1.0])
     for i in order:
         p = J[i]["parent"]
         A[i] = mul(A[p], L0[i]) if p is not None else G0[i]
@@ -471,6 +536,10 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
             ds = [a - b for a, b in zip(pos(src.rest[src.node(al[1])]), pos(src.rest[sa]))]
             Q = rot_between(dg, ds)
             A[i] = with_pos(mul(Q, rot3(A[i])), pos(A[i]))
+        if bones.get(i, {}).get("level"):
+            A[i] = with_pos(mul(level_turn(i, A[i]), rot3(A[i])), pos(A[i]))
+        if bones.get(i, {}).get("turn"):
+            A[i] = with_pos(mul(axis_turn(bones[i]["turn"]), rot3(A[i])), pos(A[i]))
     # skin to the posed rest
     Kmat = [mul(A[i], inv(G0[i])) for i in range(nj)]
 

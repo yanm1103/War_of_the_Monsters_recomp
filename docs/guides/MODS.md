@@ -161,8 +161,9 @@ weapon shown only in one move) has to be a rigid mesh parented to a bone: scalin
 type's animations instead of new ones: export the base costume (**Export to Blender**, e.g. `LIZARD0.glb`), write a bone map
 (which model joint follows which base bone; `tools/rigmaps/biped_togera.json` covers the 3ds Max Biped, `Bip01_*`, on Togera)
 and run `python tools/retarget.py LIZARD0.glb model.dae map.json rig.glb`; then **Import rig...** with `rig.glb`. The map can
-start from another one (`{"extends": "biped_togera.json", ...}`) and change only the tail or add a `mouth` locator where the
-fire comes out. The base's layers (looking around, flinches) keep only rotations, as the game adds them on top of the main
+start from another one (`{"extends": "biped_togera.json", ...}`) and change only the tail, add a `mouth` locator where the
+fire comes out or close a jaw the model's bind pose leaves open (`"turn"`). Each joint keeps the tilt it has in the model's
+bind pose, so a foot that is not flat there stays tilted in every move; the Biped map lays the feet flat (`"level"`). The base's layers (looking around, flinches) keep only rotations, as the game adds them on top of the main
 animation (`MODELS_3D.md`, "New skeleton"). The game lights monsters brightly: a texture made for another game may need
 darkening to keep its look.
 
@@ -390,6 +391,8 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
 - **HUD portrait:** the one of `ASSBOSS1.RTX` (texId 6) is a placeholder, with Congar's face. `"portrait": "goliathprime.png"` (in the monster's
   folder or at the mod root; 128 × 64 or bigger with the same aspect ratio, e.g. 512 × 256) replaces the portrait image of the custom's costume
   (`"portraitTex"`: the texId in the `.RTX`; default 6 for `ASSBOSS1`). It also applies to the adventure's boss, which uses the same file.
+  The HUD draws the portrait upside down from the image, as the disc's own are stored (Togera's `lizard0_rtx_t0003.png`): save the
+  PNG flipped top to bottom, normal on the left half and hurt on the right; the disc's monsters face right.
   Log: `[mods] ASSBOSS1.RTX t6 <- Goliath Prime/goliathprime.png`.
 - Not yet: animations ASSBOSS lacks (climbing, some blocks and counterattacks; `18bb1d2:docs/investigacoes/2026-10-23/goliath_codigo.md`,
   section 3) make the game hold the previous pose; elimination and minigames were not tested with him; the adventure save does not store a

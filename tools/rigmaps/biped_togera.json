@@ -21,10 +21,10 @@
     "Bip01_L_Hand": {"from": "bone8"},
     "Bip01_R_Thigh": {"from": "bone17"},
     "Bip01_R_Calf": {"from": "bone15"},
-    "Bip01_R_Foot": {"from": "bone14"},
+    "Bip01_R_Foot": {"from": "bone14", "level": true},
     "Bip01_L_Thigh": {"from": "bone21"},
     "Bip01_L_Calf": {"from": "bone19"},
-    "Bip01_L_Foot": {"from": "bone18"}
+    "Bip01_L_Foot": {"from": "bone18", "level": true}
   },
   "chains": [
     {"joints": ["Bip01_Tail", "Bip01_Tail1", "Bip01_Tail2", "Bip01_Tail3", "Bip01_Tail4", "Bip01_Tail5", "Bip01_Tail6",
