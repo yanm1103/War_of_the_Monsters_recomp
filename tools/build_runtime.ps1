@@ -32,6 +32,21 @@ if ($Bat -eq 'build_dev_nm.bat') {
         (Get-Content "$Dir\build_dev.bat" -Raw) -replace 'build_dev', 'build_dev_nm' | Set-Content "$Dir\$Bat" -NoNewline
     }
 }
+# Build com LTCG (build_runtime.bat build): o setup_runtime.ps1 so cria o build_dev. Cria configure.bat e build.bat a partir dos
+# do build_dev (sem o PS2X_FAST_LINK, pasta build) na 1a vez e configura; run_live.bat -Build build usa o resultado.
+if ($Bat -eq 'build.bat') {
+    if (-not (Test-Path "$Dir\configure_dev.bat") -or -not (Test-Path "$Dir\build_dev.bat")) { throw "faltam configure_dev.bat e build_dev.bat em $Dir (rode tools\setup_runtime.ps1)" }
+    if (-not (Test-Path "$Dir\build.bat")) {
+        (Get-Content "$Dir\build_dev.bat" -Raw) -replace 'build_dev', 'build' | Set-Content "$Dir\build.bat" -NoNewline
+    }
+    if (-not (Test-Path "$Dir\build\build.ninja")) {
+        $cfg = (Get-Content "$Dir\configure_dev.bat" -Raw) -replace ' -DPS2X_FAST_LINK=ON', '' -replace 'build_dev"', 'build"'
+        Set-Content "$Dir\configure.bat" $cfg -NoNewline
+        Write-Host 'configurando build (LTCG)...'
+        & $env:ComSpec /c "`"$Dir\configure.bat`"" | Select-Object -Last 3
+        if (-not (Test-Path "$Dir\build\build.ninja")) { throw 'configure.bat falhou' }
+    }
+}
 (Get-Item "$Dir\PS2Recomp\ps2xRuntime\src\lib\ps2_runtime.cpp").LastWriteTime = Get-Date
 # microprogramas do VU0 em C++ (gerados do ELF; sem o .inc o runtime usa so o interpretador). Vao para <build>\wotm_gen, que o
 # CMake do runtime poe no caminho de include (e codigo do jogo: fora do repo e fora da arvore do PS2Recomp)

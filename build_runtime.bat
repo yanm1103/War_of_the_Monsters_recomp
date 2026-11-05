@@ -41,7 +41,7 @@ if /i "%~1"=="nm" (
     set "BAT=build_dev_nm.bat"
     set "LOG=logs\build_dev_nm.log"
 )
-if /i not "%~1"=="nm" if not exist "%FOUND%\%BAT%" (
+if /i not "%~1"=="nm" if /i not "%~1"=="build" if not exist "%FOUND%\%BAT%" (
     echo Nao achei "%FOUND%\%BAT%".
     exit /b 1
 )
