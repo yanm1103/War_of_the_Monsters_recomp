@@ -277,8 +277,12 @@ A skin is a folder in `mods/<mod>/skins/<folder>/` with a `skin.json`:
   mods folder), it exports the base type's textures in the custom's `costume` (or in `--base`), and the `skin.json` comes out without `base` when
   `--base` is not given. An unknown id creates only the `skin.json`, with a warning.
   In the window, the same with **New skin...**, the skin's properties panel and **Turn into skin...** (section "Interface").
-- Not yet: elimination. In it the game loads costume 0 of every monster only once and the
-  players switch monsters between rounds without reloading: picking a costume there requires changing the loading, not just the screen.
+- **Elimination** (`native/runtime/wotm_elimcostume.inc`): the game loads the 10 playable monsters at once and whoever dies picks another
+  unused one (dialog 8). Each starting player gets their own instance: the first player on a monster takes the retail load in their
+  costume (skin or custom included), and each repeated monster is one more load in the repeater's costume. A monster picked in dialog 8
+  comes in at the costume of its instance (costume 0 if nobody started with it). The file table holds 12 monsters, so at most 2 repeats:
+  three players can share a monster, four cannot; with 2 repeats the army vehicles stay out of that match. Log:
+  `[elim] jogador N: monstro T no traje C (instancia I)`.
 
 Example (`WOTM_MATCH=4:roxo,4:3,1`, AI): the skin with the recolored PNG comes out green and costume 3 next to it stays purple;
 a skin with only `skin.json` (`togera/demonio`, base 3) loads costume 3's model. Picture:
@@ -348,7 +352,8 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   (`WOTM_MATCH=1,moddedtogera,1`, with `"base": "togera"`: walks, attacks, breathes fire and loses the round like a Togera), and Jelly and
   Cerebulon too (`WOTM_MATCH=1,cerebulon,1`: the game's regular AI, the same one that moves Cerebulon in the final stage). Goliath does not: his AI
   (`Ai::updateAssBoss`) needs the points of his stage, and as a CPU (`WOTM_MATCH=3,goliath,1`) he loads but does not show up in the fight.
-- **On the select screen** (screens 3, 6, 7, 18 and 19 and the 3 and 4 player one, outside elimination): the CUSTOM slot of the monster bar. X opens the list of customs inside the
+- **On the select screen** (screens 3, 6, 7, 18 and 19 and the 3 and 4 player one; in elimination only customs with a playable base,
+  which take the base monster's place in dialog 8): the CUSTOM slot of the monster bar. X opens the list of customs inside the
   player's box (name, mod, how many skins; in a CPU box, "PLAYERS ONLY" on the ones without `"ai"`): up and down scroll, X picks, triangle
   closes. In the adventure (1 to 4 players) X does not pick a boss-type custom (Goliath, Jelly, Cerebulon and the Mecha, Jelly-based):
   its stages' bosses are of those types (`customAllowed`). Once picked, the box shows the monster like the game's ones: up and down change costume (the `costume` of `monster.json` and the

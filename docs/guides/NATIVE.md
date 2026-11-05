@@ -524,7 +524,14 @@ match: `WOTM_MODE`. The rules, by hook:
   that player (`m_won[1]`), `SetPlayerMonster` and `playerInit`; the dialogs are modal and return through a trampoline
   (`EvaluateOnlineBattleStatus + 4`, which the game never executes) that does the rest and resumes `EvaluateGameStatus`, also when the thread
   yielded in the middle. Without a continue and with more than one in the fight: the player leaves (monster hidden, their camera follows whoever goes on). One
-  left: dialog 0xB; "play again" puts players 3 and 4 back on their starting monster. Selection: costume 0, exclusive monster.
+  left: dialog 0xB; "play again" puts players 3 and 4 back on their starting monster. Selection: costumes, mod skins and customs with a
+  playable base; the same monster for up to 3 players (`WOTM_SEL_REPEAT=0`: costume 0 without mods and one player per monster, as in
+  the retail). Loading (`wotm_elimcostume.inc`): at the entry of `Shell::LoadLevelFiles` the first player on each monster sets the
+  costume of the retail load (`formatFilename1` from the three loaders and `fileAddName` from the mode 6 loops of `LoadMonstersDB`) and
+  each repeat goes through the AI path (`m_monsterSel[4 + j]`, `m_costume[2 + j]`, `m_numAIs`) until the entry of `InitPlayers`, whose
+  duplicate count gives it the dup of its load; the starting monsters are marked used (costume 0 `SelectSlot`, taken 0) for dialog 8.
+  `SetPlayerMonster` gets the costume of the instance (type, dup); outside `InitPlayers` (dialog 8, "play again", which pass dup 0) the
+  first instance of the type no other player holds.
 - **Dodgeball (7):** hits of players 3 and 4 outside `DodgeBallLevel` (the retail counter has 2 and the 3rd would write into the ball's
   count); "P3"/"P4" in views 2 and 3. The arena only has 2 start points: the extra player spawns at the point rotated 90° around their
   center (`wotm_split4.inc`).
