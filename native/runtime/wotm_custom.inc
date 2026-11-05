@@ -1262,6 +1262,55 @@ namespace wotm_custom
         if (jelly)
             WRITE32(m + kTypeBits, kJelly);
     }
+
+    // WOTM_ANIMLOG=1: uma linha por animacao que um monstro da luta comeca (animationStart, animationTransitionInto): field, slot,
+    // tipo e id. Para conferir que uma animacao acrescentada por mod (tools/ngpanim.py) toca. Pelo handle (a0 aponta para ele nas
+    // duas): ci, animIdx +0xC; a instancia principal do monstro tem id1 = tipo (indice << 5) e id2 = dupId.
+    constexpr uint32_t kAnimStartFn = wotm::fn::animationStart__FG11_animHandleb, kAnimTransFn = wotm::fn::animationTransitionInto__FR11_animHandlefii;
+    PS2Runtime::RecompiledFunction g_origAnimStart = nullptr, g_origAnimTrans = nullptr;
+
+    bool animRamOk(uint32_t a, uint32_t n) { return a >= 0x1000u && a + n <= PS2_RAM_SIZE; }
+    // os monstros carregam acima de 32 MB (WOTM_HIGHRAM): o cRd32 (mascara de 32 MB) nao serve para os dados do .NGP
+    uint32_t aRd32(const uint8_t *rdram, uint32_t a) { uint32_t v = 0; a &= 0x1FFFFFFFu; if (a + 4 <= PS2_RAM_SIZE) std::memcpy(&v, rdram + a, 4); return v; }
+
+    void logAnim(uint8_t *rdram, uint32_t h, const char *how)
+    {
+        const uint32_t ci = aRd32(rdram, h) & 0x1FFFFFFFu;
+        const int16_t k = static_cast<int16_t>(aRd32(rdram, h + 0xC) & 0xFFFFu);
+        if (!animRamOk(ci, 0x30u) || k < 0)
+            return;
+        const uint32_t head = aRd32(rdram, ci), id1 = head >> 18, id2 = (head >> 7) & 0x7FFu;
+        if ((id1 & 0x1Fu) || !id1 || id1 > (15u << 5))
+            return;
+        const uint32_t ch = aRd32(rdram, ci + 0x20) & 0x1FFFFFFFu;
+        if (!animRamOk(ch, 0x10u) || uint32_t(k) >= (aRd32(rdram, ch) & 0xFFFFu))
+            return;
+        const uint32_t an = aRd32(rdram, ch + 0xC + 4u * uint32_t(k)) & 0x1FFFFFFFu;
+        if (!animRamOk(an, 4u))
+            return;
+        for (uint32_t i = 0; i < 8; ++i)
+        {
+            const uint32_t m = cRd32(rdram, kGameObj + kMonsters + 4 * i) & 0x1FFFFFFFu;
+            if (!animRamOk(m, 0x20u) || cRd32(rdram, m + kTypeBits) != id1 || cRd32(rdram, m + kDupId) != id2)
+                continue;
+            const wotm::mods::Custom *cu = ownFilesCustom(rdram, m);
+            std::fprintf(stderr, "[anim] %u m%u %s tipo %u anim %u (%s)\n", cRd32(rdram, wotm::sym::g_frame), i, cu ? cu->id.c_str() : "-",
+                         id1 >> 5, aRd32(rdram, an) >> 18, how);
+            return;
+        }
+    }
+    void animStart(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (ctx->pc == kAnimStartFn)
+            logAnim(rdram, GPR_U32(ctx, 4) & 0x1FFFFFFFu, "start");
+        g_origAnimStart(rdram, ctx, runtime);
+    }
+    void animTrans(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (ctx->pc == kAnimTransFn)
+            logAnim(rdram, GPR_U32(ctx, 4) & 0x1FFFFFFFu, "transition");
+        g_origAnimTrans(rdram, ctx, runtime);
+    }
 } // namespace wotm_custom
 
 // O custom de um Monster com o traje dos arquivos proprios (ou uma skin dele); nullptr = monstro do jogo. O banco de som proprio
@@ -1310,6 +1359,14 @@ void wotmCustomInstall(PS2Runtime &runtime)
         runtime.registerFunction(kMonsterUpdate, &monsterUpdate);
     if ((g_origTakeDamage = runtime.lookupFunction(kTakeDamage)))
         runtime.registerFunction(kTakeDamage, &takeDamage);
+    if (const char *e = std::getenv("WOTM_ANIMLOG"); e && *e && *e != '0')
+    {
+        if ((g_origAnimStart = runtime.lookupFunction(kAnimStartFn)))
+            runtime.registerFunction(kAnimStartFn, &animStart);
+        if ((g_origAnimTrans = runtime.lookupFunction(kAnimTransFn)))
+            runtime.registerFunction(kAnimTransFn, &animTrans);
+        std::fprintf(stderr, "[anim] log das animacoes dos monstros: %s\n", g_origAnimStart && g_origAnimTrans ? "ligado" : "SEM gancho");
+    }
     std::fprintf(stderr, "[custom] chefes jogaveis (Goliath, Jelly, Cerebulon): %s, %s\n", g_origSetAI ? "visivel com IAs" : "SEM gancho do SetAIMonster",
                  g_origTakeHit ? "toma dano das IAs" : "SEM gancho do takeHit");
 }

@@ -119,9 +119,18 @@ Animations: only the actions that differ from the game's are rewritten; the log 
 16-bit) and the rest of the action keeps the game's. An action may get longer or shorter: the curves that did not move, including
 the event channels (hits, sounds), are stretched to the new length. The game rotates each transform by three angles on its own
 axes: a transform with fewer rotation channels follows the edit as closely as its axes allow, and the log says how far off
-(`fit off by up to ...`). Transforms with no channel in the game cannot move (the log names them). Only actions the base type
-already has are imported: one with a new id is skipped with a warning. Details: `MODELS_3D.md` (`tools/ngpmesh.py`,
-`tools/ngpanim.py`).
+(`fit off by up to ...`). Transforms with no channel in the game cannot move (the log names them). Details: `MODELS_3D.md`
+(`tools/ngpmesh.py`, `tools/ngpanim.py`).
+
+New animations: an action named with an id the base type does not have (`a299`; ids go up to 299, and `tools/pose.py --list`
+shows the ones taken) is added to the model (`a299: new animation 299, 181 frames, 141 curves`). The easy way is to duplicate an
+existing action in Blender, rename it and edit it; a bone the action does not key stays in the default (bind) pose. It loops when
+the game's monsters loop that id; `a299_loop` and `a299_once` choose. A new animation has none of the event channels of the
+game's (hand and foot contacts: footsteps, dust, splashes). The game plays an animation only where its code or data asks for
+that id: for a custom monster, the punch table of its own `.CHR` (`files/`, above) picks the animation of each punch, and
+`python tools/chr_punch.py <file.CHR> <pos> <type> <id>` changes it (`pos` and `type` as `tools/chr_dump.py` prints them). The
+hit window of the slot is a fraction of the animation, so it follows a longer or shorter one. `WOTM_ANIMLOG=1` logs every
+animation a monster of the fight starts (`[anim] 2401 m0 fire_togera tipo 3 anim 299 (transition)`).
 
 ## The kit on the command line (`tools/modkit.py`)
 
