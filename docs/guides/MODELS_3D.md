@@ -13,6 +13,7 @@
 | `tools/ngpanim.py` | `python tools/ngpanim.py <base.NGP> <edited.glb> <out_dir> [--name NAME] [--into OTHER.NGP]`: the actions of a `monglb.py --edit` `.glb` edited in Blender back into the `.NGP`/`.PTR`. World of each transform in the game frame = R⁻¹·G(t)·G_rest⁻¹·R·W_bind (R = the root's rotation, G_rest = the `.glb` world in its default pose; immune to Blender's bone axis correction); then each ANIM_XFORM top-down: local = world · inverse of the parent's fitted world, pre/post rotation removed, PRH angles (closed form on 3 channels, unwrapped from the previous frame; Gauss-Newton on fixed axes), translation the remainder. A clip whose local matrices match the game's at its key times (2e-3 rotation, 0.02 units) is left alone; otherwise the moved transforms get new curves (kPwl 16-bit or static), the rest keeps the game's (stretched when the length changed), and a new `_animation` is appended (header copied, `endTime`, channel pointers added to the `.PTR`) with `animations[k]` and the `animCtx[k]` `anim`/`prevKey` repointed. An ANIM_XFORM without `firstIdx`/mask is never rebuilt by the game (it draws `atMat`): only its visibility channel counts. An ANIM_SCALE (`T(a)·S(s)·T(t+b)`) takes `s` from the row lengths of the local matrix and `t` from its translation row. A clip with an id the main instance lacks (≤ 299) becomes a new `_animation` (`startTime` 0, `soundIdx` -1, every solved channel plus the idle's other channels static at its first frame); `_animCharacter` (header, `animations[]` one longer, the angular bits copied right before it so the s16 offset reaches them) and `animCtx[]` (a copy of the idle's control node per new slot, own `prevKey`, `loop` from `LOOPING_IDS` or the `_loop`/`_once` suffix) are rewritten at the end, the `.PTR` slots inside them are carried over, and every pointer to the old ones (the instance's `+0x10`/`+0x20`) is repointed; `animIdx` is set again by `animationInitialize` on load. `--into` writes into another `.NGP` (the mod kit: the base with the edited mesh already in). Standard library only |
 | `tools/vifpkt.py` | reads a mesh packet into geometry and writes it back (rigid, sprite, skinned sub-packets); `python tools/vifpkt.py disc/MON` checks the byte-exact round trip on every packet |
 | `tools/ngpmesh.py` | `python tools/ngpmesh.py <base.NGP> <edited.glb> <out_dir> [--name NAME]`: a `.glb` from `monglb.py` remodeled in Blender (same bone names, skeleton not moved) back into the monster's `.NGP`/`.PTR` (+ the base's `.TEX`/`.RTX`). Each `obj_<address>` mesh replaces that skinned OBJECT's sub-packets (up to 3 bones per vertex; each primitive with the OBJECT texture its material `tex<texId>` names, one texture per sub-packet) and every level of its LOD points at the edited level. Joints `bone<N>` or `bone<N>@<OBJECT>` (Agamo); refuses an OBJECT with two palette blocks. The mod kit runs it (`modkit.py skin|monster mesh import`, `MODS.md`); standard library only |
+| `tools/ngprig.py` | `python tools/ngprig.py <base.NGP> <rig.glb> <out_dir> [--name NAME] [--front +y|-y] [--scale S \| --height H] [--no-fill]`: a rigged `.glb` becomes a new body on a base monster (section "New skeleton"); writes `.NGP`/`.PTR`/`.TEX`/`.RTX` and the PNGs of the new textures. The mod kit runs it (`modkit.py monster rig`, `MODS.md`); standard library only |
 | `tools/shellpics.py` | wide stage pictures and monster logos from `SHELL.TEX/.RTX` as PNG (the same ones as `wotm_savepics.hpp`) |
 | `native/wotm_model.hpp` | the same in C++: `wotm::model::Model` (load, pose, posed triangles, textures) and `Renderer` (raylib, RenderTexture) |
 | `native/monview.cpp` | `build\monview.exe disc MONKEY0 [--anim 90] [--yaw 35] [--shot x.png]`: animated window (arrows rotate, PgUp/PgDn switch the animation) or PNG |
@@ -30,7 +31,8 @@ draws the monster into the RenderTexture before the frame (`wotm_live.inc` calls
 
 ## Animation
 - Main instance: the `CHAR_INSTANCE` (op 25) reachable from root 0 with the most animations. `character` at +0x20 (`numAnims` u16 @0,
-  `numChannels` u16 @2, `animations[]` @0xC); initial channel values at `ci+4`.
+  `numChannels` u16 @2, `numAnimTran` u16 @4 = number of ANIM_XFORM nodes under the instance, `animations[]` @0xC); initial
+  channel values at `ci+4`.
 - Animation `id` = the one in `animations[k]` with `head >> 18 == id` (the Monster stores the k-th as `m_anims[id]`, ids 0..299,
   `Monster::initAfterDbLoad`). `startTime` @4, `endTime` @8, `numChannels` u16 @0xC, curves @0x18. **Idle = 90 (0x5A)**
   (`StateIdle::chooseBaseIdle`; 0x5F tired, 0x60 with special). Time in frames of 60/s; Congar's idle has 160.
@@ -61,6 +63,29 @@ Row vectors (`p' = p·M`), child = `local · pai`. Per node:
   matrix. The normal rotates only by bone x.
 - The assembled palette is equal to the one from a fight dump (`ram_1500`). In other frames the RAM palette is one frame behind
   `atMat` (not a model error).
+
+## New skeleton (`tools/ngprig.py`)
+The base `.NGP` keeps everything outside its main `CHAR_INSTANCE` (type code, shadow, reticle, root 1, COLL_GRID, sounds). A new
+`CHAR_INSTANCE` is appended at the end of the file, and root 0 and the ANIM_MGR point at it (the old one stays in the file, unused).
+- **Joints:** every joint of the skin that carries weights, a locator or a rigid mesh, plus its ancestors. Per joint: SKEL_BONE
+  (`restPoseInv` = inverse of the `.glb` rest pose) followed by ANIM_XFORM (bits 1, pre-rotation = local rest rotation, rest angles
+  0, channels rX rY rZ tX tY tZ consecutive from `firstIdx`, mask 0x3F, `matrixIdx` = its own `atMat` slot). The main root has
+  `hasColl` (bit 4).
+- **Palette:** blocks of up to 32 matrices (Jelly uses 32), one OBJECT per block, up to 5 textures each. A joint used by two
+  blocks gets a second output (SKEL_BONE + TRANSLATE(0)).
+- **Live rigid parts:** a rigid mesh whose local matrix against its joint changes in some action gets an ANIM_XFORM without
+  SKEL_BONE (the game has many; Robo-47 has 18), then an ANIM_SCALE (scale channels, pivot 0), a GROUP and one rigid OBJECT per
+  texture (header copied from the body, `+0x68` = `0xFFFFFFFF`, `polyPkt` on a packet that starts with its DMA tag). A part hidden
+  in an action is scale 0 there (the kit exports the visibility channel that way). Other rigid meshes sit in the palette on
+  their joint, as they appear in the first frame of the idle.
+- **Channels:** 6 per joint, 9 per live rigid part (rotation, translation, scale), then 6 contact channels (ids 0x802..0x805,
+  0x816, 0x817) from the height of those locators and the 7 AnimPappy channels (ids 1..7) copied from the base animation with
+  the same id, stretched to the new length. The sounds come from that animation's header.
+- **Limits:** `animPktPtr` 0..63, bone code in a vertex 0..31, `skelStack` 5, `skelMatStack` 160, hier matStack 20, animation
+  stack 16 KB (the tool warns above about 600 channels). Animation 191 is overwritten by the reticle. Congar is refused as a base:
+  `initDynamics` builds 8 BoneSprings on fixed `atMat` slots (4, 8, 11, 13, 20, 22, 26, 28). Everything else in the game reaches
+  the body by id (channels, locators 0x802..0x832, attachments, animation ids < 300), and the native renderer never indexes a
+  bone by number.
 
 ## Textures
 - Slot `s` of the OBJECT: texId at `+0x50 + 2s`, TEX0 at `+0x70 + 0x30s` (how many: `+0x5A`, up to 5); the section's slot comes from the GIF tag

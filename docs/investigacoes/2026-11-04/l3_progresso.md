@@ -81,11 +81,17 @@ Erros encontrados e corrigidos no caminho:
 - Os scripts de conferência ficam em `build/l3/` (fora do repo): `loccmp.py` (localizadores no mundo, duas NGP) e
   `clawcmp.py` (vértices das peças rígidas no mundo).
 
-## Pendente (próximos passos, na ordem)
+- Kit: `modkit.py monster rig <mod> <id> <rig.glb> [--front] [--scale | --height]` e o botão "Import rig..." no painel do
+  monstro custom (status "own skeleton: <glb>"). Conferido na linha de comando num mod de rascunho com o `biped.glb`: os 4
+  arquivos e o PNG da cor na pasta de trabalho, `files` ligado, o pack leva tudo, mesh/anim import e mesh export recusam com
+  a razão certa. O botão da GUI não foi aberto na tela. Os rigs de teste têm de 16 a 35 saídas, abaixo das 64 do viewer: o
+  `pose.py`/`wotm_model.hpp` ficam como estão.
+- Docs: MODS.md ("Own skeleton"), MODELS_3D.md ("New skeleton" e a linha do `ngprig.py`), FORMATS.md (`+0x68` do OBJECT
+  rígido); L3 fora do `TODO.md` (era o último marcador do item 8).
 
-1. Kit: `modkit.py monster rig <mod> <id> <rig.glb>` e botão "Import rig..." na GUI; `pose.py`/`wotm_model.hpp` com mais de
-   64 saídas, se precisar.
-2. Docs (MODS.md, MODELS_3D.md seção "New skeleton", TOOLS.md, FORMATS.md se faltar campo) e tirar o L3 do `TODO.md`.
+## Pendente
+
+1. O dono testa o "Import rig..." na GUI e decide o merge na `master`. No merge, esta pasta sai (a história fica no git).
 
 ## Relato do sub-agente (o que do jogo depende do esqueleto)
 
