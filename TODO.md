@@ -2,6 +2,11 @@
 
 O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado sai deste arquivo: a história vai para a mensagem do commit e o que passou a existir vai para o doc de referência (no presente). Regras dos docs: `CLAUDE.md`, "Documentação".
 
+## Port
+- **Mais log no boot:** um usuário relatou queda ao bootar. Marcar cada etapa da partida (primeira execução, ISO, ELF, mods, janela, áudio, primeira tela) no `wotm.log`, para que a última linha diga onde caiu. Começar por `native/runtime/wotm_standalone.cpp` (`crashFilter` já grava a pilha; `RUNTIME.md`, "`wotm.exe` with no argument").
+- **Aba de cheats no "Recompiled options":** os cheats do menu F1 (`g_wotmCheats`, `NATIVE.md`, "Runtime: debug menu (F1) and cheats"), mais "desbloquear tudo" e "travar tudo", os dois com confirmação. Painel em `native/runtime/wotm_mainmenu.inc`; os desbloqueios ficam no save (`wotm_save.inc`).
+- **Eliminação com zero respawns:** permitir 0 continues na tela 11, que hoje oferece de 1 a 5 (cursor 0..4 mais um em `m_elimination`, `screenElimOptions2P` de `src/game/screen.cpp`; pela variável, `WOTM_MODE=6:0`). Regras da eliminação em `wotm_modes4.inc` (`NATIVE.md`, "Elimination and minigames with 3 and 4").
+
 ## Decomp
 - **Fora do caminho crítico:** oracle para funções com chamadas; cobertura com gameplay para realimentar o `boot_coverage_asm.csv` (`57d4afd:docs/investigacoes/2026-10-19/pendencias_oracle_cobertura.md`, seções 2 e 3).
 
