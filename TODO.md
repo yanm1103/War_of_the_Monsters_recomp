@@ -10,7 +10,6 @@ O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado s
 ### 8. Mods que adicionam monstros
 Como funciona hoje: `docs/guides/MODS.md` ("Skins", "Monstros custom").
 Levantamento (tipo livre descartado em favor de remapear por instância; níveis do kit; medidas): `docs/investigacoes/2026-11-04/monstro_novo.md`. Ordem proposta:
-- **`"special"` no `monster.json`** (ponteiro em +0x7980 depois do `initDynamics`). As animações do especial de outro tipo entram pelo Import animations com os ids dele (`MODS.md`, "New animations").
 - **L3, esqueleto novo** (3 a 6 semanas): só se ainda fizer falta depois dos anteriores.
 
 ## Decomp

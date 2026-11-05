@@ -27,6 +27,7 @@ namespace wotm_custom
     constexpr uint32_t kNumAIs = 0x1203E0, kGameMode = 0x1203C8;   // TheGame::m_numAIs, m_gameMode
     constexpr uint32_t kSlots = 0xB80, kSlotStride = 0x11190, kNumSlots = 0x1203D4;   // TheGame::m_slots[16], m_numSlots
     constexpr uint32_t kGoliath = 13u << 5, kJelly = 14u << 5, kFinal = 15u << 5;
+    constexpr uint32_t kSpecialState = 0x7980;        // Monster::m_specialState (o estado do golpe especial)
     // Chefe que e Monster (a selecao nao oferece; o SetAIMonster o esconde)
     bool bossType(uint32_t bits) { return bits == kGoliath || bits == kJelly || bits == kFinal; }
     PS2Runtime::RecompiledFunction g_origSetAI = nullptr, g_origTakeHit = nullptr;
@@ -997,6 +998,12 @@ namespace wotm_custom
                          mouth[0], mouth[1], mouth[2], aim[0], aim[1], aim[2], mem(rdram, kSRes)[0], rdW(rdram, kSRes + 4), len, s.yaw, s.pitch);
     }
 
+    // Quem tem o choque como golpe de jogador: o Jelly e o custom com "special": "jelly" ou "final" (o Cerebulon segue o retail)
+    bool tazerOwner(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m)
+    {
+        const uint32_t type = READ32(m + kTypeBits);
+        return type == kJelly || (type != kFinal && READ32(m + kSpecialState) == m + kTazer);
+    }
     void tazerOK(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t m = ctx->pc == kTazerOK ? READ32(GPR_U32(ctx, 4) + kStateOwner) : 0;
@@ -1026,7 +1033,7 @@ namespace wotm_custom
             }
         }
         const float reach = mecha >= 0 ? kMechaReach : kTazerReach;
-        if (player >= 0 && READ32(m + kTypeBits) == kJelly && READ32(m + kPlayerNum) != 2u)
+        if (player >= 0 && tazerOwner(rdram, ctx, runtime, m) && READ32(m + kPlayerNum) != 2u)
         {
             const uint32_t b = wotm_modes4::call(rdram, ctx, runtime, kPadButtons, {uint32_t(player)});
             float d = 0.f;
@@ -1078,7 +1085,7 @@ namespace wotm_custom
             stopLaserSound(rdram, ctx, runtime, mecha);   // a rajada acabou (vai para a fase de desligar)
         }
         // O Mecha mira o inimigo mais perto sempre (o retail mira m_monsters[0], que pode ser ele mesmo)
-        if (!m || READ32(m + kTypeBits) != kJelly || ((!isPlayerSlot(rdram, ctx, runtime, m) || READ32(m + kPlayerNum) == 2u) && mecha < 0))
+        if (!m || !tazerOwner(rdram, ctx, runtime, m) || ((!isPlayerSlot(rdram, ctx, runtime, m) || READ32(m + kPlayerNum) == 2u) && mecha < 0))
         {
             g_origTazerUpdate(rdram, ctx, runtime);
             return;
@@ -1311,6 +1318,54 @@ namespace wotm_custom
             logAnim(rdram, GPR_U32(ctx, 4) & 0x1FFFFFFFu, "transition");
         g_origAnimTrans(rdram, ctx, runtime);
     }
+
+    // "special" (monster.json): o golpe especial de outro tipo. Todo Monster traz os estados de especial embutidos, em offsets
+    // fixos; o Monster::initDynamics (initAfterDbLoad, antes do .CHR) escolhe um pelo tipo, grava o ponteiro em +0x7980 e chama o
+    // init virtual dele. Depois dele, o ponteiro vira o do tipo pedido e o init desse estado roda; quem dispara o especial (botoes,
+    // IA, modo treino) le o +0x7980. O especial toca as animacoes 160..162 do proprio monstro. Os testes de tipo dentro dos estados
+    // seguem o tipo-base (o fogo so incendeia num Raptros). Vale para o custom com o traje dos arquivos proprios (ou uma skin dele) e
+    // para os chefes custom fora da aventura, os unicos que se distinguem do monstro do jogo do mesmo tipo.
+    constexpr uint32_t kInitDynamics = wotm::fn::initDynamics__7Monster;
+    constexpr uint32_t kVptr = 0x10, kVInit = 0x8;   // MonsterState: vtable em +0x10, init(Monster *) na entrada 1
+    // estado do especial de cada tipo (Monster +offset, como no initDynamics); 0 = sem especial
+    constexpr uint32_t kSpecialOf[16] = {0,       0xF6F4 /* SonicRoar */,   0xFE5C /* RobotSpecial */, 0xF974 /* FireBreath */,
+                                         0x10600 /* GrappleHook */,        0xF9D8 /* BugAttack */,    0,
+                                         0x1059C /* ZapAttack */,          0x10930 /* LavaBlast */,   0xF974 /* FireBreath */,
+                                         0x102A8 /* RockSpecial */,        0x10790 /* AirStrike */,   0,
+                                         0x10F60 /* CannonHands */,        0x11130 /* UltraTazer */,  0x11130 /* UltraTazer */};
+    PS2Runtime::RecompiledFunction g_origInitDynamics = nullptr;
+    void initDynamics(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (ctx->pc != kInitDynamics)
+        {
+            g_origInitDynamics(rdram, ctx, runtime);
+            return;
+        }
+        const uint32_t m = GPR_U32(ctx, 4), ra = GPR_U32(ctx, 31);
+        g_origInitDynamics(rdram, ctx, runtime);
+        const wotm::mods::Custom *cu = ownFilesCustom(rdram, m);
+        if (!cu && bossType(READ32(m + kTypeBits)) && READ32(kGameObj + kGameMode) != 1u)
+            cu = customOf(rdram, m);
+        const uint32_t off = cu && cu->special > 0 && cu->special < 16 ? kSpecialOf[cu->special] : 0;
+        if (!off)
+            return;
+        const uint32_t st = m + off, vt = READ32(st + kVptr);
+        WRITE32(m + kSpecialState, st);
+        const int16_t delta = static_cast<int16_t>(READ16(vt + kVInit));
+        wotm_modes4::call(rdram, ctx, runtime, READ32(vt + kVInit + 4), {st + static_cast<uint32_t>(static_cast<int32_t>(delta)), m});
+        ctx->pc = ra;
+        static std::set<std::string> logged;
+        if (logged.insert(cu->id).second)
+        {
+            const char *who = "?";
+            if (const wotm::mods::MonsterInfo *mi = wotm::mods::monsterInfo(cu->special))
+                who = mi->name;
+            for (const wotm::mods::MonsterInfo &b : wotm::mods::kCustomBases)
+                if (b.type == cu->special)
+                    who = b.name;
+            std::fprintf(stderr, "[custom] %s: especial do %s\n", cu->id.c_str(), who);
+        }
+    }
 } // namespace wotm_custom
 
 // O custom de um Monster com o traje dos arquivos proprios (ou uma skin dele); nullptr = monstro do jogo. O banco de som proprio
@@ -1359,6 +1414,8 @@ void wotmCustomInstall(PS2Runtime &runtime)
         runtime.registerFunction(kMonsterUpdate, &monsterUpdate);
     if ((g_origTakeDamage = runtime.lookupFunction(kTakeDamage)))
         runtime.registerFunction(kTakeDamage, &takeDamage);
+    if ((g_origInitDynamics = runtime.lookupFunction(kInitDynamics)))
+        runtime.registerFunction(kInitDynamics, &initDynamics);
     if (const char *e = std::getenv("WOTM_ANIMLOG"); e && *e && *e != '0')
     {
         if ((g_origAnimStart = runtime.lookupFunction(kAnimStartFn)))

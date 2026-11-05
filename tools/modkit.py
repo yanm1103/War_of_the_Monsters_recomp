@@ -601,6 +601,10 @@ CUSTOM_BASES = {"assboss": "ASSBOSS", "jelly": "JELLY", "final": "FINAL"}
 # as pernas; a do FINAL.CHR ja serve). Base jogavel: traje 0 e a camera do proprio tipo.
 BOSS_DEFAULTS = {"assboss": (1, ("togera", 200)), "jelly": (0, ("togera", 300)), "final": (0, None)}
 KINDS = ("mecha",)   # regras proprias do port ("kind" do monster.json, wotm_custom.inc)
+# Especiais que um custom nao pega de outro tipo ("special"; specialNeeds em native/wotm_mods.hpp): usam um modelo que so o .NGP do
+# dono traz
+SPECIAL_NEEDS = {"robo-47": "the shock wave effect", "ultra-v": "the hook's ball", "preytor": "the bugs", "magmo": "the lava rocks",
+                 "agamo": "the head", "zorgulon": "the disc", "assboss": "the cannon shells"}
 
 
 def norm(s):
@@ -1402,6 +1406,15 @@ def check(disc, mods, only=None):
                         problems += 1
                     elif v.get("files") and not os.path.isdir(os.path.join(os.path.dirname(p), v["files"] if isinstance(v["files"], str) else "files")):
                         note += " WARNING: \"files\" folder missing; the game uses the disc costume"
+                    if v.get("special") and not base_name(str(v["special"])):
+                        note += " WARNING: \"special\" %r is not a monster (%s, %s); the game keeps the base's special" % (
+                            v["special"], ", ".join(MONSTERS), ", ".join(CUSTOM_BASES))
+                    elif v.get("special") and base_name(str(v["special"])) in SPECIAL_NEEDS:
+                        sp = base_name(str(v["special"]))
+                        note += " WARNING: the %s special uses %s, which only its own model has; the game keeps the base's special" % (
+                            sp, SPECIAL_NEEDS[sp])
+                    elif v.get("special") and not v.get("files") and base_prefix(str(v.get("base", ""))) not in CUSTOM_BASES.values():
+                        note += " WARNING: \"special\" only applies with \"files\" (the game cannot tell this monster from the base's)"
             elif m:
                 stem, rtx, tid = m.group(1), bool(m.group(2)), int(m.group(3))
                 trel = find_texfile(disc, stem, ".RTX" if rtx else ".TEX")
