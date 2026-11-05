@@ -2,16 +2,6 @@
 
 O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado sai deste arquivo: a história vai para a mensagem do commit e o que passou a existir vai para o doc de referência (no presente). Regras dos docs: `CLAUDE.md`, "Documentação".
 
-## Ordem
-| # | Item | Depende de | Custo |
-|---|---|---|---|
-| 8 | Mods que adicionam monstros (as skins já existem) | — | médio/alto |
-
-### 8. Mods que adicionam monstros
-Como funciona hoje: `docs/guides/MODS.md` ("Skins", "Monstros custom").
-Levantamento (tipo livre descartado em favor de remapear por instância; níveis do kit; medidas): `docs/investigacoes/2026-11-04/monstro_novo.md`. Ordem proposta:
-- **L3, esqueleto novo** (3 a 6 semanas): só se ainda fizer falta depois dos anteriores.
-
 ## Decomp
 - **Fora do caminho crítico:** oracle para funções com chamadas; cobertura com gameplay para realimentar o `boot_coverage_asm.csv` (`57d4afd:docs/investigacoes/2026-10-19/pendencias_oracle_cobertura.md`, seções 2 e 3).
 

@@ -1865,6 +1865,9 @@ class App:
             look = "the disc costume (no own files)"
         else:
             look = "%d texture(s) to edit in monsters/%s/files" % (npng, cid) + ("; own model: %s" % ", ".join(model) if model else "")
+            rig = (modkit._json_obj(os.path.join(wfiles, modkit.BLENDER_REC)) or {}).get("rig") if model else None
+            if rig:
+                look += "; own skeleton: %s" % os.path.basename(rig)
         # numeros da luta (.CHR) e IA (.AIC) proprios: os do tipo base, extraidos para editar na pasta de trabalho
         chr_ = [n for n in names if n.upper().endswith(".CHR")]
         aic = [n for n in names if n.upper().endswith(".AIC")]
@@ -1994,14 +1997,17 @@ class App:
 
     def mesh_row(self, parent, kind, tid, folder, status=True):
         """Export to Blender (.glb com malha e animacoes), Import mesh... e Import animations... (o .glb editado vira o
-        .NGP/.PTR), com o que a pasta ja tem."""
+        .NGP/.PTR) e, nos monstros, Import rig... (esqueleto proprio, tools/ngprig.py), com o que a pasta ja tem."""
         f = ttk.Frame(parent)
         names = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
         if status:
             model = [n for n in names if os.path.splitext(n)[1].upper() in (".NGP", ".PTR")]
             glb = [n for n in names if n.lower().endswith(".glb")]
             txt = ("own model: %s" % ", ".join(model)) if model else "the base costume's"
-            ids = modkit._json_obj(os.path.join(folder, modkit.BLENDER_REC)).get("anim_ids") if model else None
+            rec = modkit._json_obj(os.path.join(folder, modkit.BLENDER_REC)) if model else {}
+            ids = rec.get("anim_ids")
+            if rec.get("rig"):
+                txt += "; own skeleton: %s" % os.path.basename(rec["rig"])
             if ids:
                 txt += "; animations changed: %s" % ", ".join(ids)
             if glb:
@@ -2013,6 +2019,8 @@ class App:
         ttk.Button(bf, text="Import mesh...", command=lambda: self.import_mesh(kind, tid)).pack(side="left", padx=(6, 0))
         ttk.Button(bf, text="Import animations...",
                    command=lambda: self.import_mesh(kind, tid, "anims")).pack(side="left", padx=(6, 0))
+        if kind == "monster":
+            ttk.Button(bf, text="Import rig...", command=lambda: self.import_rig(tid)).pack(side="left", padx=(6, 0))
         ttk.Label(bf, text="(.glb)", style="Dim.TLabel").pack(side="left", padx=(8, 0))
         return f
 
@@ -2048,6 +2056,22 @@ class App:
         self.run("Importing the %s of %s..." % (noun, tid),
                  lambda disc=self.disc.get(): fn(disc, work, mods, mod, kind, tid, p),
                  lambda: self.reselect(key))
+
+    def import_rig(self, cid):
+        work, mod, mods = self.work(), self.cur_mod(), self.mods.get()
+        if not work:
+            return
+        rec = modkit._json_obj(os.path.join(work, "monsters", cid, "files", modkit.BLENDER_REC)) or {}
+        kw = {}
+        if rec.get("rig") and os.path.isdir(os.path.dirname(rec["rig"])):
+            kw = {"initialdir": os.path.dirname(rec["rig"]), "initialfile": os.path.basename(rec["rig"])}
+        p = filedialog.askopenfilename(parent=self.root, title="Rig of %s: .glb with armature, mesh and actions" % cid,
+                                       filetypes=[("glTF binary", "*.glb *.GLB"), ("All files", "*.*")], **kw)
+        if not p:
+            return
+        self.run("Importing the rig of %s..." % cid,
+                 lambda disc=self.disc.get(): modkit.rig_import(disc, work, mods, mod, cid, p),
+                 lambda: self.reselect("monsters/" + cid))
 
     def extract_stats(self, cid):
         work, mod = self.work(), self.cur_mod()

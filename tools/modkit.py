@@ -19,6 +19,7 @@ pasta de trabalho (<mods>/_work/<mod>/, com o modkit.json dela), e o pack de um 
   python tools/modkit.py monster mesh export my_mod fire_togera               # malha e animacoes do traje base em .glb (Blender)
   python tools/modkit.py monster mesh import my_mod fire_togera [editado.glb] # a malha editada vira o .NGP/.PTR do custom
   python tools/modkit.py monster anim import my_mod fire_togera [editado.glb] # as animacoes editadas tambem
+  python tools/modkit.py monster rig my_mod lizardman rig.glb [--front +y|-y] [--scale S | --height H]   # esqueleto proprio
   python tools/modkit.py skin mesh export my_mod green / skin mesh import my_mod green [editado.glb]   # o mesmo numa skin
   python tools/modkit_gui.py                                 # o mesmo com interface (botao "Mod kit" do launcher)
 
@@ -36,6 +37,8 @@ O que cada tipo vira:
 - Malha e animacoes (skin ou custom) -> <PREFIXO><traje>.glb (tools/monglb.py --edit, precisa do numpy); voltam pelo
   tools/ngpmesh.py (malha) e tools/ngpanim.py (animacoes) como .NGP + .PTR, remontados do traje do disco com os dois .glb
   importados (.blender.json na pasta). O pack nao leva .glb/.blend (MESH_SRC).
+- Esqueleto proprio (custom): um .glb com armature, malha, acoes a<id> e localizadores -> .NGP/.PTR/.TEX/.RTX e os PNGs das
+  texturas novas, montados sobre o traje base do disco (tools/ngprig.py); depois dele o mesh/anim import recusam esse custom.
 O pack so leva o que mudou desde o export (sha1 em modkit.json na pasta de trabalho). Nada do jogo vai para o repo: o kit le o
 disco do usuario e grava nas pastas dele.
 """
@@ -1142,6 +1145,10 @@ def mesh_export(disc, work, mods, mod, kind, tid):
     (animacoes). Nao sobrescreve um .glb que ja esta la. Devolve o caminho."""
     rel, stem = mesh_target(mods, mod, kind, tid)
     out = mesh_glb(work, mods, mod, kind, tid)
+    rig = (_json_obj(_blender_rec(work, rel)) or {}).get("rig")
+    if rig:
+        print("%s has a skeleton of its own: edit %s and import it again with rig import" % (tid, rig))
+        return rig
     if os.path.exists(out):
         print("%s already exists; kept (delete it to export again)" % out)
         return out
@@ -1178,13 +1185,16 @@ def model_import(disc, work, mods, mod, kind, tid, glb=None, what="mesh"):
     import ngpmesh
     cmd = "%s import" % ("mesh" if what == "mesh" else "anim")
     rel, stem = mesh_target(mods, mod, kind, tid)
+    rec = _json_obj(_blender_rec(work, rel)) or {}
+    if rec.get("rig"):
+        raise SystemExit("%s: %s has a skeleton of its own (rig import of %s): edit that .glb and import it again with "
+                         "rig import (Revert on the .NGP goes back to the base's skeleton)" % (cmd, tid, rec["rig"]))
     glb = os.path.abspath(glb or mesh_glb(work, mods, mod, kind, tid))
     if not os.path.isfile(glb):
         raise SystemExit("%s: %s not found (export it, edit it in Blender, export the .glb)" % (cmd, glb))
     src = disc_file(disc, stem + ".NGP")
     if not src or not disc_file(disc, stem + ".PTR"):
         raise SystemExit("%s: %s.NGP/.PTR are not on the disc" % (cmd, stem))
-    rec = _json_obj(_blender_rec(work, rel)) or {}
     rec["mesh" if what == "mesh" else "anims"] = glb
     for k in ("mesh", "anims"):
         if rec.get(k) and not os.path.isfile(rec[k]):
@@ -1235,6 +1245,53 @@ def mesh_import(disc, work, mods, mod, kind, tid, glb=None):
 
 def anim_import(disc, work, mods, mod, kind, tid, glb=None):
     return model_import(disc, work, mods, mod, kind, tid, glb, "anims")
+
+
+def rig_import(disc, work, mods, mod, cid, glb, front=None, scale=None, height=None):
+    """Esqueleto proprio (tools/ngprig.py): o .glb com armature, malha, acoes a<id> e localizadores vira o corpo do custom sobre
+    o traje base do disco (codigo, sombra, sons e o resto do tipo ficam). Grava .NGP/.PTR/.TEX/.RTX e os PNGs das texturas novas
+    na pasta de trabalho do custom (o pack os leva) e liga "files". O mesh/anim import passam a recusar esse custom: o modelo e o
+    .glb do rig. Devolve o resumo do ngprig."""
+    import tempfile
+    import ngpanim
+    import ngpmesh
+    import ngprig
+    rel, stem = mesh_target(mods, mod, "monster", cid)
+    glb = os.path.abspath(glb)
+    if not os.path.isfile(glb):
+        raise SystemExit("rig import: %s not found" % glb)
+    src = disc_file(disc, stem + ".NGP")
+    if not src or not disc_file(disc, stem + ".PTR") or not disc_file(disc, stem + ".TEX"):
+        raise SystemExit("rig import: %s.NGP/.PTR/.TEX are not on the disc" % stem)
+    tmp = tempfile.mkdtemp(prefix="wotm_rig_")
+    name = os.path.basename(stem)
+    try:
+        try:
+            res = ngprig.build(src, glb, tmp, name=name, front=front, scale=scale, height=height, log=print)
+        except (ngprig.RigError, ngpanim.AnimError, ngpmesh.MeshError) as e:
+            raise SystemExit("rig import: %s" % e)
+        files = {ext: os.path.join(tmp, name + ext) for ext in (".NGP", ".PTR", ".TEX", ".RTX")}
+        put_model_files(work, rel, {k: p for k, p in files.items() if os.path.exists(p)})
+        d = os.path.join(work, *rel.split("/"))
+        rec = _json_obj(_blender_rec(work, rel)) or {}
+        pngs = sorted(n for n in os.listdir(tmp) if n.lower().endswith(".png"))
+        st = load_state(work)
+        for n in rec.get("rig_pngs", []):   # os da importacao anterior que nao voltaram
+            if n not in pngs and os.path.exists(os.path.join(d, n)):
+                os.remove(os.path.join(d, n))
+                st["files"].pop("%s/%s" % (rel, n), None)
+        for n in pngs:
+            shutil.copyfile(os.path.join(tmp, n), os.path.join(d, n))
+            st["files"]["%s/%s" % (rel, n)] = {"sha1": "", "imported": True}
+            print("texture %s -> work folder %s/" % (n, rel))
+        save_state(work, st)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    with open(_blender_rec(work, rel), "w", encoding="utf-8") as f:
+        json.dump({"rig": glb, "rig_pngs": pngs}, f, indent=1)
+    files_on(mods, mod, cid, _json_obj(os.path.join(monster_dir(mods, mod, cid), "monster.json")))
+    print("send it to the mod: %s" % pack_hint(mod))
+    return res
 
 
 def monster_duplicate(mods, mod, work, cid, new):
@@ -1488,7 +1545,8 @@ def check(disc, mods, only=None):
 def main(argv):
     opts, args, i = {}, [], 0
     while i < len(argv):
-        if argv[i] in ("--disc", "--mods", "--work", "--base", "--name", "--costume", "--camera", "--narrator"):
+        if argv[i] in ("--disc", "--mods", "--work", "--base", "--name", "--costume", "--camera", "--narrator", "--front",
+                       "--scale", "--height"):
             if i + 1 >= len(argv):
                 raise SystemExit("%s needs a value" % argv[i])
             opts[argv[i][2:]] = argv[i + 1]
@@ -1551,11 +1609,21 @@ def main(argv):
         use = ("monster new <mod> <id> --base <monster> [--costume N] [--name \"X\"] [--ai] [--camera togera:200 | --camera none] "
                "[--narrator <name>] [--no-textures]\nmonster portrait <mod> <id> <png>\nmonster model <mod> <id> <.NGP> <.PTR> [.TEX] [.RTX]"
                "\nmonster stats <mod> <id>\nmonster sounds <mod> <id>\nmonster mesh export <mod> <id>\nmonster mesh import <mod> <id> [edited.glb]"
-               "\nmonster anim import <mod> <id> [edited.glb]")
-        if len(args) < 4 or args[1] not in ("new", "portrait", "model", "stats", "sounds"):
+               "\nmonster anim import <mod> <id> [edited.glb]\nmonster rig <mod> <id> <rig.glb> [--front +y|-y] "
+               "[--scale S | --height H]")
+        if len(args) < 4 or args[1] not in ("new", "portrait", "model", "stats", "sounds", "rig"):
             raise SystemExit(use)
         w = work_of("monster " + args[1], args[2])
-        if args[1] == "new":
+        if args[1] == "rig":
+            if len(args) != 5 or opts.get("front") not in (None, "+y", "-y") or ("scale" in opts and "height" in opts):
+                raise SystemExit(use)
+            try:
+                sc = float(opts["scale"]) if "scale" in opts else None
+                ht = float(opts["height"]) if "height" in opts else None
+            except ValueError:
+                raise SystemExit("monster rig: --scale and --height are numbers")
+            rig_import(disc, w, mods, args[2], args[3], args[4], opts.get("front"), sc, ht)
+        elif args[1] == "new":
             if len(args) != 4 or not opts.get("base"):
                 raise SystemExit(use)
             co = opts.get("costume")

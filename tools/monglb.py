@@ -713,6 +713,28 @@ class Exporter:
             par = info[n][1]
             P = W[par] if par is not None else np.eye(4)
             gi[n] = add_node(with_trs({"name": name(n)}, W[n] @ np.linalg.inv(P)), gi[par] if par is not None else 0)
+        # localizadores: um empty "loc_<id>" filho da transformacao de cima do ATTACHPT (a matriz dele e a dela);
+        # o tools/ngprig.py os le, o ngpmesh e o ngpanim os ignoram
+        loc_seen = set()
+
+        def locs_under(n, depth=0):
+            if depth > 40 or not img.ok(n):
+                return
+            for arr, cnt in gm._kids(n, img.u32(n) & 63):
+                for k in range(min(cnt, 4096)):
+                    c = img.u32(arr + 4 * k)
+                    if not img.ok(c) or c in gm.nodes:
+                        continue
+                    if img.u32(c) & 63 == 40:
+                        lid = img.u32(c) >> 18
+                        if lid and lid not in loc_seen:
+                            loc_seen.add(lid)
+                            yield lid
+                    else:
+                        yield from locs_under(c, depth + 1)
+        for n in order:
+            for lid in locs_under(n):
+                add_node({"name": "loc_%x" % lid}, gi[n])
         bones_of = {}   # instancia -> [(saida, transformacao)]
         for n in order:
             if info[n][2] is not None:

@@ -132,6 +132,31 @@ that id: for a custom monster, the punch table of its own `.CHR` (`files/`, abov
 hit window of the slot is a fraction of the animation, so it follows a longer or shorter one. `WOTM_ANIMLOG=1` logs every
 animation a monster of the fight starts (`[anim] 2401 m0 fire_togera tipo 3 anim 299 (transition)`).
 
+**Own skeleton (custom monsters).** **Import rig...** (next to **Import mesh...**) takes a `.glb` with an armature of its own and
+makes it the custom's body, on top of the base costume: the base type's code, shadow, reticle, collision grid and sounds stay, and
+the skeleton, the mesh, the animations and the locators are the `.glb`'s (`tools/ngprig.py`; rules in `MODELS_3D.md`, "New
+skeleton"). Any base but Congar (its code moves 8 of its bones by number). What the `.glb` holds:
+- an armature (bone names and hierarchy are free) and the meshes weighted to it; up to 3 bones per vertex (the heaviest kept);
+  a mesh parented to a bone without weights follows that bone;
+- actions named `a<id>` with the game's ids (`a090` is the idle; `tools/pose.py --list` on the base shows the ids). An id of the
+  base type that the `.glb` lacks gets the rest pose for the base's length, so every move still has an animation. The footsteps
+  and dust come from the height of the hand and foot locators; the sounds and the throw channels come from the base's animation
+  with the same id. With the scene at 60 fps before the export one Blender frame is one game frame (the log warns when the keys
+  are further apart than 1/60 s);
+- locators: empties parented to a bone, named by alias (`hand_l`, `hand_r`, `foot_l`, `foot_r`, `grab`, `grabbed`, `impale`,
+  `chest`, `hold`, `mouth`, `head`, `look`, `extra1`, `extra2`) or `loc_<hex id>`. A locator of the base the `.glb` lacks goes
+  where the base has it, on the nearest bone, and the log names it;
+- a mesh named `coll*` is a collision box (not drawn); without one, a box around the rest mesh is used;
+- materials: `tex<texId>` keeps one of the base's textures; a material with an image gets a texture of its own (the PNG lands
+  in `files/` as `<file>_t<texId>.png`, editable like the others); one without an image gets a PNG of its color.
+A scene made in Blender (Z up, facing -Y, meters) is turned to the game's front and scaled to the base type's height, feet on the
+ground; `modkit.py monster rig ... --front +y` (a model facing +Y), `--scale S` or `--height H` change that. A `.glb` from **Export
+to Blender** (its "WotM" root) is already in the game's axes and units, so the base type's own skeleton, edited, also goes in this
+way. The import writes `.NGP`, `.PTR`, `.TEX`, `.RTX` and the new PNGs to `files/` and records the `.glb` in `.blender.json`;
+**Import mesh...** and **Import animations...** then refuse that monster (edit the rig `.glb` and import it again). **Revert** on
+the `.NGP` goes back to the base type's skeleton. A part that scales, appears or disappears in some action (a growing claw, a
+weapon shown only in one move) has to be a rigid mesh parented to a bone: scaling a bone does not reach the weighted meshes.
+
 ## The kit on the command line (`tools/modkit.py`)
 
 ```
@@ -150,6 +175,7 @@ python tools/modkit.py monster sounds my_mod fire_togera  # the base type's soun
 python tools/modkit.py monster mesh export my_mod fire_togera   # the base costume as .glb for Blender (mesh and animations)
 python tools/modkit.py monster mesh import my_mod fire_togera [edited.glb]   # the edited .glb's meshes into its .NGP + .PTR
 python tools/modkit.py monster anim import my_mod fire_togera [edited.glb]   # the edited .glb's actions into its .NGP + .PTR
+python tools/modkit.py monster rig my_mod lizardman rig.glb [--front +y|-y] [--scale S | --height H]   # own skeleton
 python tools/modkit.py skin mesh export my_mod green          # the same for a skin (skin mesh|anim import my_mod green [edited.glb])
 ```
 
