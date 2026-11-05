@@ -1424,7 +1424,7 @@ static void soloSync(uint8_t *rdram)
             if (!g_soloPrimed)
                 ;
             else if (const wotm::mods::Custom *cu = g_soloCustomPick[i] ? customAt(g_soloCustomPick[i] - 1) : nullptr)
-                wotm_narrator::announce(cu->narrator, cu->type);
+                wotm_narrator::announce(cu->narrator, cu->type, cu->bank);
             else
                 wotm_narrator::announce(col >= 1 && col <= 10 ? monsterOfCol(rdram, col) : int(msel >> 5));
         }

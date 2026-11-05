@@ -110,8 +110,9 @@ static void play(const char *const *names)
     g_playing = s;
 }
 
-// MONSTER CRY: o grito do monstro no lugar do nome (corta o MP3 que estiver tocando; sem grito, silencio). false = outra opcao, vale o MP3
-static bool cry(int monster)
+// MONSTER CRY: o grito do monstro no lugar do nome (corta o MP3 que estiver tocando; sem grito, silencio). false = outra opcao, vale o MP3.
+// `bank`: o .BNK proprio de um custom (vazio = o do tipo, do disco)
+static bool cry(int monster, const std::filesystem::path &bank = {})
 {
     if (wotm::settings::get(wotm::settings::Announcer) != 2)
         return false;
@@ -119,9 +120,10 @@ static bool cry(int monster)
     if (g_playing && IsSoundPlaying(*g_playing))
         StopSound(*g_playing);
 #if defined(WOTM_HAVE_SND)
-    wotm_snd_hooks::playMonsterCry(monster);
+    wotm_snd_hooks::playMonsterCry(monster, bank);
 #else
     (void)monster;
+    (void)bank;
 #endif
     return true;
 }
@@ -132,10 +134,10 @@ static void announce(int monster)
     if (!cry(monster))
         play(namesOf(monster));
 }
-// Monstro custom: o "narrator" do monster.json e, sem o arquivo, o do tipo (com MONSTER CRY, o grito do tipo)
-static void announce(const std::string &name, int monster)
+// Monstro custom: o "narrator" do monster.json e, sem o arquivo, o do tipo (com MONSTER CRY, o grito do banco proprio dele ou o do tipo)
+static void announce(const std::string &name, int monster, const std::filesystem::path &bank = {})
 {
-    if (cry(monster))
+    if (cry(monster, bank))
         return;
     const char *const *t = namesOf(monster);
     const char *names[4] = {name.empty() ? nullptr : name.c_str(), nullptr, nullptr, nullptr};

@@ -4,7 +4,7 @@ docs/FORMATS.md ("Som").
 
   python tools/snd989.py bnk disc/SND/SHELL_S.BNK            # sons e grains de um banco
   python tools/snd989.py stats disc/SND                       # tipos de grain/flags usados em todos os bancos
-  python tools/snd989.py wav disc/SND/SHELLMUS.BNK 0 out.wav  # som N do banco (só os grains TONE, sem envelope) em WAV
+  python tools/snd989.py wav disc/SND/SHELLMUS.BNK 0 out.wav  # som N do banco em WAV (os TONEs, camadas misturadas; sem envelope)
   python tools/snd989.py wav disc/VAG/CITYAMB.VPK - out.wav   # stream .VPK/.VAG inteiro em WAV
 
 De volta (WAV PCM 8/16/24/32 bits ou float para o ADPCM do SPU2; o codificador simula o decodificador do jogo):
@@ -12,7 +12,8 @@ De volta (WAV PCM 8/16/24/32 bits ou float para o ADPCM do SPU2; o codificador s
   python tools/snd989.py vag efeito.wav novo/VICTORY.VAG [--loop]
   python tools/snd989.py bnk-replace disc/SND/SHELL_S.BNK 3 novo.wav novo/SHELL_S.BNK   # troca o som 3 do banco
 O bnk-replace reamostra para a taxa em que o banco toca cada TONE, mantem o laco do original e corrige os offsets dos outros
-sons. A reamostragem e linear: para musica, prefira reamostrar antes num editor de audio.
+sons; num som de camadas (varios TONEs com atraso ou tom proprio), o WAV vira a unica camada. A reamostragem e linear: para
+musica, prefira reamostrar antes num editor de audio.
 """
 import collections
 import os
@@ -275,9 +276,62 @@ def sample_loop(smp, off, end):
     return 0
 
 
+KEEP_BEFORE_TONE = {4, 27, 28, 29, 30, 31, 32, 33, 40, 44}   # LFO, altura e registradores: valem para o TONE que vem depois
+FULL_ADSR = (0x80FF, 0x9FC0)   # ataque na hora, sustain cheio ate o fim da amostra (o dos sons de uma amostra so)
+
+
+def sound_tones(s):
+    return [g for g in s["grains"] if g["type"] in (1, 9)]
+
+
+def sound_kind(s):
+    """"none", "single" (um TONE), "stereo" (dois TONEs juntos com pans diferentes: canal esquerdo e direito) ou "layered"
+    (camadas: varios TONEs, cada um com o seu atraso, tom e amostra, tocados em sequencia pelo 989snd)."""
+    gs = s["grains"]
+    idx = [k for k, g in enumerate(gs) if g["type"] in (1, 9)]
+    if not idx:
+        return "none"
+    if len(idx) == 1:
+        return "single"
+    if len(idx) == 2 and gs[idx[0]]["pan"] != gs[idx[1]]["pan"] and not any(g["delay"] for g in gs[idx[0] + 1:idx[1] + 1]):
+        return "stereo"
+    return "layered"
+
+
+def render_sound(b, i):
+    """Som `i` do banco em PCM: (Hz, canais). Um TONE ou par estereo: as amostras como estao; camadas: a mistura em mono como o
+    989snd as toca (cada TONE depois da soma dos atrasos, em ticks de 240 Hz, na propria altura e volume), sem envelope e sem
+    os grains de controle (altura aleatoria, lacos)."""
+    s = b["sounds"][i]
+    kind = sound_kind(s)
+    tones = sound_tones(s)
+    if kind == "none":
+        return 0, []
+    rate = round(tone_rate(tones[0]["note"], tones[0]["fine"]))
+    if kind != "layered":
+        return rate, [adpcm_decode(b["samples"], g["sample"])[0] for g in tones]
+    mix, at = [], 0
+    for g in s["grains"]:
+        at += max(0, g["delay"])
+        if g["type"] not in (1, 9):
+            continue
+        pcm = resample(adpcm_decode(b["samples"], g["sample"])[0], tone_rate(g["note"], g["fine"]), rate)
+        vol = (g["vol"] if g["vol"] >= 0 else 127) / 127
+        start = at * rate // 240
+        if len(mix) < start + len(pcm):
+            mix += [0.0] * (start + len(pcm) - len(mix))
+        for k, v in enumerate(pcm):
+            mix[start + k] += v * vol
+    peak = max((abs(v) for v in mix), default=0)
+    scale = 32767 / peak if peak > 32767 else 1.0
+    return rate, [[int(round(v * scale)) for v in mix]]
+
+
 def bnk_replace(path, sound, wav, out):
     """Troca as amostras do som `sound` do banco pelo WAV (reamostrado para a taxa em que o banco toca cada TONE). Os outros
-    sons ficam iguais; offsets das amostras, tamanho do chunk e os campos de tamanho do SBlk sao corrigidos."""
+    sons ficam iguais; offsets das amostras, tamanho do chunk e os campos de tamanho do SBlk sao corrigidos. Um som de camadas
+    (sound_kind "layered") vira uma camada so com o WAV em mono: o TONE da amostra mais longa, sem atraso, precedido so dos
+    grains de LFO, altura e registradores que vinham antes dele (o volume de um TONE pode vir de um registrador)."""
     raw = bytearray(open(path, "rb").read())
     b = read_bnk(path)
     typ, nchunks = struct.unpack_from("<II", raw, 0)
@@ -299,7 +353,17 @@ def bnk_replace(path, sound, wav, out):
     targets = [r for r in refs if r[0] == sound]
     if not targets:
         raise SystemExit("o som %d nao tem TONE" % sound)
+    layered = sound_kind(b["sounds"][sound]) == "layered"
     rate_in, chans = read_wav_any(wav)
+    any_loop = None
+    if layered:
+        any_loop = next((lp for lp in (sample_loop(smp, r[2], sample_end(smp, r[2])) for r in targets) if lp is not None), None)
+        n_layers = len(targets)
+        main = max(targets, key=lambda r: sample_end(smp, r[2]) - r[2])
+        others_here = [r for r in targets if r[2] != main[2]]
+        targets = [r for r in targets if r[2] == main[2]]
+        chans = to_channels(chans, 1)
+        refs = [r for r in refs if r not in others_here]   # as outras camadas saem do som
     chans = to_channels(chans, len(targets)) if len(chans) > 1 else [chans[0]] * len(targets)
     new, extra = {}, {}   # extra: amostra que outro som tambem usa -> copia nova no fim do chunk, so para este som
     for k, (_, _, off, go) in enumerate(targets):
@@ -309,7 +373,7 @@ def bnk_replace(path, sound, wav, out):
         rate = round(tone_rate(note, fine))
         end = sample_end(smp, off)
         others = [r for r in refs if r[0] != sound and off <= r[2] < end]
-        loop = sample_loop(smp, off, end)
+        loop = any_loop if layered else sample_loop(smp, off, end)
         pcm = resample(chans[k], rate_in, rate)
         data = adpcm_encode(pcm, 0 if loop is not None else None)
         if others:
@@ -348,6 +412,30 @@ def bnk_replace(path, sound, wav, out):
         for (i, pos, off, _) in refs:
             if i == sound and off in at:
                 struct.pack_into("<I", blk, pos, at[off])
+    if layered:
+        o = first_sound + 12 * sound
+        ng, fg = struct.unpack_from("<b", blk, o + 4)[0], struct.unpack_from("<I", blk, o + 8)[0]
+        for j in range(len(b["sounds"])):
+            if j != sound and struct.unpack_from("<I", blk, first_sound + 12 * j + 8)[0] == fg:
+                raise SystemExit("o som %d divide os grains com o som %d; nao da para juntar as camadas" % (sound, j))
+        base = first_grain + fg
+        gr = [bytes(blk[base + 0x28 * g:base + 0x28 * (g + 1)]) for g in range(ng)]
+        k_main = (main[3] - base) // 0x28
+        keep = [g for g in gr[:k_main] if struct.unpack_from("<I", g, 0)[0] in KEEP_BEFORE_TONE] + [gr[k_main]]
+        # a camada que fica: o maior volume das camadas e o envelope de quem toca a amostra inteira (o de uma camada podia
+        # sumir antes do fim, porque as outras continuavam o som)
+        vols = [g["vol"] for g in sound_tones(b["sounds"][sound]) if g["vol"] >= 0]
+        tone = bytearray(keep[-1])
+        if struct.unpack_from("<b", tone, 9)[0] >= 0 and vols:
+            struct.pack_into("<b", tone, 9, max(vols))
+        struct.pack_into("<HH", tone, 18, *FULL_ADSR)
+        keep[-1] = bytes(tone)
+        for k, g in enumerate(keep):
+            g = bytearray(g)
+            struct.pack_into("<i", g, 4, 0)
+            blk[base + 0x28 * k:base + 0x28 * (k + 1)] = g
+        struct.pack_into("<b", blk, o + 4, len(keep))
+        print("som %d: %d camadas viram uma (a da amostra em %#x, sem atraso)" % (sound, n_layers, main[2]))
     grow = len(smp2) - len(smp)
     vag_size, sram = struct.unpack_from("<II", blk, 0x28)
     if vag_size == len(smp):
@@ -459,11 +547,10 @@ def main():
     elif cmd == "wav":
         path, which, out = sys.argv[2], sys.argv[3], sys.argv[4]
         if path.upper().endswith(".BNK"):
-            b = read_bnk(path)
-            tones = [g for g in b["sounds"][int(which)]["grains"] if g["type"] in (1, 9)]
-            chans = [adpcm_decode(b["samples"], g["sample"])[0] for g in tones]
-            rate = round(tone_rate(tones[0]["note"], tones[0]["fine"]))
-            write_wav(out, rate, chans[:2] if len(chans) >= 2 else chans)
+            rate, chans = render_sound(read_bnk(path), int(which))
+            if not chans:
+                raise SystemExit("o som %s nao tem TONE" % which)
+            write_wav(out, rate, chans)
         else:
             rate, chans = read_vpk(path)
             write_wav(out, rate, chans)

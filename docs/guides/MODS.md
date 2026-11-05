@@ -205,7 +205,7 @@ python tools/modkit.py skin mesh export my_mod green          # the same for a s
 | `.TEX` | `<file>_tNNNN.png` (one per texture) | the PNG as is |
 | `.RTX` | `<file>_rtx_tNNNN.png` (portraits, screens, fonts) | the PNG as is |
 | `.VPK` / `.VAG` | `<file>.wav` | `.VPK`/`.VAG` (same rate and volumes as the original) |
-| `.BNK` | `<bank>_sNNN.wav` (one per sound with a sample) | the bank with all edited sounds replaced (a sample another sound also uses: the edited one gets its own copy and the other keeps the original) |
+| `.BNK` | `<bank>_sNNN.wav` (one per sound with a sample; a sound made of layers, several TONEs each with its own delay, pitch and sample, comes out as the mono mix the game plays) | the bank with all edited sounds replaced (a sample another sound also uses: the edited one gets its own copy and the other keeps the original; a layered sound becomes a single layer with the WAV, full volume envelope, no delay) |
 | others | copy | copy |
 
 ## Textures as PNG
@@ -343,7 +343,10 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   `.CHR`, it applies to the custom's costume and skins only; a game monster of the same type in the same fight keeps the disc's. The
   same bank serves in 3 and 4 player fights, where the game loads the low-res `_LS` banks (same numbering). Log: `[mods] monstro
   fire_togera: som LIZARD_S.BNK` and `[snd] fire_togera: banco de som proprio LIZARD_S.BNK no handle 0x10001`; with `PS2X_SND_LOG=1`
-  each `Play banco` line shows the bank's handle.
+  each `Play banco` line shows the bank's handle. The narrator's MONSTER CRY option plays the cry from this bank too.
+  Togera's sounds, by number: 1 death (the 120 animation), 2 cry (fight entry cinematic), 3 pain, 4 jump, 5 and 6 the fireball (launch,
+  explosion), 7 the fire breath (a loop while the special lasts), 10 to 12 the three victories, 13 taunt, 14 and 15 the other two
+  deaths, 0 crowd control, 17 entering counter block.
 - `kind`: the port's own rules for the monster (`wotm_custom.inc`). Only `"mecha"` for now (below); empty = the type's.
 - `special`: another monster's special attack, by its in-game name like `base` (`"special": "congar"`); empty = the base type's. Every
   `Monster` carries the states of all the specials; `Monster::initDynamics` points the monster at its type's one (+0x7980) and the
@@ -357,6 +360,9 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   Preytor's bugs, Magmo's lava rocks, Agamo's head, Zorgulon's disc, Goliath's cannon shells): on another body they do not start, hold
   the monster in the windup or crash the game, so the port keeps the base's special and logs why. Log: `[custom] fire_togera: especial
   do congar`. In the kit window: **Special** in the monster's group.
+- `specialRoar`: `true` = the special starts with the monster's cry (`MonsterSound::playSignatureSound`, the fight entry cinematic's
+  sound, from its own bank when it has one), when it enters the special's state. Togera's fire breath has no cry of its own. Log:
+  `[custom] godzilla: grito no especial`.
 - `ai`: whether a CPU can use it (default no); without it the select screen shows "PLAYERS ONLY" in the CPU's box. With `"ai": true` the CPU can
   pick it in the select screen's CUSTOM slot; the launcher only offers customs to the player. A custom with a playable base fights as a CPU
   (`WOTM_MATCH=1,moddedtogera,1`, with `"base": "togera"`: walks, attacks, breathes fire and loses the round like a Togera), and Jelly and

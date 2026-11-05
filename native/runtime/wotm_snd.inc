@@ -299,7 +299,8 @@ inline void playPanelSfx(int sound)
 // MonsterSound::playSignatureSound (o do cinema de entrada da luta), do banco do proprio monstro (o do SoundManager::loadMonsterBank;
 // o Final_s.bnk e o banco da fase final, carregado pelo loadRTSoundBanks). Trajes com outro som no jogo (Preytor 1, Agamo 3) usam o
 // do traje 0. Um banco por vez, no grupo 0 (efeitos: o volume mestre do menu); false = sem grito (Goliath Prime, 13, nao tem).
-inline bool playMonsterCry(int monster)
+// `own`: o .BNK de um custom com banco proprio (mesma numeracao do banco do tipo), no lugar do do disco.
+inline bool playMonsterCry(int monster, const std::filesystem::path &own = {})
 {
     struct Cry { const char *bank; int sound; };
     static const Cry kCry[16] = {{nullptr, 0},       {"SND/APE_S.BNK", 0},    {"SND/ROBOT_S.BNK", 4},   {"SND/LIZARD_S.BNK", 2},
@@ -309,22 +310,29 @@ inline bool playMonsterCry(int monster)
     if (monster < 0 || monster >= 16 || !kCry[monster].bank)
         return false;
     const Cry &c = kCry[monster];
-    if (g_cryFile != c.bank)
+    const std::string file = own.empty() ? std::string(c.bank) : own.string();
+    if (g_cryFile != file)
     {
         dropCryBank();   // corta o grito anterior
-        const PS2Runtime::IoPaths &io = PS2Runtime::getIoPaths();
         std::vector<uint8_t> f;
-        if (wotm::disc::readFile(io.cdRoot, io.cdImage.string(), c.bank, f))
+        if (own.empty())
+        {
+            const PS2Runtime::IoPaths &io = PS2Runtime::getIoPaths();
+            wotm::disc::readFile(io.cdRoot, io.cdImage.string(), c.bank, f);
+        }
+        else if (std::ifstream in(own, std::ios::binary); in)
+            f.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        if (!f.empty())
             g_cryBank = Engine::get().loadBankData(f, 0);
         if (!g_cryBank)
         {
-            std::fprintf(stderr, "[narrador] grito: banco %s nao carregou\n", c.bank);
+            std::fprintf(stderr, "[narrador] grito: banco %s nao carregou\n", file.c_str());
             return false;
         }
-        g_cryFile = c.bank;
+        g_cryFile = file;
     }
     const uint32_t v = Engine::get().play(g_cryBank, c.sound, 0x400, 0, 0, 0);
-    std::fprintf(stderr, "[narrador] grito do monstro %d: som %d de %s%s\n", monster, c.sound, c.bank, v ? "" : " (nao tocou)");
+    std::fprintf(stderr, "[narrador] grito do monstro %d: som %d de %s%s\n", monster, c.sound, file.c_str(), v ? "" : " (nao tocou)");
     return v != 0;
 }
 // Motor do tanque fora de Vegas (exercito em qualquer fase, wotm_army.inc): o TankSound::updateTankSound toca o som 0 de

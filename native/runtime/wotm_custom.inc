@@ -489,7 +489,17 @@ namespace wotm_custom
         }
         if (ctx->pc == kEnterState && GPR_U32(ctx, 5) == m + kTazer && READ32(m + kTypeBits) == kJelly && isPlayerSlot(rdram, ctx, runtime, m))
             std::fprintf(stderr, "[custom] Jelly: choque (%s)\n", READ32(m + kPlayerNum) == 2u ? "IA" : "Triangulo+Circulo");
+        // "specialRoar": ao entrar no estado do especial (+0x7980), o grito do MonsterSound::playSignatureSound, que o gancho do
+        // banco proprio (wotm_snd.inc) toca do .BNK do custom
+        const uint32_t next = GPR_U32(ctx, 5);
+        const bool roar = ctx->pc == kEnterState && m && next && next == READ32(m + kSpecialState) && next != READ32(m + kCurState);
         g_origEnterState(rdram, ctx, runtime);
+        if (const wotm::mods::Custom *cu = roar ? ownFilesCustom(rdram, m) : nullptr; cu && cu->specialRoar)
+        {
+            constexpr uint32_t kMonsterSound = 0x1A7C;   // Monster::m_sound
+            wotm_modes4::call(rdram, ctx, runtime, wotm::fn::playSignatureSound__12MonsterSound, {m + kMonsterSound});
+            std::fprintf(stderr, "[custom] %s: grito no especial\n", cu->id.c_str());
+        }
     }
 
     void spinUpdate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
