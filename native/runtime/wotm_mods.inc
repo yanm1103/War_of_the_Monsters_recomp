@@ -298,6 +298,7 @@ void wotmModsInstall(PS2Runtime &runtime, const std::string &elfPath)
         if (!modsIn(fs::path(elfPath).parent_path()) && repo && *repo && modsIn(fs::path(repo)))
             dir = fs::path(repo) / "mods";
     }
+    wotmBoot("mods: lendo %s", dir.empty() ? "(sem pasta)" : dir.string().c_str());
     const size_t n = Registry::get().scan(dir);
     if (n == 0)
         return;   // sem arquivos de mod: nenhum gancho, o jogo le o disco como sempre

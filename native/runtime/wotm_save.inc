@@ -411,6 +411,12 @@ namespace wotm_save
 
     bool loadJson(Value &j)
     {
+        static bool s_logged = false;   // so a primeira leitura (no boot) vira etapa
+        if (!s_logged)
+        {
+            s_logged = true;
+            wotmBoot("save: lendo %s", g_json.string().c_str());
+        }
         std::vector<uint8_t> raw;
         if (!readFile(g_json, raw))
             return false;

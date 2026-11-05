@@ -77,6 +77,7 @@ void wotmDamagePopup(const uint8_t *rdram, const float p[3], float amount, int k
 void wotmPadSelInstall(PS2Runtime &runtime);   // wotm_padsel.inc: escolha de lados do 2 jogadores no telao do menu
 void wotmLevelSelInstall(PS2Runtime &runtime);   // wotm_levelsel.inc: fases escondidas e RANDOM na selecao de fase
 void wotmMainMenuInstall(PS2Runtime &runtime);   // wotm_mainmenu.inc: menu principal em texto
+void wotmBoot(const char *fmt, ...);   // wotm_live.inc: etapa do boot no log e na tela preta (nada depois do primeiro filme)
 
 // Trapacas de debug: a janela (menu F1, wotm_live.inc) escreve, a thread do EE (monsterUpdateCheats) le. Bits em wotm_cheats.h.
 #include "wotm_cheats.h"
@@ -2710,8 +2711,10 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
         std::filesystem::path root = io.mcRoot;
         if (root.empty())
             root = !io.elfDirectory.empty() ? io.elfDirectory / "mc0" : std::filesystem::current_path() / "mc0";
+        wotmBoot("opcoes: lendo o settings.ini");
         wotm::settings::load(root.lexically_normal().parent_path());
     }
+    wotmBoot("save: ganchos do cartao e do save.json");
     wotm_save::install(runtime);
     if ((g_origEmitMatrices = runtime.lookupFunction(kEmitMatrices)))   // emissor que teleporta (8 monstros com o Agamo)
         runtime.registerFunction(kEmitMatrices, &emitMatricesGuarded);
@@ -2722,6 +2725,7 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
         runtime.registerFunction(kLosCs, &losCsTapped);
         runtime.registerFunction(kMathfRand, &mathfRandTapped);
     }
+    wotmBoot("ganchos dos modos, menus e controles");
     wotm_split4::install(runtime);   // antes dos ganchos do scePadRead (camera livre, lock-on): eles embrulham o dela
     wotm_modes4::install(runtime);   // embrulha o fim de rodada e o InitPlayers do split4; o takeDamage das trapacas embrulha o dele
     wotm_ai::install(runtime);
