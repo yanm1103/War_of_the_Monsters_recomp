@@ -112,6 +112,8 @@ WotmFreeCamPose g_wotmFreeCamPose;
 #include "wotm_skins.inc"
 // Monstros custom (item 8, parte 2): Goliath Prime jogavel (visivel com IAs, toma dano delas)
 #include "wotm_custom.inc"
+// Trajes, skins e customs na eliminacao: um traje por tipo de monstro
+#include "wotm_elimcostume.inc"
 // Modo treino (item 9): esferas dos golpes, dano exato e boneco (WOTM_TRAINING, menu F2)
 #include "wotm_training.inc"
 // Exercito nas lutas versus (opcao ARMY): tanques, caminhoes e helicopteros da fase em levas
@@ -371,10 +373,15 @@ namespace
                     WRITE32(kShell + 0x2B84 + 4 * i, sel);
                 wotmElimSetStart(i, sel);
                 WRITE32(wotm::sym::monsterSelectMode + 0xB0u * static_cast<uint32_t>(wotm_modes4::monsterSlot(sel)), 0);   // taken: usado
-                if (i < 2)
-                    WRITE32(kShell + 0x2BE0 + 4 * i, 0);   // traje 0, como o retail na eliminacao
-                else
-                    wotm_split4::g_extraCostume[i - 2] = 0;
+                // o traje pedido fica: vale para o monstro (wotm_elimcostume.inc; sem skins nem customs nos mods, traje 0 como o retail)
+                const wotm::mods::Registry &reg = wotm::mods::Registry::get();
+                if (reg.skins().empty() && reg.customs().empty())
+                {
+                    if (i < 2)
+                        WRITE32(kShell + 0x2BE0 + 4 * i, 0);
+                    else
+                        wotm_split4::g_extraCostume[i - 2] = 0;
+                }
             }
         }
         std::fprintf(stderr, "[partida] %u: monstro %d:%d (jogador%s)", ++g_matchCount, g_matchMonsters[0], costumes[0], aiVsAiSlot(0) ? " sob IA" : "");
@@ -2982,6 +2989,7 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
     if (g_matchMode == 1 && g_matchLevel >= 0 && (g_origDialogAdventure = runtime.lookupFunction(wotm::fn::displayDialog__Fi)))
         runtime.registerFunction(wotm::fn::displayDialog__Fi, &dialogAdventure);   // depois do da pausa (wotm_pausemenu.inc)
     wotmCustomInstall(runtime);  // depois das skins: embrulha o SetAIMonster delas
+    wotmElimCostumeInstall(runtime);   // depois das skins e dos customs: o SetPlayerMonster daqui fica por fora
     wotmArmyInstall(runtime);   // antes do treino: o takeHit dele fica por fora
     wotmTrainingInstall(runtime);   // por ultimo: o gancho mais de fora do update/takeHit/takeDamage (ve o dano que as trapacas deixam)
     if (g_minRate > 0)

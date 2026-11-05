@@ -318,7 +318,15 @@ static void menuAnim(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt, int anim
     std::memcpy(rdram + wotm::sym::currAnimationIndex, &anim, 4);
 }
 static uint32_t gameMode(const uint8_t *rdram) { return rd32(rdram, kMode); }
-static bool elimination(const uint8_t *rdram) { return gameMode(rdram) == 6u; }   // traje 0, monstro exclusivo
+static bool elimination(const uint8_t *rdram) { return gameMode(rdram) == 6u; }   // monstro exclusivo (traje 0 sem mods)
+// Eliminacao com skins ou customs nos mods: um traje por monstro (wotm_elimcostume.inc), com escolha de traje e a casa CUSTOM. Sem
+// eles, o traje 0 do retail.
+static bool elimMods()
+{
+    const wotm::mods::Registry &r = wotm::mods::Registry::get();
+    return !r.skins().empty() || !r.customs().empty();
+}
+static bool elimFixed(const uint8_t *rdram) { return elimination(rdram) && !elimMods(); }
 static bool minigame(const uint8_t *rdram) { return gameMode(rdram) >= 7u && gameMode(rdram) <= 9u; }   // vindo da tela 14
 static uint32_t menuObj(int screen, uint32_t i) { return kShell + 0x6DC + (uint32_t(screen) * 90u + i) * 4u; }   // shell->m_menuObj[s][i]
 
@@ -606,15 +614,18 @@ struct CostumeList
         return -1;
     }
 };
-// Trajes da coluna: os do disco que o jogo deixa escolher (abertos e nao levados) e as skins de mod do monstro (sempre abertas, repetiveis)
+// Trajes da coluna: os do disco que o jogo deixa escolher (abertos e nao levados) e as skins de mod do monstro (sempre abertas, repetiveis).
+// Na eliminacao o "levado" e do monstro (vaga do traje 0, elimFree): os do disco valem pelo destravado (state); sem mods, so o traje 0.
 static CostumeList costumeList(uint8_t *rdram, int col, bool noMods = false)
 {
     CostumeList l;
     if (col < 1 || col > 10)   // aleatorio, personalizado
         return l;
-    for (int c = 0; c < 4; ++c)
-        if (costumeOpen(rdram, col, c)) l.c[l.n++] = c;
-    if (noMods)
+    const bool elim = elimination(rdram), fixed = elim && !elimMods();
+    for (int c = 0; c < (fixed ? 1 : 4); ++c)
+        if (elim ? rd32(rdram, wotm::sym::monsterSelectMode + uint32_t((col - 1) * 4 + c) * kSlotSize + 4) == 1u : costumeOpen(rdram, col, c))
+            l.c[l.n++] = c;
+    if (noMods || fixed)
         return l;
     const int mon = monsterOfCol(rdram, col);
     for (const wotm::mods::Skin &s : wotm::mods::Registry::get().skins())
@@ -687,9 +698,11 @@ static const wotm::mods::Custom *customAt(int k)
 }
 // O custom pode ser confirmado neste quadro: num quadro de CPU, so os com "ai" (a IA de um chefe precisa da fase dele); na aventura
 // (m_mode 1), nenhum de tipo chefe (13 a 15: Goliath, jelly, Cerebulon), que sao os chefes das fases dela
-static bool customAllowed(const wotm::mods::Custom *cu, bool cpu, bool adventure)
+// Na eliminacao, so os de base jogavel: os 10 monstros dela estao carregados e o custom ocupa a coluna da base (os de tipo chefe pediriam
+// uma 11a carga e o dialogo 8 so conhece as 10 colunas).
+static bool customAllowed(const wotm::mods::Custom *cu, bool cpu, bool adventure, bool elim = false)
 {
-    return cu && !(cpu && !cu->ai) && !(adventure && cu->type >= 13 && cu->type <= 15);
+    return cu && !(cpu && !cu->ai) && !(adventure && cu->type >= 13 && cu->type <= 15) && !(elim && (cu->type < 1 || cu->type > 11 || cu->type == 6));
 }
 
 // Eliminacao de 3 e 4: cada monstro com um jogador so. Durante a escolha vale o "pronto" dos outros quadros; na saida o traje 0 das
@@ -705,12 +718,47 @@ static void elimRelease(uint8_t *rdram)
             g_elimTaken[c] = false;
         }
 }
+// Coluna do monstro de uma escolha: a da casa ou, num custom, a da base dele (0 se nao ha)
+static int colOfType(uint8_t *rdram, int type)
+{
+    for (int c = 1; c <= 10; ++c)
+        if (monsterOfCol(rdram, c) == type) return c;
+    return 0;
+}
+static int pickCol(uint8_t *rdram, const Pick &k)
+{
+    if (k.col == kCellCustom)
+        if (const wotm::mods::Custom *cu = customAt(k.custom - 1))
+            return colOfType(rdram, cu->type);
+    return k.col <= 10 ? k.col : 0;
+}
+static bool repeatAllowed();
+// Monstro que o quadro `self` pode confirmar na eliminacao. Com repetidos (WOTM_SEL_REPEAT, o padrao) qualquer coluna aberta: cada
+// repetido e uma carga a mais (wotm_elimcostume.inc) e so cabem 2, entao os 4 nunca no mesmo monstro. Sem repetidos, o do retail:
+// monstro livre e de ninguem pronto.
 static bool elimFree(uint8_t *rdram, int col, int self)
 {
-    if (col < 1 || col > 10 || !columnOpen(rdram, col) || !costumeOpen(rdram, col, 0))
+    if (col < 1 || col > 10 || !columnOpen(rdram, col))
+        return false;
+    if (repeatAllowed())
+    {
+        bool seen[11] = {};
+        int picks = 1, distinct = 1;
+        seen[col] = true;
+        for (int p = 0; p < g_multi + g_selCpus; ++p)
+            if (p != self && g_pick[p].ready)
+                if (const int c = pickCol(rdram, g_pick[p]))
+                {
+                    ++picks;
+                    distinct += !seen[c];
+                    seen[c] = true;
+                }
+        return picks - distinct <= 2;
+    }
+    if (!costumeOpen(rdram, col, 0))
         return false;
     for (int p = 0; p < g_multi + g_selCpus; ++p)
-        if (p != self && g_pick[p].ready && g_pick[p].col == col)
+        if (p != self && g_pick[p].ready && pickCol(rdram, g_pick[p]) == col)
             return false;
     return true;
 }
@@ -769,15 +817,14 @@ static void selectBegin(uint8_t *rdram)
     {
         Pick &k = g_pick[p];
         k.list = false;
-        const bool keepCustom = keep && !elim && k.col == kCellCustom && k.custom && customAt(k.custom - 1);   // custom escolhido fica
-        if (!keepCustom && (!keep || !columnOpen(rdram, k.col) || costumeList(rdram, k.col, elim).find(elim ? 0 : k.costume) < 0))
+        const bool keepCustom = keep && !elimFixed(rdram) && k.col == kCellCustom && k.custom &&
+                                customAllowed(customAt(k.custom - 1), cpuPanel(p), false, elim);   // custom escolhido fica
+        if (!keepCustom && (!keep || !columnOpen(rdram, k.col) || costumeList(rdram, k.col).find(k.costume) < 0))
         {
             k.col = col;
-            k.costume = firstCostume(rdram, col);
+            k.costume = costumeList(rdram, col).n ? costumeList(rdram, col).c[0] : 0;
             k.custom = k.customSkin = 0;
         }
-        if (elim)
-            g_pick[p].costume = 0;
         col = stepColumn(rdram, col, 1);
         g_pick[p].ready = false;
     }
@@ -810,8 +857,11 @@ static void selectFinish(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             if (p < 2)
                 wr32(rdram, kShell + 0x2B84 + 4u * uint32_t(p), sel);
             wotmElimSetStart(p, sel);
-            wr32(rdram, wotm::sym::monsterSelectMode + uint32_t((g_pick[p].col - 1) * 4) * kSlotSize, 0u);   // taken: usado
-            g_elimTaken[g_pick[p].col - 1] = true;
+            if (const int col = pickCol(rdram, g_pick[p]))   // custom: a coluna da base
+            {
+                wr32(rdram, wotm::sym::monsterSelectMode + uint32_t((col - 1) * 4) * kSlotSize, 0u);   // taken: usado
+                g_elimTaken[col - 1] = true;
+            }
         }
     }
     for (int i = g_multi; i < 12; ++i)
@@ -870,7 +920,7 @@ static int mouseStep(int cur)
 // Toque na casa CUSTOM de um quadro da selecao de 3 e 4, em tres passos como nas telas 3 e 6 (customDecide): fechada, X abre a
 // lista (cima/baixo, X escolhe, triangulo fecha); escolhido, cima/baixo trocam de traje (o do monster.json e as skins dele), X
 // confirma e triangulo volta para a casa fechada. `cpu`: quadro de CPU (so os customs com "ai"). Devolve o som (0: nada feito).
-static int customStep(Pick &k, const bool *e, bool cpu, bool adventure)
+static int customStep(Pick &k, const bool *e, bool cpu, bool adventure, bool elim)
 {
     const int nc = customCount();
     if (nc <= 0)
@@ -890,7 +940,7 @@ static int customStep(Pick &k, const bool *e, bool cpu, bool adventure)
             return 6;
         }
         const wotm::mods::Custom *cu = customAt(k.customHl);
-        if (!e[Ok] || !customAllowed(cu, cpu, adventure))
+        if (!e[Ok] || !customAllowed(cu, cpu, adventure, elim))
             return 0;
         k.list = false;
         k.custom = k.customHl % nc + 1;
@@ -993,15 +1043,19 @@ static void selectStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         }
         if ((e[Left] || e[Right]) && !(k.col == kCellCustom && k.list))   // lista aberta: so cima/baixo, X e triangulo
         {
-            k.col = stepCell(rdram, k.col, e[Left] ? -1 : 1, elim);
-            k.costume = k.col <= 10 && !elim ? firstCostume(rdram, k.col) : 0;
+            k.col = stepCell(rdram, k.col, e[Left] ? -1 : 1, elimFixed(rdram));
+            k.costume = k.col <= 10 && costumeList(rdram, k.col).n ? costumeList(rdram, k.col).c[0] : 0;
             k.custom = k.customSkin = 0;
             sound = e[Left] ? 2 : 4;
         }
         if (k.col == kCellCustom)
         {
-            if (const int s = customStep(k, e, cpuPanel(q[at]), rd32(rdram, kMode) == 1u))
+            if (const int s = customStep(k, e, cpuPanel(q[at]), rd32(rdram, kMode) == 1u, elim))
+            {
                 sound = s;
+                if (elim && k.ready && !elimFree(rdram, pickCol(rdram, k), q[at]))
+                    k.ready = false, sound = 0;   // a base ja e de outro jogador
+            }
             else if (e[Back] && !k.custom && !k.list)
                 back = true;   // casa fechada: o triangulo volta de tela, como nas colunas
             continue;
@@ -1027,7 +1081,7 @@ static void selectStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             if (e[Back]) back = true;
             continue;
         }
-        if (elim)   // traje fixo; X so num monstro livre
+        if (elimFixed(rdram))   // traje fixo; X so num monstro livre
         {
             if (e[Ok] && elimFree(rdram, k.col, q[at]))
             {
@@ -1046,7 +1100,7 @@ static void selectStep(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             k.costume = list.c[at < 0 ? 0 : (at + dir + list.n) % list.n];
             sound = dir < 0 ? 2 : 4;
         }
-        if (e[Ok] && list.find(k.costume) >= 0)
+        if (e[Ok] && list.find(k.costume) >= 0 && (!elim || elimFree(rdram, k.col, q[at])))   // eliminacao: X so num monstro livre
         {
             k.ready = true;
             sound = 8;
@@ -1187,7 +1241,7 @@ static int soloPanels(uint8_t *rdram, SoloPanel out[kMaxPanels], bool &noCostume
         return 2;
     }
     const uint32_t mode = rd32(rdram, kMode);
-    noCostume = mode == 6;   // eliminacao: o jogo poe o traje 0
+    noCostume = mode == 6 && !elimMods();   // eliminacao sem mods: o jogo poe o traje 0
     auto on = [&](uint32_t a) { return rd32(rdram, a) != 0; };
     if (g_solo == 18 || g_solo == 19)
     {
@@ -1325,7 +1379,8 @@ static void soloSync(uint8_t *rdram)
             const wotm::mods::Custom &cu = *customAt(g_soloCustomPick[i] - 1);
             wr32(rdram, pn[i].monsterDst, uint32_t(cu.type) << 5);
             wr32(rdram, pn[i].costumeDst, uint32_t(g_soloCustomCostume[i]));
-            wr32(rdram, wotm::sym::monsterSelectMode + uint32_t((col - 1) * 4 + cur) * kSlotSize, 1u);
+            if (!elimination(rdram) || repeatAllowed())   // eliminacao sem repetidos: a vaga do traje 0 da base fica levada
+                wr32(rdram, wotm::sym::monsterSelectMode + uint32_t((col - 1) * 4 + cur) * kSlotSize, 1u);
             std::fprintf(stderr, "[padsel] %s: custom %s (tipo %d traje %d)\n", soloLabel(pn, n, i), cu.id.c_str(), cu.type,
                          g_soloCustomCostume[i]);
         }
@@ -1335,16 +1390,25 @@ static void soloSync(uint8_t *rdram)
         {
             if (col != g_soloCol[i] || noCostume)
                 g_soloSel[i] = cur, g_soloCol[i] = col;
+            else if (elimination(rdram))   // o cursor do jogo fica no 0 (soloSetCursor); vale o da lista
+            {
+                if (costumeList(rdram, col).find(g_soloSel[i]) < 0)
+                    g_soloSel[i] = 0;
+            }
             else if (g_soloSel[i] < 4 && g_soloSel[i] != cur)   // o jogo mexeu no cursor (troca de coluna, traje que deixou de valer)
                 g_soloSel[i] = cur;
             else if (g_soloSel[i] >= 4 && costumeList(rdram, col).find(g_soloSel[i]) < 0)
                 g_soloSel[i] = cur;
         }
-        else if (!g_soloDonePrev[i] && !g_soloCustomPick[i] && g_soloSel[i] >= 4 && !noCostume && g_soloCol[i] == col)
+        else if (!g_soloDonePrev[i] && !g_soloCustomPick[i] && (g_soloSel[i] >= 4 || (elimination(rdram) && g_soloSel[i] > 0)) &&
+                 !noCostume && g_soloCol[i] == col)
         {
+            // eliminacao: o jogo grava o traje 0 e marca a vaga do traje 0 (o monstro); vale o traje escolhido
             wr32(rdram, pn[i].costumeDst, uint32_t(g_soloSel[i]));
-            // o jogo marcou o procurador como levado (taken 0); ele continua livre para o outro quadro
-            wr32(rdram, wotm::sym::monsterSelectMode + uint32_t((col - 1) * 4 + cur) * kSlotSize, 1u);
+            // o jogo marcou o procurador como levado (taken 0); ele continua livre para o outro quadro (na eliminacao, com repetidos; o
+            // wotm_elimcostume.inc marca o monstro como usado na carga)
+            if (!elimination(rdram) || repeatAllowed())
+                wr32(rdram, wotm::sym::monsterSelectMode + uint32_t((col - 1) * 4 + cur) * kSlotSize, 1u);
             const int mon = monsterOfCol(rdram, col);
             std::fprintf(stderr, "[padsel] %s: %s traje %d (%s)\n", soloLabel(pn, n, i), kMonsterNames[mon],
                          g_soloSel[i], costumeName(mon, g_soloSel[i]).c_str());
@@ -1424,7 +1488,8 @@ static void soloSetCursor(uint8_t *rdram, const SoloPanel &p, int who, int col, 
 {
     const CostumeList l = costumeList(rdram, col);
     wr32(rdram, p.col, uint32_t(col));
-    wr32(rdram, p.cur, uint32_t(sel < 4 ? sel : (l.n ? l.c[0] : firstCostume(rdram, col))));
+    // eliminacao: o cursor de traje do jogo fica no 0 (ele anda pelas colunas com vaga no traje do cursor, e so o 0 marca o monstro)
+    wr32(rdram, p.cur, elimination(rdram) ? 0u : uint32_t(sel < 4 ? sel : (l.n ? l.c[0] : firstCostume(rdram, col))));
     g_soloCol[who] = col;
     g_soloSel[who] = sel;
 }
@@ -1451,7 +1516,7 @@ static uint32_t customDecide(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runt
             return 0;
         }
         const wotm::mods::Custom *cu = customAt(g_soloCustom[who]);
-        if (!customAllowed(cu, p.ai, rd32(rdram, kMode) == 1u))
+        if (!customAllowed(cu, p.ai, rd32(rdram, kMode) == 1u, elimination(rdram)))
             return 0;
         g_soloList[who] = false;
         g_soloChosen[who] = g_soloCustom[who] % nc + 1;
@@ -1480,9 +1545,13 @@ static uint32_t customDecide(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runt
             sfx(rdram, ctx, runtime, 6);
             return 0;
         }
+        // eliminacao: a procuradora e a coluna da base (o monstro que o custom ocupa); sem repetidos, ela tem de estar livre
+        const int proxy = elimination(rdram) ? colOfType(rdram, cu->type) : col;
+        if (elimination(rdram) && (proxy < 1 || (!repeatAllowed() && !costumeOpen(rdram, proxy, 0))))
+            return 0;
         g_soloCustomPick[who] = g_soloChosen[who];
         g_soloCustomCostume[who] = chosenCostume(who);
-        soloSetCursor(rdram, p, who, col, firstCostume(rdram, col));   // a coluna procuradora, com um traje livre
+        soloSetCursor(rdram, p, who, proxy, elimination(rdram) ? 0 : firstCostume(rdram, proxy));   // a coluna procuradora, com um traje livre
         std::fprintf(stderr, "[padsel] custom: %s (base %s, traje %d)\n", cu->id.c_str(), cu->typeName.c_str(), g_soloCustomCostume[who]);
         return code;   // o jogo confirma (e toca o som)
     }
@@ -1726,7 +1795,7 @@ static void publish(uint8_t *rdram)
     v.transMoving = g_transMoving && rd32(rdram, wotm::sym::betweenScreens) != 0;
     v.transProg = g_transProg;
     v.selPlayers = g_selOn ? g_multi + g_selCpus : 0;
-    v.selNoCostume = g_selOn && elimination(rdram);   // eliminacao: traje fixo
+    v.selNoCostume = g_selOn && elimFixed(rdram);   // eliminacao sem mods: traje fixo
     for (int p = 0; p < kMaxPanels; ++p)
         v.selCustom[p] = -1, v.selList[p] = false, v.selCpu[p] = false;
     for (int c = 1; c <= 10; ++c)

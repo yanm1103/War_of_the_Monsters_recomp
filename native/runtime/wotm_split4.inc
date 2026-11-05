@@ -447,13 +447,14 @@ namespace wotm_split4
     }
 
     // TheGame::SetPlayerMonster(jogador, tipo, dup, vista, traje): o InitPlayers manda m_costume[1] a todo jogador depois do 1; os
-    // jogadores 3 e 4 recebem o deles (o do arquivo que a carga leu)
+    // jogadores 3 e 4 recebem o deles (o do arquivo que a carga leu). Na eliminacao (m_mode 6) o traje vem do monstro, nao do
+    // jogador (wotm_elimcostume.inc): fica o que chegou.
     constexpr uint32_t kSetPlayer = wotm::fn::SetPlayerMonster__7TheGameiiiii;
     PS2Runtime::RecompiledFunction g_origSetPlayer = nullptr;
     void setPlayerMonster(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t player = GPR_U32(ctx, 5);
-        if (ctx->pc == kSetPlayer && player >= 2u && player < 4u && splitPlayers(rdram))
+        if (ctx->pc == kSetPlayer && player >= 2u && player < 4u && splitPlayers(rdram) && FAST_READ32(kShell + 0x2C10) != 6u)
             ctx->r[9] = _mm_set_epi64x(0, static_cast<int64_t>(g_extraCostume[player - 2u]));   // t1
         g_origSetPlayer(rdram, ctx, runtime);
     }
