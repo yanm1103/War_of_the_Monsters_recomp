@@ -10,8 +10,19 @@
 #define WOTM_HAVE_FMV 1
 namespace wotm_fmv_hooks
 {
+// Nome do filme (string do jogo) para a etapa do boot: uma queda no FFmpeg fica com o arquivo na ultima linha
+inline void bootStep(const uint8_t *rdram, uint32_t name)
+{
+    char s[64];
+    size_t n = 0;
+    for (uint32_t a = name & 0x1FFFFFFu; n + 1 < sizeof s && a + n < PS2_RAM_SIZE && rdram[a + n]; ++n)
+        s[n] = static_cast<char>(rdram[a + n]);
+    s[n] = '\0';
+    wotmBoot("filme: abrindo %s", s);
+}
 inline void playWithDB(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
 {
+    bootStep(rdram, getRegU32(ctx, 4));
     setReturnS32(ctx, static_cast<int32_t>(wotm::fmv::hooks::playMpegMovieWithDB(rdram, getRegU32(ctx, 4), getRegU32(ctx, 5))));
 }
 inline void updateDecoding(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
@@ -20,6 +31,7 @@ inline void updateDecoding(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
 }
 inline void cmoviePlay(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
 {
+    bootStep(rdram, getRegU32(ctx, 6));
     setReturnS32(ctx, static_cast<int32_t>(wotm::fmv::hooks::cmoviePlay(rdram, getRegU32(ctx, 4), getRegU32(ctx, 5), getRegU32(ctx, 6))));
 }
 inline void cmovieUpdate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *)
@@ -173,12 +185,43 @@ inline void drawOverlay()
     DrawTextEx(font(), TextFormat("%s%s", s.c_str(), t - at >= 3.0 ? TextFormat("  (%.0f s in this step)", t - at) : ""), Vector2{16.0f, h - 28.0f},
                16.0f, 0.0f, GRAY);
 }
+// Log do raylib: tudo no stdout, como o padrao dele (wotm.out.log); no stderr (wotm.log, o que vem num relato) os avisos e erros e
+// os blocos da tela, da GPU e do audio ("    > ..." logo depois do cabecalho), para uma queda na janela ou no audio ter a causa ali.
+inline std::atomic<bool> raylibBlock{false};
+inline void raylibLog(int level, const char *text, va_list args)
+{
+    char buf[512];
+    std::vsnprintf(buf, sizeof buf, text, args);
+    static const char *const names[] = {"ALL", "TRACE", "DEBUG", "INFO", "WARNING", "ERROR", "FATAL", "NONE"};
+    const char *name = level >= 0 && level < 8 ? names[level] : "?";
+    std::printf("%s: %s\n", name, buf);
+    const bool sub = std::strncmp(buf, "    >", 5) == 0;
+    const bool head = std::strstr(buf, "DISPLAY: Device initialized") || std::strstr(buf, "GL: OpenGL device information") ||
+                      std::strstr(buf, "AUDIO: Device initialized");
+    const bool warn = level >= LOG_WARNING && std::strncmp(buf, "FONT: Character", 15) != 0;   // a Consolas sem alguns glifos: ruido
+    if (warn || head || (sub && raylibBlock.load(std::memory_order_relaxed)))
+        std::fprintf(stderr, "[raylib] %s%s%s\n", level >= LOG_WARNING ? name : "", level >= LOG_WARNING ? ": " : "", buf);
+    if (!sub)
+        raylibBlock.store(head, std::memory_order_relaxed);
+}
 } // namespace wotm_boot
+void wotmSystemLog();   // wotm_standalone.cpp: Windows, CPU e RAM numa linha
+namespace wotm_live
+{
+static void installCrashFilter();   // abaixo, depois do crashFilter
+}
 
 void wotmBoot(const char *fmt, ...)
 {
     if (wotm_boot::done.load(std::memory_order_relaxed))
         return;
+    // Primeira etapa (o standalone, ou o "iniciando o runtime" do main.cpp, antes da janela): o que precisa valer desde o comeco
+    static std::once_flag once;
+    std::call_once(once, [] {
+        wotmSystemLog();
+        wotm_live::installCrashFilter();
+        SetTraceLogCallback(wotm_boot::raylibLog);
+    });
     char buf[256];
     va_list ap;
     va_start(ap, fmt);
@@ -196,9 +239,13 @@ void wotmBoot(const char *fmt, ...)
     }
     std::fprintf(stderr, "[boot] %6.2f s  %s\n", t, buf);
     std::fflush(stderr);
-    // antes do laco de apresentacao (ELF, hooks) ninguem desenha: a thread principal desenha um quadro com a etapa
-    if (!wotm_boot::presenting.load(std::memory_order_relaxed) && IsWindowReady() && std::this_thread::get_id() == wotm_boot::mainThread)
+    // antes do laco de apresentacao (ELF, hooks) ninguem desenha: a thread principal desenha um quadro com a etapa, no maximo um a
+    // cada 50 ms (cada quadro espera o SetTargetFPS: uma etapa por quadro atrasaria o boot)
+    static double s_lastDraw = -1.0;
+    if (!wotm_boot::presenting.load(std::memory_order_relaxed) && IsWindowReady() && std::this_thread::get_id() == wotm_boot::mainThread &&
+        t - s_lastDraw >= 0.05)
     {
+        s_lastDraw = t;
         BeginDrawing();
         ClearBackground(BLACK);
         wotm_boot::drawOverlay();
@@ -227,7 +274,8 @@ static void wotmBootPresent(uint32_t eePc, uint64_t vsync)
 {
     if (wotm_boot::done.load(std::memory_order_relaxed))
         return;
-    wotm_boot::presenting.store(true, std::memory_order_relaxed);
+    if (!wotm_boot::presenting.exchange(true, std::memory_order_relaxed))
+        wotmBoot("primeiro quadro na janela");
 #ifdef WOTM_HAVE_FMV
     const wotm::fmv::Player &fp = wotm::fmv::Player::get();
     if (fp.active(wotm::fmv::Player::Full) || fp.active(wotm::fmv::Player::Screen))
@@ -311,6 +359,13 @@ inline long __stdcall crashFilter(ExcPointers *e)
                  (unsigned long long)(static_cast<const char *>(e->rec->address) - base), g_stage);
     if (e->rec->code == 0xC0000005)
         std::fprintf(stderr, " acesso=%s endereco=0x%llx", e->rec->info[0] == 1 ? "escrita" : (e->rec->info[0] == 8 ? "execucao" : "leitura"), e->rec->info[1]);
+    if (e->rec->code == 0xC000001D)
+        std::fprintf(stderr, " (instrucao ilegal: veja o AVX2 na linha do sistema)");
+    if (!wotm_boot::done.load(std::memory_order_relaxed) && wotm_boot::mx.try_lock())   // try_lock: a queda pode ter sido com ele preso
+    {
+        std::fprintf(stderr, " boot=\"%s\"", wotm_boot::step.c_str());
+        wotm_boot::mx.unlock();
+    }
     std::fprintf(stderr, "\n");
     std::fflush(stderr);
     static bool traced = false;   // so a primeira queda: a pilha de uma segunda (dentro do dbghelp) nao ajuda
@@ -321,6 +376,9 @@ inline long __stdcall crashFilter(ExcPointers *e)
     }
     return 0; // EXCEPTION_CONTINUE_SEARCH
 }
+// Ligado no primeiro wotmBoot (antes da janela, do ELF e dos ganchos) e de novo no primeiro quadro nativo, caso uma biblioteca o
+// tenha trocado no meio
+static void installCrashFilter() { SetUnhandledExceptionFilter(crashFilter); }
 struct State
 {
     wotm::Scene scene;

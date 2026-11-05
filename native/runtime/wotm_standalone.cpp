@@ -8,7 +8,8 @@
 // - mods: <dados>/mods, senao <jogo>/mods (WOTM_MODS);
 // - log: stderr em <dados>/wotm.log e stdout em wotm.out.log (os anteriores viram *.prev.log), so quando o stderr nao e arquivo
 //   nem pipe.
-// Tambem a pilha da queda com nomes (wotmCrashTrace, chamado pelo crashFilter do wotm_live.inc), lidos do wotm.pdb ao lado do exe.
+// Tambem a pilha da queda com nomes (wotmCrashTrace, chamado pelo crashFilter do wotm_live.inc), lidos do wotm.pdb ao lado do exe,
+// a linha do sistema no log (wotmSystemLog) e a recusa de CPU sem AVX2 antes de qualquer inicializacao do resto do exe.
 // Arquivo proprio (fora do unity build): o windows.h conflita com o raylib dos outros.
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -16,6 +17,7 @@
 #include <windows.h>
 #include <commdlg.h>
 #include <dbghelp.h>
+#include <intrin.h>
 #pragma comment(lib, "comdlg32.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "dbghelp.lib")
@@ -31,6 +33,8 @@
 #include <vector>
 #include "wotm_version.hpp"
 
+void wotmBoot(const char *fmt, ...);   // wotm_live.inc: etapa do boot no log e na tela preta
+
 namespace {
 
 namespace fs = std::filesystem;
@@ -38,6 +42,50 @@ namespace fs = std::filesystem;
 constexpr const char *kElfName = "SCUS_971.97";
 constexpr const char *kElfSha1 = "1ed7f8457436a9170d8f85386e267369c7fcdd4f";   // SCUS_971.97 do disco NTSC-U (SCUS-97197)
 constexpr const wchar_t *kTitle = L"War of the Monsters Recompiled";
+
+// O build inteiro sai com /arch:AVX2 (ReleaseMode.cmake do PS2Recomp): sem AVX2 a CPU cai com instrucao ilegal em qualquer ponto.
+// AVX2 de verdade: AVX, FMA e OSXSAVE (cpuid 1, ECX), o Windows salvando XMM e YMM (XCR0 bits 1 e 2) e AVX2 (cpuid 7, EBX bit 5).
+// So inteiros e chamadas, sem copia de memoria: o compilador nao gera instrucao VEX aqui mesmo com /arch:AVX2.
+bool cpuHasAvx2()
+{
+#ifdef _WIN32
+    int r[4];
+    __cpuid(r, 0);
+    const int maxLeaf = r[0];
+    __cpuid(r, 1);
+    const unsigned ecx = static_cast<unsigned>(r[2]);
+    if (!(ecx & (1u << 27)) || !(ecx & (1u << 28)) || !(ecx & (1u << 12)))
+        return false;
+    if ((_xgetbv(0) & 6u) != 6u)
+        return false;
+    if (maxLeaf < 7)
+        return false;
+    __cpuidex(r, 7, 0);
+    return (static_cast<unsigned>(r[1]) & (1u << 5)) != 0;
+#else
+    return true;
+#endif
+}
+
+#ifdef _WIN32
+// Antes dos construtores estaticos das outras unidades (init_seg(compiler): .CRT$XCC, antes do .CRT$XCU), que ja podem ter AVX2.
+// O log ainda nao esta aberto: so a caixa.
+#pragma warning(disable : 4074)
+#pragma init_seg(compiler)
+struct CpuGate
+{
+    CpuGate()
+    {
+        if (cpuHasAvx2())
+            return;
+        MessageBoxW(nullptr,
+                    L"War of the Monsters Recompiled needs a processor with AVX2 (Intel Core 4th generation, AMD Ryzen or newer).\n\n"
+                    L"This processor does not have it.",
+                    kTitle, MB_OK | MB_ICONERROR);
+        ExitProcess(1);
+    }
+} g_cpuGate;
+#endif
 
 std::string utf8(const fs::path &p)
 {
@@ -294,6 +342,7 @@ bool setup(const fs::path &data, const fs::path &elf, fs::path &iso, bool elfOk)
     std::wstring why = !elfOk ? L"First run: this port needs your own copy of War of the Monsters for PlayStation 2 (NTSC-U, SCUS-97197) "
                                 L"as a disc image (.iso)."
                               : L"The disc image is no longer at:\n" + iso.wstring() + L"\n\nSelect it again.";
+    wotmBoot("primeira execucao: escolhendo a ISO");
     while (true)
     {
         if (box(why + L"\n\nPress OK to select the .iso file.", MB_OKCANCEL | MB_ICONINFORMATION) != IDOK)
@@ -301,6 +350,7 @@ bool setup(const fs::path &data, const fs::path &elf, fs::path &iso, bool elfOk)
         const fs::path pick = pickIso(iso.empty() ? fs::path() : iso.parent_path());
         if (pick.empty())
             return false;
+        wotmBoot("primeira execucao: lendo o %s da ISO %s", kElfName, utf8(pick).c_str());
         std::vector<uint8_t> bytes;
         if (!isoReadRoot(pick, kElfName, bytes))
         {
@@ -316,6 +366,7 @@ bool setup(const fs::path &data, const fs::path &elf, fs::path &iso, bool elfOk)
             std::fprintf(stderr, "[wotm] SHA1 do %s na ISO: %s (esperado %s)\n", kElfName, got.c_str(), kElfSha1);
             continue;
         }
+        wotmBoot("primeira execucao: gravando o %s e o wotm.ini", kElfName);
         {
             const fs::path tmp = data / "SCUS_971.97.tmp";
             std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
@@ -396,6 +447,49 @@ void wotmCrashTrace(void *exceptionContext)
 #endif
 }
 
+// Uma linha com o Windows, a CPU e a RAM, para o relato de uma queda no boot. Chamado pelo primeiro wotmBoot (os dois modos do exe).
+void wotmSystemLog()
+{
+#ifdef _WIN32
+    unsigned long major = 0, minor = 0, build = 0;
+    using RtlGetVersionFn = LONG(WINAPI *)(PRTL_OSVERSIONINFOW);   // o GetVersionEx mente para exe sem manifesto de compatibilidade
+    if (HMODULE nt = GetModuleHandleW(L"ntdll.dll"))
+        if (auto fn = reinterpret_cast<RtlGetVersionFn>(reinterpret_cast<void *>(GetProcAddress(nt, "RtlGetVersion"))))
+        {
+            RTL_OSVERSIONINFOW v{};
+            v.dwOSVersionInfoSize = sizeof v;
+            if (fn(&v) == 0)
+                major = v.dwMajorVersion, minor = v.dwMinorVersion, build = v.dwBuildNumber;
+        }
+    char brand[49] = "?";
+    int r[4];
+    __cpuid(r, static_cast<int>(0x80000000u));
+    if (static_cast<unsigned>(r[0]) >= 0x80000004u)
+    {
+        for (int i = 0; i < 3; ++i)
+        {
+            __cpuid(r, static_cast<int>(0x80000002u + i));
+            std::memcpy(brand + 16 * i, r, 16);
+        }
+        brand[48] = '\0';
+        for (size_t n = std::strlen(brand); n > 0 && brand[n - 1] == ' '; --n)
+            brand[n - 1] = '\0';
+    }
+    const char *b = brand;
+    while (*b == ' ')
+        ++b;
+    MEMORYSTATUSEX mem{};
+    mem.dwLength = sizeof mem;
+    GlobalMemoryStatusEx(&mem);
+    const double gb = 1024.0 * 1024.0 * 1024.0;
+    const char *wine = GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "wine_get_version") ? ", Wine" : "";
+    std::fprintf(stderr, "[wotm] sistema: Windows %lu.%lu.%lu%s; %s (%lu threads, AVX2 %s); RAM %.1f GB (%.1f GB livres)\n", major, minor,
+                 build, wine, b, GetActiveProcessorCount(ALL_PROCESSOR_GROUPS), cpuHasAvx2() ? "sim" : "NAO", mem.ullTotalPhys / gb,
+                 mem.ullAvailPhys / gb);
+    std::fflush(stderr);
+#endif
+}
+
 // Devolve o ELF a carregar, ou vazio (o jogador cancelou ou deu erro, ja avisado: o exe sai). Chamado pelo main.cpp sem argumento.
 std::filesystem::path wotmStandalonePrepare()
 {
@@ -421,6 +515,7 @@ std::filesystem::path wotmStandalonePrepare()
     }
     redirectLog(data);
     std::fprintf(stderr, "[wotm] War of the Monsters Recompiled %s\n", WOTM_VERSION);   // primeira linha do log: casa o relato com o PDB
+    wotmBoot("pasta de dados: %s", utf8(data).c_str());   // o primeiro wotmBoot escreve a linha do sistema e liga o filtro de queda
     fs::current_path(data, ec);
 
     const fs::path elf = data / kElfName;
@@ -435,6 +530,8 @@ std::filesystem::path wotmStandalonePrepare()
 
     const bool elfOk = fs::exists(elf, ec);
     const bool isoOk = !iso.empty() && fs::exists(iso, ec);
+    std::fprintf(stderr, "[wotm] %s %s; ISO %s\n", kElfName, elfOk ? "presente" : "ausente",
+                 iso.empty() ? "sem caminho" : (isoOk ? "presente" : "sumiu do caminho salvo"));
     if ((!elfOk || !isoOk) && !(envIso && *envIso))
     {
         if (!setup(data, elf, iso, elfOk && !iso.empty()))
@@ -458,6 +555,10 @@ std::filesystem::path wotmStandalonePrepare()
 
     if (!std::getenv("WOTM_MODS") && !fs::is_directory(data / "mods", ec) && fs::is_directory(game / "mods", ec))
         setEnv("WOTM_MODS", narrow(game / "mods"));
+    {
+        const uintmax_t isoSize = fs::file_size(iso, ec);
+        std::fprintf(stderr, "[wotm] ISO: %s (%.0f MB)\n", utf8(iso).c_str(), ec ? -1.0 : double(isoSize) / (1024.0 * 1024.0));
+    }
     std::fflush(stderr);
     return elf;
 }
