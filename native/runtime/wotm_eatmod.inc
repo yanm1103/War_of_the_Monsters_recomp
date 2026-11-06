@@ -6,12 +6,12 @@
 //            the player gets points. A civilian that is not eaten within a few seconds is let go.
 // Everything is read and written in guest memory from a Monster::update hook, so no game function is replaced.
 //
-// Untested against a running game: the civilians were frozen in every source build when this was written, so the pedestrian
-// plane (which two of the three coordinates are the ground) and the carry position are assumptions. The first one is switchable
-// and both are logged (WOTM_EATPLANE, and the "[eatmod]" lines).
+// Pedestrian coordinates: x and y are the street, the third is the height (0 on the ground), the same axes as a monster's locators
+// (z up). Grab and eat are confirmed in a fight; the carry (the height follows the hand) and the animations are not yet.
 //
 //   WOTM_EAT=1|all        off when unset. 1: Togera only. all: every monster
-//   WOTM_EATPLANE=xz|xy   which monster coordinates line up with a civilian's (x, y): xz (default) or xy
+//   WOTM_EATPLANE=xy|xz   which monster coordinates line up with a civilian's (x, y): xy (default; z is up) or xz
+//   WOTM_EATLIFT=0        the carried civilian stays on the ground; by default its height (third coordinate) follows the hand
 //   WOTM_EATHEAL=<n>      health restored per civilian, percent of the monster's maximum (default 5)
 //   WOTM_EATPOINTS=<n>    tokens credited per civilian (default 25)
 //   WOTM_EATREACH=<n>     how close a civilian has to be to be grabbed, in game units (default 300)
@@ -38,7 +38,7 @@ constexpr uint32_t kTogera = 3;   // monster index (type bits >> 5): lizard
 
 struct Config
 {
-    bool on = false, all = false, planeXZ = true;
+    bool on = false, all = false, planeXZ = false, lift = true;
     float healPct = 5.f, reach = 300.f;
     int points = 25;
 } g_cfg;
@@ -107,7 +107,13 @@ void playAnim(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m
 {
     const uint32_t h = m + kAnims + kAnimStride * id;
     if (!rd32(rdram, h))
+    {
+        static bool said = false;
+        if (!said)
+            std::fprintf(stderr, "[eatmod] este modelo nao tem a animacao %u (tools/eatanim.py + modkit monster anim import); segue sem animacao\n", id);
+        said = true;
         return;
+    }
     wotm_coop::callF(rdram, ctx, runtime, fn::animationTransitionInto__FR11_animHandlefii, {h, 1u, 1u}, {kAnimBlend});
 }
 
@@ -171,11 +177,13 @@ void tick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, in
             h.active = false;
             return;
         }
-        // carried: it follows the right hand on the ground plane (a civilian's third coordinate stays 0)
+        // carried: it follows the right hand; a civilian's third coordinate is its height (0 on the street), so it goes up with the hand
         float a, b;
         ground(rdram, m + kHandR, &a, &b);
         wrF(rdram, h.pos, a);
         wrF(rdram, h.pos + 4, b);
+        if (g_cfg.lift && !g_cfg.planeXZ)
+            wrF(rdram, h.pos + 8, rdF(rdram, m + kHandR + 8));
         return;
     }
     if (!tap || rd32(rdram, m + kPickup) != 0 || rd32(rdram, m + kTarget) != 0)   // something in the hands: the game's own grab/throw
@@ -223,7 +231,9 @@ void install(PS2Runtime &runtime)
     g_cfg.on = true;
     g_cfg.all = std::strcmp(e, "all") == 0;
     if (const char *s = std::getenv("WOTM_EATPLANE"))
-        g_cfg.planeXZ = std::strcmp(s, "xy") != 0;
+        g_cfg.planeXZ = std::strcmp(s, "xz") == 0;
+    if (const char *s = std::getenv("WOTM_EATLIFT"))
+        g_cfg.lift = *s != '0';
     if (const char *s = std::getenv("WOTM_EATHEAL"))
         g_cfg.healPct = std::max(0.f, float(std::atof(s)));
     if (const char *s = std::getenv("WOTM_EATPOINTS"))

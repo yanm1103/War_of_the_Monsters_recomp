@@ -805,7 +805,8 @@ helicopters from `MON/ARMY.*` (below). The adventure keeps its own army untouche
 | `WOTM_AILOG=1` | log of the AI actions (`wotm_ai.inc`): `[ai] <field> m<slot> <Classe>` at each action (`AiActionTuple`) that starts, with the class taken from the vtable; `durou N fields` on those longer than 2 s; `counter acertou` or `falhou` at the end of each `AiCounterReflex`; every 10 s, per AI, `oponentes: m<slot>... trava <endereço>` (the `Ai::m_opponents` list and the locked monster) |
 | `WOTM_NOARMYHOOKS=1` | diagnostic: installs none of the army hooks (`wotm_army.inc`), so the game runs the original functions untouched |
 | `WOTM_EAT=1\|all` | eat-civilians mod (`wotm_eatmod.inc`), off when unset: double tap of Circle grabs the nearest civilian, the second tap eats it (health back, tokens), playing the clips a299 (grab) and a298 (eat) when the model has them (`tools/eatanim.py`). `1`: Togera only; `all`: every monster |
-| `WOTM_EATPLANE=xz\|xy` | which monster coordinates line up with a civilian's (x, y) in `WOTM_EAT`: `xz` (default) or `xy` |
+| `WOTM_EATPLANE=xy\|xz` | which monster coordinates line up with a civilian's (x, y) in `WOTM_EAT`: `xy` (default; z is up) or `xz` |
+| `WOTM_EATLIFT=0` | the carried civilian stays on the ground; by default its height follows the hand |
 | `WOTM_EATHEAL=<n>` | health restored per civilian eaten, percent of the maximum (default 5) |
 | `WOTM_EATPOINTS=<n>` | tokens credited per civilian eaten (default 25) |
 | `WOTM_EATREACH=<n>` | how close a civilian has to be to be grabbed, in game units (default 300) |
