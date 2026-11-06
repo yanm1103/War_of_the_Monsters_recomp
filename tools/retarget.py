@@ -34,7 +34,10 @@ that `modkit.py monster rig` (tools/ngprig.py) takes.
 - --own clips.json: the model's own animations, in place of the source's with the same id (or as new ids):
   {"clips": [{"name": "a090", "frames": N, "joints": {joint: [[qx, qy, qz, qw, x, y, z] per frame]}}]}, each the joint's
   world in the model's scene (the .dae's axes and units, at 60 frames a second). Kept joints a clip leaves out hold their
-  rest against their parent; the map does not act on these clips.
+  rest against their parent; the map does not act on these clips. "laid": {"turn": [x, y, z], "shift": [x, y, z]} marks a
+  pose the game lays down itself (a monster on the ground: the knocked-down clips are stored standing): the game turns it
+  by those degrees about the game axes, then shifts it by those game units; the clip gives the pose as seen on the ground
+  and is stored before that.
 
 Only the standard library: it runs where the mod kit runs. Guide: docs/guides/MODS.md ("Own skeleton"); docs/guides/MODELS_3D.md.
 """
@@ -770,6 +773,9 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
             given = {mdl.names[n]: ks for n, ks in jd.items()}
             aid = int(re.match(r"a(\d+)", nm).group(1))
             sc = src_clip.get(aid)   # the props follow the source's clip with the same id, over the same share of time
+            lay = clip.get("laid")
+            U = inv(with_pos(axis_turn(lay.get("turn", [0, 0, 0])), [float(x) for x in lay.get("shift", [0, 0, 0])])) \
+                if lay else None
             tracks = {i: ([], []) for i in korder}
             pscale = {}
             for f in range(frames):
@@ -784,6 +790,8 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
                     if k is not None:
                         Wd = with_pos(quat_col(k[f][:4]), k[f][4:7])
                         Wt[i] = with_pos(rot3(mul(Cm, Wd)), to_game_p(pos(Wd)))
+                        if U is not None:
+                            Wt[i] = mul(U, Wt[i])
                     elif p is not None:
                         Wt[i] = mul(Wt[p], Lk[i])
                     else:
