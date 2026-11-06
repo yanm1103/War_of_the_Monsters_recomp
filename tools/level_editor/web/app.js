@@ -36,16 +36,166 @@ async function api(path, body) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function log(lines, cls) {
-  const el = $('log');
-  for (const l of [].concat(lines)) {
-    const d = document.createElement('div');
-    if (cls) d.className = cls;
-    d.textContent = l;
-    el.appendChild(d);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('wotmLevelEditor.' + k); return v === null ? d : v; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('wotmLevelEditor.' + k, v); } catch (e) { /* no storage */ } },
+};
+
+// ------------------------------------------------------------------ messages: the Output drawer, the status bar and toasts
+// The Output has three tabs: Messages (everything the page says), Check (the last check, its problems and the raw lvl.py output)
+// and Game (the game's [fase] lines, in words and as they are). The drawer opens by itself only on an error.
+const ICONS = { ok: 'check-circle-outline', err: 'alert-circle-outline', warn: 'alert-outline', info: 'information-outline',
+                muted: 'information-outline' };
+const PANES = { messages: 'log', check: 'checkOut', game: 'gameOut' };
+const icon = (name) => {
+  const i = document.createElement('i');
+  i.className = 'ic';
+  i.style.setProperty('--ic', `url(vendor/mdi/${name}.svg)`);
+  return i;
+};
+const clock = (ms = Date.now()) => new Date(ms).toTimeString().slice(0, 8);
+const hhmm = (ms) => new Date(ms).toTimeString().slice(0, 5);
+let outTab = 'messages';
+// one line: the time, an icon and the text; o.detail goes under a "Details" fold, o.go makes the line clickable
+function lineEl(text, level = 'info', o = {}) {
+  const d = document.createElement('div');
+  d.className = `line ${level}${o.raw ? ' raw' : ''}`;
+  const t = document.createElement('span'), x = document.createElement('span');
+  t.className = 't'; t.textContent = clock();
+  x.className = 'x'; x.textContent = text;
+  d.append(t, icon(ICONS[level] || ICONS.info), x);
+  if (o.detail) {
+    const det = document.createElement('details');
+    det.innerHTML = '<summary>Details</summary><pre></pre>';
+    det.querySelector('pre').textContent = o.detail;
+    x.appendChild(det);
   }
-  el.scrollTop = el.scrollHeight;
+  if (o.go) { d.classList.add('go'); d.title = o.goTitle || ''; d.onclick = o.go; }
+  return d;
 }
+function markTab(tab, err) {
+  if (!$('output').hidden && outTab === tab) return;
+  const b = document.querySelector(`#output .tab[data-tab="${tab}"]`);
+  b.classList.add('new');
+  if (err) b.classList.add('err');
+}
+function addLine(tab, el) {
+  const pane = $(PANES[tab]);
+  const stick = pane.hidden || pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 4;
+  pane.querySelector(':scope > .empty')?.remove();
+  pane.appendChild(el);
+  while (pane.childElementCount > 2000) pane.firstElementChild.remove();
+  if (stick) pane.scrollTop = pane.scrollHeight;
+  markTab(tab, el.classList.contains('err'));
+}
+function setStatusMsg(text, level, tab) {
+  const b = document.querySelector('#status .msg');
+  b.className = `st msg ${level}`;
+  b.dataset.tab = tab;
+  b.querySelector('.ic').style.setProperty('--ic', `url(vendor/mdi/${ICONS[level] || ICONS.info}.svg)`);
+  b.querySelector('.tx').textContent = text;
+  b.title = `${text} (opens the Output)`;
+}
+// msg(text or lines, {level, tab, toast, detail, status, open, raw, go}): lines in the Output and the last one in the status bar.
+// level: info, ok, warn, err or muted; tab: messages (default), check or game. toast: true, or [label, fn] for a button on it; left
+// out, a line shows as a toast too while a dialog hides the Output. An error opens the drawer on its tab (open: another tab, or false).
+function msg(text, o = {}) {
+  const level = o.level || 'info', tab = o.tab || 'messages';
+  const lines = [].concat(text).filter((t) => t !== '' && t !== null && t !== undefined).map(String);
+  if (!lines.length) return;
+  for (const t of lines) addLine(tab, lineEl(t, level, o));
+  const last = lines[lines.length - 1];
+  if (level !== 'muted' && o.status !== false) setStatusMsg(last, level, tab);
+  const tst = o.toast !== undefined ? o.toast : !!document.querySelector('dialog[open]') && level !== 'muted';
+  if (tst) toast(last, level, Array.isArray(tst) ? tst : null);
+  if (level === 'err' && o.open !== false) openOutput(o.open || tab);
+}
+// the older log(lines, cls), as hud.js calls it
+function log(lines, cls) { msg(lines, { level: cls || 'info' }); }
+
+function openOutput(tab = outTab) {
+  outTab = PANES[tab] ? tab : 'messages';
+  $('output').hidden = false;
+  for (const [t, id] of Object.entries(PANES)) $(id).hidden = t !== outTab;
+  document.querySelectorAll('#output .tab').forEach((b) => {
+    const on = b.dataset.tab === outTab;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-selected', on);
+    if (on) b.classList.remove('new', 'err');
+  });
+  const p = $(PANES[outTab]);
+  p.scrollTop = outTab === 'check' ? 0 : p.scrollHeight;
+  showOutToggle();
+  store.set('output', '1');
+}
+function closeOutput() {
+  $('output').hidden = true;
+  showOutToggle();
+  store.set('output', '0');
+}
+function showOutToggle() {
+  const open = !$('output').hidden, b = $('outToggle');
+  b.querySelector('.ic').style.setProperty('--ic', `url(vendor/mdi/${open ? 'chevron-down' : 'chevron-up'}.svg)`);
+  b.title = open ? 'Hide the output' : 'Show the output: messages, check and game';
+}
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch (e) { /* not allowed here: the old way */ }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) { /* ignore */ }
+  ta.remove();
+  return ok;
+}
+
+// toasts: over the view's lower right corner; inside an open dialog (the top layer) so that they show above it
+function placeToasts() {
+  const r = $('view').getBoundingClientRect(), b = $('toasts');
+  b.style.right = Math.max(8, innerWidth - r.right + 12) + 'px';
+  b.style.bottom = Math.max(8, innerHeight - r.bottom + 12) + 'px';
+}
+function toast(text, level = 'info', action = null) {
+  const box = $('toasts'), host = document.querySelector('dialog[open]') || document.body;
+  if (box.parentElement !== host) host.appendChild(box);
+  placeToasts();
+  const t = document.createElement('div'), x = document.createElement('span');
+  t.className = `toast ${level}`;
+  t.setAttribute('role', level === 'err' ? 'alert' : 'status');
+  x.textContent = text;
+  t.append(icon(ICONS[level] || ICONS.info), x);
+  let timer = 0;
+  const gone = () => { clearTimeout(timer); t.classList.add('out'); setTimeout(() => t.remove(), 200); };
+  const arm = (ms) => { clearTimeout(timer); timer = setTimeout(gone, ms); };
+  if (action) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'ghost'; b.textContent = action[0];
+    b.onclick = () => { gone(); action[1](); };
+    t.appendChild(b);
+  }
+  const c = document.createElement('button');
+  c.type = 'button'; c.className = 'icon ghost'; c.title = 'Dismiss'; c.setAttribute('aria-label', 'Dismiss');
+  c.appendChild(icon('close'));
+  c.onclick = gone;
+  t.appendChild(c);
+  t.onmouseenter = () => clearTimeout(timer);
+  t.onmouseleave = () => arm(2000);
+  box.appendChild(t);
+  while (box.childElementCount > 4) box.firstElementChild.remove();
+  arm(action ? 8000 : 4000);
+  return t;
+}
+// a dialog that closes gives the toasts back to the page (close does not bubble: capture)
+document.addEventListener('close', (e) => {
+  const box = $('toasts');
+  if (e.target instanceof HTMLDialogElement && e.target.contains(box)) {
+    document.body.appendChild(box);
+    const other = document.querySelector('dialog[open]');
+    if (other) other.appendChild(box);
+  }
+}, true);
 
 // ------------------------------------------------------------------ view
 const canvas = $('canvas');
@@ -72,10 +222,6 @@ let stageRoot = null, skyRoot = null, env = null;   // env: the stage's fog, bac
 // pedestrians (web/peds.js): a layer shown with P; pedSel is the marker the gizmo holds (never together with an object)
 const peds = createPeds({ THREE, scene, toThree, toGame });
 let discPeds = null, pedSel = null;
-const store = {
-  get(k, d) { try { const v = localStorage.getItem('wotmLevelEditor.' + k); return v === null ? d : v; } catch (e) { return d; } },
-  set(k, v) { try { localStorage.setItem('wotmLevelEditor.' + k, v); } catch (e) { /* no storage */ } },
-};
 
 function resize() {
   const r = canvas.parentElement.getBoundingClientRect();
@@ -198,7 +344,7 @@ function gsMaterial(m) {
 // game's traversal); the sky first, with no depth test, around the camera.
 function setupDrawing(gltf) {
   const raw = !!(gltf.asset && gltf.asset.extras && gltf.asset.extras.gsRaw);
-  if (!raw) log('the scene is from an older tools/lvlglb.py: restart the editor to draw it as the game does', 'err');
+  if (!raw) msg('The 3D cache is out of date. Restart the editor to rebuild it.', { level: 'err', detail: 'the scene is from an older tools/lvlglb.py' });
   const done = new Set();
   let order = 0;
   gltf.scene.traverse((o) => {
@@ -431,7 +577,7 @@ function showKeep(k) {
   if (!parts.length) return;
   $('keepText').textContent = parts.join(' ') + ' Saving keeps ' + (k.entries + k.keys.length === 1 ? 'it' : 'them') + ' in the file as ' +
     (k.entries + k.keys.length === 1 ? 'it is.' : 'they are.');
-  log($('keepText').textContent, 'warn');
+  msg($('keepText').textContent, { level: 'warn' });
 }
 
 // label: what the change does, for the Undo and Redo tooltips ("move Hotel", "delete 3 objects")
@@ -440,14 +586,18 @@ function snapshot(label = 'change') {
   if (history.length > 200) history.shift();
   future = [];
   dirty = true;
+  staleCheck();
   showUndo();
 }
+// the last check's result holds until the next change
+function staleCheck() { if (ui.check.state === 'ok' || ui.check.state === 'bad') ui.check.state = 'stale'; }
 const whatSel = () => (group.length > 1 ? `${group.length} objects` : sel ? nameOf(sel) : pedSel ? pedTitle(pedSel).toLowerCase() : 'objects');
 function restoreTo(p) {
   const again = group.filter((it) => !it.copy).map((it) => it.rec.item);
   resetAll();
   applyPatch(JSON.parse(p));
   dirty = JSON.stringify(buildPatch()) !== savedJson;
+  staleCheck();
   selectMany(again);
   showUndo();
 }
@@ -470,6 +620,32 @@ function showUndo() {
   $('redo').disabled = !r;
   $('redo').title = r ? `Redo: ${r.label} (Ctrl+Y)` : 'Nothing to redo (Ctrl+Y)';
   $('save').classList.toggle('dirty', dirty);
+  showStatus();
+}
+
+// ------------------------------------------------------------------ the status bar: last message, save, check, game, counts
+// ui.savedAt: when this page last saved this stage; ui.check.state: none, ok, bad (n problems) or stale (a change since)
+const ui = { savedAt: 0, changed: 0, check: { state: 'none', n: 0 } };
+function stField(cls, text, state, title) {
+  const b = document.querySelector(`#status .${cls}`);
+  b.className = `st ${cls}${state ? ' ' + state : ''}`;
+  b.querySelector('.tx').textContent = text;
+  if (title !== undefined) b.title = title;
+  return b;
+}
+function showStatus(changedN) {
+  if (changedN !== undefined) ui.changed = changedN;
+  const where = modNow ? `mods/${modNow}/levels/${stageName}.json` : '';
+  stField('save', dirty ? 'Unsaved changes' : ui.savedAt ? `Saved ${hhmm(ui.savedAt)}` : 'No unsaved changes',
+          dirty ? 'dirty' : ui.savedAt ? 'saved' : '', where ? `Saves to ${where} (Ctrl+S)` : 'Choose a mod to save into (Mod, at the top)');
+  const c = ui.check;
+  const ck = stField('check', c.state === 'ok' ? 'Check passed' : c.state === 'bad' ? `${c.n} ${c.n === 1 ? 'problem' : 'problems'}`
+                     : c.state === 'stale' ? 'Not checked since the last change' : 'Not checked',
+                     { ok: 'ok', bad: 'err' }[c.state] || 'idle');
+  ck.querySelector('.ic').style.setProperty('--ic', `url(vendor/mdi/${c.state === 'bad' ? 'alert-circle-outline' : c.state === 'ok' ? 'check-circle-outline' : 'shield-check-outline'}.svg)`);
+  const n = group.length || (pedSel ? 1 : 0);
+  stField('count', `${ui.changed} changed` + (n ? ` · ${n} selected` : ''));
+  showGame();
 }
 
 // ------------------------------------------------------------------ loading
@@ -481,6 +657,7 @@ async function loadStage(name) {
     stageRoot = skyRoot = null;
     stageName = name;
     $('keepNote').hidden = true;
+    clearCheckPane();
     const mod = modNow;
     const info = await api(`/api/stage?name=${encodeURIComponent(name)}&mod=${encodeURIComponent(mod)}`);
     const gltf = await new GLTFLoader().loadAsync(`/api/glb?name=${encodeURIComponent(name)}`);
@@ -516,17 +693,20 @@ async function loadStage(name) {
     const kept = applyPatch(info.patch);
     savedJson = JSON.stringify(buildPatch());
     dirty = false;
+    ui.savedAt = 0;
+    ui.check = { state: 'none', n: 0 };
     showUndo();
     frameAll();
     showKeep(kept);
     refreshList();
     if (new URLSearchParams(location.search).has('debug')) console.log('patch ' + JSON.stringify(buildPatch()));
-    const pc = peds.counts();
-    log(`${name}: ${recs.length} objects, ${pc.groups} pedestrian groups` +
-        ((info.patch.objects || []).length ? `, patch of mod "${mod}" with ${info.patch.objects.length} entries` : '') +
-        (info.patch.peds ? ' and pedestrian changes' : ''));
+    const pc = peds.counts(), n = (info.patch.objects || []).length;
+    msg(`${title(name)}: ${recs.length} objects, ${pc.groups} pedestrian groups` +
+        (n ? `; mod "${mod}" changes ${n} ${n === 1 ? 'object' : 'objects'}` : '') +
+        (info.patch.peds ? (n ? ' and the pedestrians' : `; mod "${mod}" changes the pedestrians`) : ''));
   } catch (e) {
-    log(`loading ${name}: ${e.message}`, 'err');
+    const er = cleanError(e);
+    msg(`Couldn't open ${title(name)}: ${er.text}`, { level: 'err', detail: er.detail });
   } finally {
     $('busy').hidden = true;
   }
@@ -600,9 +780,11 @@ function refreshList() {
     };
     ul.appendChild(li);
   }
-  $('count').textContent = `${shown.length} shown · ${group.length > 1 ? group.length + ' selected · ' : ''}${buildPatch().objects.length} changed`;
+  const nChanged = buildPatch().objects.length;
+  $('count').textContent = `${shown.length} shown · ${group.length > 1 ? group.length + ' selected · ' : ''}${nChanged} changed`;
   document.title = `WotM Level Editor — ${stageName}${dirty ? ' *' : ''}`;
   $('save').classList.toggle('dirty', dirty);
+  showStatus(nChanged);
 }
 
 // mode: 'set' (only this one), 'toggle' (Shift/Ctrl click), 'add'
@@ -754,7 +936,7 @@ function pedEdit(fn, label = 'pedestrians') {   // one undo step, then the edit;
     return r;
   } catch (e) {
     back();
-    log(`pedestrians: ${e.message}`, 'err');
+    msg(`Pedestrians: ${e.message}`, { level: 'warn', toast: true });
     return false;
   }
 }
@@ -888,7 +1070,10 @@ function dropToGround() {
     for (const x of [it, ...att]) setWorldMatrix(x.node, m.clone().multiply(x.node.matrixWorld));
     n++;
   }
-  log(`dropped ${n} of ${group.length} on the surface below` + (n < group.length ? ' (nothing under the others)' : ''));
+  const all = group.length, what = all === 1 ? nameOf(group[0]) : `${all} objects`;
+  if (!n) msg(`Nothing under ${what} to drop onto`, { level: 'warn', toast: true });
+  else if (n < all) msg(`Dropped ${n} of ${all} (nothing under the other ${all - n})`, { level: 'warn', toast: true });
+  else msg(`Dropped ${what} onto the surface below`, { level: 'ok', toast: true });
   showProps();
   refreshList();
 }
@@ -917,7 +1102,16 @@ function duplicate() {
     made.push(c);
     if ($('carry').checked) for (const a of it.attached) if (a.node.visible && !group.includes(a)) c.attached.push(copyOf(a));
   }
+  const on = done.size - made.length;
+  msg(`Copied ${countText(made)}` + (on ? ` and ${on} ${on === 1 ? 'object' : 'objects'} on top` : ''), { level: 'ok', toast: true });
   selectMany(made);
+}
+// "Hotel", "3 buildings" or "5 objects"
+const KIND_WORDS = { destr: ['building', 'buildings'], pickup: ['pickup', 'pickups'], prop: ['prop', 'props'] };
+function countText(list) {
+  if (list.length === 1) return nameOf(list[0]);
+  const kinds = new Set(list.map((it) => it.rec.info.kind)), w = kinds.size === 1 ? KIND_WORDS[[...kinds][0]] : null;
+  return `${list.length} ${w ? w[1] : 'objects'}`;
 }
 
 function hideRec(it) {
@@ -934,9 +1128,14 @@ function remove() {
   }
   if (!group.length || isDeleted(sel)) return;
   snapshot('delete ' + whatSel());
+  const main = group.filter((it) => it.node.visible), on = new Set();
   for (const it of [...group]) {
     hideRec(it);
-    if ($('carry').checked) for (const a of it.attached) hideRec(a);
+    if ($('carry').checked) for (const a of it.attached) { if (a.node.visible && !group.includes(a)) on.add(a); hideRec(a); }
+  }
+  if (main.length) {
+    msg(`Deleted ${countText(main)}` + (on.size ? ` and ${on.size} ${on.size === 1 ? 'object' : 'objects'} on top` : ''),
+        { level: 'ok', toast: ['Undo', undo] });
   }
   select(null);
 }
@@ -1021,31 +1220,131 @@ canvas.addEventListener('pointerup', (e) => {
 
 // ------------------------------------------------------------------ saving and testing
 // the game the editor opened: running, the stage it was opened on (server) and the one its [fase] lines name last
-const game = { running: false, stage: '', seen: '' };
+// state: closed, starting, running or reloading (showGame); result: what the game last did with the patch (gameResult)
+const game = { running: false, stage: '', seen: '', state: 'closed', result: null, pending: false, watch: 0 };
 const title = (s) => stageTitles[s] || s;
 const gameStage = () => game.seen || game.stage;
 async function gameLog() {
   try { return await fetch('/api/gamelog').then((r) => r.json()); } catch (e) { return { lines: [], running: false, stage: '' }; }
 }
+// An error from the server without its Python type ("RuntimeError: ..." keeps the type for Details)
+function cleanError(e) {
+  const s = String(e && e.message || e), m = /^[A-Z]\w*(?:Error|Exception): ([\s\S]*)$/.exec(s);
+  return { text: m ? m[1] : s, detail: m ? s : '' };
+}
+// The check's lines (editor.py check_patch, the output of lvl.py patch) as {ok, summary, problems: [{text, handle}], warns, infos}
+function readCheck(res, patch, mod) {
+  const problems = [], warns = [], infos = [];
+  let stats = null, cars = 0, walks = 0, m;
+  const objs = (patch && patch.objects) || [];
+  for (const l of res.lines || []) {
+    const s = l.trim();
+    if ((m = /^entry (\d+) skipped: (.*)$/.exec(s))) {
+      const e = objs[+m[1]], rec = e ? byHandle.get(normHandle(e.handle)) : null;
+      problems.push({ text: `${rec ? nameOf(rec.item) : e ? e.handle : 'Entry ' + m[1]} was not applied: ${m[2]}`, handle: rec ? rec.info.handle : null });
+    } else if ((m = /^pedestrian group (\d+) skipped: (.*)$/.exec(s))) {
+      problems.push({ text: `Pedestrian group ${+m[1] + 1} was not applied: ${m[2]}` });
+    } else if ((m = /^box rule: \d+ ok .*?, (\d+) off,.*worst ([\d.]+)/.exec(s))) {
+      if (+m[1]) problems.push({ text: `Collision boxes: ${m[1]} out of place (worst ${(+m[2]).toFixed(1)} units)` });
+    } else if ((m = /^cell rule: (\d+) of (\d+) paths/.exec(s))) {
+      if (+m[1] < +m[2]) problems.push({ text: `Collision cells: ${m[2] - m[1]} boxes listed in the wrong cells` });
+    } else if ((m = /^warning: mod "(.+)" also has levels\/\S+\.json/.exec(s))) {
+      warns.push(`Mod "${m[1]}" also changes ${title(stageName)} and loads after "${mod}", so the game uses ${m[1]}'s file. ` +
+                 'Mods load in alphabetical order; the last one wins.');
+    } else if (/^vehicles: link \d+-\d+ cut/.test(s)) cars++;
+    else if (/^pedestrians: segment \d+-\d+ (removed|\(.*clipped)/.test(s)) walks++;
+    else if ((m = /^(\S+): (.*)$/.exec(s)) && m[1] === stageName) stats = m[2];
+  }
+  const cut = [cars && `${cars} car ${cars === 1 ? 'path' : 'paths'}`, walks && `${walks} sidewalk ${walks === 1 ? 'segment' : 'segments'}`].filter(Boolean);
+  if (cut.length) infos.push(`Cut ${cut.join(' and ')} under the objects`);
+  if (!res.ok && !problems.length && !warns.length) problems.push({ text: 'The check failed (see Details)' });
+  const ok = !problems.length, n = problems.length;
+  const what = stats && stats !== 'nothing changed' ? statsText(stats) : 'nothing changed';
+  return { ok, n, problems, warns, infos,
+           summary: ok ? `Check passed: ${what}. Collision OK.` : `Check found ${n} ${n === 1 ? 'problem' : 'problems'}` };
+}
+function clearCheckPane() {
+  $('checkOut').innerHTML = '<div class="empty muted">No check yet. Check, Save, Test in game and Reload in game check your changes.</div>';
+}
+// the Check tab: the last check's summary, its problems (a click selects the object), warnings, notes and the raw output
+function showCheck(chk, lines) {
+  const p = $('checkOut');
+  p.textContent = '';
+  p.appendChild(lineEl(chk.summary, chk.ok ? 'ok' : 'err'));
+  for (const pr of chk.problems) {
+    p.appendChild(lineEl(pr.text, 'err', pr.handle ? { go: () => goTo(pr.handle), goTitle: 'Select it and look at it' } : {}));
+  }
+  for (const w of chk.warns) p.appendChild(lineEl(w, 'warn'));
+  for (const i of chk.infos) p.appendChild(lineEl(i, 'info'));
+  const det = document.createElement('details');
+  det.innerHTML = '<summary>Details: the full output of the check</summary><pre></pre>';
+  det.querySelector('pre').textContent = (lines || []).join('\n');
+  p.appendChild(det);
+  markTab('check', !chk.ok);
+}
+function goTo(handle) {
+  const rec = byHandle.get(normHandle(handle));
+  if (!rec) return;
+  select(rec.item);
+  if (rec.item.node.visible) focus(rec.item);
+}
+const FAILED = { check: 'Check failed', save: "Couldn't save", test: "Couldn't start the game", reload: "Couldn't reload the game" };
 async function post(kind, save = true, extra = {}) {
   const mod = modNow;
   const body = Object.assign({ name: stageName, mod, patch: buildPatch(), training: true, save }, extra);
+  const wasRunning = game.running;
+  if (kind === 'test') setGameState('starting');
+  if (kind === 'reload') setGameState('reloading');
+  game.pending = kind === 'test' || kind === 'reload';
   try {
-    log(`${kind}…`);
     const before = kind === 'reload' ? (await gameLog()).lines.length : 0;   // the log keeps every load of this run
     const res = await api(kind === 'check' ? '/api/check' : `/api/${kind}`, body);
-    log(res.lines, res.ok ? '' : 'err');
+    game.pending = false;
+    const same = JSON.stringify(buildPatch()) === JSON.stringify(body.patch);   // no edit while the server worked
+    let chk = null;
+    if (kind === 'check' || (res.lines && res.lines.length)) {
+      chk = readCheck(res, body.patch, mod);
+      ui.check = { state: !same ? 'stale' : chk.ok ? 'ok' : 'bad', n: chk.n };
+      showCheck(chk, res.lines);
+      msg(chk.summary, { level: chk.ok ? 'ok' : 'err', open: 'check', toast: kind === 'check' && chk.ok ? true : undefined,
+                         go: () => openOutput('check'), goTitle: 'Show the check' });
+      for (const w of chk.warns) msg(w, { level: 'warn', toast: true });
+    }
+    const rel = `mods/${mod}/levels/${stageName}.json`;
     if (res.saved) {
-      log(`saved ${res.saved}`, 'ok');
       savedJson = JSON.stringify(body.patch);
       dirty = JSON.stringify(buildPatch()) !== savedJson;   // an edit made while saving stays unsaved
+      ui.savedAt = Date.now();
+      const removed = /^removed /.test(res.saved);
+      const text = removed ? `Removed ${rel}: your mod no longer changes ${title(stageName)}` : `Saved to ${rel}`;
+      const bad = chk && !chk.ok;
+      msg(text, { level: 'ok', detail: res.saved.replace(/^removed /, ''),
+                  toast: bad ? false : kind === 'save' });
+      if (bad) toast(`Saved, but the check found ${chk.n} ${chk.n === 1 ? 'problem' : 'problems'}`, 'warn', ['Show', () => openOutput('check')]);
+    } else if (kind === 'save') {
+      msg(`Nothing to save: your mod has no changes for ${title(stageName)}`, { toast: true });
     }
-    if (res.launched) { log(`game: ${res.launched}`, 'ok'); game.seen = ''; game.stage = stageName; setRunning(true); watchGame(0, true); }
-    if (res.reloading) { log(`Reloading ${title(stageName)} in the game (it loads the saved file)`, 'ok'); watchGame(before); }
+    if (res.launched) {
+      game.seen = ''; game.stage = stageName; game.result = null;
+      setGameState('starting');
+      msg(`Starting the game on ${title(stageName)} (training, as Togera)`, { level: 'ok', detail: res.launched });
+      watchGame(0, true);
+    }
+    if (res.reloading) {
+      setGameState('reloading');
+      msg(`Reloading ${title(stageName)} in the game: it loads the saved file when a fight on this stage is running`, { level: 'info' });
+      watchGame(before);
+    }
+    showUndo();
     refreshList();
   } catch (e) {
-    if (kind === 'test' && e.code === 'running') { game.stage = e.data.stage || game.stage; askRunning(save); return; }
-    log(`${kind}: ${e.message}`, 'err');
+    game.pending = false;
+    if (kind === 'test' || kind === 'reload') setGameState(wasRunning ? 'running' : 'closed');
+    if (kind === 'test' && e.code === 'running') { game.stage = e.data.stage || game.stage; setRunning(true); askRunning(save); return; }
+    const er = cleanError(e);
+    const action = e.code === 'mod' ? ['Choose mod', () => $('mod').focus()]
+      : /Settings/.test(er.text) ? ['Open settings', () => $('settings').click()] : undefined;
+    msg(`${FAILED[kind] || kind}: ${er.text}`, { level: 'err', detail: er.detail, toast: action });
   }
 }
 
@@ -1084,8 +1383,8 @@ function reloadGame() {
 async function stopGame() {
   try {
     const r = await api('/api/stop', {});
-    log(r.stopped ? 'The game is closed.' : 'The game was not running.', 'ok');
-  } catch (e) { log(`stop: ${e.message}`, 'err'); }
+    msg(r.stopped ? 'The game is closed.' : 'The game was not running.', { level: 'ok', toast: true });
+  } catch (e) { msg(`Couldn't close the game: ${cleanError(e).text}`, { level: 'err' }); }
   noteGame(await gameLog());
 }
 
@@ -1132,29 +1431,45 @@ function gameLine(line) {
   return null;
 }
 // what the stage patch did in the game: its [fase] lines after `seen`, until one settles it (5.5 of the plan) or the wait ends
+// The lines go to the Game tab (in words, and the rest as they are); the one that settles it also to Messages, as a toast.
 async function watchGame(seen, launch = false) {
+  const me = game.watch = (game.watch || 0) + 1;   // a newer watch (Reload while the launch is watched) takes over
   let done = false, extra = false;
   for (let i = 0; i < (launch ? 60 : 20); i++) {
     await sleep(1500);
+    if (game.watch !== me) return;
     const r = await gameLog(), lines = r.lines || [];
     noteGame(r);
     if (lines.length < seen) seen = 0;     // a new log (the game was opened again)
     for (const l of lines.slice(seen)) {
       const t = gameLine(l);
-      if (!t || t.raw) log(`game ${l}`, 'muted');
-      else log(t.text, t.cls);
+      if (!t || t.raw) msg(l.replace(/^\[fase\] ?/, ''), { level: 'muted', tab: 'game', raw: true });
+      else if (t.end) gameResult(t);
+      else msg(t.text, { level: t.cls || 'info', tab: 'game', status: false });
       if (t && t.end) { done = true; extra = !!t.more; }
       if (t && t.last) extra = false;
     }
     seen = Math.max(seen, lines.length);
-    if (!r.running) { log('The game closed.', 'muted'); return; }
+    if (!r.running) { msg('The game closed.', { level: 'muted', tab: 'game' }); return; }
+    // the game is up once it has had time to open its window (or it already loaded the stage)
+    if (launch && i === 12 && game.state === 'starting') setGameState('running');
     if (done && !extra) return;
     if (done) extra = false;               // one more look for the rest of the load's lines
   }
+  if (game.watch !== me) return;
+  if (game.state === 'starting' || game.state === 'reloading') setGameState('running');
   if (!done) {
-    log(launch ? 'The game is open. It reports the stage patch when a fight on this stage starts.'
-               : "The game hasn't reloaded yet. It does when a fight on this stage is running.", 'warn');
+    msg(launch ? 'The game is open. It reports the stage patch when a fight on this stage starts.'
+               : "The game hasn't reloaded yet. It does when a fight on this stage is running.", { level: launch ? 'info' : 'warn', tab: 'game' });
   }
+}
+// a line that settles what the game did with the patch: applied, ignored or dropped (idle)
+function gameResult(t) {
+  const level = t.cls || 'ok';
+  game.result = { kind: level === 'ok' ? 'applied' : level === 'warn' ? 'idle' : 'ignored', text: t.text, at: Date.now() };
+  msg(t.text, { level, tab: 'game', status: false });
+  setGameState('running');
+  msg(t.text, { level, toast: true, open: 'game', go: () => openOutput('game'), goTitle: "Show the game's lines" });
 }
 function noteGame(r) {
   game.stage = r.stage || '';
@@ -1162,14 +1477,54 @@ function noteGame(r) {
   else for (const l of r.lines || []) { const t = gameLine(l); if (t && t.stage) game.seen = t.stage; }
   setRunning(!!r.running);
 }
+// the game's state: closed, starting (Test in game asked for it), running, reloading (Reload in game waits for the game's answer)
 function setRunning(on) {
+  if (!on && game.pending) return;         // Test in game is opening it: the server does not know it yet
   game.running = on;
-  $('reload').disabled = !on;
-  $('reload').title = on ? 'Save and reload this stage in the open game (F10 in the game does the same)'
-                         : 'Start the game with Test in game first';
-  $('reload').classList.toggle('primary', on);
-  $('test').classList.toggle('primary', !on);
-  $('stop').hidden = !on;
+  if (!on) game.state = 'closed';
+  else if (game.state === 'closed') game.state = 'running';
+  showGame();
+}
+function setGameState(s) {
+  game.state = s;
+  game.running = s !== 'closed';
+  showGame();
+}
+function showGame() {
+  const s = game.state, where = title(gameStage() || stageName);
+  const ind = $('gameInd');
+  ind.hidden = s === 'closed';
+  ind.className = `game-ind ${s}`;
+  $('gameIndText').innerHTML = '';
+  $('gameIndText').append(s === 'starting' ? 'Starting game…' : s === 'reloading' ? 'Reloading… waiting for a fight' : 'Game running');
+  if (s === 'running') {
+    const w = document.createElement('span');
+    w.className = 'where';
+    w.textContent = ` · ${where}`;
+    $('gameIndText').append(w);
+  }
+  ind.title = s === 'running' ? `The game the editor opened is running, on ${where}` : '';
+  const test = $('test'), rl = $('reload');
+  test.disabled = s === 'starting';
+  test.classList.toggle('primary', s === 'closed');
+  rl.disabled = s !== 'running';
+  rl.classList.toggle('primary', s === 'running' || s === 'reloading');
+  const label = dirty ? 'Save & reload' : 'Reload in game';
+  rl.querySelector('.lbl').textContent = label;
+  rl.setAttribute('aria-label', label);
+  rl.title = s === 'closed' ? 'Start the game with Test in game first'
+    : s === 'starting' ? 'The game is starting'
+    : s === 'reloading' ? 'The game is reloading this stage'
+    : (dirty ? 'Save your changes and reload' : 'Reload') + ' this stage in the open game (F10 in the game does the same)';
+  $('stop').hidden = s === 'closed';
+  const res = game.result;
+  const [text, state] = s === 'closed' ? ['Game closed', 'idle']
+    : s === 'starting' ? ['Starting game…', 'warn']
+    : s === 'reloading' ? ['Reloading in game…', 'warn']
+    : !res ? [`Game running · ${where}`, '']
+    : res.kind === 'applied' ? [`Patch applied in game ${hhmm(res.at)}`, 'ok']
+    : res.kind === 'ignored' ? ['Patch ignored in game', 'err'] : ['Reload dropped in game', 'warn'];
+  stField('game', text, state, res && s !== 'closed' ? `${res.text} (${hhmm(res.at)}); opens the Game tab` : 'Opens the Game tab');
 }
 setInterval(async () => noteGame(await gameLog()), 4000);
 
@@ -1188,7 +1543,7 @@ $('mod').onchange = (e) => {
   e.target.value = v;
   if (v === modNow) return;
   if (badModName(v)) {
-    log('A mod name can\'t contain \\ / : * ? " < > | or start with _ or .', 'err');
+    msg('A mod name can\'t contain \\ / : * ? " < > | or start with _ or .', { level: 'err', toast: true });
     e.target.value = modNow;
     return;
   }
@@ -1198,7 +1553,7 @@ $('mod').onchange = (e) => {
   }
   modNow = v;
   cfg.mod = v;
-  api('/api/config', { mod: v }).catch((err) => log(`mod: ${err.message}`, 'err'));
+  api('/api/config', { mod: v }).catch((err) => msg(`Couldn't keep the mod in the settings: ${cleanError(err).text}`, { level: 'err' }));
   loadStage(stageName);
 };
 $('filter').oninput = refreshList;
@@ -1221,6 +1576,37 @@ $('testDlg').addEventListener('close', () => {
   if (v === 'save' || v === 'nosave') post('test', v === 'save');
 });
 $('reload').onclick = reloadGame;
+// the Output: tabs, Copy, Clear, hide; the status bar's fields open it on their tab (or close it when it is there already)
+document.querySelectorAll('#output .tab').forEach((b) => (b.onclick = () => openOutput(b.dataset.tab)));
+document.querySelectorAll('#status .st').forEach((b) => (b.onclick = () => {
+  if (!$('output').hidden && outTab === b.dataset.tab) closeOutput(); else openOutput(b.dataset.tab);
+}));
+$('outToggle').onclick = () => ($('output').hidden ? openOutput() : closeOutput());
+$('outClose').onclick = closeOutput;
+$('outClear').onclick = () => { if (outTab === 'check') clearCheckPane(); else $(PANES[outTab]).textContent = ''; };
+$('outCopy').onclick = async () => {
+  const p = $(PANES[outTab]);
+  p.querySelectorAll('details').forEach((d) => (d.dataset.was = d.open ? '1' : '', d.open = true));   // the details count
+  const text = p.innerText.trim();
+  p.querySelectorAll('details').forEach((d) => (d.open = d.dataset.was === '1'));
+  const ok = await copyText(text);
+  toast(ok ? 'Copied the tab\'s text' : 'The browser did not let the page copy', ok ? 'ok' : 'warn');
+};
+$('output').style.height = Math.max(80, +store.get('outputH', '200') || 200) + 'px';
+$('outGrip').addEventListener('pointerdown', (e) => {
+  const out = $('output'), y0 = e.clientY, h0 = out.getBoundingClientRect().height, grip = e.currentTarget;
+  grip.setPointerCapture(e.pointerId);
+  grip.classList.add('drag');
+  const move = (ev) => { out.style.height = Math.round(Math.min(innerHeight * 0.6, Math.max(80, h0 + y0 - ev.clientY))) + 'px'; };
+  const up = () => {
+    grip.classList.remove('drag');
+    grip.removeEventListener('pointermove', move);
+    store.set('outputH', parseInt(out.style.height, 10));
+  };
+  grip.addEventListener('pointermove', move);
+  grip.addEventListener('pointerup', up, { once: true });
+});
+if (store.get('output', '0') === '1') openOutput('messages'); else showOutToggle();
 $('tMove').onclick = () => setTool('translate');
 $('tTurn').onclick = () => setTool('rotate');
 for (const id of ['snap', 'snapMove', 'snapTurn']) $(id).onchange = setSnap;
@@ -1264,8 +1650,8 @@ $('pModel').onchange = async () => {
       rec.info.name = name || rec.info.rule;
       rec.info.nameSrc = name ? 'model' : 'rule';
     }
-    log(name ? `model named "${name}" (${r.file})` : `model name removed (${r.file})`, 'ok');
-  } catch (e) { log(`name: ${e.message}`, 'err'); }
+    msg(name ? `Model renamed to "${name}" in every stage` : 'Model name removed in every stage', { level: 'ok', toast: true, detail: r.file });
+  } catch (e) { msg(`Couldn't rename the model: ${cleanError(e).text}`, { level: 'err' }); }
   showSel();
 };
 $('settings').onclick = () => {
@@ -1341,11 +1727,16 @@ function init(r) {
   $('mod').value = modNow;
   const s = $('stage');
   const prev = stageName || (new URLSearchParams(location.search).get('stage') || 'CENTRAL').toUpperCase();   // ?stage=METRO
-  s.innerHTML = r.stages.map((x) => `<option value="${x.name}">${x.title} (${x.name})</option>`).join('');
+  // "Midtown (CENTRAL)", but "UFO" once when the title is the file's name
+  s.innerHTML = r.stages.map((x) => `<option value="${x.name}">${x.title}${x.title.toUpperCase() === x.name ? '' : ` (${x.name})`}</option>`).join('');
   stageTitles = Object.fromEntries(r.stages.map((x) => [x.name, x.title]));
   game.stage = r.gameStage || '';
   setRunning(!!r.gameRunning);
-  if (r.discError || !r.stages.length) { log(r.discError || `no stages in ${cfg.disc}: set the game disc in Settings`, 'err'); return; }
+  if (r.discError || !r.stages.length) {
+    msg(r.discError || `No stages on this disc (${cfg.disc}). Is it War of the Monsters (NTSC-U)?`,
+        { level: 'err', toast: ['Open settings', () => $('settings').click()] });
+    return;
+  }
   s.value = r.stages.some((x) => x.name === prev) ? prev : r.stages[0].name;
   loadStage(s.value);
 }
@@ -1360,6 +1751,8 @@ if (new URLSearchParams(location.search).has('debug')) {
   window.wotmDebug = { camera, fly, flyStep, setView, select, selectMany, items, listed, dropToGround, nudge, duplicate, remove,
                        undo, buildPatch, posOf, setLook, scene, renderer, gsLights, peds, selectPed, setPeds, addPed, pedFromInputs,
                        redo, resetAll, applyPatch, frameAll, resetSel, gameLine, post, setRunning, applyTheme, refreshList,
+                       msg, toast, openOutput, closeOutput, showStatus, setGameState, readCheck, gameResult,
+                       get ui() { return ui; }, get outTab() { return outTab; },
                        get history() { return history; }, get future() { return future; }, get dirty() { return dirty; },
                        get modNow() { return modNow; }, get keep() { return keep; }, get game() { return game; },
                        get gizmoObject() { return gizmo.object || null; }, get gizmoMode() { return gizmo.getMode(); },
@@ -1367,4 +1760,4 @@ if (new URLSearchParams(location.search).has('debug')) {
                        get env() { return env; }, get skyRoot() { return skyRoot; }, get stageRoot() { return stageRoot; } };
 }
 loop();
-api('/api/init').then(init).catch((e) => log(`init: ${e.message}`, 'err'));
+api('/api/init').then(init).catch((e) => msg(`Couldn't reach the editor program: ${cleanError(e).text}`, { level: 'err' }));

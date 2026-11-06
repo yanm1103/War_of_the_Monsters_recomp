@@ -17,21 +17,24 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
 </head>
 <body>
 <header id="bar">
-  <span class="brand">WotM Level Editor</span>
-  <label>Stage <select id="stage"></select></label>
-  <label>Mod <input id="mod" list="mods" placeholder="my_mod" spellcheck="false"><datalist id="mods"></datalist></label>
+  <span class="brand" title="WotM Level Editor"><i class="ic" style="--ic:url(vendor/mdi/city-variant-outline.svg)"></i>Level Editor</span>
   <span class="sep"></span>
-  <button id="undo" title="Undo (Ctrl+Z)" disabled><i class="ic" style="--ic:url(vendor/mdi/undo.svg)"></i>Undo</button>
-  <button id="redo" class="icon" title="Redo (Ctrl+Y)" aria-label="Redo" disabled><i class="ic" style="--ic:url(vendor/mdi/redo.svg)"></i></button>
-  <button id="check" title="Apply the patch to the disc's stage and check the collision"><i class="ic" style="--ic:url(vendor/mdi/shield-check-outline.svg)"></i>Check</button>
-  <button id="save" title="Save mods/&lt;mod&gt;/levels/&lt;STAGE&gt;.json (Ctrl+S)"><i class="ic" style="--ic:url(vendor/mdi/content-save-outline.svg)"></i>Save</button>
-  <button id="test" class="primary" title="Open the game on this stage in training mode, as Togera"><i class="ic" style="--ic:url(vendor/mdi/play.svg)"></i>Test in game</button>
-  <button id="reload" disabled><i class="ic" style="--ic:url(vendor/mdi/refresh.svg)"></i>Reload in game</button>
+  <label class="field stage" title="The stage to edit"><i class="pre ic" style="--ic:url(vendor/mdi/map-outline.svg)"></i><select id="stage" aria-label="Stage"></select></label>
+  <label class="field mod" title="The mod your changes are saved into (mods/&lt;mod&gt;/levels/)"><i class="pre ic" style="--ic:url(vendor/mdi/puzzle-outline.svg)"></i><input id="mod" list="mods" placeholder="Choose a mod" spellcheck="false" aria-label="Mod"><datalist id="mods"></datalist></label>
+  <span class="sep"></span>
+  <button id="undo" class="icon ghost" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><i class="ic" style="--ic:url(vendor/mdi/undo.svg)"></i></button>
+  <button id="redo" class="icon ghost" title="Redo (Ctrl+Y)" aria-label="Redo" disabled><i class="ic" style="--ic:url(vendor/mdi/redo.svg)"></i></button>
+  <span class="grow"></span>
+  <button id="check" title="Apply your changes to the disc's stage and check the collision" aria-label="Check"><i class="ic" style="--ic:url(vendor/mdi/shield-check-outline.svg)"></i><span class="lbl">Check</span></button>
+  <button id="save" title="Save mods/&lt;mod&gt;/levels/&lt;STAGE&gt;.json (Ctrl+S)" aria-label="Save"><i class="ic" style="--ic:url(vendor/mdi/content-save-outline.svg)"></i><span class="lbl">Save</span></button>
+  <span class="sep"></span>
+  <span id="gameInd" class="game-ind" hidden><span class="dot"></span><span id="gameIndText"></span></span>
+  <button id="test" class="primary" title="Open the game on this stage in training mode, as Togera" aria-label="Test in game"><i class="ic" style="--ic:url(vendor/mdi/play.svg)"></i><span class="lbl">Test in game</span></button>
+  <button id="reload" disabled aria-label="Reload in game"><i class="ic" style="--ic:url(vendor/mdi/refresh.svg)"></i><span class="lbl">Reload in game</span></button>
   <button id="stop" class="icon" title="Close the game the editor opened" aria-label="Stop game" hidden><i class="ic" style="--ic:url(vendor/mdi/stop.svg)"></i></button>
   <span class="sep"></span>
   <button id="hud" title="The fight HUD this stage carries: replace its pictures with PNGs in the mod"><i class="ic" style="--ic:url(vendor/mdi/monitor-dashboard.svg)"></i>HUD</button>
-  <span class="grow"></span>
-  <button id="settings" class="icon" title="Settings" aria-label="Settings"><i class="ic" style="--ic:url(vendor/mdi/cog-outline.svg)"></i></button>
+  <button id="settings" class="icon ghost" title="Settings" aria-label="Settings"><i class="ic" style="--ic:url(vendor/mdi/cog-outline.svg)"></i></button>
 </header>
 <main>
   <aside id="left">
@@ -115,7 +118,33 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
     </div>
   </aside>
 </main>
-<footer id="log"></footer>
+<section id="output" hidden aria-label="Output">
+  <div id="outGrip" title="Drag to resize"></div>
+  <div class="out-head">
+    <div class="tabs" role="tablist">
+      <button class="tab on" data-tab="messages" role="tab">Messages</button>
+      <button class="tab" data-tab="check" role="tab">Check</button>
+      <button class="tab" data-tab="game" role="tab">Game</button>
+    </div>
+    <span class="grow"></span>
+    <button id="outCopy" class="ghost" title="Copy this tab's text"><i class="ic" style="--ic:url(vendor/mdi/content-copy.svg)"></i>Copy</button>
+    <button id="outClear" class="ghost" title="Clear this tab"><i class="ic" style="--ic:url(vendor/mdi/delete-sweep-outline.svg)"></i>Clear</button>
+    <button id="outClose" class="icon ghost" title="Hide the output" aria-label="Hide the output"><i class="ic" style="--ic:url(vendor/mdi/chevron-down.svg)"></i></button>
+  </div>
+  <div id="log" class="pane" data-tab="messages"></div>
+  <div id="checkOut" class="pane" data-tab="check" hidden><div class="empty muted">No check yet. Check, Save, Test in game and Reload in game check your changes.</div></div>
+  <div id="gameOut" class="pane" data-tab="game" hidden></div>
+</section>
+<footer id="status">
+  <button id="outToggle" class="icon ghost" title="Show the output: messages, check and game" aria-label="Output"><i class="ic" style="--ic:url(vendor/mdi/chevron-up.svg)"></i></button>
+  <button class="st msg" data-tab="messages" title="The last message (opens Messages)"><i class="ic" style="--ic:url(vendor/mdi/information-outline.svg)"></i><span class="tx">Ready</span></button>
+  <span class="grow"></span>
+  <button class="st save" data-tab="messages"><span class="dot"></span><span class="tx"></span></button>
+  <button class="st check" data-tab="check" title="Opens the Check tab"><i class="ic" style="--ic:url(vendor/mdi/shield-check-outline.svg)"></i><span class="tx"></span></button>
+  <button class="st game" data-tab="game" title="Opens the Game tab"><i class="ic" style="--ic:url(vendor/mdi/gamepad-variant-outline.svg)"></i><span class="tx"></span></button>
+  <button class="st count" data-tab="messages" title="Objects your mod changes, and the selection"><span class="tx"></span></button>
+</footer>
+<div id="toasts" aria-live="polite"></div>
 <dialog id="dlg">
   <form method="dialog">
     <h2>Settings</h2>

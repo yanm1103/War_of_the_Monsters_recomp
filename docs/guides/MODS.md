@@ -619,11 +619,19 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   edit, such as entries for handles the stage does not have, stay in the file as they are, and a note over the view says so when the
   file loads) and **Test in game** (opens the game in the stage in training mode with Togera: `WOTM_MATCH=3,<stage>`,
   `WOTM_TRAINING=1`, `WOTM_MODS=<mods folder>`, windowed; with unsaved changes it asks to save first, since the game loads the
-  file; with the game already open it asks to reload the stage in it or to restart it). The game's `[fase]` lines come back to the
-  log in words (patch applied, file rejected, another mod's file used, reload skipped or dropped); the load's details stay as the
-  game writes them. **Reload in game** (on while a game opened by Test runs) saves and has that game load the stage again, as
-  **F10** does there; with the game on another stage it offers a restart on this one. **Stop** (the square, while the game runs)
-  closes the game the editor opened. **HUD** opens the HUD panel (below).
+  file; with the game already open it asks to reload the stage in it or to restart it). Next to these buttons, the game's state:
+  starting, then "Game running" and its stage. **Reload in game** (on while a game opened by Test runs; "Save & reload" with
+  unsaved changes) saves and has that game load the stage again, as **F10** does there; with the game on another stage it offers a
+  restart on this one. **Stop** (the square, while the game runs) closes the game the editor opened. **HUD** opens the HUD panel
+  (below). In a window narrower than 1440 px, Check, Save, Test and Reload show only their icon.
+- **Status bar and Output:** the bar at the bottom shows the last message, whether the stage has unsaved changes (or when it was
+  saved), the last check (passed, how many problems, or not checked since the last change), the game (closed, starting, running,
+  patch applied or ignored) and how many objects the mod changes. A click on a field opens the **Output** drawer on its tab:
+  **Messages** (everything the editor says), **Check** (the last check's summary and problems, where a click selects the object,
+  and the full `lvl.py patch` output under Details) and **Game** (the game's `[fase]` lines in words: patch applied, file
+  rejected, another mod's file used, reload skipped or dropped; the load's details as the game writes them). The drawer opens by
+  itself on an error, and its top edge resizes it. Short notes (saved, deleted with Undo, copied, dropped, the game's answer) show
+  for a few seconds over the view's lower right corner, and above an open dialog.
 - **View:** two cameras, **V** switches (the last one is remembered). Fly (the default): **W/S** move where the camera looks, **A/D**
   sideways, **E** up, **Q** down, **Shift** faster, right drag looks around, the wheel moves forward. Orbit: left
   drag orbits, right drag pans, the wheel zooms. In both, a click selects the object under it (buildings, pickups, props), **G** move
