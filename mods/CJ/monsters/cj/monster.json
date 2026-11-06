@@ -1,0 +1,16 @@
+{
+  "id": "cj",
+  "name": "CJ",
+  "base": "ultra-v",
+  "costume": 0,
+  "files": true,
+  "ai": true,
+  "narrator": "cj",
+  "logo": "logo.png",
+  "portrait": "portrait.png",
+  "portraitTex": 11,
+  "shotColor": "#FFD23A",
+  "fallBlend": 6,
+  "landOnTouch": true,
+  "special": "robo-47"
+}

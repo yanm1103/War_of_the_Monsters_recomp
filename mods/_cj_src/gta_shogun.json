@@ -1,0 +1,38 @@
+{
+  "comment": "GTA SA ped skeleton (CJ, joint names with spaces as _) on Ultra-V's skeleton (MON/SHOGUN0 exported by the kit). Ultra-V: bone26 pelvis, bone15 chest, bone14 head; right arm bone5 (clavicle) bone4 bone3 (shoulder) bone2 (elbow) bone1 (wrist) bone0 (hand); left arm bone11 bone10 bone9 bone8 bone7 bone6; right leg bone25 (hip) bone24 (thigh) bone23 (knee) bone22 (ankle) bone21 (toe); left leg bone20 bone19 bone18 bone17 bone16; bone12/bone13 the back pieces.",
+  "bones": {
+    "Pelvis": {"from": "bone26", "move": true},
+    "Spine_1": {"from": ["bone26", "bone15", 0.5]},
+    "Spine_2": {"from": "bone15"},
+    "Neck": {"from": ["bone15", "bone14", 0.5]},
+    "Head": {"from": "bone14"},
+    "Bip01_R_Clavicle": {"from": "bone5"},
+    "R_UpperArm": {"from": "bone3", "align": ["R_ForeArm", "bone2"]},
+    "R_ForeArm": {"from": "bone2", "align": ["R_Hand", "bone1"]},
+    "R_Hand": {"from": "bone1"},
+    "R_Finger": {"from": "bone0"},
+    "Bip01_L_Clavicle": {"from": "bone11"},
+    "L_UpperArm": {"from": "bone9", "align": ["L_ForeArm", "bone8"]},
+    "L_ForeArm": {"from": "bone8", "align": ["L_Hand", "bone7"]},
+    "L_Hand": {"from": "bone7"},
+    "L_Finger": {"from": "bone6"},
+    "R_Thigh": {"from": "bone24", "align": ["R_Calf", "bone23"]},
+    "R_Calf": {"from": "bone23", "align": ["R_Foot", "bone22"]},
+    "R_Foot": {"from": "bone22", "level": true},
+    "R_Toe0": {"from": "bone21"},
+    "L_Thigh": {"from": "bone19", "align": ["L_Calf", "bone18"]},
+    "L_Calf": {"from": "bone18", "align": ["L_Foot", "bone17"]},
+    "L_Foot": {"from": "bone17", "level": true},
+    "L_Toe0": {"from": "bone16"}
+  },
+  "props": {"katana": {"show": "sc_a010b0"}, "bazooka": {"show": [160, 161, 162, 166, 167]}},
+  "locators": {
+    "extra1": {"joint": "R_Hand", "at": ["R_Finger01"]},
+    "hand_r": {"joint": "R_Hand", "at": ["R_Finger", "R_Finger01"]},
+    "hold": {"joint": "R_Hand", "at": ["R_Finger01"]},
+    "hand_l": {"joint": "L_Hand", "at": ["L_Finger", "L_Finger01"]},
+    "grab": {"joint": "L_Hand", "at": ["L_Finger01"]},
+    "foot_r": {"joint": "R_Foot", "at": ["R_Foot"]},
+    "foot_l": {"joint": "L_Foot", "at": ["L_Foot"]}
+  }
+}

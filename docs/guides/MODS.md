@@ -19,10 +19,10 @@ in alphabetical order wins (you can use `10_base`, `20_extra`); `WOTM_MODS=<fold
 log (`logs\live.err.log`) lists each file and each texture that came from a mod (`[mods] ...`).
 
 **Project mods** live in `mods/<mod>/` at the repo root: Goliath Prime (`mods/Goliath Prime/`), Cerebulon (`mods/Cerebulon/`),
-Godzilla (`mods/Godzilla/`) and the "Recompiled" logo of the intro (`mods/recompiled_logo/`). A project mod carries everything it needs
+Godzilla (`mods/Godzilla/`), CJ (`mods/CJ/`) and the "Recompiled" logo of the intro (`mods/recompiled_logo/`). A project mod carries everything it needs
 to run, including models and sounds from other games and the files the game loads built on top of the disc's (`.NGP`, `.PTR`, `.TEX`,
 `.RTX`, `.BNK`, edited disc textures). The sources it was made from (models, rigs, conversion scripts, WAVs) live in
-`mods/_<name>_src/` (Godzilla: `mods/_godzilla_src/`, `_godzilla1954_src/`, `_godzilla2000_src/`). Mecha is the exception:
+`mods/_<name>_src/` (Godzilla: `mods/_godzilla_src/`, `_godzilla1954_src/`, `_godzilla2000_src/`; CJ: `mods/_cj_src/`). Mecha is the exception:
 `tools/mechamon.py` builds its files from the disc, so only its `monster.json` is in the repo.
 `tools/sync_mods.ps1` mirrors each folder of `mods/` to `<runtime>\discroot\mods\` (`run_live.ps1` calls it on every boot and
 `setup_runtime.ps1` on install; `WOTM_RECOMP_DIR` or `.wotm_recomp_dir` give the runtime). Only the folders that exist in the repo are
