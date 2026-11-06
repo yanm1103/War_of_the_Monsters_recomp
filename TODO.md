@@ -3,12 +3,12 @@
 O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado sai deste arquivo: a história vai para a mensagem do commit e o que passou a existir vai para o doc de referência (no presente). Regras dos docs: `CLAUDE.md`, "Documentação".
 
 ## Decomp
-- **`dbsTraverse` (`src/common/dbs.cpp`, rascunho `NON_MATCHING`):** o caso TRANSLATE não soma o `trans` na posição acumulada; o retail soma (`5557732:docs/investigacoes/2026-11-06/objetos_fase.md`, seção 2).
+- **`dbsTraverse` (`src/common/dbs.cpp`, rascunho `NON_MATCHING`):** o caso TRANSLATE não soma o `trans` na posição acumulada; o retail soma (`docs/investigacoes/2026-11-06/objetos_fase.md`, seção 2).
 - **Fora do caminho crítico:** oracle para funções com chamadas; cobertura com gameplay para realimentar o `boot_coverage_asm.csv` (`57d4afd:docs/investigacoes/2026-10-19/pendencias_oracle_cobertura.md`, seções 2 e 3).
 
 ## Editor de fase
 Rearranjar fases existentes (mover, girar, apagar, duplicar prédios e objetos, inclusive de outra fase) com um editor dentro do jogo (câmera F5), que grava um patch JSON por fase em `mods/<mod>/levels/` aplicado na carga. Fase nova do zero fica para depois.
-1. **Mod de prova sem editor:** mover, apagar e duplicar um prédio de Midtown (CENTRAL) pelo patch, aplicado na entrada do `dbInitDb` chamado pelo `Shell::LoadLevelFiles` (imagem inflada e TEX0 relocado, nada registrado); colisão refeita pelas regras de `docs/FORMATS.md` ("Stage collision"), conferidas antes offline com `tools/lvl.py`. No jogo, conferir colisão (`hdHatTest` no lugar novo e no antigo), quebra e desvio da IA e dos veículos. Pontos (`PTS/*`) pelo `cdRead` de `wotm_mods.inc`. Contexto e riscos: `5557732:docs/investigacoes/2026-11-06/`.
+1. **Mod de prova sem editor:** mover, apagar e duplicar um prédio de Midtown (CENTRAL) pelo patch, aplicado na entrada do `dbInitDb` chamado pelo `Shell::LoadLevelFiles` (imagem inflada e TEX0 relocado, nada registrado); colisão refeita pelas regras de `docs/FORMATS.md` ("Stage collision"), conferidas antes offline com `tools/lvl.py`. No jogo, conferir colisão (`hdHatTest` no lugar novo e no antigo), quebra e desvio da IA e dos veículos. Pontos (`PTS/*`) pelo `cdRead` de `wotm_mods.inc`. Contexto e riscos: `docs/investigacoes/2026-11-06/`.
 2. **Editor no jogo:** escolher o objeto na mira (`DrawItem` com o dono anotado em `Scene::walk`), mover, girar, duplicar e apagar, gravar o patch.
 3. **Depois:** objetos novos vindos do Blender (malha e cascos de colisão).
 
