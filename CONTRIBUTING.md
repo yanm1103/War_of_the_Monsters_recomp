@@ -12,7 +12,7 @@ Thanks for helping! The project is a decompilation whose goal is a native PC por
 By contributing, you agree that your contribution is distributed under the project's [GPL-3.0](LICENSE).
 
 ## Before you start
-- You need **your own copy** of the game (NTSC-U, SCUS-97197). Nothing from the game goes into the repo: no ISO, no `asm/`, no assembly snippets in issues/PRs.
+- You need **your own copy** of the game (NTSC-U, SCUS-97197). Nothing from the game goes into the repo: no ISO, no `asm/`, no assembly snippets in issues/PRs. Mods in `mods/` are the exception and go in whole (see `docs/guides/MODS.md`).
 - Do the README setup and confirm that `ninja` ends with `build/SCUS_971.97.rom: OK` before touching anything.
 - Agree with the owner on which area (TU) you will take, so we do not work on the same one. Shared headers (`include/game/game.h`, `include/engine.h`) are the most likely conflict point: give notice before changing them.
 - Reference docs are written in English; `CLAUDE.md`, `TODO.md`, commit messages and `docs/investigacoes/` are in Portuguese.

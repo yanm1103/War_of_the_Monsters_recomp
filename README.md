@@ -47,7 +47,7 @@ Before committing changes to decompiled code, run `sh tools/wsl/gate.sh` (build 
 [docs/guides/PITFALLS.md](docs/guides/PITFALLS.md).
 
 ## Contributing
-See [CONTRIBUTING.md](CONTRIBUTING.md). The rules in [CLAUDE.md](CLAUDE.md) apply to humans too: no game files or game assembly in the repo, issues or PRs, and the ROM must keep matching the retail SHA1. The reference docs are in English; `CLAUDE.md`, `TODO.md`, commit messages and the dated notes in `docs/investigacoes/` are in Portuguese.
+See [CONTRIBUTING.md](CONTRIBUTING.md). The rules in [CLAUDE.md](CLAUDE.md) apply to humans too: no game files or game assembly in the repo, issues or PRs (mods in `mods/` are the exception: [MODS.md](docs/guides/MODS.md)), and the ROM must keep matching the retail SHA1. The reference docs are in English; `CLAUDE.md`, `TODO.md`, commit messages and the dated notes in `docs/investigacoes/` are in Portuguese.
 
 ## License
 The code in this repository is [GPL-3.0](LICENSE). It only covers what is here (decompilation, tools, native layer) and grants no rights over the game, which still belongs to its owners.

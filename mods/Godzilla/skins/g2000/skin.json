@@ -1,0 +1,8 @@
+{
+  "monster": "godzilla",
+  "id": "g2000",
+  "name": "GODZILLA 2000",
+  "ai": true,
+  "narrator": "godzilla_2000",
+  "fireColor": "#FF7A1E"
+}

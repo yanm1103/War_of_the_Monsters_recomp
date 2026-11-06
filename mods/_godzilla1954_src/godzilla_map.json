@@ -1,0 +1,9 @@
+{
+  "extends": "biped_togera.json",
+  "bones": {
+    "Bip01_Jaw": {"from": "bone0", "turn": [4, 0, 0]}
+  },
+  "locators": {
+    "mouth": {"joint": "Bip01_Head", "at": [0, 14.5, 90.5]}
+  }
+}
