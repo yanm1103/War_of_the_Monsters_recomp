@@ -400,9 +400,12 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   missile (weapon model 4005) and the shock dome (`SpecFxAnim` 0x11FF, with its 3 animations) from the disc's `MON/ROBOT0.NGP` into
   the custom's `.NGP` (`tools/ngpgraft.py`; by hand: `python tools/ngpgraft.py <files folder> robo-47`), under ids the game ignores (model + 0x100, `SpecFxAnim` + 0x80) so it does not clash with
   a Robo-47 in the same fight. The port registers the copied dome for that monster, gives it to `SpecFxAnim::isInstanceAvailable` and
-  `getInstance` in place of the game's id, points animation slot 191 (the dome the special plays while aiming; the game fills it with
-  the type's id + 5) at it, and swaps the copied missile into `Weapons::m_epNodes[13]` while `Weapon::InitWeapon` builds one of that
-  monster's missiles. The special adds three animations on top of the pose (`StateRobotSpecial::init` blends): 166 and 167 (aim,
+  `getInstance` in place of the game's id, and swaps the copied missile into `Weapons::m_epNodes[13]` while `Weapon::InitWeapon`
+  builds one of that monster's missiles. The rig import also fills the locked reticle: the reticle (attachment id type + 5) is a
+  `SWITCH` on `m_reticleState`, and its child 2 (locked) is a `CHAR_INSTANCE` spun by animation slot 191 (the game fills it with the
+  instance's animation 0), which the special speeds up when locked. Robo-47's holds a red sprite there and Ultra-V's nothing, so
+  the tool puts a copy of Robo-47's sprite under the custom's (its texture gets a new id in the custom's `.TEX`, logged as
+  `textures {18: N}`; a `<prefix>0_tNNNN.png` replaces it). The special adds three animations on top of the pose (`StateRobotSpecial::init` blends): 166 and 167 (aim,
   scrubbed by a percentage, 50% = straight ahead) and 161 (the shot), so the rig writes them as layers: rotations only, as the
   difference from the action's first frame (`ngpgraft.LAYERS`). 160 (windup) ends in the aim pose, which the game holds until the shot;
   162 is the winddown. The missile leaves from locator `extra1` (0x816). Its sounds are in Robo-47's bank: a `ROBOT_S.BNK` in the
@@ -411,7 +414,7 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   special plays sound 2 (the head opening, when the special starts), 29 (the aim: beeps that speed up, sample 0, then a held tone,
   sample 1, which loops; `robot_s_s029_a0.wav` and `_a1.wav` keep that sequence), 6 (launch), 7 (missile flight, a loop) and
   5 (explosion). Logs: `[mods] monstro CJ/monsters/cj: especial do robo-47 com as pecas dos arquivos proprios`, `[custom] SpecFxAnim copiada
-  0x127f (do 0x11ff) registrada para o dup 0`, `[custom] cj: animacao 191 do especial na copia 0x127f`, `[custom] cj: projetil 13 do
+  0x127f (do 0x11ff) registrada para o dup 0`, `[custom] cj: projetil 13 do
   especial com o modelo proprio (no 0x10a5)`.
 - `specialRoar`: `true` = the special starts with the monster's cry (`MonsterSound::playSignatureSound`, the fight entry cinematic's
   sound, from its own bank when it has one), when it enters the special's state. Togera's fire breath has no cry of its own. Log:

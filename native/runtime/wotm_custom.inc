@@ -1445,7 +1445,6 @@ namespace wotm_custom
                                          0x102A8 /* RockSpecial */,        0x10790 /* AirStrike */,   0,
                                          0x10F60 /* CannonHands */,        0x11130 /* UltraTazer */,  0x11130 /* UltraTazer */};
     PS2Runtime::RecompiledFunction g_origInitDynamics = nullptr;
-    void ownFxSlot(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, const wotm::mods::Custom &cu);
     void initDynamics(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         if (ctx->pc != kInitDynamics)
@@ -1465,7 +1464,6 @@ namespace wotm_custom
         WRITE32(m + kSpecialState, st);
         const int16_t delta = static_cast<int16_t>(READ16(vt + kVInit));
         wotm_modes4::call(rdram, ctx, runtime, READ32(vt + kVInit + 4), {st + static_cast<uint32_t>(static_cast<int32_t>(delta)), m});
-        ownFxSlot(rdram, ctx, runtime, m, *cu);
         ctx->pc = ra;
         static std::set<std::string> logged;
         if (logged.insert(cu->id).second)
@@ -1531,24 +1529,6 @@ namespace wotm_custom
                     ctx->r[5] = _mm_set_epi64x(0, static_cast<int64_t>(id + kFxShift));
         }
         (*Orig)(rdram, ctx, runtime);
-    }
-    // Monster::m_anims[191] e a animacao 0 da instancia (id do tipo + 5, dup) que o initAfterDbLoad acha: no Robo-47, a cupula
-    // 0x11FF, que o RobotSpecial toca enquanto mira. No custom com o especial emprestado ela vira a copia dele (o id + 5 do tipo
-    // base aponta para outra coisa: no Ultra-V, o efeito 0x1201 do gancho).
-    constexpr uint32_t kFxSlot = 0x1CF0 + 16 * 191;
-    void ownFxSlot(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, const wotm::mods::Custom &cu)
-    {
-        const uint32_t dup = READ32(m + kDupId);
-        for (const uint64_t e : g_ownFx)
-            if (uint32_t(e) == dup)
-            {
-                const uint32_t id = uint32_t(e >> 32);
-                wotm_modes4::call(rdram, ctx, runtime, kGetHandle, {m + kFxSlot, id, dup, 0});
-                static std::set<std::string> logged;
-                if (logged.insert(cu.id).second)
-                    std::fprintf(stderr, "[custom] %s: animacao 191 do especial na copia %#x\n", cu.id.c_str(), id);
-                return;
-            }
     }
     // O no `id` nas raizes (e GROUPs ate 4 niveis abaixo) da imagem .NGP carregada que contem o no raiz do monstro `m`
     uint32_t ownNode(uint8_t *rdram, uint32_t m, uint32_t id)
