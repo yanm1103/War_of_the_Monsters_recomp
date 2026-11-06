@@ -759,32 +759,132 @@ function listed() {   // the items the list shows: kind boxes, "Changed" and the
     return !f || `${label(it)} ${i.rule} ${i.handle} ${i.kind} ${i.id.toString(16)}`.toLowerCase().includes(f);
   });
 }
+// The list's sections, in this order; a prop over 500 units (the rule's "Terrain piece") has its own, closed at first
+const SECTIONS = [
+  { id: 'buildings', title: 'Buildings', icon: 'office-building-outline', word: 'Building', many: 'buildings' },
+  { id: 'pickups', title: 'Pickups', icon: 'package-variant-closed', word: 'Pickup', many: 'pickups' },
+  { id: 'props', title: 'Props', icon: 'cube-outline', word: 'Prop', many: 'props' },
+  { id: 'terrain', title: 'Terrain', icon: 'terrain', word: 'Terrain piece', many: 'terrain pieces' },
+];
+const SEC = Object.fromEntries(SECTIONS.map((s) => [s.id, s]));
+const secOf = (i) => (i.kind === 'destr' ? 'buildings' : i.kind === 'pickup' ? 'pickups' : i.rule === 'Terrain piece' ? 'terrain' : 'props');
+const secOpen = (id) => store.get('sec.' + id, id === 'terrain' ? '0' : '1') === '1';
+const setIc = (el, name) => el.style.setProperty('--ic', `url(vendor/mdi/${name}.svg)`);
+// what changed in an original: moved, turned (copies and deleted are said apart)
+function moveState(rec) {
+  const p = posOf(rec.item);
+  return { moved: Math.hypot(p[0] - rec.pw[0], p[1] - rec.pw[1], p[2] - rec.pw[2]) > 0.05,
+           turned: Math.abs(wrapDeg(headingOf(rec.item) - rec.h0)) > 0.05 };
+}
+// the objects resting on the selected ones that are not selected themselves (Move objects on top takes them along)
+function onTop(list = group) {
+  const on = new Set();
+  for (const it of list) for (const a of it.attached) if (a.node.visible && !list.includes(a)) on.add(a);
+  return on;
+}
+// "3 buildings, 2 pickups"
+function kindCounts(list) {
+  const n = new Map();
+  for (const it of list) { const s = secOf(it.rec.info); n.set(s, (n.get(s) || 0) + 1); }
+  return SECTIONS.filter((s) => n.has(s.id)).map((s) => `${n.get(s.id)} ${n.get(s.id) === 1 ? s.word.toLowerCase() : s.many}`).join(', ');
+}
+function rowEl(it) {
+  const i = it.rec.info, li = document.createElement('li');
+  li.className = 'it';
+  if (it.copy) li.classList.add('copy');
+  else if (!it.iname && i.nameSrc === 'rule') li.classList.add('rule');
+  if (it === sel) li.classList.add('sel');
+  else if (group.includes(it)) li.classList.add('sel2');
+  const k = icon(SEC[secOf(i)].icon);
+  k.classList.add('k');
+  const h = document.createElement('span'), bd = document.createElement('span'), hd = document.createElement('span');
+  h.className = 'h'; bd.className = 'bd'; hd.className = 'hd';
+  h.textContent = it.copy ? it.iname || `Copy ${it.rec.copies.indexOf(it) + 1}` : nameOf(it);
+  hd.textContent = i.handle;
+  const badge = (name, cls, tip) => { const b = icon(name); b.classList.add(cls); b.title = tip; bd.appendChild(b); };
+  let tip = label(it);
+  if (!it.copy) {
+    const rec = it.rec;
+    if (rec.deleted) { li.classList.add('deleted'); badge('delete-outline', 'dl', 'Deleted in your mod (click it to restore it)'); tip += ' · deleted'; }
+    else {
+      const st = moveState(rec);
+      if (st.moved || st.turned) badge('circle-medium', 'mv', st.moved && st.turned ? 'Moved and turned' : st.moved ? 'Moved' : 'Turned');
+    }
+    if (rec.copies.length) badge('content-duplicate', 'cp', `${rec.copies.length} ${rec.copies.length === 1 ? 'copy' : 'copies'}`);
+    if (i.on) {
+      const b = byHandle.get(normHandle(i.on));
+      badge('link-variant', 'on', `On ${b ? nameOf(b.item) : i.on}`);
+    }
+  }
+  li.title = tip;
+  li.append(k, h, bd, hd);
+  li.onclick = (e) => {
+    if (e.shiftKey || e.ctrlKey) select(it, 'toggle');
+    else { select(it); if (it.node.visible) focus(it); }
+  };
+  return li;
+}
 function refreshList() {
   const ul = $('list');
-  ul.textContent = '';
-  const shown = listed();
-  for (const it of shown) {
-    const i = it.rec.info;
-    const li = document.createElement('li');
-    li.innerHTML = `<span class="k">${i.kind}</span><span class="h"></span><span class="hd"></span>`;
-    li.querySelector('.h').textContent = label(it);
-    li.querySelector('.hd').textContent = i.handle;
-    if (!it.iname && i.nameSrc === 'rule') li.classList.add('rule');
-    if (it === sel) li.className = 'sel';
-    else if (group.includes(it)) li.className = 'sel2';
-    if (!it.copy && changed(it.rec)) li.classList.add('changed');
-    if (!it.copy && it.rec.deleted) li.classList.add('deleted');
-    li.onclick = (e) => {
-      if (e.shiftKey || e.ctrlKey) select(it, 'toggle');
-      else { select(it); focus(it); }
-    };
-    ul.appendChild(li);
+  const shown = listed(), all = items();
+  const bySec = new Map(SECTIONS.map((s) => [s.id, []]));
+  for (const it of shown) bySec.get(secOf(it.rec.info)).push(it);
+  const frag = document.createDocumentFragment();
+  for (const s of SECTIONS) {
+    const list = bySec.get(s.id);
+    if (!list.length) continue;
+    const open = secOpen(s.id), h = document.createElement('li'), n = document.createElement('span');
+    h.className = 'sec';
+    h.dataset.sec = s.id;
+    h.tabIndex = 0;
+    h.setAttribute('role', 'button');
+    h.setAttribute('aria-expanded', open);
+    h.title = open ? `Hide the ${s.title.toLowerCase()}` : `Show the ${s.title.toLowerCase()}`;
+    h.append(icon(open ? 'chevron-down' : 'chevron-right'), s.title);
+    if (!open && list.some((it) => group.includes(it))) {
+      const d = document.createElement('span');
+      d.className = 'has'; d.title = 'Holds selected objects';
+      h.appendChild(d);
+    }
+    n.className = 'n'; n.textContent = list.length;
+    h.appendChild(n);
+    const flip = () => { store.set('sec.' + s.id, open ? '0' : '1'); refreshList(); };
+    h.onclick = flip;
+    h.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); ul.querySelector(`li.sec[data-sec="${s.id}"]`)?.focus(); } };
+    frag.appendChild(h);
+    if (open) for (const it of list) frag.appendChild(rowEl(it));
   }
+  ul.replaceChildren(frag);
+  $('listEmpty').hidden = !!shown.length || !all.length;
+  // the chips' counts: every object of the kind in the stage (copies too), and the changed originals
+  const byKind = { destr: 0, pickup: 0, prop: 0 };
+  for (const it of all) byKind[it.rec.info.kind] = (byKind[it.rec.info.kind] || 0) + 1;
+  for (const [k, v] of Object.entries(byKind)) { const e = document.querySelector(`.kinds .n[data-n="${k}"]`); if (e) e.textContent = v; }
+  const nRecs = recs.filter(changed).length;
+  document.querySelector('.kinds .n[data-n="changed"]').textContent = nRecs;
   const nChanged = buildPatch().objects.length;
-  $('count').textContent = `${shown.length} shown · ${group.length > 1 ? group.length + ' selected · ' : ''}${nChanged} changed`;
+  $('count').textContent = (shown.length === all.length ? `${all.length} objects` : `${shown.length} of ${all.length} shown`) +
+    ` · ${nChanged} changed` + (group.length ? ` · ${group.length} selected` : '');
   document.title = `WotM Level Editor — ${stageName}${dirty ? ' *' : ''}`;
   $('save').classList.toggle('dirty', dirty);
   showStatus(nChanged);
+  showSummary(nChanged);
+  if (sel && !isDeleted(sel) && !$('props').hidden) { showBadge(); showActions(); }
+}
+// the right panel with nothing selected: the stage, how many objects the mod changes, where Save writes
+function showSummary(nChanged) {
+  const t = title(stageName);
+  $('sumStage').textContent = !stageName ? 'No stage open' : t === stageName ? t : `${t} · ${stageName}`;
+  $('sumCounts').textContent = stageName ? `${recs.length} objects · ${nChanged} changed` : '';
+  const m = $('sumMod');
+  m.textContent = '';
+  m.classList.toggle('none', !modNow);
+  if (modNow) { const b = document.createElement('b'); b.textContent = modNow; m.append('Mod: ', b); }
+  else m.textContent = 'No mod chosen yet: pick or type one in Mod, at the top.';
+  const p = $('sumPath');
+  p.classList.toggle('none', !modNow);
+  p.textContent = modNow ? `mods/${modNow}/levels/${stageName}.json` : 'The mod you choose (mods/<mod>/levels/).';
+  p.title = modNow && cfg.mods ? `${cfg.mods.replace(/[\\/]+$/, '')}${cfg.mods.includes('\\') ? '\\' : '/'}${modNow}${cfg.mods.includes('\\') ? '\\levels\\' : '/levels/'}${stageName}.json` : '';
 }
 
 // mode: 'set' (only this one), 'toggle' (Shift/Ctrl click), 'add'
@@ -824,30 +924,112 @@ function showSel() {
     showPed();
   }
   if (gone) {
-    const i = sel.rec.info;
+    const i = sel.rec.info, s = SEC[secOf(i)];
+    setIc($('dIcon').firstElementChild, s.icon);
     $('dTitle').textContent = label(sel);
-    $('dSub').textContent = `${i.handle} · ${i.kind}`;
+    $('dSub').textContent = `${i.handle} · ${s.word}`;
   } else if (sel) {
     gizmo.attach(sel.node);
-    const i = sel.rec.info;
-    $('pTitle').textContent = label(sel);
-    const onName = i.on && byHandle.get(normHandle(i.on)) ? nameOf(byHandle.get(normHandle(i.on)).item) : '';
-    $('pSub').textContent = `${i.handle} · ${i.kind} · ${dimsText(i.dims)} · id 0x${i.id.toString(16)} · ${i.states} states · ` +
-      `${i.paths} collision paths` + (i.on ? ` · on ${onName} (${i.on})` : '');
-    $('pName').value = sel.iname;
-    $('pName').placeholder = i.name;
-    $('pModel').value = i.nameSrc === 'model' ? i.name : '';
-    $('pModel').placeholder = i.rule;
-    $('pModel').disabled = !i.sig;
-    const same = recs.filter((r) => r.info.sig && r.info.sig === i.sig).length;
-    $('pModelNote').textContent = i.sig ? `the same model: ${same} in this stage, and in any stage it appears` : 'no mesh: no model name';
-    $('pGroup').textContent = group.length > 1 ? `${group.length} selected: the others follow this one.` : '';
-    $('onCount').textContent = group.reduce((n, it) => n + it.attached.length, 0);
-    $('pWarn').textContent = i.paths === 0 && i.kind !== 'pickup' ? 'No collision of its own.' : '';
-    showProps();
+    showPropsPanel();
   }
   syncBoxes();
   refreshList();
+  if (sel !== lastScrolled) {   // a pick in the view shows its row (a list click is in view already)
+    lastScrolled = sel;
+    $('list').querySelector('li.it.sel')?.scrollIntoView({ block: 'nearest' });
+  }
+}
+let lastScrolled = null;
+// one object: its header, Transform, Actions, Name and Details; several: how many of each kind, the lead one's Transform, Actions
+function showPropsPanel() {
+  const i = sel.rec.info, s = SEC[secOf(i)], multi = group.length > 1;
+  $('props').classList.toggle('multi', multi);
+  const kinds = new Set(group.map((it) => secOf(it.rec.info)));
+  setIc($('pIcon').firstElementChild, multi && kinds.size > 1 ? 'cube-outline' : s.icon);
+  $('pHandle').hidden = multi;
+  $('pGroup').hidden = !multi;
+  $('secName').hidden = $('secDetails').hidden = multi;
+  const badge = $('pBadge');
+  if (multi) {
+    $('pTitle').textContent = `${group.length} objects selected`;
+    $('pKind').textContent = kindCounts(group);
+    $('tLead').textContent = label(sel);
+    $('tLead').title = `The fields move ${label(sel)}; the others follow it`;
+    badge.hidden = true;
+  } else {
+    $('pTitle').textContent = label(sel);
+    $('pHandle').querySelector('.tx').textContent = i.handle;
+    $('pHandle').title = `Copy the handle ${i.handle}`;
+    $('pKind').textContent = s.word;
+    $('tLead').textContent = '';
+    showBadge();
+  }
+  // Name: the instance's own name and the model's (every stage)
+  $('pName').value = sel.iname;
+  $('pName').placeholder = i.name;
+  $('pModel').value = i.nameSrc === 'model' ? i.name : '';
+  $('pModel').placeholder = i.sig ? i.rule : 'No model name';
+  $('pModel').disabled = !i.sig;
+  const same = recs.filter((r) => r.info.sig && r.info.sig === i.sig).length;
+  $('pModelNote').textContent = i.sig ? `Every object with this model, in every stage (${same} in this stage). Not undoable.`
+    : 'This object has no mesh, so it has no model name.';
+  // Details
+  const dl = $('pFacts');
+  dl.textContent = '';
+  const fact = (k, v, cls) => {
+    const dt = document.createElement('dt'), dd = document.createElement('dd');
+    dt.textContent = k;
+    if (v instanceof Node) dd.appendChild(v); else dd.textContent = v;
+    if (cls) dd.className = cls;
+    dl.append(dt, dd);
+  };
+  fact('Size', `${dimsText(i.dims)} units`);
+  fact('Kind', i.rule && i.rule !== s.word ? `${s.word} (${i.rule})` : s.word);
+  fact('Model id', `0x${i.id.toString(16).toUpperCase()}`, 'mono');
+  if (i.sig) fact('Same model', `${same} in this stage`);
+  fact('Damage states', String(i.states));
+  fact('Collision boxes', String(i.paths));
+  fact('On the disc', `${i.pos.map((x) => Math.round(x)).join(', ')} · ${Math.round(i.heading)}°`);
+  if (i.on) {
+    const b = byHandle.get(normHandle(i.on)), a = document.createElement('a');
+    a.textContent = b ? nameOf(b.item) : i.on;
+    a.title = `Select it (${i.on})`;
+    a.onclick = (e) => { e.preventDefault(); goTo(i.on); };
+    fact('Resting on', a);
+  }
+  $('pWarn').hidden = multi || !(i.paths === 0 && i.kind !== 'pickup');
+  showActions();
+  showProps();
+}
+// the header's state: Copy, Moved, Turned, or how many copies it has
+function showBadge() {
+  const badge = $('pBadge');
+  if (group.length > 1) { badge.hidden = true; return; }
+  const st = sel.copy ? null : moveState(sel.rec);
+  const text = sel.copy ? 'Copy' : st.moved && st.turned ? 'Moved · Turned' : st.moved ? 'Moved' : st.turned ? 'Turned'
+    : sel.rec.copies.length ? `${sel.rec.copies.length} ${sel.rec.copies.length === 1 ? 'copy' : 'copies'}` : '';
+  badge.textContent = text;
+  badge.className = 'badge' + (sel.copy || (text && !st.moved && !st.turned) ? ' copy' : '');
+  badge.hidden = !text;
+}
+// Delete says how many go ("Delete 5 (+3 on top)"); Move objects on top, how many it takes; Restore, whether there is anything to restore
+function showActions() {
+  if (!sel || isDeleted(sel)) return;
+  const on = onTop(), carryOn = $('carry').checked, n = group.filter((it) => it.node.visible).length;
+  const sw = $('carry').closest('.switch');
+  $('onCount').textContent = on.size;
+  $('carry').disabled = !on.size;
+  sw.classList.toggle('none', !on.size);
+  sw.title = on.size ? 'Moving, turning, copying or deleting this also does it to the pickups resting on it'
+    : 'Nothing rests on the selection';
+  const del = (n > 1 ? `Delete ${n}` : 'Delete') + (carryOn && on.size ? ` (+${on.size} on top)` : '');
+  $('del').querySelector('.lbl').textContent = del;
+  $('del').title = `${del} (Del)`;
+  const rs = new Set();
+  for (const it of group) { rs.add(it.rec); if (carryOn) for (const a of it.rec.item.attached) rs.add(a.rec); }
+  $('reset').disabled = ![...rs].some(changed);
+  $('reset').title = $('reset').disabled ? 'Nothing to restore: it is where the disc has it'
+    : "Back to the disc's place, copies removed (with Move objects on top, also the objects on it)";
 }
 function syncBoxes() {
   while (boxes.length < group.length) {
@@ -883,12 +1065,24 @@ function setPeds(on) {
   $('pedsOn').checked = on;
   $('pedBar').hidden = !on;
   if (!on && pedSel) { pedSel = null; showSel(); }
+  showMode();
   showPedCounts();
+}
+// The mode rail: Objects (1) and Pedestrians (2). For now the Pedestrians mode is the pedestrian layer on (objects stay clickable).
+const modeNow = () => (pedsOn ? 'peds' : 'objects');
+function setMode(m) { if (m !== modeNow()) setPeds(m === 'peds'); }
+function showMode() {
+  for (const [id, m] of [['modeObjects', 'objects'], ['modePeds', 'peds']]) {
+    $(id).classList.toggle('on', modeNow() === m);
+    $(id).setAttribute('aria-pressed', modeNow() === m);
+  }
 }
 function showPedCounts() {
   const c = peds.counts();
   $('pedCounts').textContent = discPeds
-    ? `${c.groups}/${c.maxGroups} groups · ${c.people} people · ${c.segments}/${c.maxSegments} sidewalks` : '';
+    ? `${c.groups}/${c.maxGroups} groups · ${c.people} people · ${c.segments}/${c.maxSegments} sidewalks`
+    : stageName ? 'This stage has no pedestrian data' : '';
+  $('pedAddGroup').disabled = $('pedAddSeg').disabled = !discPeds;
 }
 function selectPed(it) {
   group = []; sel = null; pedSel = it;
@@ -1556,8 +1750,75 @@ $('mod').onchange = (e) => {
   api('/api/config', { mod: v }).catch((err) => msg(`Couldn't keep the mod in the settings: ${cleanError(err).text}`, { level: 'err' }));
   loadStage(stageName);
 };
-$('filter').oninput = refreshList;
+const showFilterClear = () => { $('filterClear').hidden = !$('filter').value; };
+$('filter').oninput = () => { showFilterClear(); refreshList(); };
+$('filterClear').onclick = () => { $('filter').value = ''; showFilterClear(); refreshList(); $('filter').focus(); };
+$('clearFilters').onclick = () => {
+  $('filter').value = '';
+  document.querySelectorAll('.kinds input[data-kind]').forEach((x) => (x.checked = true));
+  $('changedOnly').checked = false;
+  showFilterClear();
+  refreshList();
+};
 document.querySelectorAll('.kinds input').forEach((x) => (x.onchange = refreshList));
+$('modeObjects').onclick = () => setMode('objects');
+$('modePeds').onclick = () => setMode('peds');
+// Name and Details open or closed as last time
+for (const id of ['secName', 'secDetails']) {
+  $(id).open = store.get('fold.' + id, '0') === '1';
+  $(id).addEventListener('toggle', () => store.set('fold.' + id, $(id).open ? '1' : '0'));
+}
+$('pHandle').onclick = async () => {
+  if (!sel) return;
+  const h = sel.rec.info.handle, ok = await copyText(h);
+  toast(ok ? `Copied the handle ${h}` : 'The browser did not let the page copy', ok ? 'ok' : 'warn');
+};
+$('carry').onchange = showActions;
+// turn by 90 degrees about the vertical (seen from above, counterclockwise is +, as the heading field counts)
+function turnBy(d) {
+  if (!sel || isDeleted(sel)) return;
+  snapshot('turn ' + whatSel());
+  const start = startMove();
+  setWorld(sel.node, posOf(sel), wrapDeg(headingOf(sel) + d), sel.rec);
+  carry(start);
+  showProps();
+  refreshList();
+}
+$('rotL').onclick = () => turnBy(90);
+$('rotR').onclick = () => turnBy(-90);
+// dragging an axis letter changes that coordinate: one step (the snap's, else 1 unit; Shift: ten) per 3 px, one undo step
+function scrub(letter, axis) {
+  let used = false;
+  letter.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || !sel || isDeleted(sel)) return;
+    e.preventDefault();
+    try { letter.setPointerCapture(e.pointerId); } catch (err) { /* a synthetic pointer */ }
+    const x0 = e.clientX, p0 = posOf(sel), h0 = headingOf(sel);
+    let start = null;
+    used = false;
+    const move = (ev) => {
+      const dx = ev.clientX - x0;
+      if (!start) { if (Math.abs(dx) < 3) return; snapshot('move ' + whatSel()); start = startMove(); used = true; }
+      const step = ($('snap').checked ? snapMove() : 1) * (ev.shiftKey ? 10 : 1);
+      const p = p0.slice();
+      p[axis] = p0[axis] + Math.round(dx / 3) * step;
+      setWorld(sel.node, p, h0, sel.rec);
+      carry(start);
+      showProps();
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      if (start) refreshList();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  });
+  letter.addEventListener('click', (e) => { if (used) { e.preventDefault(); used = false; } });   // no focus on the field after a drag
+}
+document.querySelectorAll('#props .xyz .pre.scrub').forEach((l, n) => scrub(l, n));
 $('undo').onclick = undo;
 $('redo').onclick = redo;
 $('frame').onclick = frameAll;
@@ -1715,6 +1976,8 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'f' && pedSel) focus({ node: pedSel.kind === 'seg' ? pedSel.lane : pedSel.node });
   else if (k === 'l') setLook(!gameLook);
   else if (k === 'p') setPeds(!pedsOn);
+  else if (k === '1') setMode('objects');
+  else if (k === '2') setMode('peds');
   else if (k === 'escape') select(null);
 });
 window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
@@ -1752,6 +2015,7 @@ if (new URLSearchParams(location.search).has('debug')) {
                        undo, buildPatch, posOf, setLook, scene, renderer, gsLights, peds, selectPed, setPeds, addPed, pedFromInputs,
                        redo, resetAll, applyPatch, frameAll, resetSel, gameLine, post, setRunning, applyTheme, refreshList,
                        msg, toast, openOutput, closeOutput, showStatus, setGameState, readCheck, gameResult,
+                       setMode, turnBy, showSummary, secOf, SECTIONS, get mode() { return modeNow(); },
                        get ui() { return ui; }, get outTab() { return outTab; },
                        get history() { return history; }, get future() { return future; }, get dirty() { return dirty; },
                        get modNow() { return modNow; }, get keep() { return keep; }, get game() { return game; },

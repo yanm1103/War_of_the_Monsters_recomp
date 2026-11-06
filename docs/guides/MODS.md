@@ -628,8 +628,11 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   file; with the game already open it asks to reload the stage in it or to restart it). Next to these buttons, the game's state:
   starting, then "Game running" and its stage. **Reload in game** (on while a game opened by Test runs; "Save & reload" with
   unsaved changes) saves and has that game load the stage again, as **F10** does there; with the game on another stage it offers a
-  restart on this one. **Stop** (the square, while the game runs) closes the game the editor opened. **HUD** opens the HUD panel
-  (below). In a window narrower than 1440 px, Check, Save, Test and Reload show only their icon.
+  restart on this one. **Stop** (the square, while the game runs) closes the game the editor opened. In a window narrower than
+  1440 px, Check, Save, Test and Reload show only their icon.
+- **Mode rail** (the narrow column on the left): **Objects** (the cube, or **1**) and **Pedestrians** (the walking figure, or
+  **2**; it shows the pedestrian layer, below) switch what the editor works on; **Fight HUD** (the screen icon) opens the HUD
+  panel (below).
 - **Status bar and Output:** the bar at the bottom shows the last message, whether the stage has unsaved changes (or when it was
   saved), the last check (passed, how many problems, or not checked since the last change), the game (closed, starting, running,
   patch applied or ignored) and how many objects the mod changes. A click on a field opens the **Output** drawer on its tab:
@@ -644,19 +647,28 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   gizmo, **R** turn gizmo (about the vertical only), **F** frames the selection, **Home** (or the frame button, top right of the
   view) frames the whole stage, **Ctrl+D** copies it, **Del** deletes it, **Esc** deselects. W/A/S/D/Q/E go by their place on the
   keyboard (the same keys on AZERTY); the other shortcuts by their letter. The shortcuts work after a click on a checkbox or a
-  button; a text field, the stage picker and an open dialog keep the keys. The right panel takes position and heading by number,
-  **Snap** (steps set beside it, 10 units and 15 degrees by default; they also set the arrow keys' step), **Drop** (**End**: down
-  or up onto the first surface under the object's middle, another object's roof included) and **Reset** (back to the disc's place,
-  copies removed). A deleted object stays in the list, struck through: picking it shows **Restore**, which puts it back (with
-  Carry, the objects that were on top too). **Grid** (top right of the view) draws a 100-unit grid at the base of the selection.
+  button; a text field, the stage picker and an open dialog keep the keys. **Grid** (top right of the view) draws a 100-unit grid
+  at the base of the selection.
+- **Right panel:** with nothing selected, what a click does, the stage, how many objects the mod changes and the file **Save**
+  writes (`mods/<mod>/levels/<STAGE>.json`). With an object: its kind, name and state (Moved, Turned, Copy), its handle (a click
+  copies it) and these sections. **Transform**: **X**, **Y** and **Z** (the height) in the gizmo's colors; dragging a letter
+  sideways changes the number (a snap step, or 1 unit, per 3 pixels; Shift: ten), and the gizmo's blue arrow points to -Y.
+  **Heading**, with buttons that turn 90° either way; **Move** and **Turn** (the gizmo); **Snap** (steps beside it, 10 units and
+  15 degrees by default; they also set the arrow keys' step). **Actions**: **Drop** (**End**: down or up onto the first surface
+  under the object's middle, another object's roof included), **Duplicate**, **Restore original** (back to the disc's place,
+  copies removed; off when there is nothing to restore) and **Delete**, which says how many objects go. **Name** (closed at first)
+  holds the object's name and the model's; **Details** (closed at first) the size, the model id, the damage states, the collision
+  boxes, the place on the disc and what it rests on (a click selects it). A deleted object stays in the list, struck through:
+  picking it shows **Restore**, which puts it back (with Move objects on top, the objects that were on it too).
 - **Several objects:** Shift+click (or Ctrl+click, also in the list) adds or takes out one, Shift+left drag selects the ones whose
-  middle falls in the box (only the kinds ticked in the list), **Ctrl+A** selects everything the list shows. The gizmo and the fields
-  act on the last one picked (yellow outline); the others (orange) follow it by the same move or turn, and Drop, Duplicate, Delete
-  and Reset act on all of them. **Arrows** move the selection along the world axis nearest to where the camera looks,
-  **PgUp/PgDn** up and down (Shift: ten steps).
-- **Carry the objects on top** (on by default): moving, turning, copying, deleting or resetting a building does the same to the pickups
-  that rest on it (`lvl.py objects`, `on <handle>`).
-- **Pedestrians** (top right of the view, or **P**): the stage's pedestrian groups as orange cones, a dashed line from each to the
+  middle falls in the box (only the kinds on in the list), **Ctrl+A** selects everything the list shows. The gizmo and the fields
+  act on the last one picked (amber outline and row); the others (orange) follow it by the same move or turn, and Drop, Duplicate,
+  Delete and Restore original act on all of them. The panel says how many of each kind are selected. **Arrows** move the selection
+  along the world axis nearest to where the camera looks, **PgUp/PgDn** up and down (Shift: ten steps).
+- **Move objects on top** (a switch in Actions, on by default, with the count beside it): moving, turning, copying, deleting or
+  restoring a building does the same to the pickups that rest on it (`lvl.py objects`, `on <handle>`); Delete counts them
+  ("Delete 5 (+3 on top)").
+- **Pedestrians** (the Pedestrians mode, the box at the top right of the view, or **P**): the stage's pedestrian groups as orange cones, a dashed line from each to the
   sidewalk it walks, and the sidewalks (`PTS/<STAGE>.PED`) as blue lanes as wide as the walking lane, with a ball at each end. A
   click picks a cone, a lane or an end; the gizmo, the arrows, **End** and the position fields only move them. The right panel
   shows what a group walks, its **People** (1 to 255) or a sidewalk's **Lane** (times 10 units to each side), **Duplicate**
@@ -670,14 +682,18 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   for every stage that has the same one (the bar atlas is shared by 17). **Export** downloads the disc's picture, **Remove**
   takes the mod's out. CANYON1 and TOKYODM carry the other HUD version (B), drawn differently: the panel says so. The game reads
   the pictures when it loads the stage.
-- **List:** every object by name (its handle beside it), with a filter (name, rule name, handle, kind, id), the kinds, and
-  **Changed** (only the edited ones; a dot marks them).
+- **List:** every object by name, its handle beside it, in sections (**Buildings**, **Pickups**, **Props** and **Terrain**, the
+  props over 500 units; a click on a header closes or opens it, Terrain starts closed, and the editor remembers them). A copy
+  sits under its original, indented. Small marks after the name: a green dot (moved or turned), the copy icon (it has copies),
+  the bin (deleted: the row is struck through) and the link (it rests on another object; the tooltip names it). Above: the
+  search (name, rule name, handle, kind, model id) and chips with counts that show or hide a kind (they also limit Shift+drag
+  and Ctrl+A) and **Changed** (only the edited ones). A search that finds nothing offers **Clear filters**.
 - **Names** (`tools/lvlnames.py`): the disc has no object names. An object shows, in order, its own **Name** (right panel; kept in
   the patch's `names`), its **Model** name (every object with the same mesh and textures, in every stage; kept in
-  `~/.wotm_level_editor_names.json`, over the repo's `tools/level_editor/names.json`), or a rule's name in grey italics: a stage's
+  `~/.wotm_level_editor_names.json`, over the repo's `tools/level_editor/names.json`), or a rule's name in grey: a stage's
   special objects (reactor stacks, quake buildings, pillars), the pickup type (with "traffic" or "parked" for the cars that can
   drive), the destructible's hit point class (`Building`, `Small object`, `Tower`), `Prop` or `Terrain piece` (over 500 units).
-  The panel shows the size and how many objects of the stage share the model.
+  The Name section says how many objects of the stage share the model.
 - **Settings:** the theme, the game disc (the `.iso` itself, or an extracted folder with `LVL/` and `PTS/`), the mods folder and
   the game. With a `.iso`, a stage's files (`LVL/<STAGE>.NGP/.PTR/.TEX/.RTX`, its `PTS/` files and `RST/<STAGE>.MRS`) are copied
   once into the mod kit's cache of that image (`%LOCALAPPDATA%\WotM\modkit_disc\<key>`) and read from there; a `.bin`/`.cue`
