@@ -104,6 +104,27 @@ private:
             p.mod = sp.mod;
             p.rel = sp.rel;
         }
+        // Fases custom (mods/<mod>/stages/<pasta>/): os PNGs da pasta valem para o id ("t0004.png" ou "central_t0004.png"); o que a
+        // pasta nao troca cai no PNG da base vindo de qualquer mod ("CENTRAL_t0004.png"): o .TEX e o da base, os texIds sao os mesmos
+        for (const mods::SkinPng &sp : reg.stagePngs()) {
+            const std::string base = sp.host.filename().string();
+            std::string stem; bool rtx = false; uint32_t id = 0;
+            if (!parseName(base, stem, rtx, id) && !parseName("X_" + base, stem, rtx, id)) {
+                std::fprintf(stderr, "[mods] png %s: nome sem _tNNNN, ignorado\n", sp.rel.c_str());
+                continue;
+            }
+            if (upper(base).rfind("RTX_T", 0) == 0) rtx = true;
+            Png &p = m_png[Key{sp.stem, rtx, id}];
+            p.host = sp.host.string();
+            p.mod = sp.mod;
+            p.rel = sp.rel;
+        }
+        for (const mods::Stage &st : reg.stages()) {
+            std::vector<std::pair<Key, Png>> add;
+            for (const auto &[k, p] : m_png)
+                if (k.stem == st.base->name && !m_png.count(Key{st.upperId(), k.rtx, k.id})) add.push_back({Key{st.upperId(), k.rtx, k.id}, p});
+            for (auto &kp : add) m_png.insert(std::move(kp));
+        }
         // Retrato dos monstros custom ("portrait" do monster.json): a imagem do .RTX do traje que eles usam
         for (const mods::Custom &cu : reg.customs()) {
             if (cu.portrait.empty() || cu.portraitTex < 0) continue;

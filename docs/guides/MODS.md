@@ -535,10 +535,41 @@ all four are in `.gitignore`).
   `WOTM_AIVSAI=1` for AI vs AI. Log: `[custom] Mecha (dup 0): escudo, laser e torre achados`,
   `[custom] Mecha: escudo baixou (...); rajada: 180 quadros no monstro (-72.0 de vida), 0 em objetos`.
 
+## Custom stages (a new entry on the stage select, built on a game stage)
+`mods/<mod>/stages/<pasta>/stage.json` adds a stage to the stage select, before RANDOM. It is a game stage (the base) under a new name,
+with its own level patch:
+```json
+{ "id": "mycity", "name": "MY CITY", "base": "CENTRAL", "narrator": "mycity", "random": true }
+```
+- **`id`:** 1 to 8 letters and digits, starting with a letter. It names the stage's files and its patch. It cannot repeat a game stage
+  (`CENTRAL`, `DYLAN`...), a game file (`SHELL`, `ARMY`...), a monster file (`LIZARD1`, `ROBOT7`...) or the id of a custom monster.
+- **`name`:** what the stage select shows, up to 17 ASCII characters (default: the id in capitals).
+- **`base`:** `CENTRAL`, `VEGAS`, `CANYON2`, `METRO`, `UFO`, `CAPITOL`, `CANYON1`, `MINISF` or `TOKYODM` (or the index, `GLOSSARY.md`). The
+  other stages run scripts in every mode, and `TRAINING` belongs to training mode.
+- **`narrator`:** `narrator/<name>.mp3`, played when the stage is confirmed, looked up like the skins' (without it, silence).
+- **`random`:** `false` keeps the stage out of RANDOM.
+- **Patch:** `mods/<mod>/levels/<ID>.json` (`levels/MYCITY.json`), in the format of "Level patches" below, with the base's handles. A
+  `levels/CENTRAL.json` does not apply to a CENTRAL-based custom stage, and the other way round.
+- **What comes from the base:** the geometry, `.TEX`/`.RTX`, the stage code (water, scripted events, sounds, music, load card, pause
+  menu) and the lock: a stage based on UFO stays locked until UFO is unlocked. The files are always the disc's: a mod that replaces
+  `LVL/CENTRAL.NGP` does not change a CENTRAL-based custom stage.
+- **What the folder can bring:** points (`.SPT`, `.PUP`, `.FOP`, `.PED`, `.AIP`, any name; they enter as `PTS/<ID>.*`), the `.MRS` (as
+  `RST/<ID>.MRS`) and PNG textures (`t0004.png` or `central_t0004.png`; the texIds are the base's). A PNG of the base from any mod
+  (`CENTRAL_t0004.png`) also applies, unless the folder brings its own. `.NGP`, `.PTR`, `.TEX` and `.RTX` are ignored, with a line in the
+  log: the `.PTR` relocates the `.NGP` and the `.TEX` the texIds it uses, so the geometry is a single group, outside custom stages.
+- **Picture:** `levelpics/<id>.png` (see the next section); without it, the base's picture. The stage select marks the entry with a
+  blue "CUSTOM" label.
+- **Slots:** up to 6 custom stages, in the stage index slots 18 to 23 (dev team test stages with no files), in mod/id order. A
+  METRO-based stage without its own `.AIP` leaves the list when the screen opens with CPUs, as METRO does.
+- **Without the menu:** `WOTM_MATCH=3,1,@mycity` (`NATIVE.md`, "Runtime: direct match, AI vs AI and batch").
+- The log lists each stage and each refusal (`[mods] fase mycity ("MY CITY", meu_mod) = vaga 18, base CENTRAL (1); ...`) and the
+  confirmation (`[fases] custom mycity ...: vaga 18 -> base CENTRAL (1)`). The registry is read at boot: a new stage enters after
+  restarting the game.
+
 ## Stage select pictures
-`mods/<mod>/levelpics/<nome>.png` replaces the picture of the stages `SHELL.TEX` does not have (`training`, `lakepowell`, `tokyodeathmatch`) and
-the one of the RANDOM entry (`random`; without it, a mosaic of the game's pictures). Aspect ratio 2:1, any resolution. It wins over the repo's
-`levelpics/` folder (`NATIVE.md`, "Stage select").
+`mods/<mod>/levelpics/<nome>.png` replaces the picture of the stages `SHELL.TEX` does not have (`training`, `lakepowell`, `tokyodeathmatch`),
+the one of the RANDOM entry (`random`; without it, a mosaic of the game's pictures) and that of a custom stage (`<id>`). Aspect ratio 2:1, any
+resolution. It wins over the repo's `levelpics/` folder (`NATIVE.md`, "Stage select").
 
 ## Level patches (move, turn, delete and copy stage objects)
 `mods/<mod>/levels/<FASE>.json` (the stage's file name: `CENTRAL`, `VEGAS`, `TOKYO`...) changes the stage when it loads. Each entry names
@@ -728,6 +759,13 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   `.RTX` palettes (`Scene::loadResources`, which reads the file directly and not from RAM), movies (`wotm_fmv.hpp`), icon, pictures and monster
   of the save list (`wotm::disc::readFile`). With no file in the registry (no mod and no generated file) no hook is installed. A file that does not exist on the disc
   is served too ("new file").
+- **Custom stages** (`scanStages` in `native/wotm_mods.hpp`, `native/runtime/wotm_stages.h`): the registry gives each stage a slot 18..23
+  and aliases `LVL/<ID>.*`, `PTS/<ID>.*` and `RST/<ID>.MRS` to the base's files, marked as disc only. The search hook swaps the name in
+  the game's own text during the call (up to 8 letters: every stage path buffer fits `TRAINING.*`) and restores it, including what a longer
+  name covered. At the stage select confirmation (`changeScreen(8, 99)`) and in `WOTM_MATCH`, `activate` sets `Shell::m_levelNum` to the
+  base and writes the id into `GameLevelNames[base]`: the game builds the file names from the name table and copies `m_levelNum` into
+  `m_levelId`, so the files are the custom stage's and the code is the base's. `restore` puts the table back at the next confirmation
+  and at the entry of `userintMain` (every return to the menus); RESTART, F10 and "play again" do not pass there and stay on the stage.
 - **Generated files:** the army's vehicles for every stage, `MON/ARMY.NGP/.PTR/.TEX/.RTX`, are built from the disc's `LVL/VEGAS.*` into
   `cache/army/` and enter the registry as the mod "army (gerado)" (`Registry::addGenerated`, before the scan), with or without the
   mods folder (`WOTM_MODS=0` included). A mod with its own

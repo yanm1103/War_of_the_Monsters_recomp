@@ -47,27 +47,34 @@ void searchFile(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
     const char *p = reinterpret_cast<const char *>(rdram + (pAddr & PS2_RAM_MASK));
     const std::string rel = Registry::keyFromGame(std::string(p, strnlen(p, 256)));
     const std::string target = Registry::get().aliasOf(rel);
-    const wotm::mods::File *m = Registry::get().find(target);
+    const bool stage = Registry::get().discAlias(rel);   // fase custom: o arquivo da base, sempre o do disco
+    const wotm::mods::File *m = Registry::get().served(rel);
     if (target != rel)
     {
-        // Traje de mod sem esse arquivo na pasta da skin: busca o do traje base ("LIZARD4" -> "LIZARD1"), trocando o nome no
-        // proprio texto do jogo durante a chamada (o nome do base nunca e mais longo: o numero do traje base tem um digito)
+        // Traje de mod sem esse arquivo na pasta da skin: busca o do traje base ("LIZARD4" -> "LIZARD1"); fase custom: o da base
+        // ("MYCITY.NGP" -> "CENTRAL.NGP"). Troca o nome no proprio texto do jogo durante a chamada. O do traje base nunca e mais
+        // longo (o numero tem um digito); o da base pode ser, ate 8 letras: todo buffer de caminho de fase cabe o TRAINING.*
         char *s = reinterpret_cast<char *>(rdram + (pAddr & PS2_RAM_MASK));
         const size_t len = strnlen(s, 256);
-        const std::string saved(s, len + 1);
+        const std::string orig(s, len + 1);
         const std::string from = rel.substr(rel.find_last_of('/') + 1), to = target.substr(target.find_last_of('/') + 1);
-        std::string up(saved);
+        std::string up(orig);
         for (char &c : up) c = char(std::toupper(static_cast<unsigned char>(c)));
-        if (const size_t at = up.find(from); at != std::string::npos && to.size() <= from.size())
+        std::string saved = orig;
+        const size_t toStem = std::min(to.find('.'), to.size());
+        if (const size_t at = up.find(from); at != std::string::npos && (to.size() <= from.size() || (stage && toStem <= 8)))
         {
-            std::string repl = saved.substr(0, at) + to + saved.substr(at + from.size());
+            const std::string repl = orig.substr(0, at) + to + orig.substr(at + from.size());
+            if (repl.size() > len)   // a restauracao devolve tambem o que o nome mais longo cobriu depois do NUL
+                saved.assign(s, repl.size() + 1);
             std::memcpy(s, repl.c_str(), repl.size() + 1);
         }
         g_origSearch(rdram, ctx, rt);
         std::memcpy(s, saved.data(), saved.size());
         static std::set<std::string> logged;
         if (logged.insert(rel).second)
-            std::fprintf(stderr, "[mods] %s = %s (skin: arquivo do traje base)%s\n", rel.c_str(), target.c_str(), getRegU32(ctx, 2) ? "" : " NAO ACHADO");
+            std::fprintf(stderr, "[mods] %s = %s (%s)%s\n", rel.c_str(), target.c_str(), stage ? "fase custom: arquivo da base" : "skin: arquivo do traje base",
+                         getRegU32(ctx, 2) ? "" : " NAO ACHADO");
     }
     else
         g_origSearch(rdram, ctx, rt);
@@ -119,7 +126,7 @@ void searchFile(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
 // a arena dos patches de fase e o MB dos ganchos). Os .PTR dos monstros saem no ptrRelocate; RST, AIC e PTS tem tamanho fixo (fixedCap).
 void checkLoad(uint8_t *rdram, const char *what, const std::string &gameName, uint32_t dst, int32_t size)
 {
-    const wotm::mods::File *m = Registry::get().find(Registry::get().aliasOf(Registry::keyFromGame(gameName)));
+    const wotm::mods::File *m = Registry::get().served(Registry::keyFromGame(gameName));
     if (!m || size <= 0 || fixedCap(m->rel) || (m->rel.rfind("MON/", 0) == 0 && m->rel.size() > 4 && m->rel.substr(m->rel.size() - 4) == ".PTR"))
         return;
     const uint32_t d = dst & 0x1FFFFFFFu, end = d + uint32_t(size);

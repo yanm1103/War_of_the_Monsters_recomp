@@ -7,6 +7,9 @@
 // arquivos: o switch da foto, Shell+0x5D0, tem 24 filhos e o levelUnlocked a deixa aberta). O nome dela na tabela do
 // screenLevelSelect (GameLevelLongNames_006EEEF8) vira "Random". O resto e o codigo do jogo: cursor, trava, sons, confirmacao.
 // Com WOTM_HIGHRAM=0 a eliminacao (10 monstros carregados de uma vez) fica so com as fases do retail e a RANDOM.
+// Fases custom (mods/<mod>/stages/, wotm_stages.h): entram antes da RANDOM nas vagas 18..23, com o "name" delas na tabela, a trava e a
+// foto da base (levelUnlocked e o switch), e levelpics/<id>.png por cima quando houver. A de base METRO sem .AIP proprio fica fora
+// quando a tela abre com CPUs (a mesma regra da quarta entrada).
 // No changeScreen(8, 99) (wotm_padsel.inc) a RANDOM vira uma fase sorteada da lista, entre as destravadas (e sem a quarta entrada
 // quando o jogo a pula: modo 2 com 2+ CPUs, modo 3 com CPU; sem Training e Tokyo Deathmatch, fases de teste), antes da carga e sem
 // o narrador anunciar a fase (surpresa).
@@ -32,14 +35,30 @@ constexpr uint32_t kListLevels = kList + 0x10;
 constexpr uint32_t kLongNames = wotm::sym::GameLevelLongNames_006EEEF8;   // char[28][18] do screenLevelSelect
 constexpr uint32_t kRetail[] = {wotm::sym::PO_1PFreeForAll, wotm::sym::PO_MPFreeForAll, wotm::sym::PO_1PEndurance, wotm::sym::PO_MPElimination};
 
-static PS2Runtime::RecompiledFunction g_origLevelSelect = nullptr;
+static PS2Runtime::RecompiledFunction g_origLevelSelect = nullptr, g_origLevelUnlocked = nullptr;
 
 static uint32_t rd32(uint8_t *rdram, uint32_t a) { return FAST_READ32(a & 0x1FFFFFFFu); }
 static void wr32(uint8_t *rdram, uint32_t a, uint32_t v) { FAST_WRITE32(a & 0x1FFFFFFFu, v); }
 
-// levelUnlocked do jogo: 10, 11, 14 e 15 pela tabela de destrave (as 25 a 27 sao dos minigames, fora das listas)
+// Fase custom na vaga `level` (18..23; mods/<mod>/stages/, wotm_stages.h), ou nullptr
+static const wotm::mods::Stage *customAt(int level)
+{
+    return level >= wotm::mods::kFirstStageSlot ? wotm::mods::Registry::get().stageBySlot(level) : nullptr;
+}
+// O screenLevelSelect pula a quarta entrada da lista (a METRO, sem .AIP no disco) no modo 2 com 2+ CPUs e no modo 3 com CPU
+static bool skipNoAip(uint8_t *rdram)
+{
+    const uint32_t mode = rd32(rdram, kMode), ais = rd32(rdram, kNumAIs);
+    return (mode == 2 && ais >= 2) || (mode == 3 && ais > 0);
+}
+// Custom de base METRO sem .AIP proprio: fora com CPUs, pela mesma razao
+static bool customNeedsAip(uint8_t *rdram, const wotm::mods::Stage *st) { return st->base->level == 4 && !st->ownAip && skipNoAip(rdram); }
+
+// levelUnlocked do jogo: 10, 11, 14 e 15 pela tabela de destrave (as 25 a 27 sao dos minigames, fora das listas); a custom, a da base
 static bool unlocked(uint8_t *rdram, int level)
 {
+    if (const wotm::mods::Stage *st = customAt(level))
+        level = st->base->level;
     uint32_t off = 0;
     switch (level)
     {
@@ -62,9 +81,14 @@ static void extend(uint8_t *rdram, uint32_t src)
     const char *h = std::getenv("WOTM_HIGHRAM");
     const bool low = h && h[0] == '0';
     if (!(src == wotm::sym::PO_MPElimination && low))
+    {
         for (int l = 1; l <= 16; ++l)
             if (std::find(out.begin(), out.end(), l) == out.end())
                 out.push_back(l);
+        for (const wotm::mods::Stage &st : wotm::mods::Registry::get().stages())   // fases custom, nas vagas 18..23
+            if (!customNeedsAip(rdram, &st))
+                out.push_back(st.slot);
+    }
     out.push_back(kRandom);
     for (size_t i = 0; i < out.size(); ++i)
         wr32(rdram, kListLevels + 4 * uint32_t(i), uint32_t(out[i]));
@@ -87,8 +111,42 @@ static void levelSelectHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runti
             extend(rdram, cur);
         static const char kName[] = "Random";
         std::memcpy(rdram + ((kLongNames + 18u * kRandom) & 0x1FFFFFFFu), kName, sizeof kName);
+        for (const wotm::mods::Stage &st : wotm::mods::Registry::get().stages())
+        {
+            char name[18] = {};
+            std::memcpy(name, st.name.c_str(), std::min<size_t>(st.name.size(), 17));
+            std::memcpy(rdram + ((kLongNames + 18u * uint32_t(st.slot)) & 0x1FFFFFFFu), name, sizeof name);
+        }
     }
     g_origLevelSelect(rdram, ctx, runtime);
+    // Foto: a vaga de uma custom mostra o filho da base no switch (o desenho poe o levelpics/<id>.png por cima, se houver)
+    if (const uint32_t sw = rd32(rdram, kLevelSw) & 0x1FFFFFFFu; sw && (rd32(rdram, sw) & 63) == 6)
+    {
+        uint8_t *which = rdram + sw + 8;
+        if (const wotm::mods::Stage *st = customAt(*which))
+            *which = uint8_t(st->base->level);
+    }
+}
+
+// int levelUnlocked(int level): a vaga de uma custom vale o que vale a base (cadeado na tela 8, sem confirmar)
+static void levelUnlockedHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    if (ctx->pc == wotm::fn::levelUnlocked__Fi)
+        if (const wotm::mods::Stage *st = customAt(int(getRegU32(ctx, 4))))
+            ctx->r[4] = _mm_set_epi64x(0, st->base->level);
+    g_origLevelUnlocked(rdram, ctx, runtime);
+}
+
+// Fase escolhida no cursor da tela 8 (levels[currentSelection[8]] da g_levelList); -1 fora da lista
+static int cursorLevel(const wotm::Ram &ram)
+{
+    const uint32_t ll = ram.u32(wotm::sym::g_levelList) & 0x1FFFFFFFu;
+    if (!ll || !ram.ok(ll, 12))
+        return -1;
+    const uint32_t cur = ram.u32(wotm::sym::currentSelection + 4u * 8u), count = ram.u32(ll + 4), levels = ram.u32(ll + 8) & 0x1FFFFFFFu;
+    if (cur >= count || count > 64 || !ram.ok(levels + 4u * cur, 4))
+        return -1;
+    return int(ram.u32(levels + 4u * cur));
 }
 
 // changeScreen(8, 99): a RANDOM vira uma fase sorteada (o jogo ja gravou o m_levelNum). Chamado do wotm_padsel.inc, antes do narrador;
@@ -107,6 +165,8 @@ bool resolveRandom(uint8_t *rdram)
         for (uint32_t i = 0; i < n; ++i)
         {
             const int l = int(rd32(rdram, kListLevels + 4 * i));
+            if (const wotm::mods::Stage *st = customAt(l); st && (!st->random || customNeedsAip(rdram, st)))   // "random": false no stage.json
+                continue;
             if (l != kRandom && l != 12 && l != 16 && !(skip3 && i == 3) && unlocked(rdram, l))   // 12 Training, 16 Tokyo Deathmatch: de teste
                 pool.push_back(l);
         }
@@ -130,7 +190,10 @@ static const char *picName(int level)
     case 13: return "lakepowell";
     case 16: return "tokyodeathmatch";
     case kRandom: return "random";
-    default: return nullptr;
+    default:
+        if (const wotm::mods::Stage *st = customAt(level))   // fase custom: levelpics/<id>.png
+            return st->id.c_str();
+        return nullptr;
     }
 }
 
@@ -302,7 +365,7 @@ static uint16_t g_numTex[24];   // texturas dele (2 no da 12: metades)
 
 static unsigned nodeTexture(uint32_t node, uint32_t slot)
 {
-    for (const int l : kOwn)
+    for (int l = 23; l >= 0; --l)   // de cima: a foto de uma custom vence a da base dela no mesmo objeto
         if (g_obj[l] && g_obj[l] == node)
         {
             const Pic &p = g_pics[l];
@@ -319,8 +382,8 @@ static unsigned nodeTexture(uint32_t node, uint32_t slot)
 void prepare(wotm::Scene &scene, const wotm::Ram &ram)
 {
     scene.nodeTexture = &nodeTexture;
-    for (const int l : kOwn)
-        g_obj[l] = 0;
+    for (uint32_t &o : g_obj)
+        o = 0;
     const uint32_t sw = ram.u32(kLevelSw) & 0x1FFFFFFFu;
     if (!sw || !ram.ok(sw, 0x80) || (ram.u32(sw) & 63) != 6 || ram.u8(sw + 0xB) != 24)
         return;
@@ -343,13 +406,34 @@ void prepare(wotm::Scene &scene, const wotm::Ram &ram)
         g_numTex[l] = nt;
         picOf(l);
     }
+    // Fase custom no cursor: o switch mostra o filho da base (levelSelectHook); com levelpics/<id>.png, a foto dela por cima
+    const int cl = ram.u32(wotm::sym::currScreen) == 8 ? cursorLevel(ram) : -1;
+    if (const wotm::mods::Stage *st = cl >= 0 && cl < 24 ? customAt(cl) : nullptr)
+    {
+        const uint32_t o = picObject(ram, sw, st->base->level);
+        const uint16_t nt = o ? ram.u16(o + 0x5A) : 0;
+        bool drawn = false;
+        for (const wotm::DrawItem &i : scene.items)
+            if ((i.node & 0x1FFFFFFFu) == o) { drawn = true; break; }
+        if (o && nt >= 1 && nt <= 2 && drawn && picOf(cl).full.id)
+        {
+            if (nt == 1 && !g_obj[st->base->level])
+                scene.patchMesh(ram, o, wideUv);
+            g_obj[cl] = o;
+            g_numTex[cl] = nt;
+        }
+    }
 }
 // Selo "UNUSED" a direita do nome da fase (o screenWriteInstructions o escreve centrado em y 10 da tela do jogo) nas fases que o
-// retail nao oferece (12, 13 e 16; a RANDOM nao). Pelos glifos do quadro (Scene::text) no alto da tela; alfa e altura os deles.
+// retail nao oferece (12, 13 e 16; a RANDOM nao); "CUSTOM", em azul, nas fases custom dos mods. Pelos glifos do quadro (Scene::text) no alto da tela; alfa e altura os deles.
 // Thread da janela, depois do texto do jogo.
 void drawBadge(const std::vector<wotm::TextQuad> &text, const wotm::Ram &ram, int rw, int rh)
 {
-    if (ram.u32(wotm::sym::currScreen) != 8 || !(g_obj[12] || g_obj[13] || g_obj[16]))
+    if (ram.u32(wotm::sym::currScreen) != 8)
+        return;
+    const int cl = cursorLevel(ram);
+    const bool custom = cl >= 0 && cl < 24 && customAt(cl);   // fase custom: selo "CUSTOM" (azul)
+    if (!custom && !(g_obj[12] || g_obj[13] || g_obj[16]))
         return;
     float x1 = -1e30f, y0 = 1e30f, y1 = -1e30f;
     int a = 0;
@@ -368,12 +452,12 @@ void drawBadge(const std::vector<wotm::TextQuad> &text, const wotm::Ram &ram, in
     const float h = (y1 - y0) * sy * 0.62f, cy = (y0 + y1) * 0.5f * sy;
     const float size = h * 0.78f;
     const Font &f = wotm_padsel::uiFont();
-    const char *label = "UNUSED";
+    const char *label = custom ? "CUSTOM" : "UNUSED";
     const Vector2 ts = MeasureTextEx(f, label, size, size * 0.08f);
     const float w = ts.x + h * 0.7f, x = gr.x0 + x1 * sx + h * 0.45f;
     const unsigned char al = static_cast<unsigned char>(std::min(255, a * 2));
     const Rectangle r{x, cy - h * 0.5f, w, h};
-    DrawRectangleRounded(r, 0.35f, 6, Color{196, 52, 28, al});
+    DrawRectangleRounded(r, 0.35f, 6, custom ? Color{32, 92, 196, al} : Color{196, 52, 28, al});
     DrawRectangleRoundedLinesEx(r, 0.35f, 6, std::max(1.f, h * 0.07f), Color{255, 255, 255, al});
     DrawTextEx(f, label, Vector2{x + (w - ts.x) * 0.5f, cy - ts.y * 0.5f}, size, size * 0.08f, Color{255, 255, 255, al});
 }
@@ -384,4 +468,6 @@ void wotmLevelSelInstall(PS2Runtime &runtime)
     using namespace wotm_levelsel;
     if ((g_origLevelSelect = runtime.lookupFunction(wotm::fn::screenLevelSelect__Fv)))
         runtime.registerFunction(wotm::fn::screenLevelSelect__Fv, &levelSelectHook);
+    if (!wotm::mods::Registry::get().stages().empty() && (g_origLevelUnlocked = runtime.lookupFunction(wotm::fn::levelUnlocked__Fi)))
+        runtime.registerFunction(wotm::fn::levelUnlocked__Fi, &levelUnlockedHook);
 }

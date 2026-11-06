@@ -12,6 +12,7 @@
 // ja e >= 30 (retail). Substitui os limites pontuais anteriores (WOTM_SPRINGMIN na mola, WOTM_TURNMIN no giro).
 #include "ps2_runtime.h"
 #include "wotm_menucpus.h"   // CPUs 4..7 da tela 12
+#include "wotm_stages.h"     // fases custom: vaga -> base na confirmacao
 #include "wotm_syms.h"   // wotm::sym / wotm::fn: enderecos do ELF por nome (tools/native_syms.py --gen)
 #include "ps2_runtime_macros.h"
 #include "runtime/ee_scheduler.h"
@@ -398,8 +399,20 @@ namespace
         for (int i = g_matchPlayers; i < g_matchPlayers + g_matchAIs; ++i)
             std::fprintf(stderr, " %d:%d", g_matchMonsters[i], costumes[i]);
         std::fprintf(stderr, "%s, fase %d\n", g_matchAIs ? " (IA)" : "", g_matchLevel);
+        wotm_stages::restore(rdram);
+        wotm_stages::activate(rdram);   // "@<id>": a vaga da custom vira a base (wotm_stages.h)
         SET_GPR_S32(ctx, 2, 0);
         ctx->pc = GPR_U32(ctx, 31);
+    }
+
+    // Sem WOTM_MATCH: toda volta aos menus passa pelo userintMain (aventura, co-op, minigames, demonstracao, "voltar ao menu"); a tabela
+    // de nomes trocada por uma fase custom volta ao original antes do menu (wotm_stages.h)
+    PS2Runtime::RecompiledFunction g_origUserintMain = nullptr;
+    void userintMainRestore(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (ctx->pc == kUserintMain)
+            wotm_stages::restore(rdram);
+        g_origUserintMain(rdram, ctx, runtime);
     }
 
     void uiMainSkipped(uint8_t *, R5900Context *ctx, PS2Runtime *) { ctx->pc = GPR_U32(ctx, 31); }
@@ -2886,6 +2899,21 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
         {
             c[n] = -1;
             cus[n] = nullptr;
+            if (*p == '@')   // "@<id da fase custom>" no ultimo campo (mods/<mod>/stages/, wotm_stages.h): a vaga dela
+            {
+                const char *t = p + 1;
+                while (*t && *t != ',')
+                    ++t;
+                const std::string id(p + 1, t);
+                const wotm::mods::Stage *st = wotm::mods::Registry::get().stage(id);
+                if (!st)
+                    std::fprintf(stderr, "[wotm] WOTM_MATCH: fase custom \"%s\" nao achada em mods/ (veja as linhas [mods] fase)\n", id.c_str());
+                else if (*t)
+                    std::fprintf(stderr, "[wotm] WOTM_MATCH: a fase \"@%s\" tem de ser o ultimo campo\n", id.c_str());
+                v[n++] = st ? st->slot : -1;
+                p = st && !*t ? t : nullptr;
+                break;
+            }
             v[n++] = static_cast<int>(std::strtol(p, &end, 10));
             if (end == p && std::isalpha(static_cast<unsigned char>(*p)))   // "<id do monstro custom>" (mods/<mod>/monsters/, wotm_custom.inc)
             {
@@ -2978,6 +3006,8 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
         else
             std::fprintf(stderr, "[wotm] WOTM_MATCH invalido (\"%s\"; use <monstro>[:<figurino 0-3>][,<IA>[:<figurino>]...ate 7],<fase>)\n", e);
     }
+    if (g_matchLevel < 0 && !wotm::mods::Registry::get().stages().empty() && (g_origUserintMain = runtime.lookupFunction(kUserintMain)))
+        runtime.registerFunction(kUserintMain, &userintMainRestore);   // fases custom: a tabela de nomes volta antes do menu
     if (const char *e = std::getenv("WOTM_AIVSAI"); e && *e && std::strcmp(e, "0") != 0)
     {
         g_aiVsAiMask = 0xFu;   // "1" = todos os jogadores
