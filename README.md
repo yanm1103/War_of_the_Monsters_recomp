@@ -31,7 +31,7 @@ Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The executable: [doc
 ## Building the port (Windows)
 1. Clone with submodules (`git clone --recurse-submodules`).
 2. Put your ISO in `ISO/` and run `powershell -ExecutionPolicy Bypass -File tools\setup_runtime.ps1`. It extracts the disc, sets up PS2Recomp in `runtime/`, generates the recompiled code and runs the first build. Needs git, Python 3, CMake 3.24+ and MSVC 14.40+ (VS 2022 17.10+ or Build Tools).
-3. `build_runtime.bat` rebuilds after changes; `run_live.bat -Auto 0` runs the game.
+3. `build_runtime.bat` rebuilds after changes; `run_live.bat -Auto 0` runs the game; `level_editor.bat` opens the level editor in its own window (`docs/guides/MODS.md`, "Level editor").
 
 Runtime details, environment variables and the release package: [docs/guides/RUNTIME.md](docs/guides/RUNTIME.md) and [docs/guides/NATIVE.md](docs/guides/NATIVE.md).
 
