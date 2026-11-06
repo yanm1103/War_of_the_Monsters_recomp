@@ -98,6 +98,19 @@ uint32_t nearestPed(uint8_t *rdram, float a, float b, float reach, float *dist)
     return best;
 }
 
+// Plays animation `id` of the monster (Monster::m_anims[id]; tools/eatanim.py adds 299 = grab and 298 = eat to a model). A model
+// without that animation has no character instance in the handle, and nothing happens
+constexpr uint32_t kAnims = 0x1CF0, kAnimStride = 0x10, kAnimGrab = 299, kAnimEat = 298;
+constexpr float kAnimBlend = 20.f;
+
+void playAnim(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, uint32_t id)
+{
+    const uint32_t h = m + kAnims + kAnimStride * id;
+    if (!rd32(rdram, h))
+        return;
+    wotm_coop::callF(rdram, ctx, runtime, fn::animationTransitionInto__FR11_animHandlefii, {h, 1u, 1u}, {kAnimBlend});
+}
+
 bool canEat(uint32_t m)
 {
     return g_cfg.all || ((m >> 5) == kTogera);
@@ -153,6 +166,7 @@ void tick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, in
         }
         if (tap)
         {
+            playAnim(rdram, ctx, runtime, m, kAnimEat);
             eat(rdram, ctx, runtime, m, player, h.pos);
             h.active = false;
             return;
@@ -178,6 +192,7 @@ void tick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, in
                      g_cfg.reach, far, g_cfg.planeXZ ? "xz" : "xy", rdF(rdram, cs + kCsTrans), rdF(rdram, cs + kCsTrans + 4), rdF(rdram, cs + kCsTrans + 8));
         return;
     }
+    playAnim(rdram, ctx, runtime, m, kAnimGrab);
     h.active = true;
     h.pos = p;
     h.since = std::chrono::steady_clock::now();
