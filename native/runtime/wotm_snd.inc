@@ -379,7 +379,8 @@ void tankSound(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
 // SuckerBugSound do inseto do Preytor (this = HomingBug +0x14, dono em +0xB0). Os ganchos trocam a entrada do tipo pelo banco do
 // custom durante a chamada, e um Monster do jogo do mesmo tipo chamado no meio dela volta a ver o do jogo. O banco fica so no
 // motor nativo, carregado uma vez e mantido; o _LS de baixa resolucao tem os mesmos indices do _S, entao o mesmo banco serve nas
-// lutas de 3 e 4.
+// lutas de 3 e 4. Do mesmo jeito, um GENAMB_S.BNK do custom (Custom::ambientBank) entra em BANK_AMBIENT: o sprint, o ram e o
+// arrasto que esta instancia toca do banco comum saem dele.
 }   // namespace wotm_snd_hooks
 const wotm::mods::Custom *wotmCustomOwnFiles(uint8_t *rdram, uint32_t monster);   // wotm_overrides.cpp (wotm_custom.inc)
 namespace wotm_snd_hooks
@@ -400,6 +401,8 @@ inline int monsterBankSlot(uint32_t type)
     return type == 13 ? 22 : type == 14 || type == 15 ? 24 : -1;   // BANK_MECH, BANK_FINAL
 }
 static bool g_specialBanks = false;   // algum custom com banco do especial emprestado (Custom::specialBank)
+static bool g_ambientBanks = false;   // algum custom com banco comum proprio (Custom::ambientBank)
+constexpr int kAmbientSlot = 21;      // BANK_AMBIENT: GenAmb_s.bnk (GenAm_ls.bnk nas lutas de 3 e 4, mesmos indices)
 uint32_t loadOwnBank(const wotm::mods::Custom &cu, const std::filesystem::path &p, const char *what)
 {
     static std::map<std::string, uint32_t> s_banks;   // caminho -> handle (0 = nao carregou)
@@ -418,6 +421,7 @@ uint32_t loadOwnBank(const wotm::mods::Custom &cu, const std::filesystem::path &
 uint32_t ownBank(const wotm::mods::Custom &cu) { return loadOwnBank(cu, cu.bank, "banco de som proprio"); }
 // Banco dos sons do especial emprestado: o jogo os toca do banco do dono (o do Robo-47 na entrada 1, que so carrega com ele na luta)
 uint32_t specialBank(const wotm::mods::Custom &cu) { return loadOwnBank(cu, cu.specialBank, "banco do especial"); }
+uint32_t ambientBank(const wotm::mods::Custom &cu) { return loadOwnBank(cu, cu.ambientBank, "banco comum proprio"); }
 // Carrega de antemao os bancos dos customs (no carregamento de um banco do jogo, entre telas), para o primeiro som da luta nao
 // esperar o disco
 void preloadOwnBanks()
@@ -432,6 +436,8 @@ void preloadOwnBanks()
             g_ownBankTypes |= 1u << cu.type;
         if (!cu.specialBank.empty() && monsterBankSlot(uint32_t(cu.special)) >= 0 && specialBank(cu))
             g_specialBanks = true;
+        if (!cu.ambientBank.empty() && ambientBank(cu))
+            g_ambientBanks = true;
     }
 }
 struct BankSwap { int slot = -1; uint32_t prev = 0; };
@@ -477,6 +483,26 @@ bool swapSpecialBankFor(uint8_t *rdram, uint32_t m, BankSwap &s)
     wrU32(rdram, a, want);
     return true;
 }
+// Poe em BANK_AMBIENT o banco comum do custom `m` (Custom::ambientBank) ou, dentro da troca de outro, o do jogo de volta para um
+// Monster sem o seu. false = nada a trocar.
+bool swapAmbientBankFor(uint8_t *rdram, uint32_t m, BankSwap &s)
+{
+    if (!m || !g_ambientBanks)
+        return false;
+    const wotm::mods::Custom *cu = wotmCustomOwnFiles(rdram, m);
+    uint32_t want = cu && !cu->ambientBank.empty() ? ambientBank(*cu) : 0u;
+    if (!want && g_swapDepth[kAmbientSlot])
+        want = g_realBank[kAmbientSlot];
+    if (!want)
+        return false;
+    const uint32_t a = wotm::sym::gSoundBanks + 4u * uint32_t(kAmbientSlot);
+    s.slot = kAmbientSlot;
+    s.prev = rdU32(rdram, a);
+    if (!g_swapDepth[kAmbientSlot]++)
+        g_realBank[kAmbientSlot] = s.prev;
+    wrU32(rdram, a, want);
+    return true;
+}
 void unswapBank(uint8_t *rdram, const BankSwap &s)
 {
     if (s.slot < 0)
@@ -497,7 +523,7 @@ PS2Runtime::RecompiledFunction g_soundOrig = nullptr;
 template <uint32_t A, int Owner>
 void ownBankHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
 {
-    if (ctx->pc != A || (!g_ownBankTypes && !g_specialBanks))
+    if (ctx->pc != A || (!g_ownBankTypes && !g_specialBanks && !g_ambientBanks))
     {
         g_soundOrig<A>(rdram, ctx, rt);
         return;
@@ -518,9 +544,10 @@ void ownBankHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
         m = monsterById(rdram, rdU32(rdram, self - kWeaponSound + kWeaponOwner));
     else
         m = rdU32(rdram, self - kBugSound + kBugOwner);
-    BankSwap s1, s2, s3;
-    const bool a = swapBankFor(rdram, m, s1), b = swapBankFor(rdram, attacker, s2), c = swapSpecialBankFor(rdram, m, s3);
-    if (!a && !b && !c)
+    BankSwap s1, s2, s3, s4;
+    const bool a = swapBankFor(rdram, m, s1), b = swapBankFor(rdram, attacker, s2), c = swapSpecialBankFor(rdram, m, s3),
+               d = swapAmbientBankFor(rdram, m, s4);
+    if (!a && !b && !c && !d)
     {
         g_soundOrig<A>(rdram, ctx, rt);
         return;
@@ -528,6 +555,7 @@ void ownBankHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
     const uint32_t ra = getRegU32(ctx, 31);
     g_soundOrig<A>(rdram, ctx, rt);
     wotmFinishGuestCall(rdram, ctx, rt, ra);
+    unswapBank(rdram, s4);
     unswapBank(rdram, s3);
     unswapBank(rdram, s2);
     unswapBank(rdram, s1);

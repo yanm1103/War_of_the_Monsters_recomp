@@ -148,7 +148,10 @@ struct Custom {
     // .BNK da pasta "files" com o prefixo do dono do especial emprestado ("special"; ROBOT_S.BNK): os sons que o especial toca
     // do banco desse tipo saem dele (wotm_snd.inc); vazio = os do banco do jogo, que so existe com esse monstro na luta
     std::filesystem::path specialBank;
-    std::string kind;        // regras proprias do port ("kind": "mecha" = escudo e laser, wotm_custom.inc); vazio = as do tipo
+    // GENAMB_S.BNK (ou GENAM_LS.BNK) da pasta "files": o banco comum, com os indices dele; os sons que esta instancia toca de
+    // gSoundBanks[BANK_AMBIENT] (o sprint, o ram, o arrasto...) saem dele (wotm_snd.inc); vazio = os do jogo
+    std::filesystem::path ambientBank;
+    std::string kind;       // regras proprias do port ("kind": "mecha" = escudo e laser, wotm_custom.inc); vazio = as do tipo
     int special = 0;          // tipo cujo golpe especial o custom usa ("special": "congar"; wotm_custom.inc); 0 = o do tipo
     bool specialRoar = false;   // "specialRoar": o especial comeca com o grito dele (o som do cinema de entrada; wotm_custom.inc)
     // "fallBlend": quadros em que a camada da subida do pulo (animacao 33) some depois do pico, para a queda (34) aparecer
@@ -564,6 +567,7 @@ private:
         fs::path chr, aicAny, aic[3];
         c.bank.clear();
         c.specialBank.clear();
+        c.ambientBank.clear();
         const MonsterInfo *sp = c.special ? monsterInfo(c.special) : nullptr;
         for (auto it = fs::recursive_directory_iterator(c.files, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
             if (ec) break;
@@ -571,7 +575,8 @@ private:
             const std::string ext = key(it->path().extension().string()), stem = key(it->path().stem().string());
             fs::path *slot = nullptr;
             if (ext == ".CHR") slot = &chr;
-            else if (ext == ".BNK") slot = sp && stem.rfind(sp->prefix, 0) == 0 ? &c.specialBank : &c.bank;
+            else if (ext == ".BNK")
+                slot = stem.rfind("GENAM", 0) == 0 ? &c.ambientBank : sp && stem.rfind(sp->prefix, 0) == 0 ? &c.specialBank : &c.bank;
             else if (ext == ".AIC") slot = !stem.empty() && stem.back() >= '0' && stem.back() <= '2' ? &aic[stem.back() - '0'] : &aicAny;
             if (!slot) continue;
             if (!slot->empty())
@@ -604,6 +609,8 @@ private:
             what += std::string(what.empty() ? "" : ", ") + "som " + c.bank.filename().string();
         if (!c.specialBank.empty())
             what += std::string(what.empty() ? "" : ", ") + "som do especial " + c.specialBank.filename().string();
+        if (!c.ambientBank.empty())
+            what += std::string(what.empty() ? "" : ", ") + "banco comum " + c.ambientBank.filename().string();
         if (!what.empty())
             std::fprintf(stderr, "[mods] monstro %s: %s (RST/%s)\n", c.id.c_str(), what.c_str(), c.resetStem.c_str());
     }

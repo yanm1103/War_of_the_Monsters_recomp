@@ -384,6 +384,13 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   same bank serves in 3 and 4 player fights, where the game loads the low-res `_LS` banks (same numbering). Log: `[mods] monstro
   fire_togera: som LIZARD_S.BNK` and `[snd] fire_togera: banco de som proprio LIZARD_S.BNK no handle 0x10001`; with `PS2X_SND_LOG=1`
   each `Play banco` line shows the bank's handle. The narrator's MONSTER CRY option plays the cry from this bank too.
+  A `GENAMB_S.BNK` in the folder is the custom's copy of the shared bank (`BANK_AMBIENT`, the one every monster plays generic sounds
+  from): while this monster's sounds play it takes the game's place, so a sound replaced in it changes for this monster only. Sound 90
+  is the dash loop (Ultra-V, Robo-47 and Zorgulon). The kit builds it from `genamb_s_sNNN.wav` files in the custom's `files/` work
+  folder, keeping the shared bank's numbering. Log: `[mods] monstro cj: ..., banco comum GENAMB_S.BNK` and `[snd] cj: banco comum
+  proprio GENAMB_S.BNK no handle 0x10003`.
+  Ultra-V's sounds, by number (the ones a custom on it usually replaces): 1 a loop while in the air (jump and butt slam), 4 punch whoosh (with 13), 11
+  footstep (two samples, left and right foot, `_a0` and `_a1`), 14 landing, 15 body impact (hitting a wall or a monster while dashing).
   Togera's sounds, by number: 1 death (the 120 animation), 2 cry (fight entry cinematic), 3 pain, 4 jump, 5 and 6 the fireball (launch,
   explosion), 7 the fire breath (a loop while the special lasts), 10 to 12 the three victories, 13 taunt, 14 and 15 the other two
   deaths, 0 crowd control, 17 entering counter block.
