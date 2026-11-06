@@ -205,7 +205,7 @@ python tools/modkit.py skin mesh export my_mod green          # the same for a s
 | `.TEX` | `<file>_tNNNN.png` (one per texture) | the PNG as is |
 | `.RTX` | `<file>_rtx_tNNNN.png` (portraits, screens, fonts) | the PNG as is |
 | `.VPK` / `.VAG` | `<file>.wav` | `.VPK`/`.VAG` (same rate and volumes as the original) |
-| `.BNK` | `<bank>_sNNN.wav` (one per sound with a sample; a sound made of layers, several TONEs each with its own delay, pitch and sample, comes out as the mono mix the game plays) | the bank with all edited sounds replaced (a sample another sound also uses: the edited one gets its own copy and the other keeps the original; a layered sound becomes a single layer with the WAV, full volume envelope, no delay) |
+| `.BNK` | `<bank>_sNNN.wav` (one per sound with a sample; a sound made of layers, several TONEs each with its own delay, pitch and sample, comes out as the mono mix the game plays) | the bank with all edited sounds replaced (a sample another sound also uses: the edited one gets its own copy and the other keeps the original; a layered sound becomes a single layer with the WAV, full volume envelope, no delay and no LFO; it loops only if the original played until the game stopped it, not when a KEY_OFF in its sequence ended the loop) |
 | others | copy | copy |
 
 ## Textures as PNG

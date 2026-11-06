@@ -276,7 +276,8 @@ def sample_loop(smp, off, end):
     return 0
 
 
-KEEP_BEFORE_TONE = {4, 27, 28, 29, 30, 31, 32, 33, 40, 44}   # LFO, altura e registradores: valem para o TONE que vem depois
+KEEP_BEFORE_TONE = {27, 28, 29, 30, 31, 32, 33, 40, 44}   # altura e registradores: valem para o TONE que vem depois
+KEY_OFF = 41
 FULL_ADSR = (0x80FF, 0x9FC0)   # ataque na hora, sustain cheio ate o fim da amostra (o dos sons de uma amostra so)
 
 
@@ -331,7 +332,9 @@ def bnk_replace(path, sound, wav, out):
     """Troca as amostras do som `sound` do banco pelo WAV (reamostrado para a taxa em que o banco toca cada TONE). Os outros
     sons ficam iguais; offsets das amostras, tamanho do chunk e os campos de tamanho do SBlk sao corrigidos. Um som de camadas
     (sound_kind "layered") vira uma camada so com o WAV em mono: o TONE da amostra mais longa, sem atraso, precedido so dos
-    grains de LFO, altura e registradores que vinham antes dele (o volume de um TONE pode vir de um registrador)."""
+    grains de altura e registradores que vinham antes dele (o volume de um TONE pode vir de um registrador). O LFO sai (fazia
+    parte do efeito das camadas; numa gravacao, entorta o tom), e o WAV so fica em laco se o som original tocava ate o jogo
+    parar: um KEY_OFF na sequencia (o do crowd control do Ultra-V) encerrava o laco, e ele nao vem junto."""
     raw = bytearray(open(path, "rb").read())
     b = read_bnk(path)
     typ, nchunks = struct.unpack_from("<II", raw, 0)
@@ -357,7 +360,9 @@ def bnk_replace(path, sound, wav, out):
     rate_in, chans = read_wav_any(wav)
     any_loop = None
     if layered:
-        any_loop = next((lp for lp in (sample_loop(smp, r[2], sample_end(smp, r[2])) for r in targets) if lp is not None), None)
+        if not any(g["type"] == KEY_OFF for g in b["sounds"][sound]["grains"]):
+            any_loop = next((lp for lp in (sample_loop(smp, r[2], sample_end(smp, r[2])) for r in targets) if lp is not None),
+                            None)
         n_layers = len(targets)
         main = max(targets, key=lambda r: sample_end(smp, r[2]) - r[2])
         others_here = [r for r in targets if r[2] != main[2]]
