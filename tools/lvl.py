@@ -6,6 +6,7 @@
   python tools/lvl.py collision CENTRAL [--check]     # grid and paths; --check redoes every path's box and cells
   python tools/lvl.py points CENTRAL                  # PTS/<STAGE>.SPT/.PUP/.FOP/.PED/.AIP
   python tools/lvl.py mrs CENTRAL                     # RST/<STAGE>.MRS (background, fog, lights, time of day)
+  python tools/lvl.py peds CENTRAL                    # pedestrian groups (0xBB8 roots) and the segments they walk
   python tools/lvl.py patch CENTRAL mods/X/levels/CENTRAL.json  # apply a level patch to the image and check its collision
   option: --disc DIR (default: disc/ at the repo root)
 
@@ -41,11 +42,12 @@ def child_slots(img, n):
     """Addresses of a node's child pointers, as dbsTraverse walks them, plus the DESTRUCTIBLE states and both CONTROL children."""
     u32, u16, u8 = img.u32, img.u16, img.u8
     op = u32(n) & 63
-    arrays = {1: (0x20, u16(n + 8)), 3: (0x1C, u32(n + 8)), 4: (0x50, u32(n + 8)), 30: (0x2C, u32(n + 8)),
-              6: (0xC, u8(n + 0xB)), 35: (0xC, u32(n + 4)), 25: (0x2C, u32(n + 0x28)), 17: (0xCC, u32(n + 4)),
-              38: (0x60, u32(n + 4))}
+    # (first slot, where the count is, its width): read only for this op, so a node at the very end of the image is fine
+    arrays = {1: (0x20, 8, 2), 3: (0x1C, 8, 4), 4: (0x50, 8, 4), 30: (0x2C, 8, 4), 6: (0xC, 0xB, 1),
+              35: (0xC, 4, 4), 25: (0x2C, 0x28, 4), 17: (0xCC, 4, 4), 38: (0x60, 4, 4)}
     if op in arrays:
-        off, cnt = arrays[op]
+        off, at, width = arrays[op]
+        cnt = {1: u8, 2: u16, 4: u32}[width](n + at)
         return [n + off + 4 * k for k in range(min(cnt, 8192))]
     if op == 2:
         return [n + 0x28 + 16 * k for k in range(min(u32(n + 4), 16))]
@@ -650,6 +652,55 @@ def net_from_points(pts):
             for p in pts]
 
 
+# ------------------------------------------------------------------------------------------------------------- pedestrians
+PED_GROUP_ID = 0xBB8            # a root TRANSLATE with this id builds a PedGroup (dbProcInteractive): head bits 7..14 = how many
+PED_MAX_GROUPS = 20             # PedGroup::s_allPedGroups[20], unchecked: a 21st group writes over PathNet::ped's header
+PED_MAX_SEGMENTS = NET_NODES // 2
+# PathNet::ped with no .PED file: two nodes at z 250 with a 250 lane (2500 to each side); a group bound to it scatters
+DEFAULT_PED_NET = [{"pos": [-100.0, 0.0, 250.0], "type": 0, "links": [[1, 250, 0]]},
+                   {"pos": [100.0, 0.0, 250.0], "type": 0, "links": [[0, 250, 0]]}]
+
+
+def ped_groups(st):
+    """The stage's pedestrian groups: [{"node", "pos", "count"}], one per root TRANSLATE with id 0xBB8 (its only child is a NULL;
+    no parent, no collision; it exists in every mode)."""
+    img = st.img
+    out = []
+    for r in st.roots:
+        w = img.u32(r)
+        if w >> 18 == PED_GROUP_ID and w & 63 == 3:
+            out.append({"node": r, "pos": [img.f32(r + 0x10 + 4 * i) for i in range(3)], "count": (w >> 7) & 0xFF})
+    return out
+
+
+def ped_bind(net, pos):
+    """What PedGroup's constructor walks: the node nearest to the group (3D distance, any node type, the first of equals) and
+    its link 0, whatever its count. (a, b), or None when that node has no link; an empty net is PathNet's default one."""
+    nodes = net or DEFAULT_PED_NET
+    best = None
+    for i, n in enumerate(nodes):
+        d = math.dist(n["pos"], pos)
+        if best is None or d < best[0]:
+            best = (d, i)
+    if best is None or not nodes[best[1]]["links"]:
+        return None
+    return best[1], nodes[best[1]]["links"][0][0]
+
+
+def ped_net_segments(net):
+    """The pedestrian net as segments {"a", "b", "width", "i", "k"}: each node's link 0 (what a group walks), a pair once."""
+    out, seen = [], set()
+    for i, n in enumerate(net):
+        if not n["links"]:
+            continue
+        k, w = n["links"][0][0], n["links"][0][1]
+        if k >= len(net) or (min(i, k), max(i, k)) in seen:
+            continue
+        seen.add((min(i, k), max(i, k)))
+        out.append({"a": list(n["pos"]), "b": list(net[k]["pos"]), "width": w, "i": i, "k": k})
+    return out
+
+
 class LevelPatch:
     """A level patch (mods/<mod>/levels/<STAGE>.json, docs/MODS.md "Level patches") applied to the stage image the way
     native/runtime/wotm_levelpatch.inc applies it at the entry of dbInitDb: each entry names an object by its handle (the
@@ -992,6 +1043,137 @@ class LevelPatch:
                 self.log.append("entry %d skipped: %s" % (k, err))
                 self.stats["skipped"] += 1
 
+    def apply_peds(self, patch, nets):
+        """The patch's "peds" (docs/guides/MODS.md, "Level patches"), after "objects" and before cut_nets: "segments" replaces the
+        pedestrian net (nets["ped"], changed in place), "groups" moves, recounts or deletes the disc's groups (handle + from) and
+        adds new ones (pos, count), "off" deletes every group. A deleted group gets id 0 (a plain TRANSLATE); new groups are
+        TRANSLATE 0xBB8 + NULL in the arena, hung from the world GROUP by a new GROUP in its first slot that holds the old child
+        too. Refused, with a line: more than 20 groups, a count out of 1..255, a group whose nearest node has no link."""
+        peds = patch.get("peds") or {}
+        if not peds:
+            return
+        st, img = self.st, self.img
+        if "segments" in peds:
+            segs = list(peds["segments"] or [])
+            if len(segs) > PED_MAX_SEGMENTS:
+                self.log.append("pedestrians: %d segments, %d kept (256 nodes)" % (len(segs), PED_MAX_SEGMENTS))
+                segs = segs[:PED_MAX_SEGMENTS]
+            net = []
+            for s in segs:
+                w = max(1, min(255, int(s.get("width", 4))))
+                m = len(net)
+                net.append({"pos": [float(x) for x in s["a"]], "type": 0, "links": [[m + 1, w, 0]]})
+                net.append({"pos": [float(x) for x in s["b"]], "type": 0, "links": [[m, w, 0]]})
+            nets["ped"] = net
+            self.stats["ped segments"] = len(segs)
+        disk = {g["node"]: g for g in ped_groups(st)}
+        alive = set(disk)
+        off = bool(peds.get("off"))
+
+        def clear(n):
+            self.w32(n, img.u32(n) & 0x3FFFF)
+            alive.discard(n)
+
+        def check(pos, count):
+            if not 1 <= count <= 255:
+                raise PatchError("count %d is not 1..255" % count)
+            if not nets.get("ped") or ped_bind(nets["ped"], pos) is None:
+                raise PatchError("no sidewalk near (%.0f %.0f %.0f): its nearest node has no link" % tuple(pos)
+                                 if nets.get("ped") else "the stage has no pedestrian net")
+
+        if off:
+            for n in list(alive):
+                clear(n)
+            self.stats["ped groups off"] = len(disk)
+        new = []
+        for k, e in enumerate(peds.get("groups") or []):
+            try:
+                if e.get("handle") is None:
+                    if not off:
+                        new.append((k, e))
+                    continue
+                hv = e["handle"]
+                h = int(hv, 0) if isinstance(hv, str) else int(hv)
+                g = disk.get(h)
+                if not g:
+                    raise PatchError("%07x is not a pedestrian group of the stage" % h)
+                fr = e.get("from")
+                if not fr or max(abs(g["pos"][i] - fr[i]) for i in range(3)) > self.FROM_TOL:
+                    raise PatchError("group %07x is at (%.1f %.1f %.1f), not at \"from\" %s: another .NGP?" % (h, *g["pos"], fr))
+                if off or e.get("delete"):
+                    if h in alive:
+                        clear(h)
+                        self.stats["ped groups deleted"] += 1
+                    continue
+                pos = [float(x) for x in (e.get("pos") or g["pos"])]
+                count = int(e.get("count", g["count"]))
+                check(pos, count)
+                for i in range(3):
+                    self.wf32(h + 0x10 + 4 * i, pos[i])
+                self.w32(h, (img.u32(h) & ~(0xFF << 7)) | (count << 7))
+                self.stats["ped groups changed"] += 1
+            except (PatchError, KeyError, TypeError, ValueError) as err:
+                self.log.append("pedestrian group %d skipped: %s" % (k, err))
+                self.stats["skipped"] += 1
+        made = []
+        for k, e in new:
+            try:
+                if len(alive) + len(made) >= PED_MAX_GROUPS:
+                    raise PatchError("%d groups at most" % PED_MAX_GROUPS)
+                pos = [float(x) for x in e["pos"]]
+                count = int(e.get("count", 50))
+                check(pos, count)
+                nul = self.alloc(0x10, 16)
+                self.w32(nul, 9)
+                t = self.alloc(0x20, 16)
+                self.w32(t, (PED_GROUP_ID << 18) | (count << 7) | 3)
+                self.w32(t + 8, 1)
+                for i in range(3):
+                    self.wf32(t + 0x10 + 4 * i, pos[i])
+                self.w32(t + 0x1C, nul)
+                made.append(t)
+            except (PatchError, KeyError, TypeError, ValueError) as err:
+                self.log.append("pedestrian group %d skipped: %s" % (k, err))
+                self.stats["skipped"] += 1
+        if made:
+            w = st.world
+            slot = child_slots(img, w)[0]
+            old = img.u32(slot) & MASK
+            wrap = self.alloc(0x20 + 4 * (1 + len(made)), 16)
+            self.w32(wrap, 1)
+            self.w32(wrap + 4, img.u32(w + 4))
+            self.w16(wrap + 8, 1 + len(made))
+            self.w16(wrap + 0xA, 7)                     # visual | collision | noFOV
+            self.w32(wrap + 0x20, old)
+            for i, t in enumerate(made):
+                self.w32(wrap + 0x24 + 4 * i, t)
+            self.set_ptr(slot, wrap)
+            st.parents[wrap], st.parents[old] = [w], [wrap]
+            self.stats["ped groups added"] = len(made)
+        self.ped_new = made
+
+    def ped_report(self, nets):
+        """After cut_nets: where each live group walks (its segment and length), and the segments nobody walks."""
+        img, lines = self.img, []
+        groups = [g for g in ped_groups(self.st) if img.u32(g["node"]) >> 18 == PED_GROUP_ID]
+        groups += [{"node": t, "pos": [img.f32(t + 0x10 + 4 * i) for i in range(3)], "count": (img.u32(t) >> 7) & 0xFF}
+                   for t in getattr(self, "ped_new", [])]
+        net = nets.get("ped") or []
+        used = set()
+        for g in groups:
+            b = ped_bind(net, g["pos"])
+            if b is None:
+                lines.append("pedestrians: group %07x (%d) at (%.1f %.1f %.1f) has no sidewalk" % (g["node"], g["count"], *g["pos"]))
+                continue
+            used.add((min(b), max(b)))
+            ln = math.dist(net[b[0]]["pos"], net[b[1]]["pos"]) if net else 200.0
+            lines.append("pedestrians: group %07x (%d) at (%.1f %.1f %.1f) walks %d-%d (%.0f long)%s" % (
+                g["node"], g["count"], *g["pos"], b[0], b[1], ln, "" if net else " on the default net"))
+        empty = [s for s in ped_net_segments(net) if (min(s["i"], s["k"]), max(s["i"], s["k"])) not in used]
+        if groups and empty:
+            lines.append("pedestrians: nobody walks %s" % ", ".join("%d-%d" % (s["i"], s["k"]) for s in empty))
+        return lines
+
 
 # ------------------------------------------------------------------------------------------------------------- points
 POINTS_MAGIC = 0x12282000
@@ -1156,18 +1338,33 @@ def cmd_patch(disc, name, path):
         patch = json.load(f)
     lp = LevelPatch(st)
     lp.apply(patch)
+    pts = stage_points(disc, st.name)
+    nets = {"fodder": net_from_points(pts.get("FOP", [])), "ped": net_from_points(pts.get("PED", []))}
+    lp.apply_peds(patch, nets)          # the hook's order: objects, pedestrians, then the path cuts
     for line in lp.log:
         print("  " + line)
     print("%s: %s" % (st.name, ", ".join("%s %d" % kv for kv in sorted(lp.stats.items())) or "nothing changed"))
     for pa, (bb, n, how) in sorted(lp.redone.items()):
         print("  path %07x  box (%.1f %.1f %.1f)-(%.1f %.1f %.1f)  %d cells  %s" % (pa, *bb[0], *bb[1], n, how))
-    pts = stage_points(disc, st.name)
-    nets = {"fodder": net_from_points(pts.get("FOP", [])), "ped": net_from_points(pts.get("PED", []))}
-    for line in cut_nets(lp.footprints, nets):
+    for line in cut_nets(lp.footprints, nets) + lp.ped_report(nets):
         print("  " + line)
     st.grid = Grid(st.img, st.grid.addr)
     print("after the patch:")
     return 0 if check_collision(st) else 1
+
+
+def cmd_peds(disc, name):
+    st = Stage(name, disc)
+    net = net_from_points(stage_points(disc, st.name).get("PED", []))
+    groups = ped_groups(st)
+    print("%s: %d pedestrian groups (%d people), %d segments%s" % (st.name, len(groups), sum(g["count"] for g in groups),
+          len(ped_net_segments(net)), "" if net else " (no .PED: the default net)"))
+    for s in ped_net_segments(net):
+        print("  segment %2d-%-2d width %3d  (%.1f %.1f %.1f) - (%.1f %.1f %.1f)  %.0f long" % (
+            s["i"], s["k"], s["width"], *s["a"], *s["b"], math.dist(s["a"], s["b"])))
+    lp = LevelPatch(st)
+    for line in lp.ped_report({"ped": net}):
+        print("  " + line)
 
 
 def cmd_points(disc, name):
@@ -1204,8 +1401,10 @@ def main(argv):
     if cmd == "summary":
         cmd_summary(disc, names or sorted(f[:-4].upper() for f in os.listdir(os.path.join(disc, "LVL"))
                                           if f.upper().endswith(".NGP")))
-    elif cmd in ("objects", "collision", "points", "mrs") and len(names) == 1:
-        if cmd == "objects":
+    elif cmd in ("objects", "collision", "points", "mrs", "peds") and len(names) == 1:
+        if cmd == "peds":
+            cmd_peds(disc, names[0])
+        elif cmd == "objects":
             cmd_objects(disc, names[0], csv_path)
         elif cmd == "collision":
             cmd_collision(disc, names[0], "--check" in flags)

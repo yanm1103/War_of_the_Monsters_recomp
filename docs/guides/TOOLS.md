@@ -13,13 +13,14 @@
   - `tex.py list|export|inject`: `.TEX`/`.RTX` textures to PNG with `manifest.json` (palette found through the `.NGP` objects) and PNG/TGA back, at the same size (current palette or `--new-palette`).
   - `snd989.py wav|vpk|vag|bnk-replace`: sound to WAV and WAV back to `.VPK`, `.VAG` and sounds inside a `.BNK` (ADPCM encoder that simulates the game's decoder).
   - `gltf.py <arquivo.NGP> <saida.glb>`: static geometry with textures in binary glTF (Blender, three.js, web viewer). Posed monsters not yet: the skeleton and the animation curves still need evaluating (see the docstring).
-  - `lvl.py summary|objects|collision|points|mrs|patch`: a stage as the level editor sees it: placeable objects (handle, position,
+  - `lvl.py summary|objects|collision|points|mrs|peds|patch`: a stage as the level editor sees it: placeable objects (handle, position,
     states), the collision grid and paths (`--check` redoes every box and cell list by the disc's rules), the `PTS/*` points and the
     `.MRS` settings (`FORMATS.md`, "Stage objects", "Stage collision", "Stage points"). `Stage.footprint` gives the image ranges a
     deep copy of an object takes. `objects` ends a pickup's line with `on <handle>` when it rests on that object (`Stage.on_top`:
     inside the XY hull of one of its solid boxes, within 25 of the box's top; rooftop tanks and vents, and sidewalk items on a
     building's base). `patch <STAGE> <json>` applies a level patch (`MODS.md`, "Level patches") to the image the way the game hook
-    does, cuts the vehicle and pedestrian paths (`cut_nets`) and checks the collision of the result.
+    does, cuts the vehicle and pedestrian paths (`cut_nets`) and checks the collision of the result. `peds <STAGE>` lists the
+    pedestrian groups (handle, position, size) and the segment each one walks (`ped_groups`, `ped_bind`, `ped_report`).
   - `lvlglb.py <STAGE> <out.glb>`: the stage as a binary glTF for the level editor, one top-level node per `lvl.py` object (named by
     its handle, extras with kind, from, heading, states and `on`), its broken states as hidden `stateN` children, the rest under
     `rootN` (extras `ident`: 1 the world, 2 the sky). Meshes are shared between instances. The editor itself is

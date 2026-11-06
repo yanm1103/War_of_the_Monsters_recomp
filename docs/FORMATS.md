@@ -122,7 +122,7 @@ Id = high 14 bits of the node's first word. Nodes with opcode 0x1F and 0x27 are 
 | 2 | sky (`viewSetSkyEntry` x4) |
 | 18 | font texture |
 | 0x20..0x400 | monsters (`TheGame::MonsterParse`) |
-| 0xBB8 | pedestrian group (`PedGroup`, 0x190 bytes on the memory stack; byte `(head>>7)&0xFF` = size) |
+| 0xBB8 | pedestrian group (`PedGroup`, 0x190 bytes on the memory stack; byte `(head>>7)&0xFF` = size, 1..255): a root `TRANSLATE` (head `0xBB8<<18 \| size<<7 \| 3`, one child, a `NULL`) whose translation places the group; it walks link 0 of the `PathNet::ped` node nearest to it (3D distance, the first of equals). At most 20 groups (the game does not check) |
 | 0x7D0..0x897 | ignored here |
 | 0xFA0..0x11F7 | weapons (`Weapons::AddWeaponEpNode`) |
 | 0x11F8..0x12BF | effects: 0x11F8/0x1203 `HomingBug`, 0x11FC `OgreMace` ball, 0x11F9..0x11FA/0x11FD/0x11FE/0x11FF/0x1201 `SpecFxAnim` |

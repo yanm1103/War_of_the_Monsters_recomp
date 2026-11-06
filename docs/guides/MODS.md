@@ -571,6 +571,21 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   it. Pedestrians are cut only by walls (boxes rising 40 units above the sidewalk; curbs and low bases are walked over) and stop 15
   units from them: each segment keeps its free parts of 30 units or more, on both sides of the building. Flying paths (helicopter,
   saucer) stay. A deleted building leaves an empty lot with no path through it.
+- `peds` (at the top beside `objects`): the stage's pedestrians.
+  ```json
+  "peds": {
+    "segments": [{"a": [-300, 0, 0], "b": [300, 0, 0], "width": 5}],
+    "groups": [{"handle": "0xA00640", "from": [487.0, -50.0, 0.0], "pos": [480, 100, 0], "count": 30},
+               {"handle": "0xA00670", "from": [-29.6, -350.0, 0.0], "delete": true},
+               {"pos": [470, -200, 0], "count": 40}]
+  }
+  ```
+  `segments` replaces the stage's pedestrian net (`.PED`) with these sidewalks, at most 128 (`a` and `b` are the ends, `width` 1..255,
+  the lane is `width · 10` to each side). A group with `handle` and `from` (`python tools/lvl.py peds <FASE>`) is one of the disc's:
+  `pos` moves it, `count` (1..255) changes how many walk, `delete` takes it out. A group with no `handle` is new. `"off": true` takes out
+  every group of the disc. A stage holds at most 20 groups; one with no pedestrian net is refused. Each group walks the segment of the
+  node nearest to it, so moving a group can move it to another sidewalk: `lvl.py patch` prints the segment each group walks
+  (`walks 2-3 (725 long)`) and the segments nobody walks. Only `tools/lvl.py` applies `peds`; the game's hook ignores it.
 - Check before playing: `python tools/lvl.py patch CENTRAL mods/<mod>/levels/CENTRAL.json` applies the patch to the disc's image, prints
   what changed, each redone collision box, and checks the collision of the result (box rule and cell rule, `FORMATS.md`, "Stage
   collision"). An entry that does not match is skipped with a line saying why.
