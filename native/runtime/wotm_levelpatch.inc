@@ -120,6 +120,64 @@ std::string fmt(const char *f, ...)
     return buf;
 }
 
+// ------------------------------------------------------------------ planta dos objetos (lvl.py hull2d, seg_in_poly)
+struct P2 { double x, y; };
+struct Footprint { std::vector<P2> poly; double zmin, zmax; };
+// Casco convexo do XY, anti-horario (cadeia monotona)
+std::vector<P2> hull2d(const std::vector<V3> &pts)
+{
+    std::vector<P2> p;
+    for (const V3 &q : pts) p.push_back({std::round(q.v[0] * 1000.0) / 1000.0, std::round(q.v[1] * 1000.0) / 1000.0});
+    std::sort(p.begin(), p.end(), [](const P2 &a, const P2 &b) { return a.x < b.x || (a.x == b.x && a.y < b.y); });
+    p.erase(std::unique(p.begin(), p.end(), [](const P2 &a, const P2 &b) { return a.x == b.x && a.y == b.y; }), p.end());
+    if (p.size() < 3) return p;
+    auto half = [](auto first, auto last) {
+        std::vector<P2> out;
+        for (auto it = first; it != last; ++it)
+        {
+            const P2 &q = *it;
+            while (out.size() >= 2)
+            {
+                const P2 &a = out[out.size() - 2], &b = out.back();
+                if ((b.x - a.x) * (q.y - a.y) - (b.y - a.y) * (q.x - a.x) > 0) break;
+                out.pop_back();
+            }
+            out.push_back(q);
+        }
+        out.pop_back();
+        return out;
+    };
+    std::vector<P2> lo = half(p.begin(), p.end()), up = half(p.rbegin(), p.rend());
+    lo.insert(lo.end(), up.begin(), up.end());
+    return lo;
+}
+// Trecho [t0, t1] do segmento a->b (XY) dentro do poligono convexo anti-horario crescido de `margin` (cada aresta empurrada)
+bool segInPoly(const V3 &a, const V3 &b, const std::vector<P2> &poly, double margin, double &t0, double &t1)
+{
+    if (poly.size() < 3) return false;
+    t0 = 0.0, t1 = 1.0;
+    const double dx = b.v[0] - a.v[0], dy = b.v[1] - a.v[1];
+    for (size_t i = 0; i < poly.size(); ++i)
+    {
+        const P2 &p = poly[i], &q = poly[(i + 1) % poly.size()];
+        double nx = q.y - p.y, ny = p.x - q.x;
+        const double ln = std::hypot(nx, ny);
+        if (ln < 1e-9) continue;
+        nx /= ln, ny /= ln;
+        const double f = nx * (a.v[0] - p.x) + ny * (a.v[1] - p.y) - margin, g = nx * dx + ny * dy;   // dentro enquanto f + t*g <= 0
+        if (std::fabs(g) < 1e-12)
+        {
+            if (f > 0) return false;
+            continue;
+        }
+        const double t = -f / g;
+        if (g > 0) t1 = std::min(t1, t);
+        else t0 = std::max(t0, t);
+        if (t0 >= t1) return false;
+    }
+    return true;
+}
+
 // ------------------------------------------------------------------ a fase na RAM
 struct Stage
 {
@@ -135,6 +193,7 @@ struct Stage
     std::vector<uint32_t> freeNodes;
     std::map<std::string, int> stats;
     std::vector<std::string> log, pathLines;
+    std::vector<Footprint> footprints;   // cada caixa solida no lugar novo, para cortar as redes de carros e pedestres
 
     uint32_t u32(uint32_t a) const { uint32_t v; std::memcpy(&v, ram + (a & PS2_RAM_MASK), 4); return v; }
     uint16_t u16(uint32_t a) const { uint16_t v; std::memcpy(&v, ram + (a & PS2_RAM_MASK), 2); return v; }
@@ -390,7 +449,8 @@ struct Stage
     }
     // Caixa do caminho pela regra do disco (os 8 cantos da caixa local da folha levados ao mundo pelos TRANSLATE/ROTATE do caminho,
     // sem SCALE); false nos caminhos animados e nas folhas sem pontos
-    bool pathBox(const Path &p, Box &out) const
+    // Cantos de mundo da caixa local da folha, pela cadeia sem escala (lvl.py path_corners)
+    bool pathCorners(const Path &p, std::vector<V3> &w) const
     {
         if (p.nodes.empty()) return false;
         for (uint32_t n : p.nodes)
@@ -398,9 +458,14 @@ struct Stage
         Box lb;
         if (!aabb(leafPoints(p.nodes.back()), lb)) return false;
         const M4 m = chainMatrix(p.nodes, p.nodes.size() - 1, false);
-        std::vector<V3> w;
+        w.clear();
         for (const V3 &c : corners(lb)) w.push_back(xform(m, c));
-        return aabb(w, out);
+        return true;
+    }
+    bool pathBox(const Path &p, Box &out) const
+    {
+        std::vector<V3> w;
+        return pathCorners(p, w) && aabb(w, out);
     }
     std::set<int> cellsFor(const Box &b) const
     {
@@ -456,13 +521,15 @@ struct Stage
         const Path p = path(pa);
         Box bb;
         const char *how = "rule";
-        if (!pathBox(p, bb))
+        std::vector<V3> w;
+        if (!pathCorners(p, w))
         {
-            std::vector<V3> w;
+            w.clear();
             for (const V3 &c : corners(p.box)) w.push_back(xform(carry, c));
-            aabb(w, bb);
             how = "carried";
         }
+        aabb(w, bb);
+        if (!(u32(pa + 0x20) & 1)) footprints.push_back({hull2d(w), bb.mn.v[2], bb.mx.v[2]});
         for (int i = 0; i < 3; ++i) wf32(pa + 4 * i, bb.mn.v[i]), wf32(pa + 0xC + 4 * i, bb.mx.v[i]);
         const std::set<int> cs = cellsFor(bb);
         setCells(pa, cs);
@@ -790,6 +857,161 @@ struct Stage
     }
 };
 
+// ------------------------------------------------------------------ redes de carros e pedestres (lvl.py cut_nets)
+// Veiculos e pedestres andam na PathNet::fodder e na ::ped sem olhar a colisao. Elas ja estao prontas aqui (InitBeforeDbLoad vem
+// antes do LoadLevelFiles) e ninguem guarda ponteiro para elas ainda (os veiculos e os PedGroup nascem na travessia do dbInitDb).
+// Link de veiculo cuja faixa (largura*10 de cada lado) cruza uma caixa nova sai nos dois sentidos, como no PathNode::removePath; o
+// segmento de pedestre (dois nos ligados so um ao outro) fica com o maior trecho livre ou sai, e os nos de pedestre sem link saem
+// da lista (o PedGroup le o paths[0] do no mais perto sem olhar a contagem). Nos: u16 numNodes em +0, 0x30 cada a partir de +0x10.
+constexpr uint32_t kFodderNet = wotm::sym::x_7PathNet_fodder, kPedNet = wotm::sym::x_7PathNet_ped;
+constexpr double kPedMinLen = 30.0;
+struct NetLink { uint16_t node; uint8_t width, drop; };
+struct NetNode { std::array<uint8_t, 0x30> raw; V3 pos; uint8_t type; std::vector<NetLink> links; };
+
+std::vector<NetNode> readNet(const uint8_t *rdram, uint32_t net)
+{
+    uint16_t n;
+    std::memcpy(&n, rdram + net, 2);
+    std::vector<NetNode> out(std::min<uint16_t>(n, 256));
+    for (size_t i = 0; i < out.size(); ++i)
+    {
+        NetNode &d = out[i];
+        std::memcpy(d.raw.data(), rdram + net + 0x10 + 0x30 * i, 0x30);
+        float f[3];
+        std::memcpy(f, d.raw.data(), 12);
+        d.pos = {{f[0], f[1], f[2]}};
+        d.type = d.raw[0x10];
+        for (int j = 0; j < std::min<int>(d.raw[0x11], 6); ++j)
+        {
+            NetLink l;
+            std::memcpy(&l.node, &d.raw[0x12 + 4 * j], 2);
+            l.width = d.raw[0x14 + 4 * j], l.drop = d.raw[0x15 + 4 * j];
+            d.links.push_back(l);
+        }
+    }
+    return out;
+}
+void writeNet(uint8_t *rdram, uint32_t net, const std::vector<NetNode> &nodes)
+{
+    const uint16_t n = uint16_t(nodes.size());
+    std::memcpy(rdram + net, &n, 2);
+    for (size_t i = 0; i < nodes.size(); ++i)
+    {
+        std::array<uint8_t, 0x30> r = nodes[i].raw;
+        const float f[3] = {float(nodes[i].pos.v[0]), float(nodes[i].pos.v[1]), float(nodes[i].pos.v[2])};
+        std::memcpy(r.data(), f, 12);
+        r[0x11] = uint8_t(nodes[i].links.size());
+        for (size_t j = 0; j < nodes[i].links.size(); ++j)
+        {
+            std::memcpy(&r[0x12 + 4 * j], &nodes[i].links[j].node, 2);
+            r[0x14 + 4 * j] = nodes[i].links[j].width, r[0x15 + 4 * j] = nodes[i].links[j].drop;
+        }
+        std::memcpy(rdram + net + 0x10 + 0x30 * i, r.data(), 0x30);
+    }
+}
+
+std::vector<std::string> cutNets(uint8_t *rdram, const std::vector<Footprint> &fps)
+{
+    std::vector<std::string> log;
+    if (fps.empty()) return log;
+    auto covered = [&](const V3 &a, const V3 &b, double margin) {
+        std::vector<std::pair<double, double>> out;
+        for (const Footprint &fp : fps)
+        {
+            if (std::max(a.v[2], b.v[2]) < fp.zmin - 50.0 || std::min(a.v[2], b.v[2]) > fp.zmax) continue;
+            double t0, t1;
+            if (segInPoly(a, b, fp.poly, margin, t0, t1)) out.push_back({t0, t1});
+        }
+        return out;
+    };
+    auto linked = [](const NetNode &n, size_t k) {
+        return std::any_of(n.links.begin(), n.links.end(), [&](const NetLink &l) { return l.node == k; });
+    };
+    auto unlinkNodes = [](std::vector<NetNode> &nodes, size_t i, size_t k) {
+        auto drop = [](NetNode &n, size_t other) {
+            n.links.erase(std::remove_if(n.links.begin(), n.links.end(), [&](const NetLink &l) { return l.node == other; }), n.links.end());
+        };
+        drop(nodes[i], k), drop(nodes[k], i);
+    };
+
+    std::vector<NetNode> car = readNet(rdram, kFodderNet);
+    std::vector<std::pair<size_t, size_t>> cut;
+    for (size_t i = 0; i < car.size(); ++i)
+    {
+        if (car[i].type != 0 && car[i].type != 3) continue;   // 1 e 2 voam
+        for (const NetLink &l : car[i].links)
+            if (l.node < car.size() && (l.node > i || !linked(car[l.node], i)) && !covered(car[i].pos, car[l.node].pos, l.width * 10.0).empty())
+                cut.push_back({i, l.node});
+    }
+    for (const auto &[i, k] : cut)
+    {
+        unlinkNodes(car, i, k);
+        log.push_back(fmt("veiculos: link %zu-%zu cortado", i, k));
+    }
+    if (!cut.empty()) writeNet(rdram, kFodderNet, car);
+
+    std::vector<NetNode> ped = readNet(rdram, kPedNet);
+    bool pedChanged = false;
+    for (size_t i = 0; i < ped.size(); ++i)
+    {
+        const std::vector<NetLink> links = ped[i].links;
+        for (const NetLink &l : links)
+        {
+            const size_t k = l.node;
+            if (k >= ped.size() || (k < i && linked(ped[k], i))) continue;
+            const V3 a = ped[i].pos, b = ped[k].pos;
+            auto ivs = covered(a, b, l.width * 10.0);
+            if (ivs.empty()) continue;
+            const bool pair = ped[i].links.size() == 1 && ped[k].links.size() == 1 && ped[k].links[0].node == i;
+            std::sort(ivs.begin(), ivs.end());
+            double t = 0.0, g0 = 0.0, g1 = -1.0;
+            auto gap = [&](double s, double e) { if (e - s > g1 - g0) g0 = s, g1 = e; };
+            for (const auto &[t0, t1] : ivs)
+            {
+                if (t0 > t) gap(t, t0);
+                t = std::max(t, t1);
+            }
+            if (t < 1.0) gap(t, 1.0);
+            const double seg = std::sqrt((b.v[0] - a.v[0]) * (b.v[0] - a.v[0]) + (b.v[1] - a.v[1]) * (b.v[1] - a.v[1]) +
+                                         (b.v[2] - a.v[2]) * (b.v[2] - a.v[2]));
+            pedChanged = true;
+            if (pair && g1 > g0 && (g1 - g0) * seg >= kPedMinLen)
+            {
+                for (int j = 0; j < 3; ++j)
+                    ped[i].pos.v[j] = a.v[j] + g0 * (b.v[j] - a.v[j]), ped[k].pos.v[j] = a.v[j] + g1 * (b.v[j] - a.v[j]);
+                log.push_back(fmt("pedestres: segmento %zu-%zu encurtado para %.0f de %.0f", i, k, (g1 - g0) * seg, seg));
+            }
+            else
+            {
+                unlinkNodes(ped, i, k);
+                log.push_back(fmt("pedestres: segmento %zu-%zu tirado", i, k));
+            }
+        }
+    }
+    std::vector<size_t> keep;
+    for (size_t i = 0; i < ped.size(); ++i)
+        if (!ped[i].links.empty()) keep.push_back(i);
+    if (keep.size() < ped.size())
+    {
+        log.push_back(fmt("pedestres: %zu nos tirados, %zu ficam", ped.size() - keep.size(), keep.size()));
+        std::unordered_map<size_t, uint16_t> remap;
+        for (size_t j = 0; j < keep.size(); ++j) remap[keep[j]] = uint16_t(j);
+        std::vector<NetNode> out;
+        for (size_t i : keep)
+        {
+            NetNode n = ped[i];
+            std::vector<NetLink> ls;
+            for (NetLink l : n.links)
+                if (auto it = remap.find(l.node); it != remap.end()) l.node = it->second, ls.push_back(l);
+            n.links = ls;
+            out.push_back(n);
+        }
+        ped = out;
+    }
+    if (pedChanged) writeNet(rdram, kPedNet, ped);
+    return log;
+}
+
 std::string stageName(const uint8_t *rdram)
 {
     std::string s;
@@ -828,6 +1050,7 @@ void applyFor(uint8_t *rdram)
     {   // so a arena cheia chega aqui: o que ja foi escrito fica
         st.log.push_back(fmt("parou no meio: %s", e.what()));
     }
+    for (std::string &l : cutNets(rdram, st.footprints)) st.log.push_back(std::move(l));
     std::string summary;
     for (const auto &[k, n] : st.stats) summary += (summary.empty() ? "" : ", ") + k + " " + std::to_string(n);
     std::fprintf(stderr, "[fase] %s <- %s (%s): %s\n", name.c_str(), f->mod.c_str(), rel.c_str(), summary.empty() ? "nada mudou" : summary.c_str());

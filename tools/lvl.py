@@ -320,12 +320,19 @@ class Stage:
         """World box of a path by the disc's rule, or None when it cannot be redone (animated chain, no leaf points)."""
         if any(self.op(n) in (17, 25) for n in p.nodes):
             return None
+        c = self.path_corners(p)
+        return aabb(c) if c else None
+
+    def path_corners(self, p):
+        """World corners of a path's leaf box (the leaf's local box through the chain without scale), or None."""
+        if any(self.op(n) in (17, 25) for n in p.nodes):
+            return None
         lb = aabb(leaf_points(self.img, p.leaf))
         if not lb:
             return None
         m = chain_matrix(self.img, p.nodes[:-1], with_scale=False)
         corners = [(x, y, z) for x in (lb[0][0], lb[1][0]) for y in (lb[0][1], lb[1][1]) for z in (lb[0][2], lb[1][2])]
-        return aabb([ngp.xform(m, c) for c in corners])
+        return [ngp.xform(m, c) for c in corners]
 
     # --- placeable objects
     def objects(self):
@@ -471,6 +478,135 @@ class PatchError(Exception):
     pass
 
 
+def hull2d(pts):
+    """Convex hull of the XY of pts, counter-clockwise (monotone chain)."""
+    p = sorted(set((round(q[0], 3), round(q[1], 3)) for q in pts))
+    if len(p) < 3:
+        return p
+
+    def half(seq):
+        out = []
+        for q in seq:
+            while len(out) >= 2 and (out[-1][0] - out[-2][0]) * (q[1] - out[-2][1]) - \
+                    (out[-1][1] - out[-2][1]) * (q[0] - out[-2][0]) <= 0:
+                out.pop()
+            out.append(q)
+        return out[:-1]
+    return half(p) + half(p[::-1])
+
+
+def seg_in_poly(a, b, poly, margin):
+    """Part [t0, t1] of segment a->b (XY) inside the convex CCW polygon grown by `margin` (each edge pushed out), or None."""
+    if len(poly) < 3:
+        return None
+    t0, t1 = 0.0, 1.0
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    for i in range(len(poly)):
+        p, q = poly[i], poly[(i + 1) % len(poly)]
+        nx, ny = q[1] - p[1], p[0] - q[0]
+        ln = math.hypot(nx, ny)
+        if ln < 1e-9:
+            continue
+        nx, ny = nx / ln, ny / ln
+        f = nx * (a[0] - p[0]) + ny * (a[1] - p[1]) - margin     # inside while f + t*g <= 0
+        g = nx * dx + ny * dy
+        if abs(g) < 1e-12:
+            if f > 0:
+                return None
+            continue
+        t = -f / g
+        if g > 0:
+            t1 = min(t1, t)
+        else:
+            t0 = max(t0, t)
+        if t0 >= t1:
+            return None
+    return t0, t1
+
+
+GROUND_NODE_TYPES = (0, 3)      # PathNet node types that drive on the ground (car, tank/truck); 1 and 2 fly
+PED_MIN_LEN = 30.0              # a pedestrian segment shorter than this after clipping is removed
+
+
+def cut_nets(fps, nets):
+    """Vehicles and pedestrians walk PathNet::fodder and ::ped without looking at the collision. For each solid box placed by
+    the patch (`fps`), cut the vehicle links whose lane (width*10 to each side) crosses it, both ways (PathNode::removePath);
+    clip each pedestrian segment (a pair of nodes linked to each other) to its longest part outside, or remove it, and drop
+    the pedestrian nodes left with no link (PedGroup reads paths[0] of the nearest node without looking at the count).
+    nets: {"fodder"|"ped": [{"pos": [x, y, z], "type": t, "links": [[node, width, drop], ...]}]}, changed in place."""
+    log = []
+
+    def covered(a, b, margin):
+        out = []
+        for poly, zmin, zmax in fps:
+            if max(a[2], b[2]) < zmin - 50.0 or min(a[2], b[2]) > zmax:
+                continue
+            iv = seg_in_poly(a, b, poly, margin)
+            if iv:
+                out.append(iv)
+        return out
+
+    def unlink(nodes, i, k):
+        nodes[i]["links"] = [l for l in nodes[i]["links"] if l[0] != k]
+        nodes[k]["links"] = [l for l in nodes[k]["links"] if l[0] != i]
+
+    nodes = nets.get("fodder") or []
+    cut = []
+    for i, n in enumerate(nodes):
+        if n["type"] not in GROUND_NODE_TYPES:
+            continue
+        for k, w, _ in n["links"]:
+            if k < len(nodes) and (k > i or not any(l[0] == i for l in nodes[k]["links"])) and \
+                    covered(n["pos"], nodes[k]["pos"], w * 10.0):
+                cut.append((i, k))
+    for i, k in cut:
+        unlink(nodes, i, k)
+        log.append("vehicles: link %d-%d cut" % (i, k))
+
+    nodes = nets.get("ped") or []
+    for i, n in enumerate(nodes):
+        for k, w, _ in list(n["links"]):
+            if k >= len(nodes) or k < i and any(l[0] == i for l in nodes[k]["links"]):
+                continue
+            a, b = n["pos"], nodes[k]["pos"]
+            ivs = covered(a, b, w * 10.0)
+            if not ivs:
+                continue
+            pair = len(n["links"]) == 1 and [l[0] for l in nodes[k]["links"]] == [i]
+            gaps, t = [], 0.0
+            for t0, t1 in sorted(ivs):
+                if t0 > t:
+                    gaps.append((t, t0))
+                t = max(t, t1)
+            if t < 1.0:
+                gaps.append((t, 1.0))
+            g = max(gaps, key=lambda q: q[1] - q[0], default=None)
+            seg = math.dist(a, b)
+            if pair and g and (g[1] - g[0]) * seg >= PED_MIN_LEN:
+                na = [a[j] + g[0] * (b[j] - a[j]) for j in range(3)]
+                nb = [a[j] + g[1] * (b[j] - a[j]) for j in range(3)]
+                n["pos"], nodes[k]["pos"] = na, nb
+                log.append("pedestrians: segment %d-%d clipped to %.0f of %.0f" % (i, k, (g[1] - g[0]) * seg, seg))
+            else:
+                unlink(nodes, i, k)
+                log.append("pedestrians: segment %d-%d removed" % (i, k))
+    keep = [i for i, n in enumerate(nodes) if n["links"]]
+    if len(keep) < len(nodes):
+        log.append("pedestrians: %d nodes removed, %d left" % (len(nodes) - len(keep), len(keep)))
+        remap = {old: new for new, old in enumerate(keep)}
+        nodes[:] = [nodes[i] for i in keep]
+        for n in nodes:
+            n["links"] = [[remap[l[0]], l[1], l[2]] for l in n["links"] if l[0] in remap]
+    return log
+
+
+def net_from_points(pts):
+    """PathTool::exportPoints, read back from the file's records: position, node type, links {node, width, drop}."""
+    return [{"pos": list(p["pos"][:3]), "type": p["raw"][0x32],
+             "links": [[p["links"][j] & 0xFFFF, p["raw"][0x2C + j], p["raw"][0x33 + j]] for j in range(min(p["nlinks"], 6))]}
+            for p in pts]
+
+
 class LevelPatch:
     """A level patch (mods/<mod>/levels/<STAGE>.json, docs/MODS.md "Level patches") applied to the stage image the way
     native/runtime/wotm_levelpatch.inc applies it at the entry of dbInitDb: each entry names an object by its handle (the
@@ -487,6 +623,7 @@ class LevelPatch:
         self.free = []
         self.log = []
         self.redone = {}            # path -> (box, cells, how)
+        self.footprints = []        # (convex XY polygon, zmin, zmax) of every solid box in its new place
         self.stats = collections.Counter()
 
     # --- memory
@@ -556,10 +693,13 @@ class LevelPatch:
     def redo(self, pa, carry):
         """New box and cells of path pa: by the disc's rule when the leaf allows it, else its old box carried by `carry`."""
         p = Path(self.img, pa)
-        bb, how = self.st.path_box(p), "rule"
-        if bb is None:
+        wc, how = self.st.path_corners(p), "rule"
+        if wc is None:
             corners = [(x, y, z) for x in (p.min[0], p.max[0]) for y in (p.min[1], p.max[1]) for z in (p.min[2], p.max[2])]
-            bb, how = aabb([ngp.xform(carry, c) for c in corners]), "carried"
+            wc, how = [ngp.xform(carry, c) for c in corners], "carried"
+        bb = aabb(wc)
+        if not p.trigger:
+            self.footprints.append((hull2d(wc), bb[0][2], bb[1][2]))
         for i in range(3):
             self.wf32(pa + 4 * i, bb[0][i])
             self.wf32(pa + 0xC + 4 * i, bb[1][i])
@@ -948,6 +1088,10 @@ def cmd_patch(disc, name, path):
     print("%s: %s" % (st.name, ", ".join("%s %d" % kv for kv in sorted(lp.stats.items())) or "nothing changed"))
     for pa, (bb, n, how) in sorted(lp.redone.items()):
         print("  path %07x  box (%.1f %.1f %.1f)-(%.1f %.1f %.1f)  %d cells  %s" % (pa, *bb[0], *bb[1], n, how))
+    pts = stage_points(disc, st.name)
+    nets = {"fodder": net_from_points(pts.get("FOP", [])), "ped": net_from_points(pts.get("PED", []))}
+    for line in cut_nets(lp.footprints, nets):
+        print("  " + line)
     st.grid = Grid(st.img, st.grid.addr)
     print("after the patch:")
     return 0 if check_collision(st) else 1

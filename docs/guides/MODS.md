@@ -562,6 +562,11 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   inside them, and props; not pickups.
 - Objects that sit on a building (water tanks and vents on the roof are pickups of their own, `pickup` lines with a high Z) do not
   follow it: move or delete them in the same patch.
+- Traffic and pedestrians follow their own paths (`PTS/<FASE>.FOP` and `.PED`, `FORMATS.md`, "Path nets") and never look at the
+  collision, so the patch cuts those paths around each collision box in its new place (moved, turned and copied objects). A vehicle
+  link whose lane (`width · 10` to each side of the line) crosses a box is removed both ways, and vehicles turn back at the node before
+  it. A pedestrian segment keeps its longest free part, or is removed when less than 30 units are left. Flying paths (helicopter,
+  saucer) stay. A deleted building leaves an empty lot with no path through it.
 - Check before playing: `python tools/lvl.py patch CENTRAL mods/<mod>/levels/CENTRAL.json` applies the patch to the disc's image, prints
   what changed, each redone collision box, and checks the collision of the result (box rule and cell rule, `FORMATS.md`, "Stage
   collision"). An entry that does not match is skipped with a line saying why.
@@ -589,8 +594,11 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   plus copies of the original's paths. Every path through a changed handle gets its box redone (by the disc's rule, or the old box
   carried by the handle's change for animated chains and camera triggers) and its cell lists redone, and the `GROUP`s above the handle
   get their spheres grown to cover the object (the drawing culls a `GROUP` by its sphere). New nodes go to a 1 MB arena below the hooks'
-  last MB (`wotm_mods_hooks::kLevelArena`; loads above 32 MB stop at `kHighCeiling`). `tools/lvl.py` (`LevelPatch`) does the same in the
-  same order.
+  last MB (`wotm_mods_hooks::kLevelArena`; loads above 32 MB stop at `kHighCeiling`). Then `PathNet::fodder` and `PathNet::ped`, already
+  built by `InitBeforeDbLoad` and not yet held by any vehicle or `PedGroup`, are cut in RAM against the XY convex hull of each new
+  solid box (`cutNets`): vehicle links leave both nodes, as in `PathNode::removePath`, and pedestrian nodes left with no link leave the
+  list with the links renumbered (`PedGroup` reads `paths[0]` of the nearest node without looking at the count). `tools/lvl.py`
+  (`LevelPatch`, `cut_nets`) does the same in the same order, on the disc's `PTS` files.
 - **Log:** `[mods] N arquivo(s) de <mods> em <pasta>` at boot and, on the first search of each file, `[mods] MON/LIZARD0.TEX <-
   teste_togera (110080 bytes; disco 110080)`.
 - **Mod files bigger than the disc's:** what limits them is where each loader puts the file, not the disc size (stage and menu files
