@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=War of the Monsters (Linux Preview)
+GenericName=Fighting game
+Comment=Linux preview; requires your own NTSC-U game disc image
+Exec=wotm
+Icon=wotm
+Terminal=false
+Categories=Game;
+StartupNotify=true

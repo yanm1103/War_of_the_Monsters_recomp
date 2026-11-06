@@ -197,7 +197,7 @@ index 0000000..0947e18
 +    }
 +}
 diff --git a/ps2xRuntime/CMakeLists.txt b/ps2xRuntime/CMakeLists.txt
-index 589d768..650398d 100644
+index 589d768..f5d7b1c 100644
 --- a/ps2xRuntime/CMakeLists.txt
 +++ b/ps2xRuntime/CMakeLists.txt
 @@ -393,6 +393,7 @@ add_library(ps2_runtime STATIC
@@ -286,7 +286,7 @@ index 589d768..650398d 100644
  endif()
  
  if(PS2X_DEFAULT_BOOT_ELF_DEFINE)
-@@ -499,6 +526,7 @@ endif()
+@@ -499,13 +526,26 @@ endif()
  
  if(MSVC)
      target_compile_options(ps2EntryRunner PRIVATE /FS)
@@ -294,8 +294,9 @@ index 589d768..650398d 100644
  endif()
  
  target_include_directories(ps2_runtime PUBLIC
-@@ -506,6 +534,12 @@ target_include_directories(ps2_runtime PUBLIC
+     ${CMAKE_CURRENT_SOURCE_DIR}/include
      ${CMAKE_CURRENT_SOURCE_DIR}/src/lib/Kernel
++    ${CMAKE_CURRENT_SOURCE_DIR}/src/lib
  )
  
 +if(PS2X_RUNNER_DIR)   # os ps2_recompiled_*.h do jogo traduzido vem da mesma pasta, antes dos de include/ (que sao os do retail)
@@ -304,10 +305,15 @@ index 589d768..650398d 100644
 +    target_include_directories(${PS2X_GAME_CODE_TARGET} BEFORE PRIVATE "${PS2X_RUNNER_DIR}")
 +endif()
 +
++if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND GLFW_BUILD_X11)
++    find_package(X11 REQUIRED)
++    target_compile_definitions(ps2_runtime PRIVATE WOTM_X11_FULLSCREEN)
++    target_link_libraries(ps2_runtime PUBLIC X11::X11)
++endif()
  target_link_libraries(ps2_runtime PUBLIC ps2_host_backend ffmpeg ps2_iop)
  target_link_libraries(ps2EntryRunner
      PRIVATE
-@@ -557,6 +591,9 @@ endif()
+@@ -557,6 +597,9 @@ endif()
  if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
      EnableFastReleaseMode(ps2_runtime)
      EnableFastReleaseMode(ps2EntryRunner)
@@ -317,7 +323,7 @@ index 589d768..650398d 100644
  
      if(WIN32 AND NOT PS2X_SHOW_WINDOWS_CONSOLE)
          if(MSVC)
-@@ -608,3 +645,91 @@ endif()
+@@ -608,3 +651,92 @@ endif()
  install(DIRECTORY include/
      DESTINATION include
  )
@@ -331,6 +337,7 @@ index 589d768..650398d 100644
 +    message(FATAL_ERROR "WOTM_NATIVE_DIR nao definido: aponte para a pasta native/ do repo WoTM (-DWOTM_NATIVE_DIR=<repo>/native)")
 +endif()
 +target_include_directories(ps2_runtime PRIVATE "${WOTM_NATIVE_DIR}" "${WOTM_NATIVE_DIR}/runtime" "${CMAKE_BINARY_DIR}/wotm_gen")
++target_compile_definitions(ps2_runtime PRIVATE WOTM_NATIVE_DIR=\"${WOTM_NATIVE_DIR}\")
 +# main.cpp instala hooks por nome (wotm_syms.h; no runtime cobaia, o wotm_syms_nm.h de wotm_gen troca os enderecos pelos do ELF nmall)
 +target_include_directories(ps2EntryRunner PRIVATE "${WOTM_NATIVE_DIR}" "${CMAKE_BINARY_DIR}/wotm_gen")
 +# icone do executavel (e da janela: o recurso se chama GLFW_ICON)
@@ -410,13 +417,17 @@ index 589d768..650398d 100644
 +    ps2x_stage_ffmpeg_runtime_dlls(wotm)
 +endif()
 diff --git a/ps2xRuntime/cmake/ReleaseMode.cmake b/ps2xRuntime/cmake/ReleaseMode.cmake
-index 92ef0d5..8d7346f 100644
+index 92ef0d5..6d014de 100644
 --- a/ps2xRuntime/cmake/ReleaseMode.cmake
 +++ b/ps2xRuntime/cmake/ReleaseMode.cmake
-@@ -4,6 +4,22 @@ check_ipo_supported(RESULT IPO_SUPPORTED OUTPUT IPO_ERROR)
+@@ -4,6 +4,26 @@ check_ipo_supported(RESULT IPO_SUPPORTED OUTPUT IPO_ERROR)
  
  function(EnableFastReleaseMode TargetName)
      message("> Enabling optimization for: ${TargetName}")
++    if(PS2X_FAST_LINK AND NOT MSVC)
++        target_compile_options(${TargetName} PRIVATE -O2 -mavx2 -mbmi2 -mlzcnt -mpopcnt)
++        return()
++    endif()
 +    if(PS2X_FAST_LINK)
 +        # Build de desenvolvimento: mesma otimizacao por arquivo, mas sem otimizacao de programa inteiro (/GL, /LTCG, IPO).
 +        # O link cai de ~25 min para segundos/minutos; o codigo fica um pouco mais lento (sem inline entre arquivos).

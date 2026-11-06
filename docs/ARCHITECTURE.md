@@ -21,7 +21,7 @@ Direction: **port first**; the decomp only advances on the mod surface.
 - **Layout:** PS2Recomp is a **submodule** (`third_party/PS2Recomp`, branch `wotm` of the fork `yanm1103/PS2Recomp`, with the `sqrt` fix). Clone with `git clone --recurse-submodules`.
   The generated code goes in `recomp/` (in `.gitignore`): `recomp/retail/` (retail ELF) and `recomp/nm/` (ELF with the equivalents, test-subject runtime). The runtime reads that folder with `-DPS2X_GENERATED_DIR=<repo>/recomp/retail`.
   The fork's CMake receives `-DWOTM_NATIVE_DIR=<repo>/native` and compiles `native/runtime/`; the patch `tools/runtime_patch/wotm-runtime.patch` holds only the seams (CMake, `main.cpp`, taps on VIF1/VU1/memory, scheduler, pad).
-- **Runtime build:** `build_runtime.bat` at the root (no LTCG; `docs/guides/RUNTIME.md`). *Still manual:* generating `recomp/` (analyzer + `ps2_recomp` over the ELF). *Missing:* a single script that does this from the ISO.
+- **Setup from an ISO:** `tools/setup_runtime.ps1` (Windows) or `tools/setup_runtime.sh` (Linux) validates the retail ELF, applies the runtime patches, and generates `recomp/retail/`. The Windows setup also performs the first runtime build; on Linux, run `tools/build_runtime.sh` after setup. For incremental Windows builds, use `build_runtime.bat` (no LTCG; `docs/guides/RUNTIME.md`).
 - The recompiler needs the `SQRT.S`/`RSQRT.S` fix (PR https://github.com/ran-j/PS2Recomp/pull/277); without it, 108 + 76 game functions compute wrong results.
 
 ## Copyright and license

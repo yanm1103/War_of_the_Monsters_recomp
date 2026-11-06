@@ -2701,6 +2701,7 @@ static const Font &uiFont()
     if (!g_uiFontTried)
     {
         g_uiFontTried = true;
+#ifdef _WIN32
         void *mod = GetModuleHandleA(nullptr);
         void *res = FindResourceA(mod, "FONT_OSWALD", reinterpret_cast<const char *>(static_cast<uintptr_t>(10)));   // RT_RCDATA
         void *h = res ? LoadResource(mod, res) : nullptr;
@@ -2708,6 +2709,10 @@ static const Font &uiFont()
         const int size = res ? static_cast<int>(SizeofResource(mod, res)) : 0;
         if (data && size > 0)
             g_uiFont = LoadFontFromMemory(".ttf", data, size, 128, nullptr, 0);
+#else
+        const std::string path = wotm::assets::file("Oswald-Medium.ttf");
+        g_uiFont = LoadFontEx(path.c_str(), 128, nullptr, 0);
+#endif
         if (g_uiFont.texture.id)
         {
             GenTextureMipmaps(&g_uiFont.texture);

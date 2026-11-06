@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+appdir=${APPDIR:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)}
+if [ ! -x "$appdir/usr/bin/wotm" ]; then
+    printf '%s\n' 'WotM AppImage: missing usr/bin/wotm' >&2
+    exit 127
+fi
+export WOTM_ASSET_DIR="${WOTM_ASSET_DIR:-$appdir/usr/bin/assets}"
+exec "$appdir/usr/bin/wotm" "$@"

@@ -256,7 +256,7 @@ private:
                 else if ((tx + ty) & 1) { r = 196; g = 184; b = 160; }
                 else { r = 120; g = 104; b = 92; }
                 // um pouco de grao para nao ficar liso
-                const uint32_t n = (uint32_t(x * 73856093) ^ uint32_t(y * 19349663)) % 13;
+                const uint32_t n = (uint32_t(x) * 73856093u ^ uint32_t(y) * 19349663u) % 13;
                 r = std::min(255u, r + n); g = std::min(255u, g + n); b = std::min(255u, b + n);
                 px[size_t(y) * N + x] = r | (g << 8) | (b << 16) | 0xFF000000u;
             }

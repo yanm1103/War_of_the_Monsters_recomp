@@ -393,7 +393,7 @@ namespace wotm_custom
         const std::string host = wotm::mods::Registry::get().hostPath(rel);
         if (!host.empty())
         {
-            std::ifstream in(std::filesystem::u8path(host), std::ios::binary);
+            std::ifstream in(wotm::mods::pathFromUtf8(host), std::ios::binary);
             file.assign(std::istreambuf_iterator<char>(in), {});
         }
         else
