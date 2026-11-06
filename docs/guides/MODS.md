@@ -578,16 +578,17 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
 ### Level editor (`tools/level_editor/editor.py`)
 `python tools/level_editor/editor.py` opens the stage in 3D and writes the patch above. It is a local page (three.js, in
 `tools/level_editor/web/`) served by the script at `http://127.0.0.1:47197/` (`--port N` changes it; with the port taken by an
-editor already running, that one's window opens again; by something else, a free port): in a `pywebview` window when the module is installed
-(`pip install pywebview`), otherwise in Edge/Chrome app mode, or the default browser (`--browser`); `--serve` only serves. The window is
-in English, with a dark and a light theme (in the settings, the cog at the top right).
+editor already running, that one's page opens again; by something else, a free port), in the default browser. `--window` opens
+it in its own window instead (`pywebview` when installed, otherwise Edge/Chrome app mode); `--serve` only serves. The page is in English, with a dark and a light theme (in the settings, the cog at the top right).
 - **Top bar:** the stage, the mod (its `levels/<STAGE>.json` loads with the stage), **Undo** (Ctrl+Z), **Check** (`lvl.py patch` on the
   disc's stage: what changed, the cut vehicle and pedestrian paths, the collision check), **Save** (Ctrl+S; an empty patch removes the
   file) and **Test in game** (opens the game in the stage in training mode with Togera: `WOTM_MATCH=3,<stage>`,
   `WOTM_TRAINING=1`, `WOTM_MODS=<mods folder>`, windowed; with unsaved changes it asks to save first, since the game loads the
   file). The game's `[fase]` lines (what the patch did in the game, `ignorado` when it could not apply) come back to the log.
-- **View:** left drag orbits, right drag pans, the wheel zooms; a click selects the object under it (buildings, pickups, props). **W**
-  move gizmo, **E** turn gizmo (about the vertical only), **F** frames the selection, **Ctrl+D** copies it, **Del** deletes it, **Esc**
+- **View:** two cameras, **V** switches (the last one is remembered). Fly (the default): **W/A/S/D** move on the ground plane, **Q** up,
+  **E** down, **Z/C** turn, **X** resets the turn, **Shift** faster, right drag looks around, the wheel moves forward. Orbit: left
+  drag orbits, right drag pans, the wheel zooms. In both, a click selects the object under it (buildings, pickups, props), **G** move
+  gizmo, **R** turn gizmo (about the vertical only), **F** frames the selection, **Ctrl+D** copies it, **Del** deletes it, **Esc**
   deselects. The right panel takes position and heading by number, **Snap** (10 units, 15 degrees) and **Reset** (back to the disc's
   place, copies removed).
 - **Carry the objects on top** (on by default): moving, turning, copying, deleting or resetting a building does the same to the pickups

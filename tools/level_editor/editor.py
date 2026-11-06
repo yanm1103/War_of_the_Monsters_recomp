@@ -2,14 +2,14 @@
 """WotM level editor: a PC program that opens a stage in 3D, moves, turns, copies and deletes its objects and saves the level
 patch (docs/guides/MODS.md, "Level patches") into a mod; "Test" opens the game in that stage.
 
-  python tools/level_editor/editor.py [--browser | --serve] [--port N]
+  python tools/level_editor/editor.py [--window | --serve] [--port N]
 
---browser opens the default browser; --serve only serves (open the printed address yourself). The address is
+It opens in the default browser; --window opens its own window instead (pywebview when installed, otherwise Edge/Chrome
+app mode); --serve only serves (open the printed address yourself). The address is
 http://127.0.0.1:47197/ (--port changes it); when that port is taken by an editor already running, its window opens again,
 when by something else, a free port is used.
 
-The window is a local web page (web/, three.js) served by this script on 127.0.0.1; it opens in a pywebview window when the
-module is installed (pip install pywebview), otherwise in Edge/Chrome app mode or the default browser. Everything about the stage
+The window is a local web page (web/, three.js) served by this script on 127.0.0.1. Everything about the stage
 comes from tools/lvl.py (objects, patch, path cuts, collision check) and tools/lvlglb.py (the 3D scene, cached per user in
 %LOCALAPPDATA%/WotM/level_editor or ~/.cache/wotm_level_editor). Settings (disc, mods folder, game, theme) live in
 ~/.wotm_level_editor.json. Texts in English, like the mod kit.
@@ -310,8 +310,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(500, {"error": "%s: %s" % (type(e).__name__, e)})
 
 
-def open_window(url, force_browser):
-    if not force_browser:
+def open_window(url, window):
+    """The default browser, or with window its own window. True when that window ran here and is now closed."""
+    if window:
         try:
             import webview      # noqa: PLC0415 - optional
             webview.create_window("WotM Level Editor", url, width=1600, height=950)
@@ -362,14 +363,14 @@ def main(argv):
             url = "http://127.0.0.1:%d/" % port
             print("WotM level editor already running at", url)
             if "--serve" not in argv:
-                open_window(url, "--browser" in argv)
+                open_window(url, "--window" in argv)
             return 0
         print("port %d is taken: using a free one" % port)
         srv = Server(("127.0.0.1", 0), Handler)
     url = "http://127.0.0.1:%d/" % srv.server_address[1]
     print("WotM level editor at", url)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    if "--serve" not in argv and open_window(url, "--browser" in argv):
+    if "--serve" not in argv and open_window(url, "--window" in argv):
         return 0            # pywebview window closed
     try:
         while True:

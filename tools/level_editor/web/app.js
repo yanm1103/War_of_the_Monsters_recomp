@@ -63,9 +63,79 @@ function applyTheme(t) {
   renderer.setClearColor(getComputedStyle(document.documentElement).getPropertyValue('--view').trim());
 }
 
+// ------------------------------------------------------------------ camera: fly (WASD, default) or orbit; V switches
+// fly: W/A/S/D move on the ground plane, Q up, E down, Z/C turn, X resets the turn, Shift faster; right drag looks, the wheel
+// moves forward. orbit: OrbitControls (left drag orbits, right drag pans, wheel zooms).
+const fly = { on: true, yaw: 0, pitch: -0.6, yaw0: 0, pitch0: -0.6, keys: new Set(), last: performance.now(), speed: 900 };
+try { fly.on = localStorage.getItem('wotmLevelEditor.view') !== 'orbit'; } catch (e) { /* no storage: fly */ }
+camera.rotation.order = 'YXZ';
+
+function flyFromCamera() {   // yaw/pitch of where the camera looks now
+  const d = camera.getWorldDirection(new THREE.Vector3());
+  fly.yaw = Math.atan2(-d.x, -d.z);
+  fly.pitch = Math.asin(THREE.MathUtils.clamp(d.y, -1, 1));
+}
+function lookAtPoint(p) {
+  camera.lookAt(p);
+  flyFromCamera();
+}
+function setView(on) {
+  if (on) flyFromCamera();
+  else {   // orbit around what is in the middle of the view (or a point ahead)
+    const ray = new THREE.Raycaster(); ray.setFromCamera(new THREE.Vector2(0, 0), camera);
+    const hit = stageRoot ? ray.intersectObject(stageRoot, true).find((h) => h.object.visible) : null;
+    orbit.target.copy(hit ? hit.point : camera.position.clone().addScaledVector(camera.getWorldDirection(new THREE.Vector3()), 1000));
+  }
+  fly.on = on;
+  orbit.enabled = !on && !gizmo.dragging;
+  fly.keys.clear();
+  try { localStorage.setItem('wotmLevelEditor.view', on ? 'fly' : 'orbit'); } catch (e) { /* ignore */ }
+  $('hint').textContent = on
+    ? 'Fly view (V: orbit) · WASD move · Q up · E down · Z/C turn · X reset turn · Shift fast · Right drag: look · Wheel: forward · Click: select · G move · R turn · F focus · Ctrl+D copy · Del delete'
+    : 'Orbit view (V: fly) · Left drag: orbit · Right drag: pan · Wheel: zoom · Click: select · G move · R turn · F focus · Ctrl+D copy · Del delete';
+}
+function flyStep() {
+  const now = performance.now(), dt = Math.min(0.1, (now - fly.last) / 1000);
+  fly.last = now;
+  if (!fly.on) return;
+  const k = fly.keys, fast = k.has('shift') ? 3 : 1, step = fly.speed * fast * dt;
+  if (k.has('z')) fly.yaw += 1.6 * dt;
+  if (k.has('c')) fly.yaw -= 1.6 * dt;
+  const fwd = new THREE.Vector3(-Math.sin(fly.yaw), 0, -Math.cos(fly.yaw)), right = new THREE.Vector3(-fwd.z, 0, fwd.x);
+  const mv = new THREE.Vector3();
+  if (k.has('w')) mv.add(fwd);
+  if (k.has('s')) mv.sub(fwd);
+  if (k.has('d')) mv.add(right);
+  if (k.has('a')) mv.sub(right);
+  if (mv.lengthSq()) camera.position.addScaledVector(mv.normalize(), step);
+  if (k.has('q')) camera.position.y += step;
+  if (k.has('e')) camera.position.y -= step;
+  camera.rotation.set(fly.pitch, fly.yaw, 0);
+}
+let look = null;   // right drag in the fly view
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+canvas.addEventListener('pointerdown', (e) => {
+  if (fly.on && e.button === 2) { look = [e.clientX, e.clientY]; canvas.setPointerCapture(e.pointerId); }
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!look || !fly.on) return;
+  fly.yaw -= (e.clientX - look[0]) * 0.004;
+  fly.pitch = THREE.MathUtils.clamp(fly.pitch - (e.clientY - look[1]) * 0.004, -1.55, 1.55);
+  look = [e.clientX, e.clientY];
+});
+canvas.addEventListener('pointerup', (e) => { if (e.button === 2) look = null; });
+canvas.addEventListener('wheel', (e) => {
+  if (!fly.on) return;
+  e.preventDefault();
+  camera.position.addScaledVector(camera.getWorldDirection(new THREE.Vector3()), -e.deltaY * (e.shiftKey ? 6 : 2));
+}, { passive: false });
+window.addEventListener('blur', () => fly.keys.clear());
+window.addEventListener('keyup', (e) => fly.keys.delete(e.key.toLowerCase()));
+
 function loop() {
   requestAnimationFrame(loop);
-  orbit.update();
+  flyStep();
+  if (orbit.enabled) orbit.update();
   if (sel && selBox.visible) selBox.setFromObject(sel.node);
   renderer.render(scene, camera);
 }
@@ -212,14 +282,17 @@ function frameAll() {
   const c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3()).length();
   orbit.target.copy(c);
   camera.position.copy(c).add(new THREE.Vector3(0, size * 0.55, size * 0.55));
+  lookAtPoint(c);
+  fly.yaw0 = fly.yaw; fly.pitch0 = fly.pitch;
 }
 function focus(item) {
   const box = new THREE.Box3().setFromObject(item.node);
   if (box.isEmpty()) return;
   const c = box.getCenter(new THREE.Vector3()), r = Math.max(150, box.getSize(new THREE.Vector3()).length());
-  const dir = camera.position.clone().sub(orbit.target).normalize();
+  const dir = fly.on ? camera.getWorldDirection(new THREE.Vector3()).negate() : camera.position.clone().sub(orbit.target).normalize();
   orbit.target.copy(c);
   camera.position.copy(c).addScaledVector(dir, r * 1.4);
+  if (fly.on) lookAtPoint(c);
 }
 
 // ------------------------------------------------------------------ list and properties
@@ -292,7 +365,7 @@ function showProps() {
 // ------------------------------------------------------------------ editing
 let dragStart = null;
 gizmo.addEventListener('dragging-changed', (e) => {
-  orbit.enabled = !e.value;
+  orbit.enabled = !e.value && !fly.on;
   if (e.value && sel) {
     snapshot();
     dragStart = { inv: sel.node.matrixWorld.clone().invert(), att: carried().map((a) => [a, a.node.matrixWorld.clone()]) };
@@ -469,14 +542,19 @@ $('dlg').addEventListener('close', async () => {
   init(r);
 });
 window.addEventListener('keydown', (e) => {
-  if (e.target.matches('input, select, textarea')) return;
+  if (e.target.matches?.('input, select, textarea')) return;
   const k = e.key.toLowerCase();
   if (e.ctrlKey && k === 'z') { e.preventDefault(); undo(); }
   else if (e.ctrlKey && k === 's') { e.preventDefault(); post('save'); }
   else if (e.ctrlKey && k === 'd') { e.preventDefault(); duplicate(); }
   else if (k === 'delete') remove();
-  else if (k === 'w') setTool('translate');
-  else if (k === 'e') setTool('rotate');
+  else if (e.ctrlKey || e.altKey || e.metaKey) return;
+  else if (fly.on && 'wasdqezc'.includes(k) && k.length === 1) { e.preventDefault(); fly.keys.add(k); }
+  else if (fly.on && k === 'shift') fly.keys.add(k);
+  else if (fly.on && k === 'x') { fly.yaw = fly.yaw0; fly.pitch = fly.pitch0; }
+  else if (k === 'v') setView(!fly.on);
+  else if (k === 'g') setTool('translate');
+  else if (k === 'r') setTool('rotate');
   else if (k === 'f' && sel) focus(sel);
   else if (k === 'escape') select(null);
 });
@@ -496,5 +574,8 @@ function init(r) {
 }
 
 setTool('translate');
+orbit.enabled = false;
+setView(fly.on);
+if (new URLSearchParams(location.search).has('debug')) window.wotmDebug = { camera, fly, flyStep, setView };
 loop();
 api('/api/init').then(init).catch((e) => log(`init: ${e.message}`, 'err'));
