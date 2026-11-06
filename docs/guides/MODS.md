@@ -610,8 +610,8 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
 editor already running, that one's page opens again; by something else, a free port), in the default browser. `--window` opens
 it in its own window instead (`pywebview` when installed, otherwise Edge/Chrome app mode); `--serve` only serves; `?stage=METRO` in the address opens that stage first. Except with `--serve`, the program quits 10 s
 after its page closes (a reload of the page keeps it). The release zip carries it as `WotM_LevelEditor.exe`, next to `wotm.exe`
-(`tools/build_level_editor.ps1`), whose mods folder is the one the game reads. The page is in English, with a dark and a light
-theme (in the settings, the cog at the top right).
+(`tools/build_level_editor.ps1`), whose mods folder is the one the game reads. The page is in English, with a dark, a light and a
+System theme (the one the OS uses), in the settings (the cog at the top right).
 - **Top bar:** the stage, the mod (its `levels/<STAGE>.json` loads with the stage; picking another one asks before dropping unsaved
   changes, and the editor remembers it), **Undo** (Ctrl+Z) and **Redo** (Ctrl+Y or Ctrl+Shift+Z; their tooltips name the change),
   **Check** (`lvl.py patch` on the disc's stage: what changed, the cut vehicle and pedestrian paths, the pedestrian groups, the

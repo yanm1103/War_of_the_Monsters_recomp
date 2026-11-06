@@ -85,10 +85,15 @@ function resize() {
 }
 new ResizeObserver(resize).observe(canvas.parentElement);
 
+// Dark, Light or System (the OS's light or dark). localStorage keeps a copy for the first frame (the <script> in index.html).
+const THEMES = ['dark', 'light', 'system'];
 function applyTheme(t) {
+  if (!THEMES.includes(t)) t = 'dark';
   document.documentElement.dataset.theme = t;
+  store.set('theme', t);
   applyLook();
 }
+try { matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => applyLook()); } catch (e) { /* old engine */ }
 
 // Game look (L): the stage's fog, its background (the fog's color) and the sky. Off: the whole stage, no fog, the theme's background.
 let gameLook = store.get('gameLook', '0') === '1';
@@ -464,6 +469,7 @@ function showUndo() {
   $('undo').title = u ? `Undo: ${u.label} (Ctrl+Z)` : 'Nothing to undo (Ctrl+Z)';
   $('redo').disabled = !r;
   $('redo').title = r ? `Redo: ${r.label} (Ctrl+Y)` : 'Nothing to redo (Ctrl+Y)';
+  $('save').classList.toggle('dirty', dirty);
 }
 
 // ------------------------------------------------------------------ loading
@@ -596,6 +602,7 @@ function refreshList() {
   }
   $('count').textContent = `${shown.length} shown · ${group.length > 1 ? group.length + ' selected · ' : ''}${buildPatch().objects.length} changed`;
   document.title = `WotM Level Editor — ${stageName}${dirty ? ' *' : ''}`;
+  $('save').classList.toggle('dirty', dirty);
 }
 
 // mode: 'set' (only this one), 'toggle' (Shift/Ctrl click), 'add'
@@ -1352,7 +1359,7 @@ window.addEventListener('pagehide', () => { try { navigator.sendBeacon('/api/bye
 if (new URLSearchParams(location.search).has('debug')) {
   window.wotmDebug = { camera, fly, flyStep, setView, select, selectMany, items, listed, dropToGround, nudge, duplicate, remove,
                        undo, buildPatch, posOf, setLook, scene, renderer, gsLights, peds, selectPed, setPeds, addPed, pedFromInputs,
-                       redo, resetAll, applyPatch, frameAll, resetSel, gameLine, post, setRunning,
+                       redo, resetAll, applyPatch, frameAll, resetSel, gameLine, post, setRunning, applyTheme, refreshList,
                        get history() { return history; }, get future() { return future; }, get dirty() { return dirty; },
                        get modNow() { return modNow; }, get keep() { return keep; }, get game() { return game; },
                        get gizmoObject() { return gizmo.object || null; }, get gizmoMode() { return gizmo.getMode(); },

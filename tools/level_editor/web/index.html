@@ -1,10 +1,15 @@
 <!doctype html>
-<html lang="en" data-theme="dark" translate="no">
+<html lang="en" translate="no">
 <head>
 <meta charset="utf-8">
 <meta name="google" content="notranslate">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>WotM Level Editor</title>
+<script>
+// the first frame in the last theme (Settings keeps the real one; this copy only avoids opening dark and then turning light)
+try { const t = localStorage.getItem('wotmLevelEditor.theme');
+      if (t === 'dark' || t === 'light' || t === 'system') document.documentElement.dataset.theme = t; } catch (e) { /* no storage */ }
+</script>
 <link rel="stylesheet" href="style.css">
 <script type="importmap">
 {"imports": {"three": "./vendor/three.module.min.js", "three/addons/": "./vendor/addons/"}}
@@ -18,15 +23,15 @@
   <span class="sep"></span>
   <button id="undo" title="Undo (Ctrl+Z)" disabled><i class="ic" style="--ic:url(vendor/mdi/undo.svg)"></i>Undo</button>
   <button id="redo" class="icon" title="Redo (Ctrl+Y)" aria-label="Redo" disabled><i class="ic" style="--ic:url(vendor/mdi/redo.svg)"></i></button>
-  <button id="check" title="Apply the patch to the disc's stage and check the collision"><i class="ic" style="--ic:url(vendor/mdi/check-circle-outline.svg)"></i>Check</button>
-  <button id="save" title="Save mods/&lt;mod&gt;/levels/&lt;STAGE&gt;.json (Ctrl+S)"><i class="ic" style="--ic:url(vendor/mdi/content-save.svg)"></i>Save</button>
+  <button id="check" title="Apply the patch to the disc's stage and check the collision"><i class="ic" style="--ic:url(vendor/mdi/shield-check-outline.svg)"></i>Check</button>
+  <button id="save" title="Save mods/&lt;mod&gt;/levels/&lt;STAGE&gt;.json (Ctrl+S)"><i class="ic" style="--ic:url(vendor/mdi/content-save-outline.svg)"></i>Save</button>
   <button id="test" class="primary" title="Open the game on this stage in training mode, as Togera"><i class="ic" style="--ic:url(vendor/mdi/play.svg)"></i>Test in game</button>
   <button id="reload" disabled><i class="ic" style="--ic:url(vendor/mdi/refresh.svg)"></i>Reload in game</button>
   <button id="stop" class="icon" title="Close the game the editor opened" aria-label="Stop game" hidden><i class="ic" style="--ic:url(vendor/mdi/stop.svg)"></i></button>
   <span class="sep"></span>
-  <button id="hud" title="The fight HUD this stage carries: replace its pictures with PNGs in the mod"><i class="ic" style="--ic:url(vendor/mdi/view-dashboard-outline.svg)"></i>HUD</button>
+  <button id="hud" title="The fight HUD this stage carries: replace its pictures with PNGs in the mod"><i class="ic" style="--ic:url(vendor/mdi/monitor-dashboard.svg)"></i>HUD</button>
   <span class="grow"></span>
-  <button id="settings" class="icon" title="Settings"><i class="ic" style="--ic:url(vendor/mdi/cog.svg)"></i></button>
+  <button id="settings" class="icon" title="Settings" aria-label="Settings"><i class="ic" style="--ic:url(vendor/mdi/cog-outline.svg)"></i></button>
 </header>
 <main>
   <aside id="left">
@@ -114,7 +119,7 @@
 <dialog id="dlg">
   <form method="dialog">
     <h2>Settings</h2>
-    <label>Theme<select id="sTheme"><option value="dark">Dark</option><option value="light">Light</option></select></label>
+    <label>Theme<select id="sTheme"><option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option></select></label>
     <label>Game disc (the .iso, or an extracted folder with LVL/ and PTS/)<input id="sDisc" spellcheck="false" placeholder="C:\Games\War of the Monsters.iso"></label>
     <label>Mods folder<input id="sMods" spellcheck="false"></label>
     <label>Game (wotm.exe)<input id="sGame" spellcheck="false"></label>

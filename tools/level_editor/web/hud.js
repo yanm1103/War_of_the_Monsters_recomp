@@ -14,7 +14,7 @@ const css = `
 #hudDlg .hud-row { display: grid; grid-template-columns: 72px 72px 1fr; gap: 10px; align-items: center; padding: 8px 0;
   border-bottom: 1px solid var(--line); }
 #hudDlg .hud-thumb { width: 72px; height: 72px; object-fit: contain; border: 1px solid var(--line); border-radius: 3px;
-  background: repeating-conic-gradient(#808080 0 25%, #a0a0a0 0 50%) 0 0 / 12px 12px; }
+  background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 12px 12px; }
 #hudDlg .hud-thumb.none { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 11px;
   background: var(--panel2); text-align: center; }
 #hudDlg .hud-name { font-weight: 600; }
