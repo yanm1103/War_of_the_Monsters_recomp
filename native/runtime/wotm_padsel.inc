@@ -1319,6 +1319,9 @@ static void soloSync(uint8_t *rdram)
             continue;   // CPU ja guardada em g_xPick
         const bool done = rd32(rdram, pn[i].done) != 0;
         const int col = int(rd32(rdram, pn[i].col)), cur = int(rd32(rdram, pn[i].cur));
+        if (done && !g_soloDonePrev[i] && g_soloCustomPick[i] && g_soloCol[i] != col)   // diagnostico: o custom nao foi aplicado
+            std::fprintf(stderr, "[padsel] %s: custom NAO aplicado (coluna do jogo %d, guardada %d); o traje fica o do jogo\n",
+                         soloLabel(pn, n, i), col, g_soloCol[i]);
         if (done && !g_soloDonePrev[i] && g_soloCustomPick[i] && g_soloCol[i] == col)
         {
             // casa CUSTOM: o jogo confirmou a coluna procuradora; vale o tipo e o traje do custom, e a vaga dela volta a ficar livre
