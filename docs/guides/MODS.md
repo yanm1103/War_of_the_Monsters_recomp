@@ -585,8 +585,8 @@ it in its own window instead (`pywebview` when installed, otherwise Edge/Chrome 
   file) and **Test in game** (opens the game in the stage in training mode with Togera: `WOTM_MATCH=3,<stage>`,
   `WOTM_TRAINING=1`, `WOTM_MODS=<mods folder>`, windowed; with unsaved changes it asks to save first, since the game loads the
   file). The game's `[fase]` lines (what the patch did in the game, `ignorado` when it could not apply) come back to the log.
-- **View:** two cameras, **V** switches (the last one is remembered). Fly (the default): **W/A/S/D** move on the ground plane, **Q** up,
-  **E** down, **Z/C** turn, **X** resets the turn, **Shift** faster, right drag looks around, the wheel moves forward. Orbit: left
+- **View:** two cameras, **V** switches (the last one is remembered). Fly (the default): **W/S** move where the camera looks, **A/D**
+  sideways, **E** up, **Q** down, **Shift** faster, right drag looks around, the wheel moves forward. Orbit: left
   drag orbits, right drag pans, the wheel zooms. In both, a click selects the object under it (buildings, pickups, props), **G** move
   gizmo, **R** turn gizmo (about the vertical only), **F** frames the selection, **Ctrl+D** copies it, **Del** deletes it, **Esc**
   deselects. The right panel takes position and heading by number, **Snap** (10 units, 15 degrees) and **Reset** (back to the disc's

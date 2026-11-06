@@ -64,9 +64,8 @@ function applyTheme(t) {
 }
 
 // ------------------------------------------------------------------ camera: fly (WASD, default) or orbit; V switches
-// fly: W/A/S/D move on the ground plane, Q up, E down, Z/C turn, X resets the turn, Shift faster; right drag looks, the wheel
-// moves forward. orbit: OrbitControls (left drag orbits, right drag pans, wheel zooms).
-const fly = { on: true, yaw: 0, pitch: -0.6, yaw0: 0, pitch0: -0.6, keys: new Set(), last: performance.now(), speed: 900 };
+// fly: W/S move where the camera looks, A/D sideways, E up, Q down, Shift faster; right drag looks, the wheel moves forward. orbit: OrbitControls (left drag orbits, right drag pans, wheel zooms).
+const fly = { on: true, yaw: 0, pitch: -0.6, keys: new Set(), last: performance.now(), speed: 900 };
 try { fly.on = localStorage.getItem('wotmLevelEditor.view') !== 'orbit'; } catch (e) { /* no storage: fly */ }
 camera.rotation.order = 'YXZ';
 
@@ -91,7 +90,7 @@ function setView(on) {
   fly.keys.clear();
   try { localStorage.setItem('wotmLevelEditor.view', on ? 'fly' : 'orbit'); } catch (e) { /* ignore */ }
   $('hint').textContent = on
-    ? 'Fly view (V: orbit) · WASD move · Q up · E down · Z/C turn · X reset turn · Shift fast · Right drag: look · Wheel: forward · Click: select · G move · R turn · F focus · Ctrl+D copy · Del delete'
+    ? 'Fly view (V: orbit) · WASD move · E up · Q down · Shift fast · Right drag: look · Wheel: forward · Click: select · G move · R turn · F focus · Ctrl+D copy · Del delete'
     : 'Orbit view (V: fly) · Left drag: orbit · Right drag: pan · Wheel: zoom · Click: select · G move · R turn · F focus · Ctrl+D copy · Del delete';
 }
 function flyStep() {
@@ -99,17 +98,17 @@ function flyStep() {
   fly.last = now;
   if (!fly.on) return;
   const k = fly.keys, fast = k.has('shift') ? 3 : 1, step = fly.speed * fast * dt;
-  if (k.has('z')) fly.yaw += 1.6 * dt;
-  if (k.has('c')) fly.yaw -= 1.6 * dt;
-  const fwd = new THREE.Vector3(-Math.sin(fly.yaw), 0, -Math.cos(fly.yaw)), right = new THREE.Vector3(-fwd.z, 0, fwd.x);
+  const cp = Math.cos(fly.pitch);
+  const fwd = new THREE.Vector3(-Math.sin(fly.yaw) * cp, Math.sin(fly.pitch), -Math.cos(fly.yaw) * cp);   // where the camera looks
+  const right = new THREE.Vector3(Math.cos(fly.yaw), 0, -Math.sin(fly.yaw));
   const mv = new THREE.Vector3();
   if (k.has('w')) mv.add(fwd);
   if (k.has('s')) mv.sub(fwd);
   if (k.has('d')) mv.add(right);
   if (k.has('a')) mv.sub(right);
   if (mv.lengthSq()) camera.position.addScaledVector(mv.normalize(), step);
-  if (k.has('q')) camera.position.y += step;
-  if (k.has('e')) camera.position.y -= step;
+  if (k.has('e')) camera.position.y += step;
+  if (k.has('q')) camera.position.y -= step;
   camera.rotation.set(fly.pitch, fly.yaw, 0);
 }
 let look = null;   // right drag in the fly view
@@ -283,7 +282,6 @@ function frameAll() {
   orbit.target.copy(c);
   camera.position.copy(c).add(new THREE.Vector3(0, size * 0.55, size * 0.55));
   lookAtPoint(c);
-  fly.yaw0 = fly.yaw; fly.pitch0 = fly.pitch;
 }
 function focus(item) {
   const box = new THREE.Box3().setFromObject(item.node);
@@ -549,9 +547,8 @@ window.addEventListener('keydown', (e) => {
   else if (e.ctrlKey && k === 'd') { e.preventDefault(); duplicate(); }
   else if (k === 'delete') remove();
   else if (e.ctrlKey || e.altKey || e.metaKey) return;
-  else if (fly.on && 'wasdqezc'.includes(k) && k.length === 1) { e.preventDefault(); fly.keys.add(k); }
+  else if (fly.on && 'wasdqe'.includes(k) && k.length === 1) { e.preventDefault(); fly.keys.add(k); }
   else if (fly.on && k === 'shift') fly.keys.add(k);
-  else if (fly.on && k === 'x') { fly.yaw = fly.yaw0; fly.pitch = fly.pitch0; }
   else if (k === 'v') setView(!fly.on);
   else if (k === 'g') setTool('translate');
   else if (k === 'r') setTool('rotate');
