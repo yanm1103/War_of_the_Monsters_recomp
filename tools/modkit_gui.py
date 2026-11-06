@@ -747,7 +747,9 @@ class App:
             if not self.waveform(p, w, h):
                 c.create_text(w // 2, h // 2, text="sound", fill=DIM, font=("Segoe UI", 20))
             mb = modkit.BNK_RE.match(os.path.basename(p))
-            text += "\n%s" % ("Sound %d of bank %s.BNK" % (int(mb.group(2)), mb.group(1).upper()) if mb else "Music or voice (.VPK/.VAG)")
+            text += "\n%s" % ("Sound %d of bank %s.BNK%s" % (int(mb.group(2)), mb.group(1).upper(),
+                                                              ", sample %s only" % mb.group(3) if mb.group(3) is not None else "")
+                              if mb else "Music or voice (.VPK/.VAG)")
         if len(files) > 1:
             text += "\n(%d selected)" % len(files)
         self.pv_label.configure(text=text)

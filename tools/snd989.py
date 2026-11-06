@@ -11,9 +11,11 @@ De volta (WAV PCM 8/16/24/32 bits ou float para o ADPCM do SPU2; o codificador s
   python tools/snd989.py vpk musica.wav novo/CITYAMB.VPK --like disc/VAG/CITYAMB.VPK   # mesma taxa e volumes do original
   python tools/snd989.py vag efeito.wav novo/VICTORY.VAG [--loop]
   python tools/snd989.py bnk-replace disc/SND/SHELL_S.BNK 3 novo.wav novo/SHELL_S.BNK   # troca o som 3 do banco
+  python tools/snd989.py bnk-replace disc/SND/ROBOT_S.BNK 29 bipe.wav novo/ROBOT_S.BNK --sample 0   # so a 1a amostra do som 29
 O bnk-replace reamostra para a taxa em que o banco toca cada TONE, mantem o laco do original e corrige os offsets dos outros
-sons; num som de camadas (varios TONEs com atraso ou tom proprio), o WAV vira a unica camada. A reamostragem e linear: para
-musica, prefira reamostrar antes num editor de audio.
+sons; num som de camadas (varios TONEs com atraso ou tom proprio), o WAV vira a unica camada. Com --sample K troca so a K-esima
+amostra do som (na ordem dos TONEs) e as camadas ficam: cada TONE que a tocava toca o WAV com o seu atraso, tom e volume. A
+reamostragem e linear: para musica, prefira reamostrar antes num editor de audio.
 """
 import collections
 import os
@@ -328,13 +330,23 @@ def render_sound(b, i):
     return rate, [[int(round(v * scale)) for v in mix]]
 
 
-def bnk_replace(path, sound, wav, out):
+def sound_samples(s):
+    """Amostras distintas dos TONEs do som, na ordem em que aparecem (o K do bnk_replace com `sample`)."""
+    out = []
+    for g in sound_tones(s):
+        if g["sample"] not in out:
+            out.append(g["sample"])
+    return out
+
+
+def bnk_replace(path, sound, wav, out, sample=None):
     """Troca as amostras do som `sound` do banco pelo WAV (reamostrado para a taxa em que o banco toca cada TONE). Os outros
     sons ficam iguais; offsets das amostras, tamanho do chunk e os campos de tamanho do SBlk sao corrigidos. Um som de camadas
     (sound_kind "layered") vira uma camada so com o WAV em mono: o TONE da amostra mais longa, sem atraso, precedido so dos
     grains de altura e registradores que vinham antes dele (o volume de um TONE pode vir de um registrador). O LFO sai (fazia
     parte do efeito das camadas; numa gravacao, entorta o tom), e o WAV so fica em laco se o som original tocava ate o jogo
-    parar: um KEY_OFF na sequencia (o do crowd control do Ultra-V) encerrava o laco, e ele nao vem junto."""
+    parar: um KEY_OFF na sequencia (o do crowd control do Ultra-V) encerrava o laco, e ele nao vem junto. `sample` (K) troca so a
+    K-esima amostra do som (sound_samples) e mantem as camadas e a sequencia; o WAV fica em laco se essa amostra estava."""
     raw = bytearray(open(path, "rb").read())
     b = read_bnk(path)
     typ, nchunks = struct.unpack_from("<II", raw, 0)
@@ -357,6 +369,12 @@ def bnk_replace(path, sound, wav, out):
     if not targets:
         raise SystemExit("o som %d nao tem TONE" % sound)
     layered = sound_kind(b["sounds"][sound]) == "layered"
+    if sample is not None:
+        offs = sound_samples(b["sounds"][sound])
+        if not 0 <= sample < len(offs):
+            raise SystemExit("o som %d tem %d amostra(s); nao ha a %d" % (sound, len(offs), sample))
+        targets = [r for r in targets if r[2] == offs[sample]]
+        layered = False
     rate_in, chans = read_wav_any(wav)
     any_loop = None
     if layered:
@@ -580,7 +598,8 @@ def main():
         write_vag(out, rate, to_channels(chans, 1)[0], loop="--loop" in sys.argv)
         print("gravado", out)
     elif cmd == "bnk-replace":
-        bnk_replace(sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5])
+        k = int(sys.argv[sys.argv.index("--sample") + 1]) if "--sample" in sys.argv else None
+        bnk_replace(sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5], k)
     else:
         print(__doc__)
         return 1

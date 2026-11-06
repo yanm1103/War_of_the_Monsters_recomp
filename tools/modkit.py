@@ -33,7 +33,8 @@ O que cada tipo vira:
   troca a textura na hora de desenhar (native/wotm_texmods.hpp), em qualquer resolucao. Com --inject o pack tambem regrava o
   .TEX/.RTX (mesmo tamanho e cores da paleta atual), para a imagem do GS emulado (referencia da checagem VU1).
 - .VPK / .VAG -> <arquivo>.wav; volta pelo tools/snd989.py (mesma taxa e volumes do original).
-- .BNK -> <banco>_sNNN.wav, um por som com amostra; os editados voltam todos num banco so (snd989 bnk-replace).
+- .BNK -> <banco>_sNNN.wav, um por som com amostra; os editados voltam todos num banco so (snd989 bnk-replace). Um
+  <banco>_sNNN_aK.wav (feito a mao) troca so a K-esima amostra do som e mantem as camadas dele.
 - Malha e animacoes (skin ou custom) -> <PREFIXO><traje>.glb (tools/monglb.py --edit, precisa do numpy); voltam pelo
   tools/ngpmesh.py (malha) e tools/ngpanim.py (animacoes) como .NGP + .PTR, remontados do traje do disco com os dois .glb
   importados (.blender.json na pasta). O pack nao leva .glb/.blend (MESH_SRC).
@@ -64,7 +65,7 @@ FROZEN = bool(getattr(sys, "frozen", False))
 REPO = os.path.dirname(os.path.abspath(sys.executable)) if FROZEN else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEX_DIRS = ("LVL", "MON", "SHELL")
 PNG_RE = re.compile(r"^(.+?)(_rtx)?_t(\d+)(?:_sempaleta)?\.png$", re.I)   # _sempaleta: o export nao achou a paleta (cinza)
-BNK_RE = re.compile(r"^(.+)_s(\d+)\.wav$", re.I)
+BNK_RE = re.compile(r"^(.+)_s(\d+)(?:_a(\d+))?\.wav$", re.I)   # _aK: so a K-esima amostra de um som de camadas
 MESH_SRC = (".glb", ".gltf", ".blend", ".blend1")   # fonte da malha na pasta de trabalho (mesh export): o pack nao leva
 
 
@@ -550,7 +551,8 @@ def pack(disc, work, mods, mod, inject=False):
         if n.lower().endswith(".wav"):
             mb = BNK_RE.match(n)
             if mb and find_disc_ext(disc, bank_dir(d), mb.group(1), ".BNK"):
-                banks.setdefault((d, mb.group(1)), []).append((int(mb.group(2)), p))
+                k = int(mb.group(3)) if mb.group(3) is not None else -1
+                banks.setdefault((d, mb.group(1)), []).append(((int(mb.group(2)), k), p))
                 continue
             stem = os.path.splitext(n)[0]
             for ext in (".VPK", ".VAG"):
@@ -582,8 +584,12 @@ def pack(disc, work, mods, mod, inject=False):
         os.makedirs(os.path.dirname(out), exist_ok=True)
         tmp = out + ".tmp"
         cur = src
-        for i, wav in sorted(sounds):
-            snd989.bnk_replace(cur, i, wav, tmp)
+        whole = {i for (i, k), _ in sounds if k < 0}
+        for (i, k), wav in sorted(sounds):
+            if k >= 0 and i in whole:   # o WAV do som inteiro ja juntou as camadas
+                print("WARNING: %s skipped: %s_s%03d.wav replaces the whole sound" % (os.path.basename(wav), stem, i))
+                continue
+            snd989.bnk_replace(cur, i, wav, tmp, None if k < 0 else k)
             os.replace(tmp, out)
             cur = out
         print("bank %s.BNK: %d sound(s) replaced -> %s" % (stem.upper(), len(sounds), os.path.relpath(out, mods)))

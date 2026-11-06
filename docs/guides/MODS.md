@@ -211,7 +211,7 @@ python tools/modkit.py skin mesh export my_mod green          # the same for a s
 | `.TEX` | `<file>_tNNNN.png` (one per texture) | the PNG as is |
 | `.RTX` | `<file>_rtx_tNNNN.png` (portraits, screens, fonts) | the PNG as is |
 | `.VPK` / `.VAG` | `<file>.wav` | `.VPK`/`.VAG` (same rate and volumes as the original) |
-| `.BNK` | `<bank>_sNNN.wav` (one per sound with a sample; a sound made of layers, several TONEs each with its own delay, pitch and sample, comes out as the mono mix the game plays) | the bank with all edited sounds replaced (a sample another sound also uses: the edited one gets its own copy and the other keeps the original; a layered sound becomes a single layer with the WAV, full volume envelope, no delay and no LFO; it loops only if the original played until the game stopped it, not when a KEY_OFF in its sequence ended the loop) |
+| `.BNK` | `<bank>_sNNN.wav` (one per sound with a sample; a sound made of layers, several TONEs each with its own delay, pitch and sample, comes out as the mono mix the game plays) | the bank with all edited sounds replaced (a sample another sound also uses: the edited one gets its own copy and the other keeps the original; a layered sound becomes a single layer with the WAV, full volume envelope, no delay and no LFO; it loops only if the original played until the game stopped it, not when a KEY_OFF in its sequence ended the loop). A `<bank>_sNNN_aK.wav` made by hand replaces only the K-th distinct sample of that sound (in TONE order, from 0) and keeps its layers: every TONE that played it plays the WAV with its own delay, pitch and volume, looping if that sample looped; a `_sNNN.wav` of the same sound wins over it |
 | others | copy | copy |
 
 ## Textures as PNG
@@ -407,7 +407,10 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   difference from the action's first frame (`ngpgraft.LAYERS`). 160 (windup) ends in the aim pose, which the game holds until the shot;
   162 is the winddown. The missile leaves from locator `extra1` (0x816). Its sounds are in Robo-47's bank: a `ROBOT_S.BNK` in the
   folder is used for them (in Robo-47's bank slot while this monster's sounds play), otherwise they only sound with a Robo-47 in the
-  fight. Logs: `[mods] monstro CJ/monsters/cj: especial do robo-47 com as pecas dos arquivos proprios`, `[custom] SpecFxAnim copiada
+  fight. The kit builds it from `robot_s_sNNN.wav` files in the custom's work folder (`files/`), like the monster's own bank. The
+  special plays sound 2 (the head opening, when the special starts), 29 (the aim: beeps that speed up, sample 0, then a held tone,
+  sample 1, which loops; `robot_s_s029_a0.wav` and `_a1.wav` keep that sequence), 6 (launch), 7 (missile flight, a loop) and
+  5 (explosion). Logs: `[mods] monstro CJ/monsters/cj: especial do robo-47 com as pecas dos arquivos proprios`, `[custom] SpecFxAnim copiada
   0x127f (do 0x11ff) registrada para o dup 0`, `[custom] cj: animacao 191 do especial na copia 0x127f`, `[custom] cj: projetil 13 do
   especial com o modelo proprio (no 0x10a5)`.
 - `specialRoar`: `true` = the special starts with the monster's cry (`MonsterSound::playSignatureSound`, the fight entry cinematic's
