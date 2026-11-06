@@ -258,3 +258,114 @@ barra de status depois do Save, quando houver um jogo aberto por ele.
 2. Com a Fase 1: F10 no meio da luta deve dar o mesmo resultado sem abrir a pausa; mudar `reload.txt` (botão do editor) também; um pedido
    durante o `ARE YOU SURE?` ou durante um filme espera.
 3. JSON criado depois do boot (mod novo) e JSON apagado: a carga seguinte aplica ou loga "sem patch".
+
+## B, implementação (Fase 1)
+
+### O que mudou
+- `native/runtime/wotm_levelpatch.inc`: `findPatch` percorre as pastas de `Registry::get().dir()` a cada carga (sem `_`/`.`, ordem
+  por `Registry::key`, o último vence, `levels/` e `<FASE>.json` sem diferenciar maiúsculas; loga `[fase] LEVELS/<F>.JSON: B vence A`).
+  Sem arquivo: `[fase] <F>: sem patch`. JSON que não fecha é relido uma vez 200 ms depois. O gancho do `dbInitDb` fica instalado
+  sempre que `WOTM_LEVELPATCH > 0`. Conta as cargas (`g_loads`) e zera o F10 pendente a cada carga.
+- `native/runtime/wotm_levelreload.inc` (novo, incluído depois do `wotm_training.inc`; `wotmLevelReloadInstall` depois do
+  `dialogAdventure`, para o gancho do `displayDialog` ficar por fora do da pausa):
+  - pedido: F10 (`wotm_live.inc`, junto do F3, liga `g_wotmLevelReloadKey`) ou `WOTM_LEVELRELOAD=<arquivo>` (thread do host, mtime a
+    cada 250 ms; conteúdo novo `"<FASE> <n>"`; o conteúdo do boot não conta; conteúdo vazio, gravação pela metade, é relido);
+  - gancho na entrada do `rtTimeToReturnToShell`: com as condições do START no `rtPauseRT` (conferidas no asm: `shell+0x2BA4 == 0`,
+    `moviePlaying == 0`, `game+0x120458 == 0`, `game+0x120454 == 0`) mais `m_inSession == 1` e `gRtReturn` livre, faz o que o START
+    faz: `shell+0x2BA4 = 1` e `rtReturnToShell(2, 0)`. O próprio `rtTimeToReturnToShell` que roda em seguida já devolve 1 (contador 0 ->
+    -1), então o `rtMain` sai no fim deste quadro;
+  - gancho no `displayDialog`: o `displayDialog(0)` chamado de dentro do `EvaluateGameStatus` (ra na faixa dele) com a recarga pendente
+    não roda; faz as escritas do item 1 do `pauseLevelOverlay` (conferidas no asm: `+0x2B40`/`+0x2B44` <- `+0x2B48`, `+0x2B4C`/`+0x2B50`
+    = 0, `m_restart` 1, `m_inMenus` 1, `m_inSession` 0, `snd_StopAllSounds` se `StreamingSoundManager+0x109C == 0`) e do "sim" do
+    `areYouSure` (`+0x2BA4 = 0`, `gExitDialog = 0`, `g_inFight = false`) e volta. Pular o `displayDialog` inteiro também pula o que ele
+    faz na entrada e na saída para a pausa (`gHudEnable = 0`, `initPause` do som, `inputSetInputMode`, fade de saída, `+0x120460`):
+    a sessão nova refaz tudo isso (`Hud::initBefore`, `InitAfterDbLoad`). O som 0x4F de confirmação não toca;
+  - pedido que chegou antes de uma carga da fase (contador `g_loads`) cai: a carga já leu o JSON. Com a pausa aberta o `rtMain` não
+    roda e o pedido espera a volta à luta. Pedido de arquivo para outra fase: `[fase] recarga pedida (arquivo) para VEGAS, mas a fase e
+    CENTRAL: ignorada`. Pedido visto pelo `rtMain` sem quadro de luta por 10 s cai com uma linha.
+- F10 estava livre: o nativo usa F1, F3, F5, F6, F7, F8, F9, F11 (o F12 só no `viewer.cpp`), nada no runtime do PS2Recomp, e o painel
+  CONTROLS não aceita F1..F12. O GLFW não deixa o F10 abrir o menu da janela (`SC_KEYMENU`).
+- Docs: `NATIVE.md` (tabela: `WOTM_LEVELRELOAD`; `WOTM_LEVELPATCH=0` também desliga a recarga), `RUNTIME.md` (F10 na lista de
+  teclas), `MODS.md` ("Level patches": relido a cada carga, RESTART/RESET POSITIONS/F10/arquivo; "Under the hood": o mecanismo).
+  Comentário do topo do `wotm_pausemenu.inc` corrigido: o RESET POSITIONS recarrega a fase.
+
+### Testes no jogo (build_dev, `WOTM_MATCH=3,1 WOTM_TRAINING=1`, mods de teste na pasta de rascunho, teclas por `PostMessage`)
+Patch A = `0x101E340` de (688.2, 119.6, 0) para (688.2, 329.6, 0); B = para (688.2, 529.6, 0). `lvl.py patch`: A `moved 1, paths
+redone 1` e 4 links de veículo cortados; B `moved 1, paths redone 1, spheres grown 1` e o link 10-11.
+1. Boot com A: `[fase] CENTRAL <- A (LEVELS/CENTRAL.JSON): moved 1, paths redone 1` + 4 links. Na luta, JSON trocado por B e
+   `CENTRAL 1` no arquivo: `[fase] recarga pedida (arquivo): CENTRAL`, `[partida] rodada 1 terminou (rtMain devolveu 2)`, `LOAD`,
+   `[fase] CENTRAL <- A ...: moved 1, paths redone 1, spheres grown 1` + `link 10-11 cortado` (as contas do `lvl.py` para B), e a luta
+   volta (`[treino] intro pulada`).
+2. JSON apagado + `CENTRAL 2`: `[fase] CENTRAL: sem patch`.
+3. Mod novo `Zeta/Levels/central.JSON` (A) criado depois do boot, A de volta com B, `central 3`: `[fase] LEVELS/CENTRAL.JSON: Zeta
+   vence A`, `[fase] CENTRAL <- Zeta ...: moved 1, paths redone 1`.
+4. `VEGAS 4`: `[fase] recarga pedida (arquivo) para VEGAS, mas a fase e CENTRAL: ignorada`.
+5. F10 (`WM_KEYDOWN` VK_F10, scancode 0x44): `[fase] recarga pedida (F10): CENTRAL` e a carga. Com a janela minimizada o desenho
+   nativo não roda e o F10 não chega (o dono a tinha minimizado; restaurada sem ativar para o teste).
+6. PAUSA -> RESET POSITIONS -> X: `[treino] reset positions ...` e logo `[fase] CENTRAL <- Zeta ...`: o RESET POSITIONS recarrega a
+   fase (o teste 1 da lista acima).
+7. Pedido de arquivo com a pausa aberta: atendido ao voltar à luta (`rodada 3 terminou` pela pausa, `recarga pedida (arquivo)`,
+   `rodada 4 terminou`, a carga).
+8. JSON cortado (`{"objects":[{"handle":`) + pedido: `JSON invalido, patch ignorado: fim inesperado (linha 1)` depois da segunda
+   leitura; a fase carrega do disco.
+9. Segundo boot com o arquivo já com `CENTRAL 9` e `CENTRAL 10` escrito durante o boot: nenhuma recarga além da carga normal.
+Foto depois de uma recarga pelo F10 (`PrintWindow`, sem foco): `docs/screenshots/2026-11-06/2026-11-06_recarga_fase.png`.
+
+### Riscos que sobraram
+- Só testado no treino em CENTRAL com 1 jogador. Aventura (o RESTART restaura os continues), minigames 7/8/9 e 3-4 jogadores do
+  `wotm_modes4.inc` passam pelas mesmas escritas do RESTART do retail, mas não foram rodados.
+- O `+0x2BA4 = 1` do pedido dura um quadro (até o `displayDialog`); um gancho nativo que leia a pausa nesse quadro a vê ligada.
+- F10 só é lido enquanto o desenho nativo roda (janela não minimizada, `PS2X_SCENE=1`).
+- O tempo de uma recarga é o do `LOAD` da fase (alguns segundos; não medido com precisão).
+- Arquivos sobrepostos do disco (`PTS`, `.NGP`) editados depois do boot continuam com o tamanho do boot (`Registry::assignLsns`):
+  fora desta fase.
+
+## B, implementação: revisão independente
+
+### O que foi conferido no código
+- Escritas do `dialogHook` contra o asm de `game/ShellFinished` (`pauseLevelOverlay`, item 1, e o "sim" do `areYouSure`): batem
+  (`+0x2B40`/`+0x2B44` <- `+0x2B48`, `+0x2B4C`/`+0x2B50` = 0, `+0x2BA8` = 1, `+0x2BD0` = 1, `+0x2BCC` = 0, `snd_StopAllSounds` com
+  `game+0x1204C0+0x109C == 0`). As que ficam de fora só servem ao `areYouSure` (próximo diálogo 0x10, `calledFrom`,
+  `gCurrentMenuSelection`). `shellInfo`/`shellGame` são os objetos (o asm lê os ponteiros `shell`/`game`), como no `wotm_pausemenu.inc`.
+- Condições do `fightFrame` contra o `rtPauseRT`: as mesmas (`+0x2BA4`, `moviePlaying`, `game+0x120458`, `game+0x120454`).
+  `rtReturnToShell(2, 0)`: contador 0, o `rtTimeToReturnToShell` original devolve 1 no mesmo quadro.
+- `EvaluateGameStatus(2)`: chama `displayDialog(0)` logo na entrada, em qualquer modo (antes da tabela por modo), então o
+  `g_pending` não fica esperando em modo nenhum; o `ra` cai na faixa conferida. Os ganchos do `wotm_modes4.inc`/`wotm_split4.inc`
+  que chamam o `displayDialog` só o fazem com r = 1.
+- O que o `displayDialog` inteiro faria e fica pulado: zera `g_frame` na entrada; `initPause` do som e `gUseUnifiedView`
+  (equilibrados pela própria saída); na saída, com `m_inSession == 0` e `game+0x1204C0+0x109C == 1`, zera esse campo e devolve os
+  `snd_SetMasterVolume` de `shell+0x2A30/0x2A34`. Com o campo em 1 na hora do pedido, a recarga não para os sons nem faz essa volta.
+  Não acontece no treino (os testes passam); não sei em que momento da luta o campo vale 1.
+- Threads: `g_wotmLevelReloadKey` é atômico; `g_fileStage`/`g_fileLoads` vão sob `g_mu`; o resto só é lido na thread do EE. O
+  `g_loads` sobe antes de o JSON ser lido, então um pedido não se perde: no pior caso (pedido visto entre o `++g_loads` e a leitura)
+  vem uma recarga a mais.
+- Linux: só `std::filesystem`, `std::thread`, `std::mutex`, `std::chrono`; nenhuma API Win32 no diff.
+- `python tools/wotm_env.py`: 187 de 187. `python tools/doclint.py` nas linhas novas (índice temporário com `git add` dos quatro
+  `.md`, sem tocar no índice real): limpo.
+
+### Testes no jogo (wotm.exe do build_dev de 15:54, mais novo que os fontes; `WOTM_MONITOR=1 WOTM_MUTE=1`, janela 720)
+Mod `RevA/levels/CENTRAL.json` na pasta de rascunho; `reload.txt` com `CENTRAL 0` antes do boot; JSON e `reload.txt` gravados por
+`.tmp` + `os.replace`.
+1. Treino (`WOTM_MATCH=3,1`): `CENTRAL 1` escrito 1,5 s depois de abrir, antes da carga: `recarga pedida (arquivo) antes da ultima
+   carga da fase: ja atendida`, e 6 s de luta sem outra carga (o jogo não trava nem recarrega). JSON -> B + `CENTRAL 2`: `recarga
+   pedida (arquivo): CENTRAL`, `rodada 1 terminou (rtMain devolveu 2)`, `CENTRAL <- RevA ...: moved 1, paths redone 1, spheres grown
+   1` + `link 10-11 cortado` (as contas do `lvl.py patch` para B). `CENTRAL 3` escrito logo depois de `recarga pedida`, durante a
+   carga: cai como `ja atendida`. JSON -> A + `CENTRAL 4` e `CENTRAL 5` 0,6 s depois: uma recarga só (os 4 links de A de novo), o 5
+   cai. Três cargas no total, jogo vivo no fim.
+2. `WOTM_LEVELPATCH=0`: `patches de fase desligados`, nenhuma linha de recarga, o pedido na luta não faz nada.
+3. Pasta de mods vazia: `CENTRAL: sem patch` nas duas cargas; a recarga pelo arquivo funciona do mesmo jeito.
+4. Versus sem treino (`WOTM_MATCH=3,1,1`, com a intro da luta): pedido 0,6 s depois da carga, durante a intro: atendido ali mesmo
+   (as condições do START valem na intro), e a carga seguinte aplica B.
+Logs: `rev/game_*.log` e `rev/notes_*.txt` na pasta de rascunho da sessão.
+
+### O que sobrou da revisão
+- Um pedido que a thread do EE já viu e que espera mais de 10 s sem quadro de luta cai (`kExpireMs`). O `MODS.md` diz que ele espera
+  o filme ou o diálogo acabar e não fala desse limite. Caso raro: F10 no mesmo quadro em que o START abre a pausa, e a pausa fica
+  aberta mais de 10 s.
+- O `reload.txt` com o mesmo conteúdo da última vez é ignorado. Se o editor reiniciar o contador com o jogo aberto, o primeiro pedido
+  pode repetir o texto anterior; vale usar a hora no lugar do contador. Gravar sem `os.replace` pode deixar a thread ler um nome
+  cortado, que cai como "outra fase".
+- `[fase] <F>: sem patch` sai agora em toda carga de fase de qualquer jogador, mesmo sem mods.
+- A lista de teclas do topo do `NATIVE.md` (F3, F11, F1) não tem o F10; só o `RUNTIME.md` o lista.
+- `MODS.md`, "Level patches": "Three ways reload it" está sem o "to".
+- Não testado aqui: aventura, coop, minigames, 3 e 4 jogadores, F10 de verdade (só o arquivo-sinal) e um pedido durante o agarrão.

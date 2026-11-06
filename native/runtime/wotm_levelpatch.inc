@@ -6,15 +6,21 @@
 // as mesmas contas, e confere a colisao do resultado. Os nos novos (ROTATE no lugar de um TRANSLATE que gira, GROUP que segura o
 // original e as copias, copias da alca, do INTERACTIVE_STATE e do DESTRUCTIBLE, caminhos de colisao e nos de lista das celulas) vao
 // para a arena de 1 MB abaixo do MB dos ganchos (wotm_mods_hooks::kLevelArena), refeita a cada carga.
+// O JSON e procurado e lido a cada carga da fase (findPatch): o editor grava e a recarga (wotm_levelreload.inc, RESTART) ja o pega.
 // WOTM_LEVELPATCH=0 desliga; =2 loga cada caminho refeito (a mesma linha do lvl.py patch).
 #include <array>
+#include <chrono>
 #include <cstdarg>
+#include <filesystem>
 #include <fstream>
+#include <thread>
 #include <map>
 #include <set>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
+
+extern std::atomic<bool> g_wotmLevelReloadKey;   // wotm_levelreload.inc: F10 pede a recarga da fase
 
 namespace wotm_levelpatch
 {
@@ -1053,6 +1059,8 @@ std::vector<std::string> cutNets(uint8_t *rdram, const std::vector<Footprint> &f
     return log;
 }
 
+#include "wotm_levelpeds.inc"
+
 std::string stageName(const uint8_t *rdram)
 {
     std::string s;
@@ -1060,20 +1068,77 @@ std::string stageName(const uint8_t *rdram)
     return s;
 }
 
+// <mod>/levels/<FASE>.json procurado agora, a cada carga (um mod ou arquivo criado ou apagado depois do boot vale): as pastas de
+// Registry::dir() como no scan (sem '_'/'.' no comeco, em ordem de Registry::key, o ultimo vence), sem olhar maiusculas
+struct Found { std::filesystem::path host; std::string mod; };
+std::filesystem::path childNoCase(const std::filesystem::path &dir, const std::string &name)
+{
+    std::error_code ec;
+    for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec))
+        if (Registry::key(it->path().filename().string()) == Registry::key(name)) return it->path();
+    return {};
+}
+bool findPatch(const std::string &name, Found &out)
+{
+    namespace fs = std::filesystem;
+    const fs::path &dir = Registry::get().dir();
+    std::error_code ec;
+    if (dir.empty() || !fs::is_directory(dir, ec)) return false;
+    std::vector<fs::path> mods;
+    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec))
+    {
+        const std::string n = it->path().filename().string();
+        if (!n.empty() && n[0] != '_' && n[0] != '.' && it->is_directory(ec)) mods.push_back(it->path());
+    }
+    std::sort(mods.begin(), mods.end(), [](const fs::path &a, const fs::path &b) { return Registry::key(a.filename().string()) < Registry::key(b.filename().string()); });
+    bool any = false;
+    for (const fs::path &m : mods)
+    {
+        const fs::path lv = childNoCase(m, "levels");
+        if (lv.empty()) continue;
+        const fs::path f = childNoCase(lv, name + ".json");
+        if (f.empty() || !fs::is_regular_file(f, ec)) continue;
+        if (any) std::fprintf(stderr, "[fase] LEVELS/%s.JSON: %s vence %s\n", name.c_str(), m.filename().string().c_str(), out.mod.c_str());
+        out = {f, m.filename().string()};
+        any = true;
+    }
+    return any;
+}
+
 void applyFor(uint8_t *rdram)
 {
     const std::string name = stageName(rdram);
     if (name.empty()) return;
     const std::string rel = "LEVELS/" + name + ".JSON";
-    const wotm::mods::File *f = Registry::get().find(rel);
-    if (!f) return;
-    std::ifstream in(f->host, std::ios::binary);
-    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    Found f;
+    static std::string s_lastPatched;   // fase cuja ultima carga teve patch: "sem patch" so diz algo nela (ou com WOTM_LEVELPATCH=2)
+    if (!findPatch(name, f))
+    {
+        if (g_verbose >= 2 || s_lastPatched == name) std::fprintf(stderr, "[fase] %s: sem patch\n", name.c_str());
+        s_lastPatched.clear();
+        return;
+    }
+    s_lastPatched = name;
     json::Value v;
     std::string err;
-    if (!json::parse(text, v, &err) || v.type != json::Value::Obj)
+    // O editor pode estar gravando o arquivo agora: um JSON que nao fecha e lido de novo uma vez, um pouco depois
+    for (int attempt = 0;; ++attempt)
     {
-        std::fprintf(stderr, "[fase] %s (%s): JSON invalido, patch ignorado: %s\n", rel.c_str(), f->mod.c_str(), err.c_str());
+        std::ifstream in(f.host, std::ios::binary);
+        if (!in)
+        {
+            std::fprintf(stderr, "[fase] %s: sem patch (%s sumiu)\n", name.c_str(), f.host.string().c_str());
+            return;
+        }
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        err.clear();
+        if (json::parse(text, v, &err) && v.type == json::Value::Obj) break;
+        if (attempt == 0)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            continue;
+        }
+        std::fprintf(stderr, "[fase] %s (%s): JSON invalido, patch ignorado: %s\n", rel.c_str(), f.mod.c_str(), err.c_str());
         return;
     }
     Stage st{rdram};
@@ -1091,22 +1156,42 @@ void applyFor(uint8_t *rdram)
     {   // so a arena cheia chega aqui: o que ja foi escrito fica
         st.log.push_back(fmt("parou no meio: %s", e.what()));
     }
+    std::vector<uint32_t> pedsMade;
+    try
+    {
+        pedsMade = applyPeds(st, rdram, v);
+    }
+    catch (const PatchError &e)
+    {   // so a arena cheia chega aqui
+        st.log.push_back(fmt("pedestres: parou no meio: %s", e.what()));
+    }
     for (std::string &l : cutNets(rdram, st.footprints)) st.log.push_back(std::move(l));
+    if (v.get("peds") || g_verbose >= 2)
+        for (std::string &l : pedReport(st, rdram, pedsMade)) st.log.push_back(std::move(l));
     std::string summary;
     for (const auto &[k, n] : st.stats) summary += (summary.empty() ? "" : ", ") + k + " " + std::to_string(n);
-    std::fprintf(stderr, "[fase] %s <- %s (%s): %s\n", name.c_str(), f->mod.c_str(), rel.c_str(), summary.empty() ? "nada mudou" : summary.c_str());
+    std::fprintf(stderr, "[fase] %s <- %s (%s): %s\n", name.c_str(), f.mod.c_str(), rel.c_str(), summary.empty() ? "nada mudou" : summary.c_str());
     for (const std::string &l : st.log) std::fprintf(stderr, "[fase]   %s\n", l.c_str());
     if (g_verbose >= 2)
         for (const std::string &l : st.pathLines) std::fprintf(stderr, "[fase]   %s\n", l.c_str());
     std::fprintf(stderr, "[fase]   antes: %s\n[fase]   depois: %s\n", before.c_str(), st.check().c_str());
 }
 
+// Cargas da fase desde o boot, contadas antes de o JSON ser lido: um pedido de recarga (wotm_levelreload.inc) feito antes dela ja foi
+// atendido por ela
+std::atomic<unsigned> g_loads{0};
+
 void dbInitDbHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
     if (ctx->pc == kDbInitDb)
     {
         const uint32_t ra = GPR_U32(ctx, 31);
-        if (ra >= kLoadLevelFiles && ra < kLoadLevelFiles + kLoadLevelFilesSize) applyFor(rdram);
+        if (ra >= kLoadLevelFiles && ra < kLoadLevelFiles + kLoadLevelFilesSize)
+        {
+            ++g_loads;
+            g_wotmLevelReloadKey.store(false);   // F10 de antes desta carga (no menu, durante o LOAD): ja atendido
+            applyFor(rdram);
+        }
     }
     g_orig(rdram, ctx, runtime);
 }
@@ -1121,14 +1206,10 @@ void wotmLevelPatchInstall(PS2Runtime &runtime)
         std::fprintf(stderr, "[fase] patches de fase desligados (WOTM_LEVELPATCH=0)\n");
         return;
     }
-    int n = 0;
     for (const auto &[rel, f] : Registry::get().files())
         if (rel.rfind("LEVELS/", 0) == 0 && rel.size() > 5 && rel.substr(rel.size() - 5) == ".JSON")
-        {
             std::fprintf(stderr, "[fase] patch %s (%s)\n", rel.c_str(), f.mod.c_str());
-            ++n;
-        }
-    if (!n) return;   // sem patch: nenhum gancho
+    // o gancho fica mesmo sem patch no boot: o JSON e procurado a cada carga (findPatch)
     if (!(g_orig = runtime.lookupFunction(kDbInitDb)))
     {
         std::fprintf(stderr, "[fase] dbInitDb sem funcao no runtime: patches de fase desligados\n");

@@ -120,6 +120,8 @@ WotmFreeCamPose g_wotmFreeCamPose;
 #include "wotm_elimcostume.inc"
 // Modo treino (item 9): esferas dos golpes, dano exato e boneco (WOTM_TRAINING, menu F2)
 #include "wotm_training.inc"
+// Recarga da fase no meio da luta (F10, WOTM_LEVELRELOAD): o patch da fase e relido
+#include "wotm_levelreload.inc"
 // Exercito nas lutas versus (opcao ARMY): tanques, caminhoes e helicopteros da fase em levas
 #include "wotm_army.inc"
 // Log das acoes da IA (WOTM_AILOG)
@@ -3120,6 +3122,7 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
     wotmSkinsInstall(runtime);   // por ultimo: embrulha os ganchos do SetPlayerMonster/SetAIMonster (split4, WOTM_AIVSAI)
     if (g_matchMode == 1 && g_matchLevel >= 0 && (g_origDialogAdventure = runtime.lookupFunction(wotm::fn::displayDialog__Fi)))
         runtime.registerFunction(wotm::fn::displayDialog__Fi, &dialogAdventure);   // depois do da pausa (wotm_pausemenu.inc)
+    wotmLevelReloadInstall(runtime);   // depois dos da pausa e do dialogAdventure: o displayDialog dela fica por fora
     wotmCustomInstall(runtime);  // depois das skins: embrulha o SetAIMonster delas
     wotmElimCostumeInstall(runtime);   // depois das skins e dos customs: o SetPlayerMonster daqui fica por fora
     wotmArmyInstall(runtime);   // antes do treino: o takeHit dele fica por fora

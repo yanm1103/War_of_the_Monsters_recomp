@@ -585,12 +585,24 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   `pos` moves it, `count` (1..255) changes how many walk, `delete` takes it out. A group with no `handle` is new. `"off": true` takes out
   every group of the disc. A stage holds at most 20 groups; one with no pedestrian net is refused. Each group walks the segment of the
   node nearest to it, so moving a group can move it to another sidewalk: `lvl.py patch` prints the segment each group walks
-  (`walks 2-3 (725 long)`) and the segments nobody walks. Only `tools/lvl.py` applies `peds`; the game's hook ignores it.
+  (`walks 2-3 (725 long)`) and the segments nobody walks; the game logs the same report (`[fase]   pedestres: grupo ... anda em
+  2-3`; also without `peds` with `WOTM_LEVELPATCH=2`).
 - Check before playing: `python tools/lvl.py patch CENTRAL mods/<mod>/levels/CENTRAL.json` applies the patch to the disc's image, prints
   what changed, each redone collision box, and checks the collision of the result (box rule and cell rule, `FORMATS.md`, "Stage
   collision"). An entry that does not match is skipped with a line saying why.
 - Log in the game: `[fase] CENTRAL <- <mod> (LEVELS/CENTRAL.JSON): ...` with the same counts as `lvl.py patch`, a line per skipped entry,
-  and the collision check before and after. `WOTM_LEVELPATCH=2` also prints each redone box; `=0` turns patches off.
+  and the collision check before and after; `[fase] CENTRAL: sem patch` when no mod has the stage's file. `WOTM_LEVELPATCH=2` also
+  prints each redone box; `=0` turns patches off.
+- **The patch is read at every load of the stage**, not only at boot: the mods folder is searched again (a mod or a file created or
+  deleted after boot counts; with the file in two mods, the last mod in alphabetical order wins, `[fase] LEVELS/CENTRAL.JSON: B vence
+  A`). A file that does not parse is read once more 200 ms later (the editor may be writing it). So editing during a fight and
+  reloading the stage applies the new patch, without restarting the game. Three ways to reload it: the pause's **RESTART** (YES) or, in
+  training, **RESET POSITIONS**; **F10** in the fight (no pause menu); and the file named by `WOTM_LEVELRELOAD=<arquivo>`, where
+  writing `<STAGE> <counter>` (new content each time) asks for the reload if that stage is loaded. The reload is the retail RESTART: the
+  whole stage loads again (the `LOAD` screen), the fight starts over and the continues are restored. A request waits for a frame where
+  the game could pause (in the pause, until the fight resumes; during a movie or a dialog, until it ends; time in the pause does not
+  count) and is dropped after 10 s of running game without one, or if a stage load came after it, since that load already read the
+  file. Log: `[fase] recarga pedida (F10)` or `(arquivo)`, then the load's `[fase]` lines.
 
 ### Level editor (`tools/level_editor/editor.py`)
 `python tools/level_editor/editor.py` opens the stage in 3D and writes the patch above. It is a local page (three.js, in
@@ -652,17 +664,30 @@ it in its own window instead (`pywebview` when installed, otherwise Edge/Chrome 
   mods folder (`WOTM_MODS=0` included). A mod with its own
   `MON/ARMY.*` wins (`NATIVE.md`, "Army in versus fights").
 - **Level patches** (`native/runtime/wotm_levelpatch.inc`): hook at the entry of `dbInitDb` when `Shell::LoadLevelFiles` calls it (the
-  stage image is inflated at 0xA00000 with TEX0 relocated, and nothing has been registered yet). A handle that turns becomes a new
+  stage image is inflated at 0xA00000 with TEX0 relocated, and nothing has been registered yet); installed whenever `WOTM_LEVELPATCH`
+  is not 0, and the JSON is looked up in the mods folder at that moment, not in the boot registry. A handle that turns becomes a new
   `ROTATE` in its parent and in its collision paths; a deleted handle becomes `NULL` (op 9) and its paths leave the grid cells; a copy is
   a new handle, `INTERACTIVE_STATE` (id1 cleared) and `DESTRUCTIBLE`, held with the original by a new `GROUP` (noFOV) in the parent's slot,
   plus copies of the original's paths. Every path through a changed handle gets its box redone (by the disc's rule, or the old box
   carried by the handle's change for animated chains and camera triggers) and its cell lists redone, and the `GROUP`s above the handle
   get their spheres grown to cover the object (the drawing culls a `GROUP` by its sphere). New nodes go to a 1 MB arena below the hooks'
-  last MB (`wotm_mods_hooks::kLevelArena`; loads above 32 MB stop at `kHighCeiling`). Then `PathNet::fodder` and `PathNet::ped`, already
+  last MB (`wotm_mods_hooks::kLevelArena`; loads above 32 MB stop at `kHighCeiling`). Then `peds` (`wotm_levelpeds.inc`): `segments`
+  rewrites `PathNet::ped` in RAM, a deleted group loses its id (a plain `TRANSLATE`), a moved or recounted one is rewritten in
+  place, and new groups (`TRANSLATE` 0xBB8 with a `NULL`) hang from a new `GROUP` in the world `GROUP`'s first slot, which holds
+  the old child too. Then `PathNet::fodder` and `PathNet::ped`, already
   built by `InitBeforeDbLoad` and not yet held by any vehicle or `PedGroup`, are cut in RAM against the XY convex hull of each new
   solid box (`cutNets`): vehicle links leave both nodes, as in `PathNode::removePath`, and pedestrian nodes left with no link leave the
   list with the links renumbered (`PedGroup` reads `paths[0]` of the nearest node without looking at the count). `tools/lvl.py`
-  (`LevelPatch`, `cut_nets`) does the same in the same order, on the disc's `PTS` files.
+  (`LevelPatch`, `cut_nets`) does the same in the same order, on the disc's `PTS` files. A reload starts from a clean image: the
+  stage `.NGP` is inflated again, the arena is rebuilt and `InitBeforeDbLoad` reads the `PTS` again before each load.
+- **Stage reload** (`native/runtime/wotm_levelreload.inc`): F10 (read by the window, `wotm_live.inc`) or the `WOTM_LEVELRELOAD` file
+  sets a request; the hook at the entry of `rtTimeToReturnToShell` (end of each `rtMain` frame) serves it under the conditions with
+  which `rtPauseRT` accepts START (`m_inSession` 1, `gRtReturn` free, not paused, no movie, `game+0x120454`/`+0x120458` clear), and
+  with `StreamingSoundManager+0x109C` at 0 (at 1 the retail `displayDialog` restores the master volume on its way out, which the hook
+  skips), the way START does: `shell+0x2BA4 = 1`, `rtReturnToShell(2, 0)`. The `displayDialog(0)` that `EvaluateGameStatus(2)` calls next does not
+  open the pause: the hook writes what the pause's RESTART item and the YES of `areYouSure` write (continues restored, `m_restart` 1,
+  `m_inMenus` 1, `m_inSession` 0, pause flag cleared, `snd_StopAllSounds` when `StreamingSoundManager+0x109C` is 0) and returns. `main` then runs
+  the session again from `LoadLevelFiles`.
 - **Log:** `[mods] N arquivo(s) de <mods> em <pasta>` at boot and, on the first search of each file, `[mods] MON/LIZARD0.TEX <-
   teste_togera (110080 bytes; disco 110080)`.
 - **Mod files bigger than the disc's:** what limits them is where each loader puts the file, not the disc size (stage and menu files

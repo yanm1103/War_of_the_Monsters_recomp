@@ -329,6 +329,7 @@ static void wotmBootPresent(uint32_t eePc, uint64_t vsync)
 #include <filesystem>
 #include "wotm_freecam.inc"   // camera livre de debug (F5)
 extern std::atomic<float> g_wotmMechaReticle;   // wotm_overrides.cpp: peso da camera da torre do Mecha (0 = sem retícula)
+extern std::atomic<bool> g_wotmLevelReloadKey;   // wotm_levelreload.inc: F10 pede a recarga da fase
 extern std::atomic<uint32_t> g_wotmFxTint[100];   // wotm_overrides.cpp: cor do fogo por fx[i] (wotm_custom.inc grava)
 static const bool g_wotmFxTintLinked = (wotm::Particles::tintTags = g_wotmFxTint, true);
 #include "wotm_prompts.inc"   // icones de botao 2D (Kenney) no lugar dos 3D do jogo
@@ -2314,6 +2315,8 @@ static bool wotmDrawNative(const uint8_t *rdram)
         static float gameFps = 0.f, screenFps = 0.f;
         if (IsKeyPressed(KEY_F3))
             show = !show;
+        if (IsKeyPressed(KEY_F10))   // recarrega a fase (wotm_levelreload.inc): o patch dela e relido
+            g_wotmLevelReloadKey.store(true, std::memory_order_relaxed);
         ++drawn;
         const double now = GetTime();
         static const bool camLog = std::getenv("WOTM_CAMLOG") != nullptr;   // diagnostico: serie temporal da camera lida (um [cam] por desenho)
