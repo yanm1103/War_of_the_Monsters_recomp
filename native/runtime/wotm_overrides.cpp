@@ -119,6 +119,7 @@ WotmFreeCamPose g_wotmFreeCamPose;
 #include "wotm_ai.inc"
 // Mod "comer civis": log das chamadas ao PedGroup (WOTM_EATLOG)
 #include "wotm_eat.inc"
+#include "wotm_eatmod.inc"
 
 namespace
 {
@@ -2728,6 +2729,7 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
     wotm_modes4::install(runtime);   // embrulha o fim de rodada e o InitPlayers do split4; o takeDamage das trapacas embrulha o dele
     wotm_ai::install(runtime);
     wotm_eat::install(runtime);
+    wotm_eatmod::install(runtime);
     wotm_coop::install(runtime);    // embrulha as vistas, a largada, o InitPlayers e o fim de rodada do split4 e do modes4
     if ((g_origPolyBuild = runtime.lookupFunction(kPolyBuildPrim)))
         runtime.registerFunction(kPolyBuildPrim, &polyBuildPrimTapped);
