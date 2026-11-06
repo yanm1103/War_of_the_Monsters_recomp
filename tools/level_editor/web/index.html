@@ -33,6 +33,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
   <button id="reload" disabled aria-label="Reload in game"><i class="ic" style="--ic:url(vendor/mdi/refresh.svg)"></i><span class="lbl">Reload in game</span></button>
   <button id="stop" class="icon" title="Close the game the editor opened" aria-label="Stop game" hidden><i class="ic" style="--ic:url(vendor/mdi/stop.svg)"></i></button>
   <span class="sep"></span>
+  <button id="help" class="icon ghost" title="Keyboard shortcuts (? or F1)" aria-label="Keyboard shortcuts"><i class="ic" style="--ic:url(vendor/mdi/help-circle-outline.svg)"></i></button>
   <button id="settings" class="icon ghost" title="Settings" aria-label="Settings"><i class="ic" style="--ic:url(vendor/mdi/cog-outline.svg)"></i></button>
 </header>
 <main>
@@ -67,11 +68,35 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
   <section id="view">
     <canvas id="canvas"></canvas>
     <div id="band" hidden></div>
-    <div id="overlay">
-      <label title="The stage's fog, background and sky, as in the game (L)"><input type="checkbox" id="look"> Game look</label>
-      <label title="A 100-unit grid at the base of the selection"><input type="checkbox" id="grid"> Grid</label>
-      <label title="Pedestrian groups (cones) and the sidewalks they walk (blue lanes), to move, add and delete (P)"><input type="checkbox" id="pedsOn"> Pedestrians</label>
-      <button id="frame" class="icon" title="Frame the whole stage (Home)" aria-label="Frame all"><i class="ic" style="--ic:url(vendor/mdi/fit-to-screen-outline.svg)"></i></button>
+    <!-- the tool: Move or Turn, and the snap (it holds for the gizmo and the arrow keys) -->
+    <div id="toolBar" class="float" role="toolbar" aria-label="Tool">
+      <div class="seg" role="group" aria-label="Gizmo">
+        <button id="tMove" class="toggle on" title="Move tool (G)"><i class="ic" style="--ic:url(vendor/mdi/cursor-move.svg)"></i><span class="lbl">Move</span></button>
+        <button id="tTurn" class="toggle" title="Turn tool (R)"><i class="ic" style="--ic:url(vendor/mdi/rotate-3d-variant.svg)"></i><span class="lbl">Turn</span></button>
+      </div>
+      <span class="fsep"></span>
+      <label class="tgl" title="Snap the gizmo and the arrow keys to these steps"><input type="checkbox" id="snap"><i class="ic" style="--ic:url(vendor/mdi/magnet.svg)"></i><span class="lbl">Snap</span></label>
+      <label class="field suf small-num" title="Move step (units)"><input id="snapMove" type="number" min="0.1" step="5" aria-label="Move step"><i class="post">u</i></label>
+      <label class="field suf small-num" title="Turn step (degrees)"><input id="snapTurn" type="number" min="0.1" step="5" aria-label="Turn step"><i class="post">°</i></label>
+    </div>
+    <!-- the view: game look, grid, layers; fly or orbit; focus, frame all; the shortcuts -->
+    <div id="overlay" class="float" role="toolbar" aria-label="View">
+      <label class="tgl icon" title="Game look: the stage's fog, background and sky, as in the game (L)"><input type="checkbox" id="look" aria-label="Game look"><i class="ic" style="--ic:url(vendor/mdi/weather-fog.svg)"></i></label>
+      <label class="tgl icon" title="Grid: 100-unit lines (the snap step when it is smaller) and 1000-unit lines, at the base of the selection"><input type="checkbox" id="grid" aria-label="Grid"><i class="ic" style="--ic:url(vendor/mdi/grid.svg)"></i></label>
+      <button id="layersBtn" class="icon ghost" title="Layers" aria-label="Layers" aria-haspopup="true" aria-expanded="false"><i class="ic" style="--ic:url(vendor/mdi/layers-outline.svg)"></i></button>
+      <span class="fsep"></span>
+      <div class="seg" role="group" aria-label="Camera">
+        <button id="vFly" class="toggle" title="Fly: WASD to move, right-drag to look (V switches)"><i class="ic" style="--ic:url(vendor/mdi/airplane.svg)"></i><span class="lbl">Fly</span></button>
+        <button id="vOrbit" class="toggle" title="Orbit: drag to orbit, right-drag to pan, wheel to zoom (V switches)"><i class="ic" style="--ic:url(vendor/mdi/rotate-orbit.svg)"></i><span class="lbl">Orbit</span></button>
+      </div>
+      <span class="fsep"></span>
+      <button id="focusSel" class="icon ghost" title="Focus the selection (F)" aria-label="Focus the selection" disabled><i class="ic" style="--ic:url(vendor/mdi/crosshairs-gps.svg)"></i></button>
+      <button id="frame" class="icon ghost" title="Frame the whole stage (Home)" aria-label="Frame all"><i class="ic" style="--ic:url(vendor/mdi/fit-to-screen-outline.svg)"></i></button>
+      <button id="keysBtn" class="icon ghost" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><i class="ic" style="--ic:url(vendor/mdi/keyboard-outline.svg)"></i></button>
+    </div>
+    <div id="layersMenu" class="float menu" hidden role="menu" aria-label="Layers">
+      <div class="sec-title">Layers</div>
+      <label class="switch" title="Pedestrian groups (cones) and the sidewalks they walk (blue lanes), to move, add and delete (P)"><input type="checkbox" id="pedsOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/walk.svg)"></i><span class="tx">Pedestrians</span><kbd>P</kbd></label>
     </div>
     <div id="keepNote" class="callout warn" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span id="keepText"></span>
       <button id="keepClose" class="icon ghost" title="Hide this note" aria-label="Hide"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
@@ -80,8 +105,9 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <button id="pedAddSeg" title="A new sidewalk segment where the view looks; drag its ends into place"><i class="ic" style="--ic:url(vendor/mdi/vector-polyline-plus.svg)"></i>Add sidewalk</button>
       <span id="pedCounts" class="muted small"></span>
     </div>
-    <div id="hint" class="muted"></div>
-    <div id="busy" hidden>Loading…</div>
+    <div id="hint" class="muted" aria-live="polite"></div>
+    <div id="busy" hidden><div class="busy-card" role="status"><span class="spin"></span>
+      <div><div id="busyText">Loading…</div><div class="busy-sub">The first time a stage opens takes a few seconds.</div></div></div></div>
   </section>
   <aside id="right">
     <div id="noSel">
@@ -138,15 +164,6 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
           <label class="field suf" title="The heading, in degrees, about the vertical"><input id="ph" type="number" step="5" aria-label="Heading"><i class="post">°</i></label>
           <button id="rotL" class="icon" title="Turn 90° counterclockwise, seen from above" aria-label="Turn 90° counterclockwise"><i class="ic" style="--ic:url(vendor/mdi/rotate-left.svg)"></i></button>
           <button id="rotR" class="icon" title="Turn 90° clockwise, seen from above" aria-label="Turn 90° clockwise"><i class="ic" style="--ic:url(vendor/mdi/rotate-right.svg)"></i></button>
-        </div>
-        <div class="tool-row">
-          <div class="seg" role="group" aria-label="Gizmo">
-            <button id="tMove" class="toggle on" title="Move tool (G)"><i class="ic" style="--ic:url(vendor/mdi/cursor-move.svg)"></i>Move</button>
-            <button id="tTurn" class="toggle" title="Turn tool (R)"><i class="ic" style="--ic:url(vendor/mdi/rotate-3d-variant.svg)"></i>Turn</button>
-          </div>
-          <label class="chip snap-chip" title="Snap the gizmo and the arrow keys to these steps"><input type="checkbox" id="snap"><i class="ic" style="--ic:url(vendor/mdi/magnet.svg)"></i>Snap</label>
-          <label class="field suf small-num" title="Move step (units)"><input id="snapMove" type="number" min="0.1" step="5" aria-label="Move step"><i class="post">u</i></label>
-          <label class="field suf small-num" title="Turn step (degrees)"><input id="snapTurn" type="number" min="0.1" step="5" aria-label="Turn step"><i class="post">°</i></label>
         </div>
       </section>
       <section class="psec">
@@ -244,6 +261,62 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
     <h2>Test in game</h2>
     <p>This stage has unsaved changes. The game loads the saved file.</p>
     <div class="row end"><button value="cancel">Cancel</button><button value="nosave">Test the saved file</button><button value="save" class="primary">Save and test</button></div>
+  </form>
+</dialog>
+<dialog id="keysDlg" aria-labelledby="keysTitle" autofocus>
+  <form method="dialog">
+    <div class="dlg-head"><h2 id="keysTitle">Keyboard shortcuts</h2>
+      <button value="close" class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+    <div class="keys-cols">
+      <div>
+        <h3>Camera</h3>
+        <dl class="kl">
+          <dt><kbd>V</kbd></dt><dd>Switch Fly / Orbit</dd>
+          <dt><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd></dt><dd>Fly: move</dd>
+          <dt><kbd>E</kbd> / <kbd>Q</kbd></dt><dd>Fly: up / down</dd>
+          <dt><kbd>Shift</kbd></dt><dd>Fly: faster</dd>
+          <dt>Right-drag</dt><dd>Fly: look around</dd>
+          <dt>Wheel</dt><dd>Fly: move forward / Orbit: zoom</dd>
+          <dt>Left-drag</dt><dd>Orbit: orbit</dd>
+          <dt>Right-drag</dt><dd>Orbit: pan</dd>
+          <dt><kbd>F</kbd></dt><dd>Focus the selection</dd>
+          <dt><kbd>Home</kbd></dt><dd>Frame the whole stage</dd>
+        </dl>
+        <h3>Select</h3>
+        <dl class="kl">
+          <dt>Click</dt><dd>Select</dd>
+          <dt><kbd>Shift</kbd>+Click / <kbd>Ctrl</kbd>+Click</dt><dd>Add or remove</dd>
+          <dt><kbd>Shift</kbd>+Drag</dt><dd>Box select (the kinds shown in the list)</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>A</kbd></dt><dd>Select everything in the list</dd>
+          <dt><kbd>Esc</kbd></dt><dd>Deselect</dd>
+        </dl>
+      </div>
+      <div>
+        <h3>Edit</h3>
+        <dl class="kl">
+          <dt><kbd>G</kbd> / <kbd>R</kbd></dt><dd>Move / Turn tool</dd>
+          <dt>Arrows</dt><dd>Nudge along the axis nearest to the view</dd>
+          <dt><kbd>PgUp</kbd> / <kbd>PgDn</kbd></dt><dd>Nudge up / down</dd>
+          <dt><kbd>Shift</kbd> + nudge</dt><dd>Ten steps</dd>
+          <dt><kbd>End</kbd></dt><dd>Drop to the surface below</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>D</kbd></dt><dd>Duplicate</dd>
+          <dt><kbd>Del</kbd></dt><dd>Delete</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>Y</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></dt><dd>Redo</dd>
+        </dl>
+        <h3>View</h3>
+        <dl class="kl">
+          <dt><kbd>L</kbd></dt><dd>Game look</dd>
+          <dt><kbd>1</kbd> / <kbd>2</kbd></dt><dd>Objects / Pedestrians</dd>
+        </dl>
+        <h3>File</h3>
+        <dl class="kl">
+          <dt><kbd>Ctrl</kbd>+<kbd>S</kbd></dt><dd>Save</dd>
+          <dt><kbd>?</kbd> / <kbd>F1</kbd></dt><dd>This list</dd>
+        </dl>
+      </div>
+    </div>
+    <p class="keys-note">The letter keys are where W, A, S, D, Q and E sit on a QWERTY keyboard, on any layout.</p>
   </form>
 </dialog>
 <dialog id="askDlg">

@@ -660,7 +660,7 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   starting, then "Game running" and its stage. **Reload in game** (on while a game opened by Test runs; "Save & reload" with
   unsaved changes) saves and has that game load the stage again, as **F10** does there; with the game on another stage it offers a
   restart on this one. **Stop** (the square, while the game runs) closes the game the editor opened. In a window narrower than
-  1440 px, Check, Save, Test and Reload show only their icon.
+  1440 px, Check, Save, Test and Reload show only their icon. The **?** button (or **?**, or **F1**) lists every shortcut.
 - **Mode rail** (the narrow column on the left): **Objects** (the cube, or **1**) and **Pedestrians** (the walking figure, or
   **2**; it shows the pedestrian layer, below) switch what the editor works on; **Fight HUD** (the screen icon) opens the HUD
   panel (below).
@@ -672,20 +672,27 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   rejected, another mod's file used, reload skipped or dropped; the load's details as the game writes them). The drawer opens by
   itself on an error, and its top edge resizes it. Short notes (saved, deleted with Undo, copied, dropped, the game's answer) show
   for a few seconds over the view's lower right corner, and above an open dialog.
-- **View:** two cameras, **V** switches (the last one is remembered). Fly (the default): **W/S** move where the camera looks, **A/D**
-  sideways, **E** up, **Q** down, **Shift** faster, right drag looks around, the wheel moves forward. Orbit: left
-  drag orbits, right drag pans, the wheel zooms. In both, a click selects the object under it (buildings, pickups, props), **G** move
-  gizmo, **R** turn gizmo (about the vertical only), **F** frames the selection, **Home** (or the frame button, top right of the
-  view) frames the whole stage, **Ctrl+D** copies it, **Del** deletes it, **Esc** deselects. W/A/S/D/Q/E go by their place on the
-  keyboard (the same keys on AZERTY); the other shortcuts by their letter. The shortcuts work after a click on a checkbox or a
-  button; a text field, the stage picker and an open dialog keep the keys. **Grid** (top right of the view) draws a 100-unit grid
-  at the base of the selection.
+- **View:** two cameras, **V** (or **Fly** / **Orbit** on the view's top right bar) switches; the last one is remembered. Fly (the
+  default): **W/S** move where the camera looks, **A/D** sideways, **E** up, **Q** down, **Shift** faster, right drag looks around,
+  the wheel moves forward. Orbit: left drag orbits, right drag pans, the wheel zooms. In both, a click selects the object under it
+  (buildings, pickups, props; the pointer turns into a hand and a white outline shows what a click picks), **F** (or the crosshair
+  button) frames the selection, **Home** (or the frame button) frames the whole stage, **Ctrl+D** copies it, **Del** deletes it,
+  **Esc** deselects. W/A/S/D/Q/E go by their place on the keyboard (the same keys on AZERTY); the other shortcuts by their letter.
+  The shortcuts work after a click on a checkbox or a button; a text field, the stage picker and an open dialog keep the keys. A
+  chip at the view's lower left says what the mouse and the keys do at that moment (it fades after a few seconds and comes back
+  when that changes).
+- **View bars:** on the top left, the tool: **Move** (**G**) and **Turn** (**R**, about the vertical only) for the gizmo, and
+  **Snap** with its steps (10 units and 15 degrees by default; they also set the arrow keys' step). On the top right: **Game
+  look** (**L**), **Grid** (a line every 100 units, or every snap step when it is smaller, and a stronger one every 1000, at the
+  base of the selection), **Layers** (the Pedestrians layer), the cameras, Focus, Frame all and the shortcuts. The gizmo's arrows
+  have the colors of the X, Y and Z fields; the selected object's amber outline shows through what stands in front of it, the
+  others of a selection (orange) only where they are in view. A deleted object shows as a red dashed box where it was while it is
+  selected; with **Changed** on, every deleted one does (a click on the box selects it), and a green box marks each changed object.
 - **Right panel:** with nothing selected, what a click does, the stage, how many objects the mod changes and the file **Save**
   writes (`mods/<mod>/levels/<STAGE>.json`). With an object: its kind, name and state (Moved, Turned, Copy), its handle (a click
   copies it) and these sections. **Transform**: **X**, **Y** and **Z** (the height) in the gizmo's colors; dragging a letter
   sideways changes the number (a snap step, or 1 unit, per 3 pixels; Shift: ten), and the gizmo's blue arrow points to -Y.
-  **Heading**, with buttons that turn 90° either way; **Move** and **Turn** (the gizmo); **Snap** (steps beside it, 10 units and
-  15 degrees by default; they also set the arrow keys' step). **Actions**: **Drop** (**End**: down or up onto the first surface
+  **Heading**, with buttons that turn 90° either way. **Actions**: **Drop** (**End**: down or up onto the first surface
   under the object's middle, another object's roof included), **Duplicate**, **Restore original** (back to the disc's place,
   copies removed; off when there is nothing to restore) and **Delete**, which says how many objects go. **Name** (closed at first)
   holds the object's name and the model's; **Details** (closed at first) the size, the model id, the damage states, the collision
@@ -699,7 +706,7 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
 - **Move objects on top** (a switch in Actions, on by default, with the count beside it): moving, turning, copying, deleting or
   restoring a building does the same to the pickups that rest on it (`lvl.py objects`, `on <handle>`); Delete counts them
   ("Delete 5 (+3 on top)").
-- **Pedestrians** (the Pedestrians mode, the box at the top right of the view, or **P**): the stage's pedestrian groups as orange cones, a dashed line from each to the
+- **Pedestrians** (the Pedestrians mode, the view's **Layers** menu, or **P**): the stage's pedestrian groups as orange cones, a dashed line from each to the
   sidewalk it walks, and the sidewalks (`PTS/<STAGE>.PED`) as blue lanes as wide as the walking lane, with a ball at each end. A
   click picks a cone, a lane or an end; the gizmo, the arrows, **End** and the position fields only move them. The right panel
   shows what a group walks, its **People** (1 to 255) or a sidewalk's **Lane** (times 10 units to each side), **Duplicate**

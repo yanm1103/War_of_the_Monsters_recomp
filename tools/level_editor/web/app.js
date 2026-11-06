@@ -211,13 +211,44 @@ orbit.screenSpacePanning = true;
 const gizmo = new TransformControls(camera, canvas);
 gizmo.setSize(0.9);
 scene.add(gizmo);
-const boxes = [];   // one outline per selected item; the primary one (gizmo, fields) in yellow
-const grid = new THREE.GridHelper(20000, 200, 0x8a96a8, 0x566070);
-grid.material.transparent = true;
-grid.material.opacity = 0.45;
-grid.material.fog = false;
-grid.visible = false;
-scene.add(grid);
+// The gizmo in the axis colors of the X/Y/Z fields (scene X = game X red, scene Y = game Z green, scene Z = game -Y blue), and white
+// instead of yellow for the hovered handle, so that it does not read as the selection's amber. TransformControls sets the hover
+// color with setHex(0xffff00) on every frame, so each color's setHex swaps it.
+const GIZMO_COLORS = new Map([[0xff0000, 0xF0605A], [0x00ff00, 0x4CC38A], [0x0000ff, 0x4C9AFF], [0xffff00, 0xFFFFFF]]);
+gizmo.traverse((o) => {
+  for (const m of [].concat(o.material || [])) {
+    if (!m.color || m.color._wotm) continue;
+    const c = m.color, set = THREE.Color.prototype.setHex;
+    c.setHex = function (hex, space) { return set.call(this, GIZMO_COLORS.get(hex) ?? hex, space); };
+    c._wotm = true;
+    const was = c.getHex();
+    if (GIZMO_COLORS.has(was)) c.setHex(was);
+  }
+});
+// the selection's outlines: the one the gizmo holds in amber through everything in front of it, the others of the group in orange
+// (behind walls they stay hidden: with a hundred selected, seeing them all through the buildings is noise)
+const boxes = [];
+const SEL_COLOR = 0xFFC233, SEL2_COLOR = 0xFF8A3D, HOVER_COLOR = 0xFFFFFF, DEL_COLOR = 0xF0605A, CHANGED_COLOR = 0x3FB97F;
+function lineBox(color, o = {}) {
+  const b = new THREE.BoxHelper(undefined, color);
+  Object.assign(b.material, { fog: false, transparent: true, depthWrite: false }, o);
+  b.visible = false;
+  scene.add(b);
+  return b;
+}
+const hoverBox = lineBox(HOVER_COLOR, { opacity: 0.55, depthTest: false });
+hoverBox.renderOrder = 999;
+// the grid: 100-unit lines (the snap step when it is smaller) and 1000-unit lines, white (black in the light theme without Game look)
+function gridHelper(size, divisions, opacity) {
+  const g = new THREE.GridHelper(size, divisions, 0xffffff, 0xffffff);
+  Object.assign(g.material, { transparent: true, opacity, fog: false, depthWrite: false });
+  g.visible = false;
+  scene.add(g);
+  return g;
+}
+let gridMinor = gridHelper(20000, 200, 0.10), gridMinorStep = 100;
+const gridMajor = gridHelper(20000, 20, 0.28);
+let gridOn = false;
 let stageRoot = null, skyRoot = null, env = null;   // env: the stage's fog, background and lights (/api/stage, RST/<STAGE>.MRS)
 // pedestrians (web/peds.js): a layer shown with P; pedSel is the marker the gizmo holds (never together with an object)
 const peds = createPeds({ THREE, scene, toThree, toGame });
@@ -252,6 +283,10 @@ function applyLook() {
   renderer.setClearColor(gameLook && env && env.bg ? gsColor(env.bg)
     : getComputedStyle(document.documentElement).getPropertyValue('--view').trim());
   $('look').checked = gameLook;
+  // the grid: black lines on the light theme's background, white on the dark one and over the stage's own (Game look)
+  const t = document.documentElement.dataset.theme;
+  const light = t === 'light' || (t === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
+  for (const g of [gridMinor, gridMajor]) g.material.color.set(light && !gameLook ? 0x000000 : 0xffffff);
 }
 function setLook(on) {
   gameLook = on;
@@ -404,10 +439,11 @@ function setView(on) {
   orbit.enabled = !on && !gizmo.dragging;
   fly.keys.clear();
   try { localStorage.setItem('wotmLevelEditor.view', on ? 'fly' : 'orbit'); } catch (e) { /* ignore */ }
-  const common = 'Click: select · Shift+click: add · Shift+drag: box · Ctrl+A: all listed · G move · R turn · Arrows/PgUp/PgDn nudge · End drop · F focus · Home all · Ctrl+D copy · Del delete · L game look · P pedestrians';
-  $('hint').textContent = (on
-    ? 'Fly view (V: orbit) · WASD move · E up · Q down · Shift fast · Right drag: look · Wheel: forward · '
-    : 'Orbit view (V: fly) · Left drag: orbit · Right drag: pan · Wheel: zoom · ') + common;
+  for (const [id, v] of [['vFly', true], ['vOrbit', false]]) {
+    $(id).classList.toggle('on', on === v);
+    $(id).setAttribute('aria-pressed', on === v);
+  }
+  showHint();
 }
 function flyStep() {
   const now = performance.now(), dt = Math.min(0.1, (now - fly.last) / 1000);
@@ -452,8 +488,45 @@ function loop() {
   flyStep();
   if (orbit.enabled) orbit.update();
   if (skyRoot) skyRoot.position.copy(camera.position);   // the sky moves with the camera (it turns with the view, not the stage)
+  hoverStep();
   syncBoxes();
   renderer.render(scene, camera);
+}
+
+// ------------------------------------------------------------------ the hint chip (lower left of the view)
+// What the mouse and keys do now. It fades after 8 s without a change of context and comes back when the context changes.
+const HINTS = {
+  fly: 'Right-drag to look · WASD to fly · Click to select · ? for shortcuts',
+  orbit: 'Drag to orbit · Right-drag to pan · Wheel to zoom · Click to select',
+  one: 'Drag the arrows to move · R to turn · End to drop · Ctrl+D to copy · Del to delete',
+  turn: 'Drag the ring to turn · G to move · End to drop · Ctrl+D to copy · Del to delete',
+  many: 'The amber one leads, the orange ones follow · Shift+click adds or removes',
+  deleted: 'Deleted in your mod · Restore brings it back · Esc to deselect',
+  band: 'Release to select the objects whose middle is inside',
+  gizmo: 'Ctrl+Z undoes the move',
+  peds: 'Click a group or a sidewalk · Add them from the toolbar',
+  pedSeg: 'Drag an end to stretch it · Drag the middle to move it',
+  pedGroup: 'Drag the arrows to move it · End to drop · Ctrl+D to copy · Del to delete',
+};
+const hint = { key: '', timer: 0 };
+function hintKey() {
+  if (band && !$('band').hidden) return 'band';
+  if (gizmo.dragging) return 'gizmo';
+  if (pedSel) return pedSel.kind === 'group' ? 'pedGroup' : 'pedSeg';
+  if (isDeleted(sel)) return 'deleted';
+  if (group.length > 1) return 'many';
+  if (sel) return gizmo.getMode() === 'rotate' ? 'turn' : 'one';
+  if (pedsOn) return 'peds';
+  return fly.on ? 'fly' : 'orbit';
+}
+function showHint() {
+  const k = hintKey(), el = $('hint');
+  if (k === hint.key) return;
+  hint.key = k;
+  el.textContent = HINTS[k];
+  el.classList.remove('gone');
+  clearTimeout(hint.timer);
+  hint.timer = setTimeout(() => el.classList.add('gone'), 8000);
 }
 
 // ------------------------------------------------------------------ model
@@ -650,7 +723,10 @@ function showStatus(changedN) {
 
 // ------------------------------------------------------------------ loading
 async function loadStage(name) {
+  $('busyText').textContent = `Loading ${title(name)}…`;
   $('busy').hidden = false;
+  hoverBox.visible = false;
+  hover.item = null;
   try {
     select(null);
     for (const r of [stageRoot, skyRoot]) if (r) { scene.remove(r); r.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); }
@@ -869,6 +945,7 @@ function refreshList() {
   $('save').classList.toggle('dirty', dirty);
   showStatus(nChanged);
   showSummary(nChanged);
+  syncMarks();
   if (sel && !isDeleted(sel) && !$('props').hidden) { showBadge(); showActions(); }
 }
 // the right panel with nothing selected: the stage, how many objects the mod changes, where Save writes
@@ -932,8 +1009,12 @@ function showSel() {
     gizmo.attach(sel.node);
     showPropsPanel();
   }
+  $('focusSel').disabled = !sel && !pedSel;
+  $('tTurn').disabled = !!pedSel;   // pedestrian markers only move
   syncBoxes();
   refreshList();
+  showHint();
+  hover.dirty = true;
   if (sel !== lastScrolled) {   // a pick in the view shows its row (a list click is in view already)
     lastScrolled = sel;
     $('list').querySelector('li.it.sel')?.scrollIntoView({ block: 'nearest' });
@@ -1031,24 +1112,151 @@ function showActions() {
   $('reset').title = $('reset').disabled ? 'Nothing to restore: it is where the disc has it'
     : "Back to the disc's place, copies removed (with Move objects on top, also the objects on it)";
 }
+// every frame: the selection's outlines (they follow the gizmo), the changed ones' and the grid's height
 function syncBoxes() {
-  while (boxes.length < group.length) {
-    const b = new THREE.BoxHelper(undefined, 0xffcc33);
-    b.material.fog = false;
-    scene.add(b);
-    boxes.push(b);
-  }
+  if (hoverBox.visible && (!hover.item || group.includes(hover.item))) hoverBox.visible = false;
+  while (boxes.length < group.length) boxes.push(lineBox(SEL2_COLOR, { opacity: 0.8 }));
   boxes.forEach((b, n) => {
     const it = group[n];
     b.visible = !!it && it.node.visible;
     if (!b.visible) return;
     b.setFromObject(it.node);
-    b.material.color.set(it === sel ? 0xffcc33 : 0xff8a3d);
+    const lead = it === sel, m = b.material;
+    if (m.depthTest === lead) {   // the lead one through the walls, on top of everything; the others in the scene's depth
+      m.depthTest = !lead;
+      m.opacity = lead ? 0.95 : 0.8;
+      b.renderOrder = lead ? 1000 : 0;
+      m.color.set(lead ? SEL_COLOR : SEL2_COLOR);
+    }
   });
-  if (grid.visible) {   // at the base of the selection, else at the stage's origin
+  marks.changed.forEach((b, n) => {
+    const it = marks.changedItems[n];
+    b.visible = !!it && it.node.visible && !group.includes(it);
+    if (b.visible) b.setFromObject(it.node);
+  });
+  if (gridOn) {   // at the base of the selection, else at the stage's origin; the small lines around the selection
     const box = sel ? new THREE.Box3().setFromObject(sel.node) : null;
-    grid.position.y = box && !box.isEmpty() ? box.min.y + 0.5 : 0;
+    const y = box && !box.isEmpty() ? box.min.y + 0.5 : 0;
+    gridMajor.position.y = y;
+    gridMinor.position.y = y + 0.25;
+    if (gridMinorStep < 100) {
+      const c = box && !box.isEmpty() ? box.getCenter(new THREE.Vector3()) : new THREE.Vector3();
+      const s = gridMinorStep * 2;   // even division counts: lines on the step's multiples
+      gridMinor.position.x = Math.round(c.x / s) * s;
+      gridMinor.position.z = Math.round(c.z / s) * s;
+    } else gridMinor.position.x = gridMinor.position.z = 0;
   }
+}
+// The grid's small lines: 100 units, or the snap's move step when it is smaller (at most 2000 lines, around the selection)
+function setGrid(on = gridOn) {
+  gridOn = on;
+  const snap = $('snap').checked ? snapMove() : 100;
+  const step = snap < 100 ? snap : 100;
+  if (step !== gridMinorStep) {
+    const color = gridMinor.material.color.getHex();
+    scene.remove(gridMinor);
+    gridMinor.geometry.dispose(); gridMinor.material.dispose();
+    const div = step < 100 ? Math.min(2000, Math.round(20000 / step)) : 200;
+    gridMinor = gridHelper(div * step, div, 0.10);
+    gridMinor.material.color.setHex(color);
+    gridMinorStep = step;
+  }
+  gridMinor.visible = gridMajor.visible = on;
+  $('grid').checked = on;
+}
+
+// Deleted originals and changed objects in the view: a dashed red box where a deleted one was (when it is selected, or with the
+// Changed chip on; a click on it selects it), and a green box around each changed one that is not selected (Changed on).
+// refreshList rebuilds them (syncMarks); the green ones follow their object every frame (syncBoxes).
+const DEL_MAT = new THREE.LineDashedMaterial({ color: DEL_COLOR, dashSize: 20, gapSize: 14, transparent: true, opacity: 0.7, fog: false, depthWrite: false });
+const BOX_EDGES = [0, 1, 1, 3, 3, 2, 2, 0, 4, 5, 5, 7, 7, 6, 6, 4, 0, 4, 1, 5, 2, 6, 3, 7];
+const marks = { deleted: [], changed: [], changedItems: [], root: new THREE.Group() };
+marks.root.name = 'marks';
+scene.add(marks.root);
+function dashedBox(box) {
+  const p = [];
+  for (const k of BOX_EDGES) {
+    p.push(k & 1 ? box.max.x : box.min.x, k & 2 ? box.max.y : box.min.y, k & 4 ? box.max.z : box.min.z);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
+  const l = new THREE.LineSegments(g, DEL_MAT);
+  l.computeLineDistances();
+  return l;
+}
+function syncMarks() {
+  for (const m of marks.deleted) { marks.root.remove(m.line); m.line.geometry.dispose(); }
+  marks.deleted = [];
+  const all = $('changedOnly').checked;
+  for (const rec of recs) {
+    if (!rec.deleted || !(all || rec.item === sel)) continue;
+    const box = new THREE.Box3().setFromObject(rec.node);   // a hidden node still has its box
+    if (box.isEmpty()) continue;
+    const line = dashedBox(box);
+    marks.root.add(line);
+    marks.deleted.push({ item: rec.item, box, line });
+  }
+  const ch = [];
+  if (all) {
+    for (const rec of recs) {
+      if (!changed(rec)) continue;
+      if (!rec.deleted) { const st = moveState(rec); if (st.moved || st.turned) ch.push(rec.item); }
+      ch.push(...rec.copies);
+    }
+  }
+  while (marks.changed.length < ch.length) marks.changed.push(lineBox(CHANGED_COLOR, { opacity: 0.5 }));
+  for (const b of marks.changed.slice(ch.length)) b.visible = false;
+  marks.changedItems = ch;
+}
+// the dashed box a ray meets first, nearer than `far` (the first surface); not one the camera is inside
+function deletedHit(ray, far = Infinity) {
+  let best = null, bd = far;
+  const p = new THREE.Vector3();
+  for (const m of marks.deleted) {
+    if (m.box.containsPoint(ray.ray.origin) || !ray.ray.intersectBox(m.box, p)) continue;
+    const d = p.distanceTo(ray.ray.origin);
+    if (d <= bd) { bd = d; best = m.item; }
+  }
+  return best;
+}
+
+// Hover: what a click would pick, outlined in white, and the pointer as a hand over it. At most 30 raycasts a second, from the
+// render loop, and none while a button is down (drag, look, band, gizmo) or the gizmo has the pointer.
+const hover = { at: null, last: 0, item: null, n: 0, dirty: false };
+canvas.addEventListener('pointermove', (e) => { hover.at = ndc(e); hover.dirty = true; hover.buttons = e.buttons; });
+canvas.addEventListener('pointerleave', () => { hover.at = null; hover.dirty = true; });
+// what is under the pointer at p (NDC): {item} an object, {ped} a pedestrian marker, {deleted} a dashed box, or null
+function pickAt(p, add = false) {
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(p, camera);
+  const hits = stageRoot ? ray.intersectObject(stageRoot, true).filter((h) => visibleChain(h.object)) : [];
+  if (pedsOn && !add) {   // a marker in front of the stage's first surface (lanes lie just above the sidewalk)
+    const ph = ray.intersectObjects(peds.items().map((it) => it.pick), false)[0];
+    if (ph && (!hits.length || ph.distance <= hits[0].distance + 2)) return { ped: ph.object.userData.pedItem };
+  }
+  const d = deletedHit(ray, hits.length ? hits[0].distance : Infinity);
+  if (d) return { deleted: d };
+  if (hits.length) for (let o = hits[0].object; o; o = o.parent) if (itemOf.has(o)) return { item: itemOf.get(o) };
+  return null;
+}
+function hoverStep() {
+  if (!hover.dirty) return;
+  const now = performance.now();
+  if (now - hover.last < 33) return;
+  const busy = hover.buttons || gizmo.dragging || look || band || !stageRoot;
+  hover.dirty = false;
+  hover.last = now;
+  let it = null;
+  if (!busy && hover.at && gizmo.axis === null) {
+    hover.n++;
+    const h = pickAt(hover.at);
+    it = h ? h.item || h.deleted || h.ped || null : null;
+  }
+  hover.item = it;
+  const obj = it && !it.kind ? it : null;   // an object or a deleted original (pedestrian markers have a kind)
+  hoverBox.visible = !!obj && obj.node.visible && !group.includes(obj);
+  if (hoverBox.visible) hoverBox.setFromObject(obj.node);
+  canvas.style.cursor = gizmo.axis !== null && !busy ? 'move' : it ? 'pointer' : '';
 }
 function showProps() {
   if (!sel || isDeleted(sel)) return;
@@ -1067,6 +1275,8 @@ function setPeds(on) {
   if (!on && pedSel) { pedSel = null; showSel(); }
   showMode();
   showPedCounts();
+  showHint();
+  hover.dirty = true;
 }
 // The mode rail: Objects (1) and Pedestrians (2). For now the Pedestrians mode is the pedestrian layer on (objects stay clickable).
 const modeNow = () => (pedsOn ? 'peds' : 'objects');
@@ -1177,6 +1387,8 @@ function carry(start) {
 let dragStart = null;
 gizmo.addEventListener('dragging-changed', (e) => {
   orbit.enabled = !e.value && !fly.on;
+  if (e.value) dragged = true;
+  showHint();
   if (e.value && pedSel) snapshot('move ' + pedTitle(pedSel).toLowerCase());
   else if (e.value && sel) {
     snapshot((gizmo.getMode() === 'rotate' ? 'turn ' : 'move ') + whatSel());
@@ -1201,6 +1413,9 @@ function setTool(mode) {
   gizmo.showY = true;
   $('tMove').classList.toggle('on', mode === 'translate');
   $('tTurn').classList.toggle('on', mode === 'rotate');
+  $('tMove').setAttribute('aria-pressed', mode === 'translate');
+  $('tTurn').setAttribute('aria-pressed', mode === 'rotate');
+  showHint();
 }
 function snapMove() { return Math.max(0.1, +$('snapMove').value || 10); }
 function snapTurn() { return Math.max(0.1, +$('snapTurn').value || 15); }
@@ -1209,6 +1424,12 @@ function setSnap() {
   gizmo.setTranslationSnap(on ? snapMove() : null);
   gizmo.setRotationSnap(on ? THREE.MathUtils.degToRad(snapTurn()) : null);
   store.set('snap', on ? '1' : '0'); store.set('snapMove', snapMove()); store.set('snapTurn', snapTurn());
+  setGrid();
+}
+// F and the view bar's button: look at the selection (an object, or a pedestrian marker)
+function focusSelection() {
+  if (sel) focus(sel);   // a deleted one too: where it was
+  else if (pedSel) focus({ node: pedSel.kind === 'seg' ? pedSel.lane : pedSel.node });
 }
 
 function editFromInputs() {
@@ -1357,9 +1578,11 @@ const ndc = (e) => {
   const r = canvas.getBoundingClientRect();
   return new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1);
 };
-let down = null, band = null;
+let down = null, band = null, dragged = false, flyTipShown = false;   // dragged: the gizmo moved something since the button went down
 canvas.parentElement.addEventListener('pointerdown', (e) => {   // capture: before OrbitControls sees it
+  if (e.target !== canvas) { down = null; return; }   // a floating bar's button
   down = [e.clientX, e.clientY];
+  dragged = false;
   if (e.button === 0 && e.shiftKey && gizmo.axis === null) {
     band = { x: e.clientX, y: e.clientY };
     orbit.enabled = false;
@@ -1373,11 +1596,13 @@ canvas.addEventListener('pointermove', (e) => {
     width: Math.abs(e.clientX - band.x) + 'px', height: Math.abs(e.clientY - band.y) + 'px',
   });
   el.hidden = Math.hypot(e.clientX - band.x, e.clientY - band.y) < 5;
+  showHint();
 });
 canvas.addEventListener('pointerup', (e) => {
   const b = band;
   band = null;
-  $('band').hidden = true;
+  hover.buttons = 0; hover.dirty = true;
+  if (!$('band').hidden) { $('band').hidden = true; showHint(); }
   orbit.enabled = !fly.on && !gizmo.dragging;
   if (b && Math.hypot(e.clientX - b.x, e.clientY - b.y) >= 5) {
     const a = ndc({ clientX: b.x, clientY: b.y }), z = ndc(e);
@@ -1393,23 +1618,19 @@ canvas.addEventListener('pointerup', (e) => {
     selectMany(inside, true);
     return;
   }
-  if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4 || gizmo.dragging || e.button !== 0) return;
-  const ray = new THREE.Raycaster();
-  ray.setFromCamera(ndc(e), camera);
-  const add = e.shiftKey || e.ctrlKey;
-  const hits = ray.intersectObject(stageRoot || scene, true).filter((h) => visibleChain(h.object));
-  if (pedsOn && !add) {   // a marker in front of the stage's first surface (lanes lie just above the sidewalk)
-    const ph = ray.intersectObjects(peds.items().map((it) => it.pick), false)[0];
-    if (ph && (!hits.length || ph.distance <= hits[0].distance + 2)) { selectPed(ph.object.userData.pedItem); return; }
+  const moved = down ? Math.hypot(e.clientX - down[0], e.clientY - down[1]) : 0;
+  // a left drag in the fly view does nothing: once a session, say how to look around
+  if (down && e.button === 0 && fly.on && !e.shiftKey && moved > 24 && !gizmo.dragging && !dragged && !flyTipShown) {
+    flyTipShown = true;
+    toast('In Fly view, hold the right button to look around (or press V for Orbit).', 'info');
   }
-  for (const hit of hits) {
-    if (!visibleChain(hit.object)) continue;
-    for (let o = hit.object; o; o = o.parent) {
-      if (itemOf.has(o)) { select(itemOf.get(o), add ? 'toggle' : 'set'); return; }
-    }
-    break;      // the first visible thing is not an object (ground, a road): keep looking at nothing
-  }
-  if (!add) select(null);
+  if (!down || moved > 4 || gizmo.dragging || dragged || e.button !== 0) return;
+  // the first visible thing under the pointer: an object, a pedestrian marker, a deleted one's dashed box; ground or a road: nothing
+  const add = e.shiftKey || e.ctrlKey, h = pickAt(ndc(e), add);
+  if (h && h.ped) selectPed(h.ped);
+  else if (h && h.deleted) select(h.deleted);
+  else if (h && h.item) select(h.item, add ? 'toggle' : 'set');
+  else if (!add) select(null);
 });
 
 // ------------------------------------------------------------------ saving and testing
@@ -1875,11 +2096,30 @@ $('snap').checked = store.get('snap', '0') === '1';
 $('snapMove').value = store.get('snapMove', '10');
 $('snapTurn').value = store.get('snapTurn', '15');
 setSnap();
-$('grid').checked = store.get('grid', '0') === '1';
-grid.visible = $('grid').checked;
-$('grid').onchange = (e) => { grid.visible = e.target.checked; store.set('grid', e.target.checked ? '1' : '0'); };
+setGrid(store.get('grid', '0') === '1');
+$('grid').onchange = (e) => { setGrid(e.target.checked); store.set('grid', e.target.checked ? '1' : '0'); };
 $('look').onchange = (e) => setLook(e.target.checked);
 $('pedsOn').onchange = (e) => setPeds(e.target.checked);
+// the view bar: fly or orbit, focus, the layers menu, the shortcuts
+$('vFly').onclick = () => { if (!fly.on) setView(true); };
+$('vOrbit').onclick = () => { if (fly.on) setView(false); };
+$('focusSel').onclick = focusSelection;
+function showLayers(open) {
+  $('layersMenu').hidden = !open;
+  $('layersBtn').classList.toggle('on', open);
+  $('layersBtn').setAttribute('aria-expanded', open);
+}
+$('layersBtn').onclick = () => showLayers($('layersMenu').hidden);
+document.addEventListener('pointerdown', (e) => {   // a click anywhere else closes the layers menu
+  if (!$('layersMenu').hidden && !e.target.closest('#layersMenu, #layersBtn')) showLayers(false);
+}, true);
+function showKeys() {
+  if (document.querySelector('dialog[open]')) return;
+  showLayers(false);
+  $('keysDlg').showModal();
+}
+$('keysBtn').onclick = showKeys;
+$('help').onclick = showKeys;
 $('pedAddGroup').onclick = () => addPed('group');
 $('pedAddSeg').onclick = () => addPed('seg');
 for (const id of ['pdCount', 'pdWidth', 'pdx', 'pdy', 'pdz']) $(id).onchange = pedFromInputs;
@@ -1941,6 +2181,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   const text = field && !e.target.matches('select');
+  if (e.key === 'F1') { e.preventDefault(); showKeys(); return; }   // the browser's help never opens
   // Save, Undo and Redo before the focus test: Ctrl+S never opens the browser's "save page"; in a text field Undo is the field's
   if (ctrl && !e.altKey && k === 's') {
     e.preventDefault();
@@ -1956,6 +2197,8 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (field) return;
+  if (k === '?' && !ctrl && !e.altKey) { e.preventDefault(); showKeys(); return; }
+  if (k === 'escape' && !$('layersMenu').hidden) { showLayers(false); return; }   // the menu first, the selection stays
   if (ctrl && k === 'd') { e.preventDefault(); duplicate(); }
   else if (e.ctrlKey && k === 'a') { e.preventDefault(); selectMany(listed()); }
   else if (k === 'delete') remove();
@@ -1972,8 +2215,7 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'v') setView(!fly.on);
   else if (k === 'g') setTool('translate');
   else if (k === 'r') setTool('rotate');
-  else if (k === 'f' && sel) focus(sel);
-  else if (k === 'f' && pedSel) focus({ node: pedSel.kind === 'seg' ? pedSel.lane : pedSel.node });
+  else if (k === 'f') focusSelection();
   else if (k === 'l') setLook(!gameLook);
   else if (k === 'p') setPeds(!pedsOn);
   else if (k === '1') setMode('objects');
@@ -2016,6 +2258,10 @@ if (new URLSearchParams(location.search).has('debug')) {
                        redo, resetAll, applyPatch, frameAll, resetSel, gameLine, post, setRunning, applyTheme, refreshList,
                        msg, toast, openOutput, closeOutput, showStatus, setGameState, readCheck, gameResult,
                        setMode, turnBy, showSummary, secOf, SECTIONS, get mode() { return modeNow(); },
+                       gizmo, boxes, hoverBox, marks, hover, hoverPick: pickAt, hoverStep, syncMarks, syncBoxes,
+                       boxCenter: (o) => new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()), setGrid, setTool, setSnap, showKeys, showHint,
+                       focusSelection, HINTS, get hintKey() { return hint.key; }, get hoverCount() { return hover.n; },
+                       get gridMinor() { return gridMinor; }, get gridMajor() { return gridMajor; },
                        get ui() { return ui; }, get outTab() { return outTab; },
                        get history() { return history; }, get future() { return future; }, get dirty() { return dirty; },
                        get modNow() { return modNow; }, get keep() { return keep; }, get game() { return game; },
