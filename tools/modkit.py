@@ -33,7 +33,8 @@ O que cada tipo vira:
   troca a textura na hora de desenhar (native/wotm_texmods.hpp), em qualquer resolucao. Com --inject o pack tambem regrava o
   .TEX/.RTX (mesmo tamanho e cores da paleta atual), para a imagem do GS emulado (referencia da checagem VU1).
 - .VPK / .VAG -> <arquivo>.wav; volta pelo tools/snd989.py (mesma taxa e volumes do original).
-- .BNK -> <banco>_sNNN.wav, um por som com amostra; os editados voltam todos num banco so (snd989 bnk-replace).
+- .BNK -> <banco>_sNNN.wav, um por som com amostra; os editados voltam todos num banco so (snd989 bnk-replace). Um
+  <banco>_sNNN_aK.wav (feito a mao) troca so a K-esima amostra do som e mantem as camadas dele.
 - Malha e animacoes (skin ou custom) -> <PREFIXO><traje>.glb (tools/monglb.py --edit, precisa do numpy); voltam pelo
   tools/ngpmesh.py (malha) e tools/ngpanim.py (animacoes) como .NGP + .PTR, remontados do traje do disco com os dois .glb
   importados (.blender.json na pasta). O pack nao leva .glb/.blend (MESH_SRC).
@@ -64,7 +65,7 @@ FROZEN = bool(getattr(sys, "frozen", False))
 REPO = os.path.dirname(os.path.abspath(sys.executable)) if FROZEN else os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEX_DIRS = ("LVL", "MON", "SHELL")
 PNG_RE = re.compile(r"^(.+?)(_rtx)?_t(\d+)(?:_sempaleta)?\.png$", re.I)   # _sempaleta: o export nao achou a paleta (cinza)
-BNK_RE = re.compile(r"^(.+)_s(\d+)\.wav$", re.I)
+BNK_RE = re.compile(r"^(.+)_s(\d+)(?:_a(\d+))?\.wav$", re.I)   # _aK: so a K-esima amostra de um som de camadas
 MESH_SRC = (".glb", ".gltf", ".blend", ".blend1")   # fonte da malha na pasta de trabalho (mesh export): o pack nao leva
 
 
@@ -550,7 +551,8 @@ def pack(disc, work, mods, mod, inject=False):
         if n.lower().endswith(".wav"):
             mb = BNK_RE.match(n)
             if mb and find_disc_ext(disc, bank_dir(d), mb.group(1), ".BNK"):
-                banks.setdefault((d, mb.group(1)), []).append((int(mb.group(2)), p))
+                k = int(mb.group(3)) if mb.group(3) is not None else -1
+                banks.setdefault((d, mb.group(1)), []).append(((int(mb.group(2)), k), p))
                 continue
             stem = os.path.splitext(n)[0]
             for ext in (".VPK", ".VAG"):
@@ -582,8 +584,12 @@ def pack(disc, work, mods, mod, inject=False):
         os.makedirs(os.path.dirname(out), exist_ok=True)
         tmp = out + ".tmp"
         cur = src
-        for i, wav in sorted(sounds):
-            snd989.bnk_replace(cur, i, wav, tmp)
+        whole = {i for (i, k), _ in sounds if k < 0}
+        for (i, k), wav in sorted(sounds):
+            if k >= 0 and i in whole:   # o WAV do som inteiro ja juntou as camadas
+                print("WARNING: %s skipped: %s_s%03d.wav replaces the whole sound" % (os.path.basename(wav), stem, i))
+                continue
+            snd989.bnk_replace(cur, i, wav, tmp, None if k < 0 else k)
             os.replace(tmp, out)
             cur = out
         print("bank %s.BNK: %d sound(s) replaced -> %s" % (stem.upper(), len(sounds), os.path.relpath(out, mods)))
@@ -606,6 +612,8 @@ KINDS = ("mecha",)   # regras proprias do port ("kind" do monster.json, wotm_cus
 # dono traz
 SPECIAL_NEEDS = {"robo-47": "the shock wave effect", "ultra-v": "the hook's ball", "preytor": "the bugs", "magmo": "the lava rocks",
                  "agamo": "the head", "zorgulon": "the disc", "assboss": "the cannon shells"}
+# ... menos os que o rig import copia para os arquivos proprios (tools/ngpgraft.py SPECIALS)
+SPECIAL_PARTS = ("robo-47",)
 
 
 def norm(s):
@@ -1261,11 +1269,14 @@ def rig_import(disc, work, mods, mod, cid, glb, front=None, scale=None, height=N
     src = disc_file(disc, stem + ".NGP")
     if not src or not disc_file(disc, stem + ".PTR") or not disc_file(disc, stem + ".TEX"):
         raise SystemExit("rig import: %s.NGP/.PTR/.TEX are not on the disc" % stem)
+    import ngpgraft
+    data = _json_obj(os.path.join(monster_dir(mods, mod, cid), "monster.json"))
+    layers = ngpgraft.LAYERS.get(base_name(str((data or {}).get("special", ""))), ())
     tmp = tempfile.mkdtemp(prefix="wotm_rig_")
     name = os.path.basename(stem)
     try:
         try:
-            res = ngprig.build(src, glb, tmp, name=name, front=front, scale=scale, height=height, log=print)
+            res = ngprig.build(src, glb, tmp, name=name, front=front, scale=scale, height=height, layer_ids=layers, log=print)
         except (ngprig.RigError, ngpanim.AnimError, ngpmesh.MeshError) as e:
             raise SystemExit("rig import: %s" % e)
         files = {ext: os.path.join(tmp, name + ext) for ext in (".NGP", ".PTR", ".TEX", ".RTX")}
@@ -1287,9 +1298,31 @@ def rig_import(disc, work, mods, mod, cid, glb, front=None, scale=None, height=N
         shutil.rmtree(tmp, ignore_errors=True)
     with open(_blender_rec(work, rel), "w", encoding="utf-8") as f:
         json.dump({"rig": glb, "rig_pngs": pngs}, f, indent=1)
-    files_on(mods, mod, cid, _json_obj(os.path.join(monster_dir(mods, mod, cid), "monster.json")))
+    special_parts(disc, work, rel, data)
+    files_on(mods, mod, cid, data)
     print("send it to the mod: %s" % pack_hint(mod))
     return res
+
+
+def special_parts(disc, work, rel, data):
+    """O especial emprestado ("special") que precisa de pecas do .NGP do dono (tools/ngpgraft.py): copia-as nos arquivos proprios
+    da pasta de trabalho `rel`. Sem "special" que precise, ou ja com as pecas, nao faz nada."""
+    import ngpgraft
+    sp = base_name(str((data or {}).get("special", "")))
+    if sp not in ngpgraft.SPECIALS:
+        return False
+    d = os.path.join(work, *rel.split("/"))
+    try:
+        done = ngpgraft.graft(d, sp, lambda r: disc_file(disc, r), log=print)
+    except ngpgraft.GraftError as e:
+        raise SystemExit("special %s: %s" % (sp, e))
+    if done:
+        st = load_state(work)
+        for n in os.listdir(d):
+            if n.upper().endswith((".NGP", ".PTR", ".TEX", ".RTX")):
+                st["files"].setdefault("%s/%s" % (rel, n), {"sha1": "", "imported": True})
+        save_state(work, st)
+    return done
 
 
 def monster_duplicate(mods, mod, work, cid, new):
@@ -1464,10 +1497,11 @@ def check(disc, mods, only=None):
                     if v.get("special") and not base_name(str(v["special"])):
                         note += " WARNING: \"special\" %r is not a monster (%s, %s); the game keeps the base's special" % (
                             v["special"], ", ".join(MONSTERS), ", ".join(CUSTOM_BASES))
-                    elif v.get("special") and base_name(str(v["special"])) in SPECIAL_NEEDS:
+                    elif v.get("special") and base_name(str(v["special"])) in SPECIAL_NEEDS and not (
+                            v.get("files") and base_name(str(v["special"])) in SPECIAL_PARTS):
                         sp = base_name(str(v["special"]))
-                        note += " WARNING: the %s special uses %s, which only its own model has; the game keeps the base's special" % (
-                            sp, SPECIAL_NEEDS[sp])
+                        note += " WARNING: the %s special uses %s, which only its own model has; the game keeps the base's special%s" % (
+                            sp, SPECIAL_NEEDS[sp], " (Import rig... copies it into the monster's files)" if sp in SPECIAL_PARTS else "")
                     elif v.get("special") and not v.get("files") and base_prefix(str(v.get("base", ""))) not in CUSTOM_BASES.values():
                         note += " WARNING: \"special\" only applies with \"files\" (the game cannot tell this monster from the base's)"
             elif m:

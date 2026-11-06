@@ -942,6 +942,64 @@ namespace
     // (Monster+0xC -> +0x60, em radianos) depois da integracao. O rate mostrado e o da variavel (sem o limite).
     constexpr uint32_t kMonsterDynamicsUpdatePosition = wotm::fn::updatePosition__15MonsterDynamics;
     PS2Runtime::RecompiledFunction g_origUpdatePosition = nullptr;
+    bool g_turnLog = false, g_moveLog = false;
+
+    // Nome do estado do monstro pelo deslocamento do objeto MonsterState dentro do Monster (lista do construtor, game.h)
+    const char *monsterStateName(uint32_t off)
+    {
+        static const struct { uint32_t off; const char *name; } kStates[] = {
+            {0x7984, "Idle"}, {0x79AC, "Run"}, {0x7A90, "Dash"}, {0x7AD4, "Jump"}, {0x7DA0, "Block"}, {0x7DD8, "Counter"},
+            {0x7E30, "Recoil"}, {0x7EA0, "KnockBack"}, {0x8450, "Death"}, {0x8470, "Punch"}, {0xAE90, "BatSwipe"},
+            {0xDC70, "PickUp"}, {0xDCE0, "Grapple"}, {0xDD54, "GrappleLift"}, {0xDD74, "GrappleThrow"},
+            {0xDDA0, "GrappleThrow1"}, {0xDDCC, "Grappled"}, {0xDE30, "BeingSlammed"}, {0xE3E0, "BeingThrown"},
+            {0xE990, "GrappleBreak"}, {0xEF40, "Throw"}, {0xEFE0, "Climb"}, {0xF0B0, "Fly"}, {0xF3F0, "CrowdControl"},
+            {0xF6F4, "SonicRoar"}, {0xF974, "FireBreath"}, {0xF9D8, "BugAttack"}, {0xFA1C, "ButtSlam"}, {0xFD40, "RamAttack"},
+            {0xFE20, "Taunt"}, {0xFE38, "Javelin"}, {0xFE5C, "RobotSpecial"}, {0x102A8, "RockSpecial"}, {0x1059C, "ZapAttack"},
+            {0x10600, "GrappleHook"}, {0x106E0, "Impaled"}, {0x10714, "Stunned"}, {0x1074C, "TwoHandedThrow"},
+            {0x10790, "AirStrike"}, {0x10930, "LavaBlast"}, {0x10AE0, "GrappleOHAttack"}, {0x10B34, "MonkeyOHAttack"},
+            {0x10BA0, "Shocked"}, {0x10BF0, "Catch"}, {0x10C40, "GetupAttack"}, {0x10CF0, "StompAttack"},
+            {0x10D50, "TazerAttack"}, {0x10D90, "ShieldAttack"}, {0x10E70, "Victory"}, {0x10E90, "GunAttack"},
+            {0x10EBC, "TopSpin"}, {0x10F60, "CannonHands"}, {0x11100, "BigTakeHit"}, {0x11114, "Countered"},
+            {0x11130, "UltraTazer"}};
+        for (const auto &s : kStates)
+            if (s.off == off)
+                return s.name;
+        return "?";
+    }
+
+    // WOTM_MOVELOG: uma linha [move] por MonsterDynamics::updatePosition dos monstros de jogador humano (m_monsters[0..3]):
+    // estado (e sub-estado do Run/Jump, animacao do Run), quadros no estado, posicao e angulo z do cs, manche
+    // (m_motionVec, w = giro), velocidade alvo, medida (total, frente, lado) e vertical, giro (velRot z) e a trava
+    // (m_target, m_pinMode, m_pinTarget). Serve para ver o que o monstro faz enquanto o dono joga.
+    void moveLogLine(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t mon, uint32_t dyn)
+    {
+        int slot = -1;
+        for (int p = 0; p < 4; ++p)
+            if (READ32(kGame + 0x120380 + 4 * p) == mon)
+                slot = p;
+        if (slot < 0)
+            return;
+        auto f = [&](uint32_t addr)
+        {
+            const uint32_t w = READ32(addr);
+            float v;
+            std::memcpy(&v, &w, 4);
+            return v;
+        };
+        const uint32_t st = READ32(mon + 0x34), cs = READ32(mon + 0xC);
+        const uint32_t off = st ? st - mon : 0;
+        const char *nm = st ? monsterStateName(off) : "-";
+        char sub[48] = "";
+        if (off == 0x79AC)
+            std::snprintf(sub, sizeof sub, " sub=%d anim=%d", static_cast<int32_t>(READ32(st + 0xD4)), static_cast<int32_t>(READ32(st + 0x60)));
+        else if (off == 0x7AD4 || off == 0xF0B0)
+            std::snprintf(sub, sizeof sub, " sub=%d", static_cast<int32_t>(READ32(st + 0x18)));
+        std::fprintf(stderr, "[move] g=%u p%d %s%s fr=%u pos=%.0f,%.0f,%.0f ang=%+.2f stick=%+.2f,%+.2f,%+.2f giro=%+.2f alvo=%.0f vel=%.0f frente=%+.0f lado=%+.0f vz=%+.0f velRot=%+.2f trava=%06x pin=%d/%06x\n",
+                     READ32(wotm::sym::g_frame), slot, nm, sub, st ? READ32(st + 0x8) : 0u, f(cs + 0x10), f(cs + 0x14), f(cs + 0x18),
+                     f(cs + 0x68), f(dyn + 0x120), f(dyn + 0x124), f(dyn + 0x128), f(dyn + 0x12C), f(dyn + 0x140), f(dyn + 0x150),
+                     f(dyn + 0x154), f(dyn + 0x158), f(dyn + 0x168), f(dyn + 0x108), READ32(mon + 0x68B4),
+                     static_cast<int32_t>(READ32(mon + 0x6C38)), READ32(mon + 0x6C04));
+    }
 
     void updatePositionLogged(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
@@ -963,9 +1021,12 @@ namespace
         g_origUpdatePosition(rdram, ctx, runtime);
         const uint32_t mon = READ32(dyn);
         const uint32_t cs = READ32(mon + 0xC);
-        std::fprintf(stderr, "[turn] g=%u mon=%06x rate=%d acc=%+.3f,%+.3f,%+.3f vel=%+.3f,%+.3f,%+.3f -> %+.3f,%+.3f,%+.3f ang=%+.3f,%+.3f,%+.3f\n",
-                     READ32(wotm::sym::g_frame), mon, rate, acc[0], acc[1], acc[2], v0[0], v0[1], v0[2], readF(rdram, dyn + 0x100), readF(rdram, dyn + 0x104),
-                     readF(rdram, dyn + 0x108), readF(rdram, cs + 0x60), readF(rdram, cs + 0x64), readF(rdram, cs + 0x68));
+        if (g_turnLog)
+            std::fprintf(stderr, "[turn] g=%u mon=%06x rate=%d acc=%+.3f,%+.3f,%+.3f vel=%+.3f,%+.3f,%+.3f -> %+.3f,%+.3f,%+.3f ang=%+.3f,%+.3f,%+.3f\n",
+                         READ32(wotm::sym::g_frame), mon, rate, acc[0], acc[1], acc[2], v0[0], v0[1], v0[2], readF(rdram, dyn + 0x100), readF(rdram, dyn + 0x104),
+                         readF(rdram, dyn + 0x108), readF(rdram, cs + 0x60), readF(rdram, cs + 0x64), readF(rdram, cs + 0x68));
+        if (g_moveLog)
+            moveLogLine(rdram, ctx, runtime, mon, dyn);
     }
 
     // WOTM_FIELDLOG: uma linha [field] por quadro do jogo, detectado quando timerWaitForMinUpdateRate atualiza
@@ -2684,10 +2745,13 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
     wotmModsInstall(runtime, elfPath);
     if (const char *e = std::getenv("WOTM_RATEMIN"))
         g_minRate = std::atoi(e);
-    if (std::getenv("WOTM_TURNLOG") && (g_origUpdatePosition = runtime.lookupFunction(kMonsterDynamicsUpdatePosition)))
+    g_turnLog = std::getenv("WOTM_TURNLOG") != nullptr;
+    g_moveLog = std::getenv("WOTM_MOVELOG") != nullptr;
+    if ((g_turnLog || g_moveLog) && (g_origUpdatePosition = runtime.lookupFunction(kMonsterDynamicsUpdatePosition)))
     {
         runtime.registerFunction(kMonsterDynamicsUpdatePosition, &updatePositionLogged);
-        std::fprintf(stderr, "[wotm] log da rotacao dos monstros ligado (WOTM_TURNLOG)\n");
+        std::fprintf(stderr, "[wotm] log de movimento dos monstros ligado (%s%s)\n", g_turnLog ? "WOTM_TURNLOG " : "",
+                     g_moveLog ? "WOTM_MOVELOG" : "");
     }
     if (std::getenv("WOTM_FIELDLOG"))
     {

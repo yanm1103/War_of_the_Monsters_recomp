@@ -838,6 +838,9 @@ def retime(w, game, cv, addr, st, s, n_frames):
 # ids whose animation loops in most of the disc's monsters (control node flag, animCtx[k] +0x29): the default of a new one
 LOOPING_IDS = {1, 2, 3, 6, 7, 8, 9, 33, 34, 58, 59, 60, 61, 62, 63, 74, 77, 89, 90, 95, 96, 101, 103, 104, 106, 110, 113,
                114, 142, 143, 145, 161, 172, 173, 174, 176, 181, 209, 250, 263, 265, 266}
+# ids the game only blends on top of the main animation by a percentage (AnimBlend; `layer` in docs/ANIM_IDS.md): a new one
+# is written as a layer (rotations only, as deltas)
+LAYER_IDS = {5, 33, 35, 36, 37, 38, 50, 111, 154, 155, 156, 166, 167, 181, 182, 251, 252, 253, 254, 255, 256}
 MAX_ID = 299   # Monster::m_anims has 300 handles (MonsterInit: animationGetHandle for ids 0..0x12B)
 
 

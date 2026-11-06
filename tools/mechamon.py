@@ -90,7 +90,7 @@ def pad16(b):
 
 
 def build_tex(jtex, ctex, new_ids):
-    """JELLY0.TEX + os pacotes do Mecha (ids novos, bin pelo tamanho do bloco)."""
+    """JELLY0.TEX + os pacotes do Mecha (`new_ids`: {id na origem: id novo}, na ordem; bin pelo tamanho do bloco)."""
     jd, _ = tex.read_file(jtex)
     cd, _ = tex.read_file(ctex)
     jp, cp = tex.parse(jd), tex.parse(cd)
@@ -100,7 +100,7 @@ def build_tex(jtex, ctex, new_ids):
     by_id = {p.texId: p for p in cp["packets"]}
     cblk = {i: s[1] for i, s in enumerate(cp["sizes"])}
     pkts = []
-    for old in TEX_IDS:
+    for old in new_ids:
         p = by_id[old]
         blk = cblk[p.bin]
         b = next((i for i, s in enumerate(sizes) if s[1] == blk), None)

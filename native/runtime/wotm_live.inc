@@ -846,6 +846,43 @@ void wotmPickupHighlights(const uint8_t *rdram)
     }
 }
 
+// Cor de vertice mais comum do primeiro OBJECT abaixo de `node` (GROUP/TRANSLATE/MATRIX/SCALE), em 0x01BBGGRR; 0 = sem malha.
+// wotm_custom.inc ("shotColor") a usa para achar a cor do corpo do tiro e recolori-lo pelo colorQuad do _cs.
+uint32_t wotmObjectMainColor(const uint8_t *rdram, uint32_t node)
+{
+    if (!rdram)
+        return 0;
+    const wotm::Ram ram{rdram, PS2_RAM_SIZE};
+    uint32_t stack[64], n = 0;
+    stack[n++] = node & 0x1FFFFFFFu;
+    for (int guard = 0; n && guard < 256; ++guard)
+    {
+        const uint32_t a = stack[--n];
+        if (!ram.ok(a, 0x60))
+            continue;
+        const uint32_t op = ram.u32(a) & 63;
+        uint32_t kids = 0, cnt = 0;
+        if (op == 0)
+        {
+            const wotm::MeshData md = wotm::decodeObject(ram, a);
+            std::map<uint32_t, int> freq;
+            for (const wotm::Vtx &v : md.tris)
+                ++freq[uint32_t(v.r) | uint32_t(v.g) << 8 | uint32_t(v.b) << 16];
+            const auto best = std::max_element(freq.begin(), freq.end(), [](const auto &x, const auto &y) { return x.second < y.second; });
+            if (best != freq.end())
+                return 0x01000000u | best->first;
+            continue;
+        }
+        if (op == 1) { kids = a + 0x20; cnt = ram.u16(a + 8); }
+        else if (op == 3) { kids = a + 0x1C; cnt = ram.u32(a + 8); }
+        else if (op == 4) { kids = a + 0x50; cnt = ram.u32(a + 8); }
+        else if (op == 30) { kids = a + 0x2C; cnt = ram.u32(a + 8); }
+        for (uint32_t k = std::min(cnt, 32u); k-- > 0 && n < 64;)   // de tras para a frente: o primeiro filho sai primeiro
+            stack[n++] = ram.u32(kids + 4 * k) & 0x1FFFFFFFu;
+    }
+    return 0;
+}
+
 namespace wotm_live
 {
 static void pushRect(const wotm::ScreenRect &r, uint8_t state)

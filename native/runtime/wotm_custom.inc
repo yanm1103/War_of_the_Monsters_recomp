@@ -17,6 +17,8 @@
 
 #include "wotm_disc.hpp"   // .CHR do monstro base da camera (camTable)
 
+uint32_t wotmObjectMainColor(const uint8_t *rdram, uint32_t node);   // wotm_live.inc (outro TU): cor de vertice de um modelo
+
 namespace wotm_custom
 {
     constexpr uint32_t kSetAI = wotm::fn::SetAIMonster__7TheGameiiii, kTakeHit = wotm::fn::takeHit__7MonsterP8_fvectorfi;
@@ -535,6 +537,70 @@ namespace wotm_custom
             wotm_modes4::call(rdram, ctx, runtime, wotm::fn::playSignatureSound__12MonsterSound, {m + kMonsterSound});
             std::fprintf(stderr, "[custom] %s: grito no especial\n", cu->id.c_str());
         }
+    }
+
+    // "fallBlend": na queda do pulo (StateJump sub 6 e 8) o jogo mantem por cima da queda (animacao 34) a camada da subida
+    // (blend9C, animacao 33) com peso pela velocidade vertical, e ela so sai perto do chao. No Ultra-V as duas poses sao quase
+    // iguais; num custom com animacoes proprias a mistura vira uma pose do meio. Com "fallBlend": N a camada some em N quadros
+    // a partir do pico (0 = corte) e a queda aparece inteira.
+    // "landOnTouch": perto do chao, ainda no ar (sub 8), o jogo poe por cima a camada do pouso (blend104, animacao 35) parada no
+    // primeiro quadro, uma pose de quem se prepara para pousar. Com "landOnTouch": true ela fica escondida no ar e entra inteira
+    // no toque (sub 9), onde o jogo a avanca pelo impacto e passa para o levantar (39).
+    constexpr uint32_t kJumpUpdate = wotm::fn::update__9StateJump;
+    // JumpFlyBase::subState; pesos da blend9C e da blend104 (AnimBlend +0x48, o que o update grava)
+    constexpr uint32_t kJumpSub = 0x18, kJumpRiseWeight = 0x9C + 0x48, kJumpLandWeight = 0x104 + 0x48;
+    PS2Runtime::RecompiledFunction g_origJumpUpdate = nullptr;
+    struct FallFade { uint32_t state = 0; uint32_t sub = 0; uint32_t n = 0; float w0 = 0.f; };
+    FallFade g_fallFade[8];
+
+    void jumpUpdate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t st = ctx->pc == kJumpUpdate ? GPR_U32(ctx, 4) : 0;
+        g_origJumpUpdate(rdram, ctx, runtime);
+        const wotm::mods::Custom *cu = st ? ownFilesCustom(rdram, cRd32(rdram, st + kStateOwner)) : nullptr;
+        if (!cu || (cu->fallBlend < 0 && !cu->landOnTouch))
+            return;
+        FallFade *f = nullptr;
+        for (FallFade &e : g_fallFade)
+            if (e.state == st || (!f && !e.state))
+                f = &e;
+        if (!f)
+            f = &g_fallFade[0];
+        const uint32_t sub = cRd32(rdram, st + kJumpSub);
+        auto weight = [&](uint32_t off) { return reinterpret_cast<float *>(rdram + ((st + off) & 0x01FFFFFFu)); };
+        static const bool log = std::getenv("WOTM_ANIMLOG") != nullptr;
+        if (f->state != st)
+            *f = {st, 0, 0, 0.f};
+        const uint32_t was = f->sub;
+        f->sub = sub;
+        if ((sub == 6 || sub == 8) && cu->fallBlend >= 0)
+        {
+            float *w = weight(kJumpRiseWeight);
+            if (was != 6 && was != 8)
+            {
+                f->n = 0;
+                f->w0 = *w;
+                if (log)
+                    std::fprintf(stderr, "[custom] %s: queda do pulo, camada da subida %.2f some em %d quadros\n", cu->id.c_str(), *w,
+                                 cu->fallBlend);
+            }
+            ++f->n;
+            const float k = cu->fallBlend > 0 ? 1.f - float(f->n) / float(cu->fallBlend) : 0.f;
+            const float target = f->w0 * (k > 0.f ? k : 0.f);
+            if (target < *w)
+                *w = target;
+        }
+        if (cu->landOnTouch && sub == 8)
+            *weight(kJumpLandWeight) = 0.f;
+        else if (cu->landOnTouch && sub == 9 && was == 8 && cRd32(rdram, cRd32(rdram, st + kStateOwner) + kCurState) == st)
+        {   // so com o pulo ainda no estado: pousando com velocidade o jogo ja passou para o Run no mesmo quadro e mandou a camada
+            // sumir (rampOut com a taxa do peso zero); religada depois disso ela ficaria para sempre
+            *weight(kJumpLandWeight) = 1.f;
+            if (log)
+                std::fprintf(stderr, "[custom] %s: pouso no toque\n", cu->id.c_str());
+        }
+        if (sub != 6 && sub != 8 && sub != 9)
+            f->state = 0;
     }
 
     void spinUpdate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -1411,18 +1477,126 @@ namespace wotm_custom
             std::fprintf(stderr, "[custom] %s: especial do %s\n", cu->id.c_str(), who);
         }
     }
+    // Pecas do especial emprestado nos arquivos proprios (tools/ngpgraft.py; Registry: specialParts). Alguns especiais usam modelos
+    // que o banco de dados registra a partir do .NGP do dono (dbProcInteractive): o missil do Robo-47 e o modelo de arma 4005
+    // (Weapons::m_epNodes[13], um so para todos) e a cupula de choque e a instancia de SpecFxAnim 0x11FF (uma por monstro, pelo
+    // m_curDupId do arquivo, com as 3 animacoes dela). A copia no .NGP do custom vem com ids que o jogo ignora (arma + 0x100,
+    // SpecFxAnim + 0x80), entao nao briga com um Robo-47 na mesma luta:
+    // - o dbProcInteractive registra a SpecFxAnim copiada como o jogo faz com a dele (addInstance com o m_curDupId);
+    // - o isInstanceAvailable/getInstance de um custom com especial emprestado pede o id da copia quando ela existe para ele (o
+    //   RobotSpecial::transitionOK so deixa o especial comecar com uma cupula livre; o Weapon::DetonateWeapon a abre);
+    // - o Weapon::InitWeapon do projetil do especial poe na m_epNodes do tipo, so durante a chamada, a copia do arquivo do dono.
+    constexpr uint32_t kProcInteractive = wotm::fn::dbProcInteractive__FP9_hierheadP8_fvectorPA3_f,
+                       kFxAvail = wotm::fn::isInstanceAvailable__10SpecFxAnimP7Monsteri,
+                       kFxGet = wotm::fn::getInstance__10SpecFxAnimP7Monsteri, kFxAdd = wotm::fn::addInstance__10SpecFxAnimP9_hierheadi,
+                       kFxReset = wotm::fn::initBeforeDbLoad__10SpecFxAnim;
+    constexpr uint32_t kCurDupId = 0x120448, kWeapons = 0x112490, kFileStatus = wotm::sym::fileStatus, kNgpAddrs = 0x3C, kNgpCount = 0x74;
+    constexpr uint32_t kFxShift = 0x80, kWeaponShift = 0x100;
+    constexpr uint32_t kWeaponNode[][2] = {{13, 4005}};   // tipo de Weapon -> id do modelo (Weapons::AddWeaponEpNode)
+    PS2Runtime::RecompiledFunction g_origProcInteractive = nullptr, g_origFxAvail = nullptr, g_origFxGet = nullptr, g_origFxReset = nullptr;
+    std::set<uint64_t> g_ownFx;   // SpecFxAnim copiadas registradas nesta carga: id << 32 | dup
+    bool specFxId(uint32_t id) { return id - 0x11F9u < 2u || id == 0x11FD || id == 0x11FE || id == 0x11FF || id == 0x1201; }
+    void procInteractive(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t h = ctx->pc == kProcInteractive ? GPR_U32(ctx, 4) : 0;
+        const uint32_t id = h ? READ32(h) >> 18 : 0;
+        if (!h || id < kFxShift || !specFxId(id - kFxShift))
+        {
+            g_origProcInteractive(rdram, ctx, runtime);
+            return;
+        }
+        const uint32_t ra = GPR_U32(ctx, 31), dup = READ32(kGameObj + kCurDupId);
+        wotm_modes4::call(rdram, ctx, runtime, kFxAdd, {h, dup});
+        static std::set<uint64_t> logged;
+        if (g_ownFx.insert(uint64_t(id) << 32 | dup).second && logged.insert(uint64_t(id) << 32 | dup).second)
+            std::fprintf(stderr, "[custom] SpecFxAnim copiada %#x (do %#x) registrada para o dup %u\n", id, id - kFxShift, dup);
+        ctx->pc = ra;
+    }
+    void fxReset(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        g_ownFx.clear();
+        g_origFxReset(rdram, ctx, runtime);
+    }
+    // isInstanceAvailable(Monster *, int id) e getInstance(Monster *, int id): a copia do custom no lugar do id do jogo
+    template <uint32_t A, PS2Runtime::RecompiledFunction *Orig>
+    void fxFind(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (ctx->pc == A && !g_ownFx.empty())
+        {
+            const uint32_t m = GPR_U32(ctx, 4), id = GPR_U32(ctx, 5);
+            if (m && specFxId(id) && g_ownFx.count(uint64_t(id + kFxShift) << 32 | READ32(m + kDupId)))
+                if (const wotm::mods::Custom *cu = ownFilesCustom(rdram, m); cu && cu->special)
+                    ctx->r[5] = _mm_set_epi64x(0, static_cast<int64_t>(id + kFxShift));
+        }
+        (*Orig)(rdram, ctx, runtime);
+    }
+    // O no `id` nas raizes (e GROUPs ate 4 niveis abaixo) da imagem .NGP carregada que contem o no raiz do monstro `m`
+    uint32_t ownNode(uint8_t *rdram, uint32_t m, uint32_t id)
+    {
+        const uint32_t cs = m ? cRd32(rdram, m + kCs) & 0x1FFFFFFFu : 0, ep = cs ? cRd32(rdram, cs) & 0x1FFFFFFFu : 0;   // _cs +0: o no
+        uint32_t img = 0;
+        const int n = static_cast<int8_t>(cRd8(rdram, kFileStatus + kNgpCount));
+        for (int k = 0; ep && k < n; ++k)
+            if (const uint32_t a = cRd32(rdram, kFileStatus + kNgpAddrs + 4u * uint32_t(k)) & 0x1FFFFFFFu; a && a <= ep && a > img)
+                img = a;
+        if (!img)
+            return 0;
+        uint32_t found = 0;
+        auto walk = [&](auto &&self, uint32_t node, int depth) -> void {
+            node &= 0x1FFFFFFFu;
+            if (found || depth > 4 || !animRamOk(node, 0x24u))
+                return;
+            const uint32_t w = cRd32(rdram, node);
+            if (w >> 18 == id)
+            {
+                found = node;
+                return;
+            }
+            if ((w & 63) == 1)
+                for (uint32_t k = 0, c = (cRd32(rdram, node + 8) & 0xFFFFu); k < c && k < 512; ++k)
+                    self(self, cRd32(rdram, node + 0x20 + 4 * k), depth + 1);
+        };
+        for (uint32_t i = 0, roots = cRd32(rdram, img); i < roots && i < 16; ++i)
+            walk(walk, cRd32(rdram, img + 4 + 4 * i), 0);
+        return found;
+    }
+    // Modelo proprio do projetil `type` do custom dono `m` (com especial emprestado); 0 = o do jogo
+    uint32_t ownWeaponNode(uint8_t *rdram, uint32_t m, uint32_t type)
+    {
+        const wotm::mods::Custom *cu = m ? ownFilesCustom(rdram, m) : nullptr;
+        if (!cu || !cu->special)
+            return 0;
+        for (const auto &e : kWeaponNode)
+            if (e[0] == type)
+                if (const uint32_t node = ownNode(rdram, m, e[1] + kWeaponShift))
+                {
+                    static std::set<std::string> logged;
+                    if (logged.insert(cu->id).second)
+                        std::fprintf(stderr, "[custom] %s: projetil %u do especial com o modelo proprio (no %#x)\n", cu->id.c_str(), type,
+                                     e[1] + kWeaponShift);
+                    return node;
+                }
+        return 0;
+    }
     // Cor do fogo ("fireColor" da skin ou do custom; MODS.md): os efeitos do Togera criados por um monstro com cor propria saem
     // dela. Os ganchos de quem os cria guardam o monstro (g_fxOwner): FireBreath::Activate e TestCollis (o bafo e o acerto dele),
     // Weapon::DetonateWeapon (a explosao da bola de fogo; o dono e o m_ownerId) e StateCrowdControl::transitionInto. O gancho dos
     // dois particleCreateFx grava, no indice de fx[] que ele devolve, o preset + 1 e a cor, ou 0 (g_wotmFxTint; o desenho,
     // wotm_fx.hpp, pinta enquanto o preset de fx[i] for o mesmo). So os presets do Togera: poeira, fumaca e clarao branco ficam.
+    // Cor do tiro ("shotColor"): na explosao do tiro padrao do monstro (Weapon::DetonateWeapon com o m_type do projetil do dono,
+    // Monster +0x6878: o do Ultra-V e o 6, ShogunFlashBang 112, WhiteFlash 29 e RedHalo 116) todo efeito criado sai na cor (o
+    // branco continua branco), e a luz pontual que o tiro carrega (Weapon::InitWeapon, vermelha no Ultra-V) troca de matiz.
     constexpr uint32_t kFxPos = wotm::fn::particleCreateFx__FP8_fvectorifPA3_ff, kFxMat = wotm::fn::particleCreateFx__FP8_fvectorPA3_fifT0T1bf;
     constexpr uint32_t kBreathActivate = wotm::fn::Activate__10FireBreathfffffff, kBreathCollis = wotm::fn::TestCollis__10FireBreath,
-                       kDetonate = wotm::fn::DetonateWeapon__6WeaponR9_hdResult, kCrowdInto = wotm::fn::transitionInto__17StateCrowdControl;
+                       kDetonate = wotm::fn::DetonateWeapon__6WeaponR9_hdResult, kCrowdInto = wotm::fn::transitionInto__17StateCrowdControl,
+                       kInitWeapon = wotm::fn::InitWeapon__6Weapon;
     constexpr uint32_t kBreathOwner = 0x4, kWeaponOwnerId = 0x120, kCrowdOwner = 0xC;
+    constexpr uint32_t kWeaponType = 0x4C, kWeaponCs = 0x150, kWeaponLight = 0x160, kShotType = 0x6878, kPointLights = wotm::sym::pointLights,
+                       kLightColor = 0x20, kCsEpNode = 0x0, kCsColorQuad = 0x70;
     PS2Runtime::RecompiledFunction g_origFxPos = nullptr, g_origFxMat = nullptr, g_origBreathActivate = nullptr, g_origBreathCollis = nullptr,
-                                   g_origDetonate = nullptr, g_origCrowdInto = nullptr;
+                                   g_origDetonate = nullptr, g_origCrowdInto = nullptr, g_origInitWeapon = nullptr;
     uint32_t g_fxOwner = 0;   // monstro dono dos efeitos criados agora (0 = nenhum)
+    bool g_fxShot = false;    // os efeitos criados agora sao da explosao do tiro padrao de g_fxOwner
 
     bool togeraFx(uint32_t preset)
     {
@@ -1441,8 +1615,8 @@ namespace wotm_custom
             return false;
         }
     }
-    // A cor do fogo do monstro: a da skin do traje, ou a do custom dono dela; 0 = a do jogo
-    uint32_t fireColorOf(uint8_t *rdram, uint32_t m)
+    // Uma cor do monstro ("fireColor", "shotColor"): a da skin do traje, ou a do custom dono dela; 0 = a do jogo
+    uint32_t colorOf(uint8_t *rdram, uint32_t m, uint32_t wotm::mods::Skin::*skinKey, uint32_t wotm::mods::Custom::*customKey)
     {
         const int costume = m ? monsterCostume(rdram, m) : -1;
         if (costume < 4)
@@ -1451,11 +1625,13 @@ namespace wotm_custom
         const wotm::mods::Skin *k = r.skinByIndex(int(cRd32(rdram, m + kTypeBits) >> 5), costume);
         if (!k)
             return 0;
-        if (k->fireColor)
-            return k->fireColor;
+        if (k->*skinKey)
+            return k->*skinKey;
         const wotm::mods::Custom *cu = k->custom.empty() ? nullptr : r.custom(k->custom);
-        return cu ? cu->fireColor : 0;
+        return cu ? cu->*customKey : 0;
     }
+    uint32_t fireColorOf(uint8_t *rdram, uint32_t m) { return colorOf(rdram, m, &wotm::mods::Skin::fireColor, &wotm::mods::Custom::fireColor); }
+    uint32_t shotColorOf(uint8_t *rdram, uint32_t m) { return colorOf(rdram, m, &wotm::mods::Skin::shotColor, &wotm::mods::Custom::shotColor); }
     void fxCreate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t entry, PS2Runtime::RecompiledFunction orig)
     {
         const int presetReg = entry == kFxPos ? 5 : 6;   // (pos, id, ...) / (pos, mat, id, ...); fora do GPR_U32, que nao poe parenteses
@@ -1468,13 +1644,14 @@ namespace wotm_custom
             std::fprintf(stderr, "[fx] criado fx[%u] preset %u por 0x%08X, dono 0x%08X\n", idx, preset, GPR_U32(ctx, 31), owner);
         if (preset == ~0u || idx >= 100)
             return;
-        const uint32_t color = owner && togeraFx(preset) ? fireColorOf(rdram, owner) : 0;
+        const uint32_t shot = owner && g_fxShot ? shotColorOf(rdram, owner) : 0;
+        const uint32_t color = shot ? shot : owner && togeraFx(preset) ? fireColorOf(rdram, owner) : 0;
         g_wotmFxTint[idx].store(color ? ((preset + 1) << 24 | (color & 0xFFFFFFu)) : 0, std::memory_order_relaxed);
         if (color)
         {
             static std::set<uint64_t> logged;   // uma linha por preset e cor
             if (logged.insert(uint64_t(preset) << 32 | color).second)
-                std::fprintf(stderr, "[custom] fogo: preset %u na cor #%06X\n", preset, color & 0xFFFFFFu);
+                std::fprintf(stderr, "[custom] %s: preset %u na cor #%06X\n", shot ? "tiro" : "fogo", preset, color & 0xFFFFFFu);
         }
     }
     void fxPos(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { fxCreate(rdram, ctx, runtime, kFxPos, g_origFxPos); }
@@ -1502,18 +1679,88 @@ namespace wotm_custom
         const uint32_t m = ctx->pc == kCrowdInto ? READ32(GPR_U32(ctx, 4) + kCrowdOwner) : 0;
         withFxOwner(rdram, ctx, runtime, m, g_origCrowdInto);
     }
+    // Monstro da luta dono de um Weapon (pelo m_ownerId; 0 = nenhum: o dono pode ser um veiculo, uma torre)
+    uint32_t weaponOwner(uint8_t *rdram, uint32_t w)
+    {
+        const uint32_t id = cRd32(rdram, w + kWeaponOwnerId) & 0x7FFu;
+        for (uint32_t i = 0; id && i < 8; ++i)
+            if (const uint32_t o = cRd32(rdram, kGameObj + kMonsters + 4 * i); o && (cRd32(rdram, o + kId) & 0x7FFu) == id)
+                return o;
+        return 0;
+    }
+    // A cor do tiro de um Weapon: a "shotColor" do dono quando o Weapon e o tiro padrao dele; 0 = a do jogo
+    uint32_t weaponShotColor(uint8_t *rdram, uint32_t w, uint32_t owner)
+    {
+        return owner && cRd32(rdram, w + kWeaponType) == cRd32(rdram, owner + kShotType) ? shotColorOf(rdram, owner) : 0;
+    }
     void detonate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
-        uint32_t m = 0;
-        if (ctx->pc == kDetonate)
-            if (const uint32_t id = READ32(GPR_U32(ctx, 4) + kWeaponOwnerId))
-            {
-                const uint32_t o = wotm_modes4::call(rdram, ctx, runtime, kGetInteractive, {id});
-                for (uint32_t i = 0; o && i < 8; ++i)   // so um monstro da luta (o dono pode ser um veiculo, uma torre)
-                    if (READ32(kGameObj + kMonsters + 4 * i) == o)
-                        m = o;
-            }
+        const uint32_t w = ctx->pc == kDetonate ? GPR_U32(ctx, 4) : 0;
+        const uint32_t m = w ? weaponOwner(rdram, w) : 0;
+        const bool prev = g_fxShot;
+        g_fxShot = weaponShotColor(rdram, w, m) != 0;
         withFxOwner(rdram, ctx, runtime, m, g_origDetonate);
+        g_fxShot = prev;
+    }
+    // A cor `in` (rgb) com o matiz de `color` (0xRRGGBB), como o Particles::tinted das particulas (wotm_fx.hpp): v = canal maior,
+    // s = saturacao; a parte saturada vai para a cor (normalizada para canal maior 1) e a parte branca continua branca
+    void tintRgb(const float in[3], uint32_t color, float out[3])
+    {
+        const float v = std::max({in[0], in[1], in[2]}), mn = std::min({in[0], in[1], in[2]});
+        const float s = v > 0.f ? (v - mn) / v : 0.f;
+        const float T[3] = {float((color >> 16) & 255), float((color >> 8) & 255), float(color & 255)};
+        const float tm = std::max({T[0], T[1], T[2], 1.f});
+        for (int k = 0; k < 3; ++k)
+            out[k] = v * (1.f - s + s * T[k] / tm);
+    }
+    // O tiro padrao de um monstro com "shotColor" (Weapon::InitWeapon): a luz pontual que ele carrega (vermelha no Ultra-V) e o
+    // corpo (o modelo do Weapons::m_epNodes do tipo: no do Ultra-V, id 4012, cor de vertice 255,64,64) tomam o matiz pedido. O
+    // corpo pelo colorQuad do _cs do tiro (multiplicador da cor de vertice que o hier aplica; o hierInitCs do proximo
+    // csActivate o volta a 1): por canal, a cor de vertice recolorida dividida pela original.
+    void initWeapon(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t w = ctx->pc == kInitWeapon ? GPR_U32(ctx, 4) : 0;
+        const uint32_t type = w ? READ32(w + kWeaponType) : 0, own = w && type < 45 ? ownWeaponNode(rdram, weaponOwner(rdram, w), type) : 0;
+        const uint32_t slot = kGameObj + kWeapons + 4 * type, prev = own ? READ32(slot) : 0;
+        if (own)
+        {
+            const uint32_t ra = GPR_U32(ctx, 31);
+            WRITE32(slot, own);
+            g_origInitWeapon(rdram, ctx, runtime);
+            wotmFinishGuestCall(rdram, ctx, runtime, ra);
+            WRITE32(slot, prev);
+        }
+        else
+            g_origInitWeapon(rdram, ctx, runtime);
+        const uint32_t color = w ? weaponShotColor(rdram, w, weaponOwner(rdram, w)) : 0;
+        if (!color)
+            return;
+        auto writeF = [&](uint32_t a, float f) {
+            uint32_t u;
+            std::memcpy(&u, &f, 4);
+            WRITE32(a, u);
+        };
+        if (const int32_t light = int32_t(READ32(w + kWeaponLight)); light >= 0 && light < 32)
+        {
+            const uint32_t c = kPointLights + 0x40 * uint32_t(light) + kLightColor;
+            const float in[3] = {rdF(rdram, c), rdF(rdram, c + 4), rdF(rdram, c + 8)};
+            float out[3];
+            tintRgb(in, color, out);
+            for (int k = 0; k < 3; ++k)
+            {
+                writeF(c + 4 * k, out[k]);
+                writeF(w + 4 * k, out[k]);   // m_dyn.r/g/b, de onde a luz saiu
+            }
+        }
+        const uint32_t cs = READ32(w + kWeaponCs), ep = cs ? READ32(cs + kCsEpNode) : 0;
+        const uint32_t body = ep ? wotmObjectMainColor(rdram, ep) : 0;   // 0x01BBGGRR (o tiro do Ultra-V tem 20 vertices)
+        if (!body)
+            return;
+        const float in[3] = {float(body & 255), float((body >> 8) & 255), float((body >> 16) & 255)};
+        float out[3];
+        tintRgb(in, color, out);
+        for (int k = 0; k < 3; ++k)
+            writeF(cs + kCsColorQuad + 4 * k, out[k] / std::max(in[k], 1.f));
     }
 } // namespace wotm_custom
 
@@ -1575,8 +1822,20 @@ void wotmCustomInstall(PS2Runtime &runtime)
         runtime.registerFunction(kBreathCollis, &breathCollis);
     if ((g_origDetonate = runtime.lookupFunction(kDetonate)))
         runtime.registerFunction(kDetonate, &detonate);
+    if ((g_origInitWeapon = runtime.lookupFunction(kInitWeapon)))
+        runtime.registerFunction(kInitWeapon, &initWeapon);
+    if ((g_origProcInteractive = runtime.lookupFunction(kProcInteractive)))
+        runtime.registerFunction(kProcInteractive, &procInteractive);
+    if ((g_origFxReset = runtime.lookupFunction(kFxReset)))
+        runtime.registerFunction(kFxReset, &fxReset);
+    if ((g_origFxAvail = runtime.lookupFunction(kFxAvail)))
+        runtime.registerFunction(kFxAvail, &fxFind<kFxAvail, &g_origFxAvail>);
+    if ((g_origFxGet = runtime.lookupFunction(kFxGet)))
+        runtime.registerFunction(kFxGet, &fxFind<kFxGet, &g_origFxGet>);
     if ((g_origCrowdInto = runtime.lookupFunction(kCrowdInto)))
         runtime.registerFunction(kCrowdInto, &crowdInto);
+    if ((g_origJumpUpdate = runtime.lookupFunction(kJumpUpdate)))
+        runtime.registerFunction(kJumpUpdate, &jumpUpdate);
     if (const char *e = std::getenv("WOTM_ANIMLOG"); e && *e && *e != '0')
     {
         if ((g_origAnimStart = runtime.lookupFunction(kAnimStartFn)))

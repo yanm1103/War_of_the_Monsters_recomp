@@ -935,7 +935,7 @@ struct FxSystem {
     uint32_t type = 0;
     int n = 0;             // numParticles
     float key = 0;         // ordem de desenho (maior = mais longe = antes)
-    uint32_t tint = 0;     // "fireColor" do monstro que o criou (0x01RRGGBB; 0 = as cores do jogo); Particles::tintTags
+    uint32_t tint = 0;     // "fireColor"/"shotColor" do monstro que o criou (0x01RRGGBB; 0 = as cores do jogo); Particles::tintTags
 };
 
 // Eixos da camera para montar os quadrados: right/up no plano da tela, back = -frente, profundidade(p) = depth . (p, 1)

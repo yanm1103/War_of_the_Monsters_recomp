@@ -1,0 +1,74 @@
+{
+  "raw": "raw",
+  "anim": "C:/Games/Grand Theft Auto San Andreas/anim",
+  "clump": 2,
+  "base": "shogun_list.txt",
+  "comment": "Ultra-V animation id -> GTA SA clip (ids in WoTM docs/ANIM_IDS.md). Walk/run lengths: CJ's stride at Ultra-V's size over its speeds (walk 235, run 403 units/s). Ids left out keep Ultra-V's moves retargeted (grab, carry, climb, specials, crowd control with the katana).",
+  "clips": {
+    "90":  {"src": "ped/IDLE_stance", "fit": "cycles"},
+    "95":  {"src": "ped/IDLE_tired", "fit": "cycles"},
+    "96":  {"src": "ped/IDLE_stance", "fit": "native"},
+
+    "1":   {"src": "ped/WALK_player", "frames": 34},
+    "7":   {"src": "ped/WALK_player", "frames": 34, "range": [1.2, 0.0]},
+    "2":   {"src": "ped/run_player", "frames": 44},
+    "8":   {"src": "ped/run_player", "frames": 44, "range": [0.733, 0.0]},
+    "6":   {"src": "ped/run_player", "frames": 44},
+    "9":   {"src": "ped/run_player", "frames": 44, "range": [0.733, 0.0]},
+    "265": {"src": "ped/sprint_civi", "fit": "native"},
+
+    "30":  {"src": "ped/JUMP_launch"},
+    "31":  {"src": "ped/JUMP_launch_R"},
+    "32":  {"src": "ped/JUMP_launch"},
+    "33":  {"src": "ped/JUMP_glide", "fit": "cycles"},
+    "34_loop": {"src": "ped/FALL_fall", "fit": "native", "phase": 0.3488},
+    "35":  {"src": "ped/FALL_land", "range": [0.0, 0.12]},
+    "39":  {"src": "ped/FALL_land", "range": [0.12, 0.467]},
+
+    "10":  {"src": "ped/FightA_1"},
+    "11":  {"src": "ped/FightA_2", "range": [0.0, 0.55]},
+    "12":  {"src": "fight_c/FightC_3"},
+    "13":  {"src": "fight_e/FightKick_B"},
+    "14":  {"src": "fight_c/FightC_2"},
+    "15":  {"src": "fight_c/FightC_M"},
+    "16":  {"src": "ped/FightA_3"},
+    "18":  {"src": "fight_c/FightC_1"},
+    "240": {"src": "ped/FightA_G"},
+    "241": {"src": "fight_d/FightD_G"},
+
+    "60":  {"src": "ped/FightA_block", "range": [0.20, 0.21], "over": "ped/IDLE_stance"},
+    "71":  {"src": "fight_c/HitC_1"},
+    "77":  {"src": "fight_c/HitC_3"},
+    "64":  {"src": "ped/FightA_3", "range": [0.0, 0.6]},
+    "76":  {"src": "ped/HitA_3"},
+
+    "70":  {"src": "ped/HIT_front"},
+    "69":  {"src": "ped/HIT_behind"},
+    "67":  {"src": "ped/HIT_L"},
+    "68":  {"src": "ped/HIT_R"},
+
+    "250": {"src": "ped/FALL_fall", "fit": "cycles"},
+    "85":  {"src": "ped/getup_front", "range": [0.0, 0.01], "laid": {"turn": [-90, 0, 0], "shift": [-0.1, -63.2, 13.0]}},
+    "86":  {"src": "ped/getup", "range": [0.0, 0.01], "laid": {"turn": [90, 0, 0], "shift": [0, 50.4, 21.6]}},
+    "81":  {"src": "ped/getup_front", "range": [0.0, 0.01], "laid": {"turn": [-90, 0, 0], "shift": [-0.1, -63.2, 13.0]}},
+    "80":  {"src": "ped/getup", "range": [0.0, 0.01], "laid": {"turn": [90, 0, 0], "shift": [0, 50.4, 21.6]}},
+    "87":  {"src": "ped/getup_front"},
+    "88":  {"src": "ped/getup"},
+
+    "120": {"src": "ped/KO_shot_stom"},
+
+    "92":  {"src": "riot/RIOT_challenge"},
+    "130": {"src": "dancing/dnce_M_a", "fit": "cycles", "frames": 256},
+    "132": {"src": "otb/wtchrace_win"},
+
+    "41":  {"src": "misc/pickup_box"},
+    "52":  {"src": "grenade/WEAPON_throw"},
+    "54":  {"src": "grenade/WEAPON_throw"},
+
+    "160": {"src": "rocket/RocketFire", "range": [0.0, 0.3667], "over": "rocket/idle_rocket", "turn": [0, -52, 0.0, 0.3]},
+    "166_once": {"src": "rocket/RocketFire", "range": [0.3667, 0.3667], "frames": 30, "over": "rocket/idle_rocket", "turn": -52},
+    "167_once": {"src": "rocket/RocketFire", "range": [0.3667, 0.3667], "frames": 30, "over": "rocket/idle_rocket", "turn": -52},
+    "161": {"src": "rocket/RocketFire", "range": [0.3667, 0.6333], "over": "rocket/idle_rocket", "turn": -52},
+    "162": {"src": "rocket/RocketFire", "range": [0.6333, 0.9667], "over": "rocket/idle_rocket", "turn": [-52, 0, 0.5, 0.8]}
+  }
+}

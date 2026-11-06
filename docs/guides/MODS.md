@@ -19,10 +19,10 @@ in alphabetical order wins (you can use `10_base`, `20_extra`); `WOTM_MODS=<fold
 log (`logs\live.err.log`) lists each file and each texture that came from a mod (`[mods] ...`).
 
 **Project mods** live in `mods/<mod>/` at the repo root: Goliath Prime (`mods/Goliath Prime/`), Cerebulon (`mods/Cerebulon/`),
-Godzilla (`mods/Godzilla/`) and the "Recompiled" logo of the intro (`mods/recompiled_logo/`). A project mod carries everything it needs
+Godzilla (`mods/Godzilla/`), CJ (`mods/CJ/`) and the "Recompiled" logo of the intro (`mods/recompiled_logo/`). A project mod carries everything it needs
 to run, including models and sounds from other games and the files the game loads built on top of the disc's (`.NGP`, `.PTR`, `.TEX`,
 `.RTX`, `.BNK`, edited disc textures). The sources it was made from (models, rigs, conversion scripts, WAVs) live in
-`mods/_<name>_src/` (Godzilla: `mods/_godzilla_src/`, `_godzilla1954_src/`, `_godzilla2000_src/`). Mecha is the exception:
+`mods/_<name>_src/` (Godzilla: `mods/_godzilla_src/`, `_godzilla1954_src/`, `_godzilla2000_src/`; CJ: `mods/_cj_src/`). Mecha is the exception:
 `tools/mechamon.py` builds its files from the disc, so only its `monster.json` is in the repo.
 `tools/sync_mods.ps1` mirrors each folder of `mods/` to `<runtime>\discroot\mods\` (`run_live.ps1` calls it on every boot and
 `setup_runtime.ps1` on install; `WOTM_RECOMP_DIR` or `.wotm_recomp_dir` give the runtime). Only the folders that exist in the repo are
@@ -142,7 +142,7 @@ the skeleton, the mesh, the animations and the locators are the `.glb`'s (`tools
 skeleton"). Any base but Congar (its code moves 8 of its bones by number). What the `.glb` holds:
 - an armature (bone names and hierarchy are free) and the meshes weighted to it; up to 3 bones per vertex (the heaviest kept);
   a mesh parented to a bone without weights follows that bone;
-- actions named `a<id>` with the game's ids (`a090` is the idle; `tools/pose.py --list` on the base shows the ids). An id of the
+- actions named `a<id>` with the game's ids (`a090` is the idle; `tools/pose.py --list` on the base shows the ids, `docs/ANIM_IDS.md` what each one is). An id of the
   base type that the `.glb` lacks gets the rest pose for the base's length, so every move still has an animation. The footsteps
   and dust come from the height of the hand and foot locators; the sounds and the throw channels come from the base's animation
   with the same id. With the scene at 60 fps before the export one Blender frame is one game frame (the log warns when the keys
@@ -170,6 +170,12 @@ fire comes out or close a jaw the model's bind pose leaves open (`"turn"`). Each
 bind pose, so a foot that is not flat there stays tilted in every move; the Biped map lays the feet flat (`"level"`). The base's layers (looking around, flinches) keep only rotations, as the game adds them on top of the main
 animation (`MODELS_3D.md`, "New skeleton"). The game lights monsters brightly: a texture made for another game may need
 darkening to keep its look.
+The model can also bring moves of its own: `--own clips.json` replaces the base's animation with the same id (a walk, a
+punch from the model's own game; `docs/ANIM_IDS.md` says which id is which), each clip giving the world of the model's joints
+per frame; keep the base's length for attacks and hit reactions, where the game times the move by the animation. A weapon
+that appears only in some moves is a rigid mesh on a joint in the `.dae` (a node with `instance_geometry` under the joint)
+and `"props": {"<node>": {"show": "<base node>"}}` in the map: it is seen as much as that node of the base is (its scale),
+e.g. a sword on the hand that follows the base's own sword parts.
 
 ## The kit on the command line (`tools/modkit.py`)
 
@@ -209,7 +215,7 @@ python tools/modkit.py skin mesh export my_mod green          # the same for a s
 | `.TEX` | `<file>_tNNNN.png` (one per texture) | the PNG as is |
 | `.RTX` | `<file>_rtx_tNNNN.png` (portraits, screens, fonts) | the PNG as is |
 | `.VPK` / `.VAG` | `<file>.wav` | `.VPK`/`.VAG` (same rate and volumes as the original) |
-| `.BNK` | `<bank>_sNNN.wav` (one per sound with a sample; a sound made of layers, several TONEs each with its own delay, pitch and sample, comes out as the mono mix the game plays) | the bank with all edited sounds replaced (a sample another sound also uses: the edited one gets its own copy and the other keeps the original; a layered sound becomes a single layer with the WAV, full volume envelope, no delay) |
+| `.BNK` | `<bank>_sNNN.wav` (one per sound with a sample; a sound made of layers, several TONEs each with its own delay, pitch and sample, comes out as the mono mix the game plays) | the bank with all edited sounds replaced (a sample another sound also uses: the edited one gets its own copy and the other keeps the original; a layered sound becomes a single layer with the WAV, full volume envelope, no delay and no LFO; it loops only if the original played until the game stopped it, not when a KEY_OFF in its sequence ended the loop). A `<bank>_sNNN_aK.wav` made by hand replaces only the K-th distinct sample of that sound (in TONE order, from 0) and keeps its layers: every TONE that played it plays the WAV with its own delay, pitch and volume, looping if that sample looped; a `_sNNN.wav` of the same sound wins over it |
 | others | copy | copy |
 
 ## Textures as PNG
@@ -263,7 +269,8 @@ A skin is a folder in `mods/<mod>/skins/<folder>/` with a `skin.json`:
 - `name`: what the select screen shows. `base`: disc costume (0 to 3) that provides whatever the folder does not bring, and the costume's sounds.
   `ai`: whether drawn AIs can use it (default no). `narrator`: `narrator/<nome>.mp3` spoken when the skin is confirmed in a select
   screen (empty, or the file missing: the custom's `narrator`, then the type's). `fireColor`: the colour of the fire (`"#FF7A1E"`;
-  empty = the custom's `fireColor`, then the game's); see `fireColor` under "Custom monsters".
+  empty = the custom's `fireColor`, then the game's); see `fireColor` under "Custom monsters". `shotColor`: the colour of the
+  default shot, the same way (see `shotColor` under "Custom monsters").
 - A mod skin is always unlocked: it does not go through the unlock screen.
 - What goes in the folder, from the simplest to the most complete:
   - **PNGs only**: model and textures of the base costume; the PNGs replace the textures. Name as in the base costume's export
@@ -347,6 +354,14 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   GS of `ps2EntryRunner`). Two green pieces are not particles and stay in the model files: the fireball's body is the texture
   `lizard0_t0001.png` (a recoloured PNG in the skin or in `files/`), and the crowd control swirl is the model with id 0x63 in
   `LIZARD0.NGP`, with green vertex colours (`0d800d`) that have to be recoloured in the skin's `.NGP`.
+- `shotColor`: `"#RRGGBB"`, the colour of the type's default shot (the projectile of the ranged attack, `Monster` +0x6878; Ultra-V's
+  red bolt, type 6) fired by this monster (own costume and skins without their own `shotColor`). Three parts take the colour, with
+  the same recolouring as `fireColor` (the white stays white): the effects created when the shot explodes (`Weapon::DetonateWeapon`;
+  Ultra-V's are `ShogunFlashBang` 112, `RedHalo` 116 and `WhiteFlash` 29), the point light the shot carries (`Weapon::InitWeapon`;
+  red on Ultra-V) and the shot's body (the model of the weapon type in `Weapons::m_epNodes`, id 4012 on Ultra-V, vertex colour
+  `255,64,64`), through the `colorQuad` of the shot's `_cs`, the per-object vertex colour multiplier the game itself applies (so it
+  also shows in the emulated GS of `ps2EntryRunner`). A pickup fired as a weapon, the special and the punch flashes keep the game's
+  colours. Log: `[custom] tiro: preset 112 na cor #FFD23A`.
 - `logo`: a 2:1 PNG with the name drawn (in the monster's folder or at the mod root; the game's are 256 × 128, 512 × 256 keeps it
   sharp in a large window), shown where the game shows its monsters' logos: under the model in the select screen and above the
   stage picture in the save list. Without it, the name in text (the save list never falls back to the base type's logo).
@@ -369,6 +384,13 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   same bank serves in 3 and 4 player fights, where the game loads the low-res `_LS` banks (same numbering). Log: `[mods] monstro
   fire_togera: som LIZARD_S.BNK` and `[snd] fire_togera: banco de som proprio LIZARD_S.BNK no handle 0x10001`; with `PS2X_SND_LOG=1`
   each `Play banco` line shows the bank's handle. The narrator's MONSTER CRY option plays the cry from this bank too.
+  A `GENAMB_S.BNK` in the folder is the custom's copy of the shared bank (`BANK_AMBIENT`, the one every monster plays generic sounds
+  from): while this monster's sounds play it takes the game's place, so a sound replaced in it changes for this monster only. Sound 90
+  is the dash loop (Ultra-V, Robo-47 and Zorgulon). The kit builds it from `genamb_s_sNNN.wav` files in the custom's `files/` work
+  folder, keeping the shared bank's numbering. Log: `[mods] monstro cj: ..., banco comum GENAMB_S.BNK` and `[snd] cj: banco comum
+  proprio GENAMB_S.BNK no handle 0x10003`.
+  Ultra-V's sounds, by number (the ones a custom on it usually replaces): 1 a loop while in the air (jump and butt slam), 4 punch whoosh (with 13), 11
+  footstep (two samples, left and right foot, `_a0` and `_a1`), 14 landing, 15 body impact (hitting a wall or a monster while dashing).
   Togera's sounds, by number: 1 death (the 120 animation), 2 cry (fight entry cinematic), 3 pain, 4 jump, 5 and 6 the fireball (launch,
   explosion), 7 the fire breath (a loop while the special lasts), 10 to 12 the three victories, 13 taunt, 14 and 15 the other two
   deaths, 0 crowd control, 17 entering counter block.
@@ -385,9 +407,36 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   Preytor's bugs, Magmo's lava rocks, Agamo's head, Zorgulon's disc, Goliath's cannon shells): on another body they do not start, hold
   the monster in the windup or crash the game, so the port keeps the base's special and logs why. Log: `[custom] fire_togera: especial
   do congar`. In the kit window: **Special** in the monster's group.
+  **Robo-47's homing missile** works on a custom with its own skeleton (`files` from **Import rig...**): the rig import copies the
+  missile (weapon model 4005) and the shock dome (`SpecFxAnim` 0x11FF, with its 3 animations) from the disc's `MON/ROBOT0.NGP` into
+  the custom's `.NGP` (`tools/ngpgraft.py`; by hand: `python tools/ngpgraft.py <files folder> robo-47`), under ids the game ignores (model + 0x100, `SpecFxAnim` + 0x80) so it does not clash with
+  a Robo-47 in the same fight. The port registers the copied dome for that monster, gives it to `SpecFxAnim::isInstanceAvailable` and
+  `getInstance` in place of the game's id, and swaps the copied missile into `Weapons::m_epNodes[13]` while `Weapon::InitWeapon`
+  builds one of that monster's missiles. The rig import also fills the locked reticle: the reticle (attachment id type + 5) is a
+  `SWITCH` on `m_reticleState`, and its child 2 (locked) is a `CHAR_INSTANCE` spun by animation slot 191 (the game fills it with the
+  instance's animation 0), which the special speeds up when locked. Robo-47's holds a red sprite there and Ultra-V's nothing, so
+  the tool puts a copy of Robo-47's sprite under the custom's (its texture gets a new id in the custom's `.TEX`, logged as
+  `textures {18: N}`; a `<prefix>0_tNNNN.png` replaces it). The special adds three animations on top of the pose (`StateRobotSpecial::init` blends): 166 and 167 (aim,
+  scrubbed by a percentage, 50% = straight ahead) and 161 (the shot), so the rig writes them as layers: rotations only, as the
+  difference from the action's first frame (`ngpgraft.LAYERS`). 160 (windup) ends in the aim pose, which the game holds until the shot;
+  162 is the winddown. The missile leaves from locator `extra1` (0x816). Its sounds are in Robo-47's bank: a `ROBOT_S.BNK` in the
+  folder is used for them (in Robo-47's bank slot while this monster's sounds play), otherwise they only sound with a Robo-47 in the
+  fight. The kit builds it from `robot_s_sNNN.wav` files in the custom's work folder (`files/`), like the monster's own bank. The
+  special plays sound 2 (the head opening, when the special starts), 29 (the aim: beeps that speed up, sample 0, then a held tone,
+  sample 1, which loops; `robot_s_s029_a0.wav` and `_a1.wav` keep that sequence), 6 (launch), 7 (missile flight, a loop) and
+  5 (explosion). Logs: `[mods] monstro CJ/monsters/cj: especial do robo-47 com as pecas dos arquivos proprios`, `[custom] SpecFxAnim copiada
+  0x127f (do 0x11ff) registrada para o dup 0`, `[custom] cj: projetil 13 do
+  especial com o modelo proprio (no 0x10a5)`.
 - `specialRoar`: `true` = the special starts with the monster's cry (`MonsterSound::playSignatureSound`, the fight entry cinematic's
   sound, from its own bank when it has one), when it enters the special's state. Togera's fire breath has no cry of its own. Log:
   `[custom] godzilla: grito no especial`.
+- `fallBlend`: frames (0 to 120) over which the jump's rising layer (animation 33) fades out after the apex, so the fall (34)
+  shows on its own; 0 = a cut. Without it the game keeps the rising layer over the fall, weighted by the vertical speed, until
+  near the ground: fine when the two poses are alike (Ultra-V), a blend of two poses when they are not. Log (`WOTM_ANIMLOG`):
+  `[custom] cj: queda do pulo, camada da subida 1.00 some em 6 quadros`.
+- `landOnTouch`: `true` = the jump's landing layer (animation 35) only comes in when the feet touch the ground. Without it the
+  game puts it on near the ground, still in the air, held on its first frame (a pose bracing for the landing). Log:
+  `[custom] cj: pouso no toque`.
 - `ai`: whether a CPU can use it (default no); without it the select screen shows "PLAYERS ONLY" in the CPU's box. With `"ai": true` the CPU can
   pick it in the select screen's CUSTOM slot; the launcher only offers customs to the player. A custom with a playable base fights as a CPU
   (`WOTM_MATCH=1,moddedtogera,1`, with `"base": "togera"`: walks, attacks, breathes fire and loses the round like a Togera), and Jelly and

@@ -747,7 +747,9 @@ class App:
             if not self.waveform(p, w, h):
                 c.create_text(w // 2, h // 2, text="sound", fill=DIM, font=("Segoe UI", 20))
             mb = modkit.BNK_RE.match(os.path.basename(p))
-            text += "\n%s" % ("Sound %d of bank %s.BNK" % (int(mb.group(2)), mb.group(1).upper()) if mb else "Music or voice (.VPK/.VAG)")
+            text += "\n%s" % ("Sound %d of bank %s.BNK%s" % (int(mb.group(2)), mb.group(1).upper(),
+                                                              ", sample %s only" % mb.group(3) if mb.group(3) is not None else "")
+                              if mb else "Music or voice (.VPK/.VAG)")
         if len(files) > 1:
             text += "\n(%d selected)" % len(files)
         self.pv_label.configure(text=text)
@@ -1829,7 +1831,7 @@ class App:
         sb_ = modkit.base_name(str(data.get("special", ""))) if data.get("special") else None
         special = tk.StringVar(value=self.base_label(sb_) if sb_ else self.BASE_SPECIAL)
         ttk.Label(p, text="Special").grid(row=6, column=0, sticky="w", padx=(0, 8), pady=2)
-        ttk.Combobox(p, textvariable=special, values=[self.BASE_SPECIAL] + [t for t, b in self.BASES if b not in modkit.SPECIAL_NEEDS],
+        ttk.Combobox(p, textvariable=special, values=[self.BASE_SPECIAL] + [t for t, b in self.BASES if b not in modkit.SPECIAL_NEEDS or b in modkit.SPECIAL_PARTS],
                      width=28, state="readonly").grid(
             row=6, column=1, sticky="w", pady=2)
         ai = tk.BooleanVar(value=bool(data.get("ai")))
