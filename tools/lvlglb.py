@@ -6,8 +6,16 @@
 Scene: each object is a top-level node "0xB18310 destr" whose matrix is the handle's world matrix (extras: kind, handle, from,
 heading, id, states, on); its meshes hang under "state0" (intact) and "state1"... (broken states, extras.hidden). An object
 nested in another (a sign on a building) stays inside its owner's state. Everything without a handle hangs under "rootN"
-(extras: root, ident; ident 1 is the world, 2 the sky). Meshes are shared between instances. The .glb is derived from the
-user's disc: it goes to a cache, never to the repo.
+(extras: root, ident; ident 1 is the world), except the sky: the subtree of the node with id 2 (at any depth) hangs under
+"sky" (extras.sky), without the transforms above that node (the game draws it around the camera). Meshes are shared between
+instances.
+
+Colors are the GS's raw bytes (asset extras.gsRaw): COLOR_0 = vertex RGBA / 255 and the textures with the GS's raw alpha
+(0x80 = 1.0), for a viewer that does the GS's modulation (C = Ct * Cv >> 7, As = At * Av >> 7) itself. Each material carries
+the GS state inherited from the nodes' ctx (extras.gs: ALPHA_1 with ABE, alpha test ref, ZMSK with ABE; tools/gltf.py) plus
+extras.zmsk (ZMSK with or without ABE), extras.fog (the OBJECT's fogBurnThru below 255: the fog applies), extras.ot
+(alphaSort: drawn after the rest, far to near) and, on the OBJECTs with dirLight, extras.dirLight (the vertex color times the
+.MRS's three parallel lights). The .glb is derived from the user's disc: it goes to a cache, never to the repo.
 """
 import collections
 import os
@@ -39,37 +47,37 @@ def export(st, objs, disc, out, lod=99, on=None):
     lib = tex.Library(base + ".TEX", base + ".RTX", base + ".NGP")
     g = gltf.Glb()
     g.j["extensionsUsed"] = ["KHR_materials_unlit"]
+    g.j["asset"]["extras"] = {"gsRaw": True}
     stats = collections.Counter()
-    material = gltf.Materials(g, img, lib, True, stats).get
+    material = gltf.Materials(g, img, lib, True, stats, raw=True).get
     mesh_of, group_node, handle_node, seen = {}, {}, {}, set()
 
-    def mesh(node):
-        if node in mesh_of:
-            return mesh_of[node]
+    def mesh(node, gs):
+        if (node, gs) in mesh_of:
+            return mesh_of[node, gs]
         md = ngp.decode_mesh(img, node)
         stats["sprites left out"] += len(md.sprites)
         if md.skinned or not md.tris:
-            mesh_of[node] = None
+            mesh_of[node, gs] = None
             return None
         groups = {}
         for k in range(0, len(md.tris), 3):
             groups.setdefault(md.tris[k + 2].slot, []).append(md.tris[k:k + 3])
+        # fogBurnThru (+0x2C) is added to the fog's F: 3500 and up is never fogged (the sky, glows); flags (+0xC): alphaSort 0x8000,
+        # dirLight 0x100 (lit by the .MRS's three parallel lights; the rest has its light painted in the vertices)
+        burn, flags = img.f32(node + 0x2C), img.u16(node + 0xC)
+        extras = {"fog": bool(burn < 255), "ot": bool(flags & 0x8000), "zmsk": bool(gs[2])}
+        if flags & 0x100:
+            extras["dirLight"] = True
         prims = []
         for slot, tris in sorted(groups.items()):
             verts, index, idx = {}, [], []
-            # As = Av * At / 0x80 (alfa da textura ate 0xFF): o glTF so tem a textura ate 1,0, entao o ganho vai para o vertice
-            gain = 1.0
-            if md.abe and slot != ngp.SLOT_NOTEX:
-                s = slot if slot < min(img.u16(node + 0x5A), 5) else 0
-                gain = lib.alpha_max(img.u16(node + 0x50 + 2 * s),
-                                     img.u32(node + 0x70 + 0x30 * s) | (img.u32(node + 0x74 + 0x30 * s) << 32)) / 128.0
             for tri in tris:
                 for v in tri:
                     p = gltf.to_y_up((v.x, v.y, v.z))
                     ln = (v.nx * v.nx + v.ny * v.ny + v.nz * v.nz) ** 0.5
                     nn = gltf.to_y_up((v.nx / ln, v.ny / ln, v.nz / ln)) if ln > 1e-6 else (0.0, 1.0, 0.0)
-                    a = min(1.0, v.a * gain / 128.0) if md.abe else 1.0
-                    c = (min(1.0, v.r / 128.0), min(1.0, v.g / 128.0), min(1.0, v.b / 128.0), 1.0 if a >= 0.9 else a)
+                    c = (v.r / 255.0, v.g / 255.0, v.b / 255.0, v.a / 255.0)   # raw: the viewer does the GS's math
                     k = (p, nn, (v.u, v.v), c)
                     if k not in verts:
                         verts[k] = len(verts)
@@ -81,14 +89,12 @@ def export(st, objs, disc, out, lod=99, on=None):
             if slot != ngp.SLOT_NOTEX:
                 attrs["TEXCOORD_0"] = g.accessor("f", 2, [k[2] for k in index])
             ctype, fmt = (5123, "H") if len(index) < 65536 else (5125, "I")
-            # alfa de vertice >= 1 em tudo: opaco (o three.js nao grava Z nos BLEND e o resto da fase aparece atras)
-            blend = md.abe and any(k[3][3] < 1.0 for k in index)
             prims.append({"attributes": attrs, "indices": g.accessor(fmt, 1, idx, ctype=ctype, target=34963),
-                          "material": material(node, slot, blend)})
+                          "material": material(node, slot, md.abe, gs, extras)})
             stats["triangles"] += len(tris)
         g.j["meshes"].append({"name": "obj_%x" % node, "primitives": prims})
-        mesh_of[node] = len(g.j["meshes"]) - 1
-        return mesh_of[node]
+        mesh_of[node, gs] = len(g.j["meshes"]) - 1
+        return mesh_of[node, gs]
 
     def new_node(d, parent=None):
         g.j["nodes"].append(d)
@@ -117,14 +123,28 @@ def export(st, objs, disc, out, lod=99, on=None):
                             "on": "0x%X" % on[h] if h in on else ""}}
         handle_node[h] = new_node(d, parent)
 
-    def walk(node, m, owner, state, depth=0):
+    def node_gs(node, op, gs):
+        """The GS state after this node's ctx (GROUP/TRANSLATE/ROTATE/SCALE at +4, ANIM_XFORM/ANIM_SCALE at +8; pose.py)."""
+        if op in (1, 3, 4, 30):
+            return ngp.gs_apply(img, gs, img.u32(node + 4))
+        if op in (17, 38):
+            return ngp.gs_apply(img, gs, img.u32(node + 8))
+        return gs
+
+    def walk(node, m, owner, state, depth=0, gs=ngp.GS_DEFAULT, sky=False):
         if depth > 64 or not img.ok(node, 4):
             return
+        op = img.u32(node) & 63
+        if not sky and op not in (0, 0x1F, 0x27) and img.u32(node) >> 18 == 2:   # 0x1F/0x27 are destructibles (dbProcInteractive)
+            # the sky (viewSetSkyEntry): drawn on its own, around the camera; the transforms above it do not apply
+            if "sky" not in handle_node:
+                open_handle("sky", None, None, {"sky": True})
+            owner, m, sky = "sky", ngp.ident(), True
         key = (node, owner, state, tuple(map(tuple, m)))
         if key in seen:
             return
         seen.add(key)
-        op = img.u32(node) & 63
+        gs = node_gs(node, op, gs)
 
         def kids(arr, n, mm):
             for k in range(min(n, 4096)):
@@ -136,12 +156,13 @@ def export(st, objs, disc, out, lod=99, on=None):
                 par = owner_node(owner, state) if not isinstance(owner, str) else None
                 lm = lvl.local_matrix(img, child)
                 open_handle(child, ngp.mul(lm, mm) if lm else mm, par)     # nested: relative to the owner's node
-                walk_handle(child)
+                walk_handle(child, gs)
             elif child not in by_handle:
-                walk(child, mm, owner, state, depth + 1)
+                walk(child, mm, owner, state, depth + 1, gs, sky)
 
         if op == 0:
-            mi = mesh(node)
+            mi = mesh(node, gs)
+            stats["sky objects"] += bool(sky and mi is not None)
             if mi is not None:
                 new_node({"mesh": mi, "matrix": gl_matrix(m)}, owner_node(owner, state))
                 stats["instances"] += 1
@@ -185,16 +206,18 @@ def export(st, objs, disc, out, lod=99, on=None):
             go(img.u32(node + 0xC), m)
         elif op == 31:      # DESTRUCTIBLE: every state, each in its owner's "stateN"
             for k in range(min(img.u16(node + 0xA), 8)):
-                walk(img.u32(node + 0xC + 12 * k) & lvl.MASK, m, owner, k if not isinstance(owner, str) else state, depth + 1)
+                walk(img.u32(node + 0xC + 12 * k) & lvl.MASK, m, owner, k if not isinstance(owner, str) else state, depth + 1,
+                     gs, sky)
 
-    def walk_handle(h):
+    def walk_handle(h, gs):
         op = img.u32(h) & 63
         arr, n = {3: (h + 0x1C, img.u32(h + 8)), 4: (h + 0x50, img.u32(h + 8)), 30: (h + 0x2C, img.u32(h + 8))}.get(op, (0, 0))
         if not arr:
-            walk(h, ngp.ident(), h, 0, 1)
+            walk(h, ngp.ident(), h, 0, 1, gs)
             return
+        gs = node_gs(h, op, gs)
         for k in range(min(n, 4096)):
-            walk(img.u32(arr + 4 * k) & lvl.MASK, ngp.ident(), h, 0, 1)
+            walk(img.u32(arr + 4 * k) & lvl.MASK, ngp.ident(), h, 0, 1, gs)
 
     for ri, r in enumerate(st.roots):
         label = "root%d" % ri

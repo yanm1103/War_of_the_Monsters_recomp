@@ -23,8 +23,13 @@
     pedestrian groups (handle, position, size) and the segment each one walks (`ped_groups`, `ped_bind`, `ped_report`).
   - `lvlglb.py <STAGE> <out.glb>`: the stage as a binary glTF for the level editor, one top-level node per `lvl.py` object (named by
     its handle, extras with kind, from, heading, states and `on`), its broken states as hidden `stateN` children, the rest under
-    `rootN` (extras `ident`: 1 the world, 2 the sky). Meshes are shared between instances. The editor itself is
-    `tools/level_editor/` (`MODS.md`, "Level editor"; three.js r160 vendored in `web/vendor/`, MIT).
+    `rootN` (extras `ident`: 1 the world). The sky, the subtree of the node with id 2 at any depth, hangs under `sky` (extras
+    `sky`) without the transforms above it. Meshes are shared between instances. Colors are the GS's raw bytes (asset extras
+    `gsRaw`): `COLOR_0` is the vertex RGBA / 255 and the textures keep the GS alpha (0x80 = 1.0, up to 0xFF), for a viewer that
+    does the GS's modulation itself. Each material carries the GS state inherited from the nodes' ctx (`ngp.gs_apply`): extras
+    `gs` (`blend`: ALPHA_1 when the mesh has ABE, else null; `aref`: alpha test ref or -1), `zmsk`, `fog` (the OBJECT's
+    `fogBurnThru` below 255), `ot` (`alphaSort`) and, on the OBJECTs with `dirLight`, `dirLight`; meshes with ABE are `BLEND`. The editor itself is `tools/level_editor/`
+    (`MODS.md`, "Level editor"; three.js r160 vendored in `web/vendor/`, MIT).
   - `lvlhud.py <STAGE>|--all`: the fight HUD a stage carries (level editor, HUD panel). The HUD nodes (ids 0x1C20..0x2133) and the
     fight font (id 18) are found by id, and each texture gets a role (bar atlas, special icon, BOSS label, player number, font,
     pickup ring, hint box, cinema bars, buttons), its file (`.TEX` or `.RTX`), its texId and the mod PNG name. `--all` prints the

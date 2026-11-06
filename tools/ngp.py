@@ -430,6 +430,33 @@ def decode_mesh(img, node):
     return md
 
 
+# ---------------------------------------------------------------- estado do GS herdado (tools/pose.py, tools/lvlglb.py)
+
+GS_DEFAULT = (0x44, -1, False, 2)   # ctxDef do jogo: ALPHA_1 0x44, sem teste de alfa, grava Z, teste de Z normal
+
+
+def gs_apply(img, gs, ctxp):
+    """Estado do GS depois do pacote A+D do ctx de um no (Scene::groupState; GsState::apply do nativo)."""
+    ctxp &= 0x0FFFFFFF
+    if not ctxp or not img.ok(ctxp, 0x20) or img.u32(ctxp + 0x14) != 0x10000000 or img.u32(ctxp + 0x18) != 0xE:
+        return gs
+    n = min(img.u32(ctxp + 0x10) & 0x7FFF, 8)
+    if not img.ok(ctxp, 0x20 + 16 * n):
+        return gs
+    blend, aref, zmsk, ztst = gs
+    for i in range(n):
+        d, reg = img.u32(ctxp + 0x20 + 16 * i), img.u32(ctxp + 0x28 + 16 * i) & 0xFF
+        if reg == 0x42:
+            blend = d & 0xFF
+        elif reg == 0x47:
+            atst, ref = (d >> 1) & 7, (d >> 4) & 0xFF
+            ztst = (d >> 17) & 3
+            aref = -1 if (not (d & 1) or atst == 1) else ref if atst == 6 else max(ref - 1, 0) if atst == 5 else 8
+        elif reg == 0x4E:
+            zmsk = bool(img.u32(ctxp + 0x24 + 16 * i) & 1)
+    return (blend, aref, zmsk, ztst)
+
+
 # ---------------------------------------------------------------- hierarquia
 
 def ident():

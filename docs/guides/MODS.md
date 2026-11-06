@@ -608,7 +608,7 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
 `python tools/level_editor/editor.py` opens the stage in 3D and writes the patch above. It is a local page (three.js, in
 `tools/level_editor/web/`) served by the script at `http://127.0.0.1:47197/` (`--port N` changes it; with the port taken by an
 editor already running, that one's page opens again; by something else, a free port), in the default browser. `--window` opens
-it in its own window instead (`pywebview` when installed, otherwise Edge/Chrome app mode); `--serve` only serves. The page is in English, with a dark and a light theme (in the settings, the cog at the top right).
+it in its own window instead (`pywebview` when installed, otherwise Edge/Chrome app mode); `--serve` only serves; `?stage=METRO` in the address opens that stage first. The page is in English, with a dark and a light theme (in the settings, the cog at the top right).
 - **Top bar:** the stage, the mod (its `levels/<STAGE>.json` loads with the stage), **Undo** (Ctrl+Z), **Check** (`lvl.py patch` on the
   disc's stage: what changed, the cut vehicle and pedestrian paths, the collision check), **Save** (Ctrl+S; an empty patch removes the
   file) and **Test in game** (opens the game in the stage in training mode with Togera: `WOTM_MATCH=3,<stage>`,
@@ -644,10 +644,22 @@ it in its own window instead (`pywebview` when installed, otherwise Edge/Chrome 
   (`wotm-recomp-win/build_dev/ps2xRuntime/wotm.exe` with the ELF in `discroot` and the first `ISO/*.iso` as `PS2X_CD_IMAGE`, the
   way `run_live` starts it; with the disc set to a `.iso`, that one); otherwise `wotm.exe` next to the editor and the `iso=` of
   its `wotm.ini`. They are kept in `~/.wotm_level_editor.json`.
+- **Drawing:** the colors are the GS's: the vertex color and alpha times the texture's (`C = Ct·Cv >> 7`, `As = At·Av >> 7`, so a
+  vertex above 0x80 brightens the texture), with no color management, and each mesh takes the blend mode, alpha test and Z write of
+  the GS state its nodes set (ALPHA_1 0x44 is the normal blend, 0x48 the additive glows). Blended meshes with `alphaSort` are drawn
+  last, far to near; the other blended ones after the opaque ones, in the stage's order. The objects with `dirLight` (cars, towers,
+  statues) take the three parallel lights of `RST/<STAGE>.MRS` on their vertex color, so turning one changes its light as in the
+  game; the rest of the stage has its light painted in the vertex colors.
+- **Game look** (top right of the view, or **L**; remembered, off by default) adds what `RST/<STAGE>.MRS` sets: the fog (the GS's,
+  per vertex and hyperbolic in the depth, so it is half there not far past its start distance: 2259 units in CENTRAL, 1393 in
+  METRO), the background in the fog's color, and the sky, drawn first around the camera and never picked by a click or Drop. The
+  objects the game never fogs (the sky, some glows) stay clear, and so do the selection outlines, the gizmo and the grid. Off, the
+  whole stage shows with no fog over the theme's background, which is the way to edit from afar. With a mod that has its own
+  `RST/<STAGE>.MRS`, that file gives the fog, background and lights.
 - The 3D scene is `python tools/lvlglb.py <STAGE> <out.glb>` (`TOOLS.md`), cached per user (`%LOCALAPPDATA%\WotM\level_editor`); the
   first open of a stage takes a few seconds. What it does not show like the game: particles and sprites, animated parts (rest pose),
-  the GS blend modes (blended meshes whose vertex alpha times the texture's raw alpha reaches 1 are drawn opaque, as the GS does),
-  the `.MRS` fog and lights, the sky. Icons: Material Design Icons (`web/vendor/mdi/`, Pictogrammers Free License).
+  the specular highlight of the lit objects, the far clip, and alpha above 1 in the normal blend (the view keeps the brighter
+  source but drops the GS's darkening of what is behind, so it comes out brighter there). Icons: Material Design Icons (`web/vendor/mdi/`, Pictogrammers Free License).
 
 ## Under the hood (for those who touch the code)
 

@@ -6,6 +6,18 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
+// The GS modulates and blends the bytes as they are: no color management (texture, vertex and interface colors stay raw).
+THREE.ColorManagement.enabled = false;
+
+// The GS's fog: F = clamp(burn + FA + FB / W, 0, 255) per vertex, W the depth in front of the camera (game units), and the GS mixes
+// (F * C + (255 - F) * FOGCOL) / 255 before the alpha blend. scene.fog is a THREE.Fog whose near holds FA and far FB (burn: 1).
+// The .MRS's maxV caps F (gsFogMax; 0 in a material that does not set it, read as 255).
+THREE.ShaderChunk.fog_pars_vertex = '#ifdef USE_FOG\n\tuniform float fogNear;\n\tuniform float fogFar;\n\tuniform float gsFogMax;\n\tvarying float vGsFog;\n#endif';
+THREE.ShaderChunk.fog_vertex = '#ifdef USE_FOG\n\tfloat gsW = - mvPosition.z;\n' +
+  '\tvGsFog = gsW > 0.001 ? clamp( 1.0 + fogNear + fogFar / gsW, 0.0, gsFogMax > 0.0 ? gsFogMax : 255.0 ) / 255.0 : 1.0;\n#endif';
+THREE.ShaderChunk.fog_pars_fragment = '#ifdef USE_FOG\n\tuniform vec3 fogColor;\n\tvarying float vGsFog;\n#endif';
+THREE.ShaderChunk.fog_fragment = '#ifdef USE_FOG\n\tgl_FragColor.rgb = mix( fogColor, gl_FragColor.rgb, vGsFog );\n#endif';
+
 const $ = (id) => document.getElementById(id);
 const Y = new THREE.Vector3(0, 1, 0);
 const toThree = (p) => new THREE.Vector3(p[0], p[2], -p[1]);
@@ -36,6 +48,7 @@ function log(lines, cls) {
 const canvas = $('canvas');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
+renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, 1, 5, 60000);
 camera.position.set(0, 2500, 2500);
@@ -49,9 +62,10 @@ const boxes = [];   // one outline per selected item; the primary one (gizmo, fi
 const grid = new THREE.GridHelper(20000, 200, 0x8a96a8, 0x566070);
 grid.material.transparent = true;
 grid.material.opacity = 0.45;
+grid.material.fog = false;
 grid.visible = false;
 scene.add(grid);
-let stageRoot = null;
+let stageRoot = null, skyRoot = null, env = null;   // env: the stage's fog, background and lights (/api/stage, RST/<STAGE>.MRS)
 const store = {
   get(k, d) { try { const v = localStorage.getItem('wotmLevelEditor.' + k); return v === null ? d : v; } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem('wotmLevelEditor.' + k, v); } catch (e) { /* no storage */ } },
@@ -67,7 +81,144 @@ new ResizeObserver(resize).observe(canvas.parentElement);
 
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
-  renderer.setClearColor(getComputedStyle(document.documentElement).getPropertyValue('--view').trim());
+  applyLook();
+}
+
+// Game look (L): the stage's fog, its background (the fog's color) and the sky. Off: the whole stage, no fog, the theme's background.
+let gameLook = store.get('gameLook', '0') === '1';
+const gsColor = (rgb) => new THREE.Color(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255);
+function applyLook() {
+  const f = env && env.fog && env.fog.fa !== undefined ? env.fog : null;
+  scene.fog = gameLook && f ? new THREE.Fog(gsColor(f.rgb), f.fa, f.fb) : null;
+  gsFog.gsFogMax.value = f && f.maxV > 0 ? Math.min(255, f.maxV) : 255;
+  if (skyRoot) skyRoot.visible = gameLook;
+  renderer.setClearColor(gameLook && env && env.bg ? gsColor(env.bg)
+    : getComputedStyle(document.documentElement).getPropertyValue('--view').trim());
+  $('look').checked = gameLook;
+}
+function setLook(on) {
+  gameLook = on;
+  store.set('gameLook', on ? '1' : '0');
+  applyLook();
+}
+
+// ------------------------------------------------------------------ the GS's drawing (tools/lvlglb.py exports the raw bytes)
+// Every stage TEX0 is MODULATE with TCC 1: C = min(255, Ct * Cv >> 7), As = min(255, At * Av >> 7) / 128 (up to 1.99); without a
+// texture C = Cv and As = Av / 128. COLOR_0 and the textures hold the bytes / 255, so the factors are 255/128 and 255²/128².
+const GS_MODULATE = `
+#ifdef USE_MAP
+  diffuseColor.rgb = min( diffuseColor.rgb * 1.9921875, vec3( 1.0 ) );
+  diffuseColor.a = min( diffuseColor.a * 3.968811, 1.9921875 );
+#else
+  diffuseColor.a = min( diffuseColor.a * 1.9921875, 1.9921875 );
+#endif`;
+const gsFog = { gsFogMax: { value: 255 } };
+function gsCompile(shader) {
+  shader.uniforms.gsFogMax = gsFog.gsFogMax;
+  shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>' + GS_MODULATE);
+}
+const gsProgramKey = () => 'wotm-gs';   // one program per define set for every stage material
+
+// OBJECTs with dirLight (VU1 program 0x1010): C = min(255, Cv * sum(color_i / 128 * max(0, n.L_i))) over the .MRS's three parallel
+// lights, the normal turned with the object (turning it in the editor changes its light, as in the game). No ambient term.
+const gsLights = { gsLightDir: { value: [0, 1, 2].map(() => new THREE.Vector3()) },
+                   gsLightCol: { value: [0, 1, 2].map(() => new THREE.Vector3()) }, gsLightOn: { value: 0 } };
+const GS_LIGHT = `
+if ( gsLightOn > 0.5 ) {
+  vec3 gsN = normalize( mat3( modelMatrix ) * normal ), gsSum = vec3( 0.0 );
+  for ( int i = 0; i < 3; i ++ ) gsSum += gsLightCol[ i ] * max( 0.0, dot( gsN, gsLightDir[ i ] ) );
+  vColor.rgb = min( vColor.rgb * gsSum, vec3( 1.0 ) );
+}`;
+function gsCompileLit(shader) {
+  gsCompile(shader);
+  Object.assign(shader.uniforms, gsLights);
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nuniform vec3 gsLightDir[ 3 ];\nuniform vec3 gsLightCol[ 3 ];\nuniform float gsLightOn;')
+    .replace('#include <color_vertex>', '#include <color_vertex>' + GS_LIGHT);
+}
+const gsProgramKeyLit = () => 'wotm-gs-lit';
+function setLights(lights) {   // env.lights: rgb (0..255, /128 as the VU1 takes it) and dir (game axes, toward the light)
+  const ok = Array.isArray(lights) && lights.length === 3;
+  gsLights.gsLightOn.value = ok ? 1 : 0;
+  if (!ok) return;
+  lights.forEach((l, i) => {
+    gsLights.gsLightDir.value[i].set(l.dir[0], l.dir[2], -l.dir[1]).normalize();
+    gsLights.gsLightCol.value[i].set(l.rgb[0] / 128, l.rgb[1] / 128, l.rgb[2] / 128);
+  });
+}
+
+// ALPHA_1 (A - B) * C + D, A/B/D in {Cs, Cd, 0} and C in {As, Ad, FIX}, as GL factors: the coefficient of Cs and of Cd is c * C + k.
+// A source factor of As becomes One with the color premultiplied in the shader, so As above 1 counts as on the GS.
+function gsBlend(m, alpha) {
+  const A = alpha & 3, B = (alpha >> 2) & 3, C = (alpha >> 4) & 3, D = (alpha >> 6) & 3;
+  const f = [[THREE.SrcAlphaFactor, THREE.OneMinusSrcAlphaFactor], [THREE.DstAlphaFactor, THREE.OneMinusDstAlphaFactor],
+             [THREE.OneFactor, THREE.ZeroFactor]][Math.min(C, 2)];   // FIX taken as 0x80 (no stage uses it)
+  const coef = (x) => ({ c: (A === x) - (B === x), k: D === x ? 1 : 0 });
+  const factor = ({ c, k }) => (c === 0 ? (k ? THREE.OneFactor : THREE.ZeroFactor) : c > 0 ? (k ? THREE.OneFactor : f[0]) : k ? f[1] : f[0]);
+  const s = coef(0), d = coef(1), sNeg = s.c < 0 && !s.k, dNeg = d.c < 0 && !d.k;
+  m.blending = THREE.CustomBlending;
+  m.blendEquation = sNeg && dNeg ? THREE.AddEquation : sNeg ? THREE.ReverseSubtractEquation : dNeg ? THREE.SubtractEquation : THREE.AddEquation;
+  m.blendSrc = sNeg && dNeg ? THREE.ZeroFactor : factor(s);
+  m.blendDst = sNeg && dNeg ? THREE.ZeroFactor : factor(d);
+  m.premultipliedAlpha = m.blendSrc === THREE.SrcAlphaFactor;
+  if (m.premultipliedAlpha) m.blendSrc = THREE.OneFactor;
+  m.blendSrcAlpha = THREE.ZeroFactor;   // the framebuffer's alpha is not read
+  m.blendDstAlpha = THREE.OneFactor;
+}
+
+// material.userData (glTF extras): gs {blend: ALPHA_1 with ABE or null, aref: alpha test ref or -1}, zmsk, fog, ot (alphaSort), dirLight
+function gsMaterial(m) {
+  const u = m.userData, g = u.gs || {}, abe = g.blend !== null && g.blend !== undefined;
+  if (m.map) m.map.colorSpace = THREE.NoColorSpace;
+  m.onBeforeCompile = u.dirLight ? gsCompileLit : gsCompile;
+  m.customProgramCacheKey = u.dirLight ? gsProgramKeyLit : gsProgramKey;
+  m.fog = u.fog !== false;
+  m.depthWrite = !u.zmsk;
+  // GS test: As * 128 <= aref fails. Without a test, the GS still writes Z where As is 0; 0.5/128 leaves those texels out, since the
+  // three.js order is not the game's and they would hide what is behind them
+  m.alphaTest = g.aref >= 0 ? (g.aref + 0.5) / 128 : abe ? 0.5 / 128 : 0;
+  if (abe) gsBlend(m, g.blend);
+  else m.blending = THREE.NoBlending;
+  m.transparent = !!u.ot;   // alphaSort: after the rest, far to near, like the game's alpha OT
+  m.needsUpdate = true;
+}
+
+// The stage's materials once loaded; the blended ones that are not alphaSort are drawn after the opaque ones in the scene's order (the
+// game's traversal); the sky first, with no depth test, around the camera.
+function setupDrawing(gltf) {
+  const raw = !!(gltf.asset && gltf.asset.extras && gltf.asset.extras.gsRaw);
+  if (!raw) log('the scene is from an older tools/lvlglb.py: restart the editor to draw it as the game does', 'err');
+  const done = new Set();
+  let order = 0;
+  gltf.scene.traverse((o) => {
+    if (!o.isMesh) return;
+    const mats = [].concat(o.material);
+    for (const m of mats) {
+      if (raw && !done.has(m)) { done.add(m); gsMaterial(m); }
+    }
+    const u = mats[0].userData, abe = u.gs && u.gs.blend !== null && u.gs.blend !== undefined;
+    if (raw && abe && !u.ot) o.renderOrder = 1 + order++;
+  });
+  let sky = null;
+  gltf.scene.traverse((o) => { if (!sky && o.userData && o.userData.sky) sky = o; });
+  if (sky) {
+    scene.add(sky);     // out of the stage: clicks, Drop and framing never meet it
+    let n = 0;
+    sky.traverse((o) => {
+      if (!o.isMesh) return;
+      o.material = [].concat(o.material).map((m) => {
+        const c = m.clone();   // clone() leaves out onBeforeCompile and customProgramCacheKey
+        c.onBeforeCompile = m.onBeforeCompile;
+        c.customProgramCacheKey = m.customProgramCacheKey;
+        c.depthTest = false; c.depthWrite = false; c.fog = false; c.transparent = false;
+        return c;
+      });
+      if (o.material.length === 1) o.material = o.material[0];
+      o.renderOrder = -1e6 + n++;
+      o.frustumCulled = false;
+    });
+  }
+  return sky;
 }
 
 // ------------------------------------------------------------------ camera: fly (WASD, default) or orbit; V switches
@@ -96,7 +247,7 @@ function setView(on) {
   orbit.enabled = !on && !gizmo.dragging;
   fly.keys.clear();
   try { localStorage.setItem('wotmLevelEditor.view', on ? 'fly' : 'orbit'); } catch (e) { /* ignore */ }
-  const common = 'Click: select · Shift+click: add · Shift+drag: box · Ctrl+A: all listed · G move · R turn · Arrows/PgUp/PgDn nudge · End drop · F focus · Ctrl+D copy · Del delete';
+  const common = 'Click: select · Shift+click: add · Shift+drag: box · Ctrl+A: all listed · G move · R turn · Arrows/PgUp/PgDn nudge · End drop · F focus · Ctrl+D copy · Del delete · L game look';
   $('hint').textContent = (on
     ? 'Fly view (V: orbit) · WASD move · E up · Q down · Shift fast · Right drag: look · Wheel: forward · '
     : 'Orbit view (V: fly) · Left drag: orbit · Right drag: pan · Wheel: zoom · ') + common;
@@ -143,6 +294,7 @@ function loop() {
   requestAnimationFrame(loop);
   flyStep();
   if (orbit.enabled) orbit.update();
+  if (skyRoot) skyRoot.position.copy(camera.position);   // the sky moves with the camera (it turns with the view, not the stage)
   syncBoxes();
   renderer.render(scene, camera);
 }
@@ -250,13 +402,18 @@ async function loadStage(name) {
   $('busy').hidden = false;
   try {
     select(null);
-    if (stageRoot) { scene.remove(stageRoot); stageRoot.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); }
+    for (const r of [stageRoot, skyRoot]) if (r) { scene.remove(r); r.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); }
+    stageRoot = skyRoot = null;
     stageName = name;
     const mod = $('mod').value.trim();
     const info = await api(`/api/stage?name=${encodeURIComponent(name)}&mod=${encodeURIComponent(mod)}`);
     const gltf = await new GLTFLoader().loadAsync(`/api/glb?name=${encodeURIComponent(name)}`);
+    env = info.env || null;
+    setLights(env && env.lights);
+    skyRoot = setupDrawing(gltf);
     stageRoot = gltf.scene;
     scene.add(stageRoot);
+    applyLook();
     recs = []; byHandle = new Map(); itemOf = new Map(); history = [];
     const infoOf = new Map(info.objects.map((o) => [o.handle, o]));
     stageRoot.updateMatrixWorld(true);
@@ -409,7 +566,12 @@ function showSel() {
   refreshList();
 }
 function syncBoxes() {
-  while (boxes.length < group.length) { const b = new THREE.BoxHelper(undefined, 0xffcc33); scene.add(b); boxes.push(b); }
+  while (boxes.length < group.length) {
+    const b = new THREE.BoxHelper(undefined, 0xffcc33);
+    b.material.fog = false;
+    scene.add(b);
+    boxes.push(b);
+  }
   boxes.forEach((b, n) => {
     const it = group[n];
     b.visible = !!it && it.node.visible;
@@ -712,6 +874,7 @@ setSnap();
 $('grid').checked = store.get('grid', '0') === '1';
 grid.visible = $('grid').checked;
 $('grid').onchange = (e) => { grid.visible = e.target.checked; store.set('grid', e.target.checked ? '1' : '0'); };
+$('look').onchange = (e) => setLook(e.target.checked);
 $('drop').onclick = dropToGround;
 $('dup').onclick = duplicate;
 $('del').onclick = remove;
@@ -772,6 +935,7 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'g') setTool('translate');
   else if (k === 'r') setTool('rotate');
   else if (k === 'f' && sel) focus(sel);
+  else if (k === 'l') setLook(!gameLook);
   else if (k === 'escape') select(null);
 });
 window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
@@ -782,7 +946,7 @@ function init(r) {
   $('mods').innerHTML = r.mods.map((m) => `<option value="${m}">`).join('');
   if (!$('mod').value) $('mod').value = cfg.mod || '';
   const s = $('stage');
-  const prev = stageName || 'CENTRAL';
+  const prev = stageName || (new URLSearchParams(location.search).get('stage') || 'CENTRAL').toUpperCase();   // ?stage=METRO
   s.innerHTML = r.stages.map((x) => `<option value="${x.name}">${x.title} (${x.name})</option>`).join('');
   setRunning(!!r.gameRunning);
   if (r.discError || !r.stages.length) { log(r.discError || `no stages in ${cfg.disc}: set the game disc in Settings`, 'err'); return; }
@@ -795,7 +959,8 @@ orbit.enabled = false;
 setView(fly.on);
 if (new URLSearchParams(location.search).has('debug')) {
   window.wotmDebug = { camera, fly, flyStep, setView, select, selectMany, items, listed, dropToGround, nudge, duplicate, remove,
-                       undo, buildPatch, posOf, get group() { return group; }, get sel() { return sel; } };
+                       undo, buildPatch, posOf, setLook, scene, renderer, gsLights, get group() { return group; }, get sel() { return sel; },
+                       get env() { return env; }, get skyRoot() { return skyRoot; }, get stageRoot() { return stageRoot; } };
 }
 loop();
 api('/api/init').then(init).catch((e) => log(`init: ${e.message}`, 'err'));

@@ -57,7 +57,7 @@ aside { background: var(--panel); padding: 8px; overflow: auto; min-height: 0; }
 #busy[hidden], #band[hidden] { display: none; }
 #band { position: absolute; border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); pointer-events: none; }
 #overlay { position: absolute; top: 6px; right: 8px; background: color-mix(in srgb, var(--panel) 80%, transparent);
-           border: 1px solid var(--line); border-radius: 4px; padding: 2px 8px; }
+           border: 1px solid var(--line); border-radius: 4px; padding: 2px 8px; display: flex; gap: 12px; }
 #list li .h { overflow: hidden; text-overflow: ellipsis; }
 #list li .hd { margin-left: auto; color: var(--muted); font-size: 11px; }
 #list li.rule .h { color: var(--muted); font-style: italic; }

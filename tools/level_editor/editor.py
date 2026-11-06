@@ -18,8 +18,10 @@ import contextlib
 import io
 import glob
 import json
+import math
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import threading
@@ -203,7 +205,8 @@ class Stages:
         st, objs, on = self.objects(disc, name)
         root = stage_root(disc, name)
         ngp_path = os.path.join(root, "LVL", name + ".NGP")
-        stamp = "%d-%d-%d" % (os.path.getsize(ngp_path), int(os.path.getmtime(ngp_path)), module_stamp(lvlglb))
+        stamp = "%d-%d-%s" % (os.path.getsize(ngp_path), int(os.path.getmtime(ngp_path)), "-".join(str(module_stamp(m)) for m in
+                                 (lvlglb, lvlglb.gltf, lvlglb.ngp, lvlglb.tex, lvlglb.lvl)))
         os.makedirs(CACHE, exist_ok=True)
         path = os.path.join(CACHE, "%s-%s.glb" % (name, disc_key(disc)))   # two discs never share a scene
         with self.lock:
@@ -269,6 +272,37 @@ def describe(stage, objs, on, facts, names):
                     "name": name, "nameSrc": src, "rule": lvlnames.rule_name(stage, o["kind"], f, names),
                     "sig": f["sig"] or "", "dims": f["dims"], "ptype": f.get("ptype")})
     return out
+
+
+def stage_env(cfg, disc, name, mod=""):
+    """The stage's look from RST/<STAGE>.MRS (lvl.read_mrs; the mod's own file when it has one): fog (key 4, with FA and FB
+    as fogCalcFogValues makes them), background (the fog's color: fogBackgroundColorIsSlaved; key 2 when there is no fog)
+    and the three parallel lights (key 5; dir points at the light, game axes, Z up)."""
+    path = os.path.join(cfg["mods"], mod, "RST", name.upper() + ".MRS") if mod else ""
+    if not os.path.isfile(path):
+        path = os.path.join(stage_root(disc, name), "RST", name.upper() + ".MRS")
+    env = {"file": path, "fog": None, "bg": None, "lights": []}
+    if not os.path.isfile(path):
+        return env
+    for _off, key, body in lvl.read_mrs(path):
+        if key == 4 and len(body) >= 28:
+            mn, mx, maxv, far, r, g, b = struct.unpack_from("<4f3i", body)
+            fog = {"minR": mn, "maxR": mx, "maxV": maxv, "farClip": far, "rgb": [r, g, b]}
+            if mx > mn:     # else fogUpdate sends nothing
+                fb = (maxv - 1.0) * mn * mx / (mx - mn)
+                fog.update(fa=1.0 - fb / mx, fb=fb)
+            env["fog"] = fog
+        elif key == 2 and len(body) >= 12:
+            env["bg"] = list(struct.unpack_from("<3i", body))
+        elif key == 5 and len(body) >= 60:
+            v = struct.unpack_from("<15f", body)
+            for i in range(3):
+                h, p = math.radians(v[9 + i]), math.radians(v[12 + i])
+                env["lights"].append({"rgb": [v[i], v[3 + i], v[6 + i]], "h": v[9 + i], "p": v[12 + i],
+                                      "dir": [math.cos(p) * math.sin(h), math.cos(p) * math.cos(h), math.sin(p)]})
+    if env["fog"] and "fa" in env["fog"]:
+        env["bg"] = env["fog"]["rgb"]
+    return env
 
 
 def check_patch(disc, name, patch):
@@ -431,7 +465,8 @@ class Handler(BaseHTTPRequestHandler):
                     except (OSError, ValueError):
                         pass
                 facts = STAGES.facts(cfg["disc"], q["name"])
-                return self.send(200, {"objects": describe(q["name"], objs, on, facts, load_names()), "patch": patch})
+                return self.send(200, {"objects": describe(q["name"], objs, on, facts, load_names()), "patch": patch,
+                                       "env": stage_env(cfg, cfg["disc"], q["name"], q.get("mod", ""))})
             if u.path == "/api/gamelog":
                 return self.send(200, {"lines": game_stage_lines(cfg), "running": game_running()})
             if u.path == "/api/glb":
