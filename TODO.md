@@ -17,7 +17,11 @@ Rearranjar fases existentes (mover, girar, apagar, duplicar prédios e objetos, 
    - Editor (passos 7a a 7c do plano): listar e abrir as customs, Test in game com `@<id>`, painel HUD, "New stage…".
    - Decisão do dono sobre a trava: hoje a custom herda a da base (alternativa: não listar a custom de base trancada).
 4. **Objetos novos vindos do Blender** (plano em `docs/investigacoes/2026-11-06/objetos_blender_plano.md`; conversor `tools/lvlprop.py`, diário `props_passo0_1.md`): falta pôr o prop na fase na carga (`apply_props` no `wotm_levelpatch.inc` e no `lvl.py`), o editor e os passos 3 a 8 do plano. Decisões do dono: sombra recebida segue a fase (bits do gabarito), luz pontual sempre ligada. Pendente: foto de um cubo sem cor de vértice ao lado de um com a luz direcional (`"light": "dir"`) para o dono escolher o padrão.
-5. **Depois:** fase do zero como "base + geometria trocada" (mesmo relatório, seção 6).
+5. **Céu:** trocar o skybox da fase pelo editor (o céu é um nó próprio da fase, `lvlglb` já o separa).
+6. **Tamanho da fase:** ver se há limite (grade de colisão, retângulo do `hdLosTest`, rede dos carros, câmera) e deixar definir ou mudar pelo editor.
+7. **Paleta de props estilo Ctrl+P:** barra de busca que abre por atalho, com prévia, para achar e criar props (os da fase, os de outras fases e os importados do Blender).
+8. **Capa da fase na seleção:** editor da foto da tela de seleção (`levelpics/<id>.png`), por exemplo uma captura da vista do editor recortada em 2:1.
+9. **Depois:** fase do zero como "base + geometria trocada" (mesmo relatório, seção 6).
    - Cópia profunda: clonar as partes animadas (o destrutível debaixo de `CHAR_INSTANCE`/`ANIM_*`, hoje recusado, e os emissores de lá, hoje em comum: 6 no 3-MILE), com animação própria no lugar do `ACT_ANIM` que a cópia tira; segunda arena na memória alta para patch acima de 1 MB. Contexto: `docs/investigacoes/2026-11-06/copia_profunda.md`.
 
 ## Fora da ordem (até o dono escolher)
