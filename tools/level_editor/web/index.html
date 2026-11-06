@@ -20,7 +20,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
   <span class="brand" title="WotM Level Editor"><i class="ic" style="--ic:url(vendor/mdi/city-variant-outline.svg)"></i>Level Editor</span>
   <span class="sep"></span>
   <label class="field stage" title="The stage to edit"><i class="pre ic" style="--ic:url(vendor/mdi/map-outline.svg)"></i><select id="stage" aria-label="Stage"></select></label>
-  <label class="field mod" title="The mod your changes are saved into (mods/&lt;mod&gt;/levels/)"><i class="pre ic" style="--ic:url(vendor/mdi/puzzle-outline.svg)"></i><input id="mod" list="mods" placeholder="Choose a mod" spellcheck="false" aria-label="Mod"><datalist id="mods"></datalist></label>
+  <label class="field mod" title="The mod your changes are saved into (mods/&lt;mod&gt;/levels/)"><i class="pre ic" style="--ic:url(vendor/mdi/puzzle-outline.svg)"></i><select id="mod" aria-label="Mod"></select></label>
   <span class="sep"></span>
   <button id="undo" class="icon ghost" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><i class="ic" style="--ic:url(vendor/mdi/undo.svg)"></i></button>
   <button id="redo" class="icon ghost" title="Redo (Ctrl+Y)" aria-label="Redo" disabled><i class="ic" style="--ic:url(vendor/mdi/redo.svg)"></i></button>
@@ -98,8 +98,12 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <div class="sec-title">Layers</div>
       <label class="switch" title="Pedestrian groups (cones) and the sidewalks they walk (blue lanes), to move, add and delete (P)"><input type="checkbox" id="pedsOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/walk.svg)"></i><span class="tx">Pedestrians</span><kbd>P</kbd></label>
     </div>
-    <div id="keepNote" class="callout warn" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span id="keepText"></span>
-      <button id="keepClose" class="icon ghost" title="Hide this note" aria-label="Hide"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+    <div id="notes">
+      <div id="winNote" class="callout warn" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span id="winText"></span>
+        <button id="winClose" class="icon ghost" title="Hide this note" aria-label="Hide"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+      <div id="keepNote" class="callout warn" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span id="keepText"></span>
+        <button id="keepClose" class="icon ghost" title="Hide this note" aria-label="Hide"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+    </div>
     <div id="pedBar" hidden>
       <button id="pedAddGroup" title="A new group of people where the view looks (it walks the sidewalk with the nearest end)"><i class="ic" style="--ic:url(vendor/mdi/account-multiple-plus.svg)"></i>Add group</button>
       <button id="pedAddSeg" title="A new sidewalk segment where the view looks; drag its ends into place"><i class="ic" style="--ic:url(vendor/mdi/vector-polyline-plus.svg)"></i>Add sidewalk</button>
@@ -243,24 +247,84 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
   <button class="st count" data-tab="messages" title="Objects your mod changes, and the selection"><span class="tx"></span></button>
 </footer>
 <div id="toasts" aria-live="polite"></div>
-<dialog id="dlg">
+<!-- the dialogs: a head (title, close), a body, a foot with the buttons on the right. A Cancel or close button is type="button"
+     (data-close), so that Enter in a field takes the dialog's main button -->
+<dialog id="dlg" class="dlg settings" aria-labelledby="sTitle" tabindex="-1">
   <form method="dialog">
-    <h2>Settings</h2>
-    <label>Theme<select id="sTheme"><option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option></select></label>
-    <label>Game disc (the .iso, or an extracted folder with LVL/ and PTS/)<input id="sDisc" spellcheck="false" placeholder="C:\Games\War of the Monsters.iso"></label>
-    <label>Mods folder<input id="sMods" spellcheck="false"></label>
-    <label>Game (wotm.exe)<input id="sGame" spellcheck="false"></label>
-    <label>ELF to pass to the game (empty for the release wotm.exe)<input id="sElf" spellcheck="false"></label>
-    <label>Game working folder<input id="sCwd" spellcheck="false"></label>
-    <label>Disc image for the dev runtime (.iso; only with an ELF; empty: the game disc above when it is an .iso)<input id="sIso" spellcheck="false"></label>
-    <div class="row end"><button value="cancel">Cancel</button><button id="sOk" value="ok" class="primary">Save</button></div>
+    <div class="dlg-head"><h2 id="sTitle">Settings</h2>
+      <button type="button" data-close class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+    <div class="dlg-body">
+      <div class="sec-title">Appearance</div>
+      <div class="set-row"><span class="set-l" id="sThemeL">Theme</span>
+        <div class="seg" id="sTheme" role="radiogroup" aria-labelledby="sThemeL">
+          <label title="Dark theme"><input type="radio" name="sTheme" value="dark"><i class="ic" style="--ic:url(vendor/mdi/weather-night.svg)"></i>Dark</label>
+          <label title="Light theme"><input type="radio" name="sTheme" value="light"><i class="ic" style="--ic:url(vendor/mdi/white-balance-sunny.svg)"></i>Light</label>
+          <label title="The system's light or dark"><input type="radio" name="sTheme" value="system"><i class="ic" style="--ic:url(vendor/mdi/theme-light-dark.svg)"></i>System</label>
+        </div></div>
+      <div class="sec-title">Game files</div>
+      <div class="pf" data-key="disc">
+        <div class="pf-top"><label for="sDisc">Game disc</label><span class="pstate" data-for="disc"></span></div>
+        <div class="pf-row"><input id="sDisc" spellcheck="false" autocomplete="off" placeholder="C:\Games\War of the Monsters.iso">
+          <button type="button" class="icon browse" data-browse="disc" title="Choose the .iso (a folder: type its path)" aria-label="Browse" hidden><i class="ic" style="--ic:url(vendor/mdi/folder-open-outline.svg)"></i></button></div>
+        <div class="help">The .iso, or a folder extracted from it with LVL and PTS inside.</div>
+        <div class="perr" data-for="disc" hidden></div>
+      </div>
+      <div class="pf" data-key="mods">
+        <div class="pf-top"><label for="sMods">Mods folder</label><span class="pstate" data-for="mods"></span></div>
+        <div class="pf-row"><input id="sMods" spellcheck="false" autocomplete="off">
+          <button type="button" class="icon browse" data-browse="mods" title="Choose the folder" aria-label="Browse" hidden><i class="ic" style="--ic:url(vendor/mdi/folder-open-outline.svg)"></i></button></div>
+        <div class="help">The folder the game reads mods from. Each mod is a folder in it.</div>
+        <div class="perr" data-for="mods" hidden></div>
+      </div>
+      <div class="pf" data-key="game">
+        <div class="pf-top"><label for="sGame">Game (wotm.exe)</label><span class="pstate" data-for="game"></span></div>
+        <div class="pf-row"><input id="sGame" spellcheck="false" autocomplete="off">
+          <button type="button" class="icon browse" data-browse="game" title="Choose the program" aria-label="Browse" hidden><i class="ic" style="--ic:url(vendor/mdi/folder-open-outline.svg)"></i></button></div>
+        <div class="help">Test in game opens it on the stage.</div>
+        <div class="perr" data-for="game" hidden></div>
+      </div>
+      <details id="sAdv" class="fold adv" hidden>
+        <summary class="sec-title"><i class="ic chev"></i>Advanced (for developers)</summary>
+        <div class="pf" data-key="elf">
+          <div class="pf-top"><label for="sElf">ELF to pass to the game</label><span class="pstate" data-for="elf"></span></div>
+          <div class="pf-row"><input id="sElf" spellcheck="false" autocomplete="off">
+            <button type="button" class="icon browse" data-browse="elf" title="Choose the ELF" aria-label="Browse" hidden><i class="ic" style="--ic:url(vendor/mdi/folder-open-outline.svg)"></i></button></div>
+          <div class="help">For the clone's runtime. Empty for the release wotm.exe.</div>
+          <div class="perr" data-for="elf" hidden></div>
+        </div>
+        <div class="pf" data-key="cwd">
+          <div class="pf-top"><label for="sCwd">Game working folder</label><span class="pstate" data-for="cwd"></span></div>
+          <div class="pf-row"><input id="sCwd" spellcheck="false" autocomplete="off">
+            <button type="button" class="icon browse" data-browse="cwd" title="Choose the folder" aria-label="Browse" hidden><i class="ic" style="--ic:url(vendor/mdi/folder-open-outline.svg)"></i></button></div>
+          <div class="help">Empty: the game's own folder.</div>
+          <div class="perr" data-for="cwd" hidden></div>
+        </div>
+        <div class="pf" data-key="iso">
+          <div class="pf-top"><label for="sIso">Disc image for the dev runtime</label><span class="pstate" data-for="iso"></span></div>
+          <div class="pf-row"><input id="sIso" spellcheck="false" autocomplete="off">
+            <button type="button" class="icon browse" data-browse="iso" title="Choose the .iso" aria-label="Browse" hidden><i class="ic" style="--ic:url(vendor/mdi/folder-open-outline.svg)"></i></button></div>
+          <div class="help">Only with an ELF. Empty: the game disc above, when it is an .iso.</div>
+          <div class="perr" data-for="iso" hidden></div>
+        </div>
+      </details>
+    </div>
+    <div class="dlg-foot"><button type="button" data-close>Cancel</button><button id="sOk" value="ok" class="primary">Save</button></div>
   </form>
 </dialog>
-<dialog id="testDlg">
+<!-- New mod, and "Save into which mod?" when Save, Test or Reload need one -->
+<dialog id="modDlg" class="dlg" aria-labelledby="mdTitle">
   <form method="dialog">
-    <h2>Test in game</h2>
-    <p>This stage has unsaved changes. The game loads the saved file.</p>
-    <div class="row end"><button value="cancel">Cancel</button><button value="nosave">Test the saved file</button><button value="save" class="primary">Save and test</button></div>
+    <div class="dlg-head"><h2 id="mdTitle">New mod</h2>
+      <button type="button" data-close class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+    <div class="dlg-body">
+      <p id="mdText" class="muted"></p>
+      <label class="fl" id="mdPickRow">Mod<select id="mdPick"></select></label>
+      <label class="fl" id="mdNameRow">Mod name<input id="mdName" spellcheck="false" autocomplete="off" placeholder="MyStage"></label>
+      <div class="help" id="mdHelp"></div>
+      <div class="callout err" id="mdErr" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-circle-outline.svg)"></i><span>A mod name can't contain \ / : * ? " &lt; &gt; | or start with _ or .</span></div>
+      <div class="callout warn" id="mdWarn" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span id="mdWarnText"></span></div>
+    </div>
+    <div class="dlg-foot"><button type="button" data-close>Cancel</button><button id="mdOk" value="ok" class="primary">Create</button></div>
   </form>
 </dialog>
 <dialog id="keysDlg" aria-labelledby="keysTitle" autofocus>
@@ -319,11 +383,13 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
     <p class="keys-note">The letter keys are where W, A, S, D, Q and E sit on a QWERTY keyboard, on any layout.</p>
   </form>
 </dialog>
-<dialog id="askDlg">
+<dialog id="askDlg" class="dlg" aria-labelledby="askTitle" aria-describedby="askText">
   <form method="dialog">
-    <h2 id="askTitle"></h2>
-    <p id="askText"></p>
-    <div class="row end" id="askBtns"></div>
+    <div class="dlg-head"><h2 id="askTitle"></h2>
+      <button type="button" data-close class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+    <div class="dlg-body ask-body"><i id="askIcon" class="ic ask-ic" hidden></i>
+      <div class="ask-tx"><p id="askText"></p><div id="askNote" class="callout warn" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span></span></div></div></div>
+    <div class="dlg-foot" id="askBtns"></div>
   </form>
 </dialog>
 <script type="module" src="app.js"></script>

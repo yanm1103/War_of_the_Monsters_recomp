@@ -652,18 +652,27 @@ it in its own window instead (`pywebview` when installed, otherwise Edge/Chrome 
 after its page closes (a reload of the page keeps it). The release zip carries it as `WotM_LevelEditor.exe`, next to `wotm.exe`
 (`tools/build_level_editor.ps1`), whose mods folder is the one the game reads. The page is in English, with a dark, a light and a
 System theme (the one the OS uses), in the settings (the cog at the top right).
-- **Top bar:** the stage, the mod (its `levels/<STAGE>.json` loads with the stage; picking another one asks before dropping unsaved
-  changes, and the editor remembers it), **Undo** (Ctrl+Z) and **Redo** (Ctrl+Y or Ctrl+Shift+Z; their tooltips name the change),
-  **Check** (`lvl.py patch` on the disc's stage: what changed, the cut vehicle and pedestrian paths, the pedestrian groups, the
-  collision check), **Save** (Ctrl+S, also from a field; an empty patch removes the file; keys, entries and names the editor does not
-  edit, such as entries for handles the stage does not have, stay in the file as they are, and a note over the view says so when the
-  file loads) and **Test in game** (opens the game in the stage in training mode with Togera: `WOTM_MATCH=3,<stage>`,
-  `WOTM_TRAINING=1`, `WOTM_MODS=<mods folder>`, windowed; with unsaved changes it asks to save first, since the game loads the
-  file; with the game already open it asks to reload the stage in it or to restart it). Next to these buttons, the game's state:
+- **Top bar:** the stage (switching with unsaved changes asks: Cancel, Discard, or Save and switch), the mod (a list of the mods
+  folder's mods and **New mod…**, which asks for a name; its `levels/<STAGE>.json`
+  loads with the stage, and the editor remembers it; switching with unsaved changes offers **Discard and load X** or **Move my
+  changes to X**, and says when X already has a file for this stage; Save with no mod chosen asks **Save into which mod?**),
+  **Undo** (Ctrl+Z) and **Redo** (Ctrl+Y or Ctrl+Shift+Z; their tooltips name the change), **Check** (`lvl.py patch` on the disc's
+  stage: a one-line summary, "Check passed: …" or how many problems, and a list of the problems, each naming its object, where a
+  click selects it: an entry skipped, a pedestrian group with no sidewalk, a collision box or cell that does not match; the cut
+  vehicle and pedestrian paths and the full output go with it), **Save** (Ctrl+S, also from a field; an empty patch removes the
+  file; a failing check still saves and an amber note says so; keys, entries and names the editor does not edit, such as entries
+  for handles the stage does not have, stay in the file as they are, and a note over the view says so when the file loads) and
+  **Test in game** (opens the game in the stage in training mode with Togera: `WOTM_MATCH=3,<stage>`, `WOTM_TRAINING=1`,
+  `WOTM_MODS=<mods folder>`, windowed; with unsaved changes it asks **Save before testing?**, since the game loads the file, and
+  offers to test without them; with the game already open it asks to reload the stage in it or to restart it). Next to these
+  buttons, the game's state:
   starting, then "Game running" and its stage. **Reload in game** (on while a game opened by Test runs; "Save & reload" with
   unsaved changes) saves and has that game load the stage again, as **F10** does there; with the game on another stage it offers a
   restart on this one. **Stop** (the square, while the game runs) closes the game the editor opened. In a window narrower than
   1440 px, Check, Save, Test and Reload show only their icon. The **?** button (or **?**, or **F1**) lists every shortcut.
+- **Winning mod:** the game loads, for each stage, the `levels/<STAGE>.json` of the last mod in name order that has one. When
+  another mod than the chosen one wins for this stage, a note under the top bar names it when the stage loads (and after a save),
+  since the game does not use the chosen mod's file; its X hides it until the next stage or mod.
 - **Mode rail** (the narrow column on the left): **Objects** (the cube, or **1**) and **Pedestrians** (the walking figure, or
   **2**; it shows the pedestrian layer, below) switch what the editor works on; **Fight HUD** (the screen icon) opens the HUD
   panel (below).
@@ -735,8 +744,12 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   special objects (reactor stacks, quake buildings, pillars), the pickup type (with "traffic" or "parked" for the cars that can
   drive), the destructible's hit point class (`Building`, `Small object`, `Tower`), `Prop` or `Terrain piece` (over 500 units).
   The Name section says how many objects of the stage share the model.
-- **Settings:** the theme, the game disc (the `.iso` itself, or an extracted folder with `LVL/` and `PTS/`), the mods folder and
-  the game. With a `.iso`, a stage's files (`LVL/<STAGE>.NGP/.PTR/.TEX/.RTX`, its `PTS/` files and `RST/<STAGE>.MRS`) are copied
+- **Settings:** the theme (Dark, Light, System; it previews as it is picked), the game disc (the `.iso` itself, or an extracted
+  folder with `LVL/` and `PTS/`), the mods folder and the game. Each path shows **Found** or what is wrong with it (not found, not
+  a disc, an image the editor cannot read) as it is typed (`POST /api/paths`); **Browse** next to it opens the system's picker in
+  the editor's own window (`--window` with `pywebview`). The **Advanced** section (the ELF, the game's working folder and the
+  image the dev runtime boots) shows only in a clone of the repo or when an ELF is set. Closing the dialog reloads the stage only
+  when the disc or the mods folder changed, asking first with unsaved changes. With a `.iso`, a stage's files (`LVL/<STAGE>.NGP/.PTR/.TEX/.RTX`, its `PTS/` files and `RST/<STAGE>.MRS`) are copied
   once into the mod kit's cache of that image (`%LOCALAPPDATA%\WotM\modkit_disc\<key>`) and read from there; a `.bin`/`.cue`
   image is not read. In a clone they default to `disc/` (else the first `ISO/*.iso`), `mods/` and the runtime next to the repo
   (`wotm-recomp-win/build_dev/ps2xRuntime/wotm.exe` with the ELF in `discroot` and the first `ISO/*.iso` as `PS2X_CD_IMAGE`, the

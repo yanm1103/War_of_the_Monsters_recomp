@@ -733,9 +733,12 @@ async function loadStage(name) {
     stageRoot = skyRoot = null;
     stageName = name;
     $('keepNote').hidden = true;
+    $('winNote').hidden = true;
+    winHidden = false;
     clearCheckPane();
     const mod = modNow;
     const info = await api(`/api/stage?name=${encodeURIComponent(name)}&mod=${encodeURIComponent(mod)}`);
+    stageHave = info.have || [];
     const gltf = await new GLTFLoader().loadAsync(`/api/glb?name=${encodeURIComponent(name)}`);
     env = info.env || null;
     discPeds = info.peds || null;
@@ -774,6 +777,8 @@ async function loadStage(name) {
     showUndo();
     frameAll();
     showKeep(kept);
+    const w = showWinner();
+    if (w) msg(winnerText(w), { level: 'warn' });
     refreshList();
     if (new URLSearchParams(location.search).has('debug')) console.log('patch ' + JSON.stringify(buildPatch()));
     const pc = peds.counts(), n = (info.patch.objects || []).length;
@@ -1703,8 +1708,43 @@ function goTo(handle) {
   select(rec.item);
   if (rec.item.node.visible) focus(rec.item);
 }
+// The check as the server gives it (editor.py check_patch): the summary, the problems (an entry the game skips names its object)
+function checkFromServer(res) {
+  const problems = [], warns = [];
+  for (const p of res.problems || []) {
+    const rec = p.handle ? byHandle.get(normHandle(p.handle)) : null;
+    const text = p.kind === 'entry' && rec ? `${nameOf(rec.item)} was not applied: ${p.reason}` : p.text;
+    if (p.level === 'warn') warns.push(text);
+    else problems.push({ text, handle: rec ? rec.info.handle : null });
+  }
+  const n = problems.length;
+  return { ok: !n, n, problems, warns, infos: res.infos || [],
+           summary: res.summary || (n ? `Check found ${n} ${n === 1 ? 'problem' : 'problems'}` : 'Check passed. Collision OK.') };
+}
+// the mod whose file the game uses for this stage: the last by name of those that have one (case aside)
+function winnerOf(have, mod) {
+  const all = [...new Set(have.concat(mod ? [mod] : []))];
+  return all.sort((a, b) => (a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : 0)).pop() || '';
+}
+const winnerText = (w) => `Mod "${w}" also changes ${title(stageName)} and loads after "${modNow}", so the game uses ${w}'s file. ` +
+  'Mods load in alphabetical order; the last one wins.';
+let winHidden = false;   // closed by hand: until the next stage load or mod switch
+function showWinner() {
+  const w = modNow ? winnerOf(stageHave, modNow) : '';
+  const on = !!w && w.toLowerCase() !== modNow.toLowerCase();
+  $('winNote').hidden = !on || winHidden;
+  $('winText').textContent = on ? winnerText(w) : '';
+  return on ? w : '';
+}
 const FAILED = { check: 'Check failed', save: "Couldn't save", test: "Couldn't start the game", reload: "Couldn't reload the game" };
+// Check, Save, Test in game or Reload in game; true when the server did it. Saving with no mod chosen asks which one first.
 async function post(kind, save = true, extra = {}) {
+  const writes = kind === 'save' || kind === 'reload' || (kind === 'test' && save);
+  if (writes && !modNow) {
+    const m = await pickMod('save', { save: 'Save', test: 'Save and test', reload: 'Save and reload' }[kind]);
+    if (!m) return false;
+    moveTo(m, false);
+  }
   const mod = modNow;
   const body = Object.assign({ name: stageName, mod, patch: buildPatch(), training: true, save }, extra);
   const wasRunning = game.running;
@@ -1717,13 +1757,21 @@ async function post(kind, save = true, extra = {}) {
     game.pending = false;
     const same = JSON.stringify(buildPatch()) === JSON.stringify(body.patch);   // no edit while the server worked
     let chk = null;
-    if (kind === 'check' || (res.lines && res.lines.length)) {
-      chk = readCheck(res, body.patch, mod);
+    if (kind === 'check' || res.problems || (res.lines && res.lines.length)) {
+      // the server's summary and problems; an older reply (lines only) read here
+      chk = res.problems ? checkFromServer(res) : readCheck(res, body.patch, mod);
       ui.check = { state: !same ? 'stale' : chk.ok ? 'ok' : 'bad', n: chk.n };
       showCheck(chk, res.lines);
       msg(chk.summary, { level: chk.ok ? 'ok' : 'err', open: 'check', toast: kind === 'check' && chk.ok ? true : undefined,
                          go: () => openOutput('check'), goTitle: 'Show the check' });
-      for (const w of chk.warns) msg(w, { level: 'warn', toast: true });
+      if (!res.problems) for (const w of chk.warns) msg(w, { level: 'warn', toast: true });
+    }
+    if (res.have) stageHave = res.have;
+    if (res.winner !== undefined) {   // another mod's file for this stage loads after this one: the note says so (a toast when new)
+      const was = !$('winNote').hidden;
+      winHidden = false;
+      const w = showWinner();
+      if (w && !was) msg(winnerText(w), { level: 'warn', toast: true });
     }
     const rel = `mods/${mod}/levels/${stageName}.json`;
     if (res.saved) {
@@ -1752,32 +1800,73 @@ async function post(kind, save = true, extra = {}) {
     }
     showUndo();
     refreshList();
+    return true;
   } catch (e) {
     game.pending = false;
     if (kind === 'test' || kind === 'reload') setGameState(wasRunning ? 'running' : 'closed');
-    if (kind === 'test' && e.code === 'running') { game.stage = e.data.stage || game.stage; setRunning(true); askRunning(save); return; }
+    if (kind === 'test' && e.code === 'running') { game.stage = e.data.stage || game.stage; setRunning(true); askRunning(save); return false; }
     const er = cleanError(e);
+    const where = /wotm\.exe/.test(er.text) ? 'game' : /disc image/.test(er.text) ? 'iso' : '';
     const action = e.code === 'mod' ? ['Choose mod', () => $('mod').focus()]
-      : /Settings/.test(er.text) ? ['Open settings', () => $('settings').click()] : undefined;
+      : e.code === 'settings' || /Settings/.test(er.text) ? ['Open settings', () => openSettings(where)] : undefined;
     msg(`${FAILED[kind] || kind}: ${er.text}`, { level: 'err', detail: er.detail, toast: action });
+    return false;
   }
 }
 
-// a small dialog with a title, a text and buttons [value, label, primary]; then(value) when it closes (Esc: 'cancel')
-function ask(head, text, buttons, then) {
+// a question: a title, a text and buttons [value, label, primary]; o.icon (an MDI name, amber), o.note (an amber line under the
+// text). then(value) runs once: on a button's click, or when the dialog closes otherwise (Esc, the close button: 'cancel').
+function ask(head, text, buttons, then, o = {}) {
   const dlg = $('askDlg');
+  if (dlg.open) dlg.close();
   $('askTitle').textContent = head;
   $('askText').textContent = text;
+  $('askIcon').hidden = !o.icon;
+  if (o.icon) setIc($('askIcon'), o.icon);
+  $('askNote').hidden = !o.note;
+  $('askNote').querySelector('span').textContent = o.note || '';
   $('askBtns').textContent = '';
+  let done = false, main = null;
+  // (a close event left over from the dialog's last use finds it open again: only a real close counts)
+  const onClose = () => { if (!dlg.open) finish(dlg.returnValue || 'cancel'); };
+  const finish = (v) => {
+    if (done) return;
+    done = true;
+    dlg.removeEventListener('close', onClose);
+    if (dlg.open) dlg.close(v);
+    then(v);
+  };
   for (const [value, label, primary] of buttons) {
     const b = document.createElement('button');
-    b.value = value; b.textContent = label;
-    if (primary) b.className = 'primary';
+    b.type = 'button'; b.value = value; b.textContent = label;
+    if (primary) { b.className = 'primary'; main = b; }
+    b.onclick = () => finish(value);
     $('askBtns').appendChild(b);
   }
   dlg.returnValue = '';
-  dlg.addEventListener('close', () => then(dlg.returnValue || 'cancel'), { once: true });
+  dlg.addEventListener('close', onClose);
   dlg.showModal();
+  (main || $('askBtns').lastElementChild)?.focus();
+}
+const changesText = (n) => `${n} unsaved ${n === 1 ? 'change' : 'changes'}`;
+// How many things differ from the saved file: entries by handle, the instance names, the pedestrians, the rest of the file
+function unsavedCount() {
+  let a = {};
+  try { a = JSON.parse(savedJson || '{}') || {}; } catch (e) { /* nothing saved */ }
+  const b = buildPatch();
+  const ents = (p) => new Map((Array.isArray(p.objects) ? p.objects : []).map((e) => [normHandle(e && e.handle), JSON.stringify(e)]));
+  const A = ents(a), B = ents(b);
+  let n = 0;
+  for (const [h, j] of B) if (A.get(h) !== j) n++;
+  for (const h of A.keys()) if (!B.has(h)) n++;
+  const rest = (p) => JSON.stringify(Object.assign({}, p, { objects: undefined }));
+  if (rest(a) !== rest(b)) n++;
+  return Math.max(n, dirty ? 1 : 0);
+}
+// unsaved changes in the way: Cancel, Discard, or save first (then gets 'cancel', 'discard' or 'save')
+function askUnsaved(text, saveLabel, then) {
+  ask('Unsaved changes', text, [['cancel', 'Cancel'], ['discard', 'Discard'], ['save', saveLabel, true]], then,
+      { icon: 'content-save-alert-outline' });
 }
 // Test with the game open: reload this stage in it, or close it and open it again
 function askRunning(save) {
@@ -1946,31 +2035,135 @@ setInterval(async () => noteGame(await gameLog()), 4000);
 // ------------------------------------------------------------------ wiring
 // the stage and mod pickers let go of the focus once picked: arrows and letters are the scene's again
 $('stage').onchange = (e) => {
+  const to = e.target.value;
   e.target.blur();
-  if (dirty && !confirm('Unsaved changes on this stage. Load another one anyway?')) { e.target.value = stageName; return; }
-  loadStage(e.target.value);
+  if (!dirty) { loadStage(to); return; }
+  e.target.value = stageName;      // until the answer
+  askUnsaved(`${title(stageName)} has ${changesText(unsavedCount())}.`, 'Save and switch', async (v) => {
+    if (v === 'cancel' || (v === 'save' && !(await post('save')))) return;
+    $('stage').value = to;
+    loadStage(to);
+  });
 };
+// ------------------------------------------------------------------ the mod: the picker, New mod, switching with unsaved changes
 // the game skips a mod folder whose name starts with _ or . (and Windows refuses these characters)
 const badModName = (m) => /[\\/:*?"<>|]/.test(m) || /^[_.]/.test(m);
-$('mod').onchange = (e) => {
-  const v = e.target.value.trim();
-  e.target.blur();
-  e.target.value = v;
-  if (v === modNow) return;
-  if (badModName(v)) {
-    msg('A mod name can\'t contain \\ / : * ? " < > | or start with _ or .', { level: 'err', toast: true });
-    e.target.value = modNow;
-    return;
-  }
-  if (dirty && !confirm(`Load mod "${v || '(none)'}"'s version of this stage? Your unsaved changes are lost.`)) {
-    e.target.value = modNow;       // the scene stays the old mod's: Save keeps writing there
-    return;
-  }
+const NEW_MOD = '__new__';       // the picker's "New mod…" (a name the editor refuses, so no mod has it)
+let modList = [], stageHave = [];   // the mods folder's mods; the mods that have a file for this stage (/api/stage)
+const sameName = (a, b) => a.toLowerCase() === b.toLowerCase();
+const hasStage = (m) => stageHave.some((x) => sameName(x, m));
+const knownMod = (m) => modList.find((x) => sameName(x, m)) || m;   // an existing mod's own spelling
+function fillMods() {
+  const pick = $('mod'), names = [...new Set(modList.concat(modNow ? [modNow] : []))];
+  names.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  pick.textContent = '';
+  const opt = (v, t, disabled) => { const o = document.createElement('option'); o.value = v; o.textContent = t; o.disabled = !!disabled; pick.appendChild(o); };
+  if (!modNow) opt('', 'Choose a mod', true);
+  for (const m of names) opt(m, m);
+  opt(NEW_MOD, 'New mod…');
+  pick.value = modNow;
+  const f = pick.closest('.field');
+  f.classList.toggle('none', !modNow);
+  f.title = modNow ? `Your changes are saved into mods/${modNow}/levels/` : 'Choose the mod your changes are saved into, or make a new one';
+}
+// the mod in use from now on (the config keeps it); the scene is not loaded again here
+function setMod(v) {
   modNow = v;
   cfg.mod = v;
+  winHidden = false;
+  fillMods();
+  showWinner();
   api('/api/config', { mod: v }).catch((err) => msg(`Couldn't keep the mod in the settings: ${cleanError(err).text}`, { level: 'err' }));
-  loadStage(stageName);
+}
+// the scene's changes go into mod v without loading its file: unsaved until Save writes them there
+function moveTo(v, say = true) {
+  setMod(v);
+  savedJson = '';
+  dirty = true;
+  showUndo();
+  refreshList();
+  if (say) msg(`Your changes now go into mod "${v}". Save writes mods/${v}/levels/${stageName}.json.`, { level: 'ok', toast: true });
+}
+function switchMod(v) {
+  v = knownMod((v || '').trim());
+  if (!v || v === modNow) { fillMods(); return; }
+  if (badModName(v)) {
+    msg('A mod name can\'t contain \\ / : * ? " < > | or start with _ or .', { level: 'err', toast: true });
+    fillMods();
+    return;
+  }
+  if (!dirty) { setMod(v); loadStage(stageName); return; }
+  const n = unsavedCount();
+  ask(`Switch to mod "${v}"?`,
+      modNow ? `You have ${changesText(n)} for ${modNow}.` : `You have ${changesText(n)}, not saved in any mod yet.`,
+      [['cancel', 'Cancel'], ['discard', `Discard and load ${v}`], ['move', `Move my changes to ${v}`, true]],
+      (a) => {
+        if (a === 'discard') { setMod(v); loadStage(stageName); }
+        else if (a === 'move') moveTo(v);
+        else fillMods();
+      },
+      { icon: 'content-save-alert-outline', note: hasStage(v) ? `${v} already changes this stage; saving will replace its file.` : '' });
+}
+$('mod').onchange = (e) => {
+  const v = e.target.value;
+  e.target.blur();
+  fillMods();                      // the picker shows the mod in use until the switch is decided
+  if (v === NEW_MOD) pickMod('new').then((m) => { if (m) switchMod(m); });
+  else switchMod(v);
 };
+// mode 'new': a name for a new mod. 'save': the mod to save into, when Save, Test or Reload find none chosen (one of the mods, or a
+// new one). Resolves to the name, or '' when cancelled.
+function pickMod(mode = 'new', okLabel = 'Create') {
+  return new Promise((resolve) => {
+    const dlg = $('modDlg'), pick = $('mdPick'), name = $('mdName'), save = mode === 'save';
+    if (dlg.open) dlg.close();
+    $('mdTitle').textContent = save ? 'Save into which mod?' : 'New mod';
+    $('mdText').textContent = save ? 'Your changes are saved in a mod: a folder in the mods folder that the game loads.' : '';
+    $('mdText').hidden = !save;
+    pick.textContent = '';
+    for (const m of modList.concat([NEW_MOD])) {
+      const o = document.createElement('option');
+      o.value = m; o.textContent = m === NEW_MOD ? 'New mod…' : m;
+      pick.appendChild(o);
+    }
+    $('mdPickRow').hidden = !save || !modList.length;
+    pick.value = $('mdPickRow').hidden ? NEW_MOD : modList[0];
+    name.value = '';
+    $('mdOk').textContent = save ? okLabel : 'Create';
+    const isNew = () => $('mdPickRow').hidden || pick.value === NEW_MOD;
+    const value = () => (isNew() ? name.value.trim() : pick.value);
+    const show = () => {
+      const nw = isNew(), v = value(), bad = nw && !!v && badModName(v), had = nw && v && modList.find((m) => sameName(m, v));
+      $('mdNameRow').hidden = !nw;
+      $('mdErr').hidden = !bad;
+      $('mdHelp').hidden = !nw;
+      $('mdHelp').textContent = had ? `Mod "${had}" exists: your changes go into it.`
+        : `The folder mods/${v && !bad ? v : '<name>'}/ is created when you save.`;
+      const replaces = !!v && !bad && hasStage(v);
+      $('mdWarn').hidden = !replaces;
+      $('mdWarnText').textContent = replaces ? `${knownMod(v)} already changes this stage; saving will replace its file.` : '';
+      $('mdOk').disabled = !v || bad;
+    };
+    pick.onchange = () => { show(); if (pick.value === NEW_MOD) name.focus(); };
+    name.oninput = show;
+    show();
+    let done = false;
+    const onClose = () => { if (!dlg.open) finish(''); };
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      dlg.removeEventListener('close', onClose);
+      if (dlg.open) dlg.close();
+      resolve(v ? knownMod(v) : '');
+    };
+    // Create (Enter in the name clicks it too): only a name the game takes
+    $('mdOk').onclick = (e) => { e.preventDefault(); const v = value(); if (v && !badModName(v)) finish(v); };
+    dlg.addEventListener('close', onClose);
+    dlg.returnValue = '';
+    dlg.showModal();
+    (isNew() ? name : pick).focus();
+  });
+}
 const showFilterClear = () => { $('filterClear').hidden = !$('filter').value; };
 $('filter').oninput = () => { showFilterClear(); refreshList(); };
 $('filterClear').onclick = () => { $('filter').value = ''; showFilterClear(); refreshList(); $('filter').focus(); };
@@ -2046,17 +2239,18 @@ $('frame').onclick = frameAll;
 $('stop').onclick = stopGame;
 $('restore').onclick = resetSel;
 $('keepClose').onclick = () => { $('keepNote').hidden = true; };
+$('winClose').onclick = () => { winHidden = true; $('winNote').hidden = true; };
 $('check').onclick = () => post('check');
 $('save').onclick = () => post('save');
 $('test').onclick = () => {
   if (!dirty) { post('test', false); return; }
-  $('testDlg').returnValue = '';
-  $('testDlg').showModal();
+  const n = unsavedCount();
+  ask('Save before testing?',
+      `The game loads the saved file. Your last ${n === 1 ? 'change is' : `${n} changes are`} not saved yet.`,
+      [['cancel', 'Cancel'], ['nosave', 'Test without them'], ['save', 'Save and test', true]],
+      (v) => { if (v === 'save' || v === 'nosave') post('test', v === 'save'); },
+      { icon: 'content-save-alert-outline' });
 };
-$('testDlg').addEventListener('close', () => {
-  const v = $('testDlg').returnValue;
-  if (v === 'save' || v === 'nosave') post('test', v === 'save');
-});
 $('reload').onclick = reloadGame;
 // the Output: tabs, Copy, Clear, hide; the status bar's fields open it on their tab (or close it when it is there already)
 document.querySelectorAll('#output .tab').forEach((b) => (b.onclick = () => openOutput(b.dataset.tab)));
@@ -2155,19 +2349,85 @@ $('pModel').onchange = async () => {
   } catch (e) { msg(`Couldn't rename the model: ${cleanError(e).text}`, { level: 'err' }); }
   showSel();
 };
-$('settings').onclick = () => {
-  $('sDisc').value = cfg.disc || ''; $('sMods').value = cfg.mods || ''; $('sGame').value = cfg.game || '';
-  $('sElf').value = cfg.elf || ''; $('sCwd').value = cfg.cwd || ''; $('sIso').value = cfg.iso || '';
-  $('sTheme').value = document.documentElement.dataset.theme;
+// ------------------------------------------------------------------ Settings: appearance, the game's files, the developer fields
+// Each path has a badge from the server (/api/paths, 400 ms after the last key): Found, Not found, Not set, and why. Browse is the
+// pywebview window's file dialog (canBrowse); Advanced (the clone's runtime: ELF, working folder, dev disc) only in a clone.
+const PATHS = { disc: 'sDisc', mods: 'sMods', game: 'sGame', elf: 'sElf', cwd: 'sCwd', iso: 'sIso' };
+const ADVANCED = new Set(['elf', 'cwd', 'iso']);
+let canBrowse = false, isClone = false;
+const themePicked = () => document.querySelector('#sTheme input:checked')?.value || 'dark';
+function openSettings(focusKey = '') {
+  if (document.querySelector('dialog[open]')) return;
+  for (const [k, id] of Object.entries(PATHS)) $(id).value = cfg[k] || '';
+  const t = document.documentElement.dataset.theme;
+  document.querySelectorAll('#sTheme input').forEach((r) => (r.checked = r.value === t));
+  $('sAdv').hidden = !isClone;
+  $('sAdv').open = isClone && ADVANCED.has(focusKey);
+  document.querySelectorAll('#dlg .browse').forEach((b) => (b.hidden = !canBrowse));
+  showPaths({});
+  checkPaths(0);
   $('dlg').returnValue = '';
   $('dlg').showModal();
-};
-$('sTheme').onchange = (e) => applyTheme(e.target.value);   // preview; Cancel goes back
-$('dlg').addEventListener('close', async () => {
+  (PATHS[focusKey] ? $(PATHS[focusKey]) : $('dlg')).focus();   // not the close button's focus ring
+}
+let pathTimer = 0, pathSeq = 0;
+function checkPaths(delay = 400) {
+  clearTimeout(pathTimer);
+  return new Promise((done) => {
+    pathTimer = setTimeout(async () => {
+      const me = ++pathSeq, body = {};
+      for (const [k, id] of Object.entries(PATHS)) body[k] = $(id).value;
+      try { const r = await api('/api/paths', body); if (me === pathSeq) showPaths(r); } catch (e) { /* the badges stay as they are */ }
+      done();
+    }, delay);
+  });
+}
+const STATE_IC = { ok: 'check-circle-outline', warn: 'alert-outline', err: 'alert-circle-outline' };
+function showPaths(r) {
+  for (const k of Object.keys(PATHS)) {
+    const s = r[k], b = document.querySelector(`#dlg .pstate[data-for="${k}"]`), e = document.querySelector(`#dlg .perr[data-for="${k}"]`);
+    b.className = 'pstate' + (s ? ' ' + s.state : '');
+    b.textContent = '';
+    b.title = s ? s.text || s.short : '';
+    if (s && STATE_IC[s.state]) b.appendChild(icon(STATE_IC[s.state]));
+    if (s) b.append(s.short);
+    const why = s && (s.state === 'err' || s.state === 'warn') ? s.text : '';
+    e.hidden = !why;
+    e.className = 'perr' + (s && s.state === 'warn' ? ' warn' : '');
+    e.textContent = why;
+  }
+  // a problem in a closed Advanced shows on its title
+  const advBad = [...ADVANCED].some((k) => r[k] && r[k].state === 'err');
+  $('sAdv').querySelector('summary').classList.toggle('bad', advBad);
+}
+for (const id of Object.values(PATHS)) $(id).addEventListener('input', () => checkPaths());
+document.querySelectorAll('#dlg .browse').forEach((b) => (b.onclick = async () => {
+  const k = b.dataset.browse;
+  try {
+    const r = await api('/api/browse', { kind: k, path: $(PATHS[k]).value });
+    if (r.path) { $(PATHS[k]).value = r.path; checkPaths(0); }
+  } catch (e) { toast(cleanError(e).text, 'err'); }
+}));
+$('settings').onclick = () => openSettings();
+document.querySelectorAll('#sTheme input').forEach((r) => (r.onchange = () => applyTheme(r.value)));   // a preview; Cancel goes back
+// a Cancel or close button of a dialog (type="button", so that Enter takes the main one)
+document.querySelectorAll('dialog [data-close]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close('cancel')));
+$('dlg').addEventListener('close', () => {
   if ($('dlg').returnValue !== 'ok') { applyTheme(cfg.theme || 'dark'); return; }
-  const r = await api('/api/config', { disc: $('sDisc').value, mods: $('sMods').value, game: $('sGame').value, elf: $('sElf').value,
-                                       cwd: $('sCwd').value, iso: $('sIso').value, theme: $('sTheme').value });
-  init(r);
+  const next = { theme: themePicked() };
+  for (const [k, id] of Object.entries(PATHS)) next[k] = $(id).value.trim();
+  // a new disc or mods folder opens the stage again; the other settings leave the scene as it is
+  const reload = next.disc !== (cfg.disc || '') || next.mods !== (cfg.mods || '');
+  const apply = async () => {
+    try { init(await api('/api/config', next), reload || !stageName); }
+    catch (e) { applyTheme(cfg.theme || 'dark'); msg(`Couldn't keep the settings: ${cleanError(e).text}`, { level: 'err' }); }
+  };
+  if (!reload || !dirty || !stageName) { apply(); return; }
+  askUnsaved(`${title(stageName)} opens again with the new ${next.disc !== (cfg.disc || '') ? 'game disc' : 'mods folder'}, and has ` +
+             `${changesText(unsavedCount())}.`, 'Save and apply', async (v) => {
+    if (v === 'cancel' || (v === 'save' && !(await post('save')))) { applyTheme(cfg.theme || 'dark'); msg('Settings not changed', { level: 'muted' }); return; }
+    apply();
+  });
 });
 // a control that takes the keys itself: text and number fields and the pickers (not checkboxes, radios or sliders)
 const typing = (t) => !!t?.matches?.('input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select');
@@ -2187,7 +2447,7 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     const t = e.target;
     if (field) t.blur();               // the field's change first (it may be an edit)
-    if (t.id !== 'mod') post('save');  // a new mod name loads that mod: no save into it before
+    post('save');
     return;
   }
   if (ctrl && !e.altKey && (k === 'z' || k === 'y')) {
@@ -2224,12 +2484,16 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 
-function init(r) {
+// /api/init or /api/config's reply. load: open the stage (again); Settings without a new disc or mods folder leaves the scene alone
+function init(r, load = true) {
   cfg = r.config;
+  canBrowse = !!r.canBrowse;
+  isClone = !!r.clone;
   applyTheme(cfg.theme || 'dark');
-  $('mods').innerHTML = r.mods.map((m) => `<option value="${m}">`).join('');
+  modList = r.mods || [];
   if (!stageName) modNow = (cfg.mod || '').trim();   // the first init; Settings keeps the mod in use
-  $('mod').value = modNow;
+  if (badModName(modNow)) modNow = '';
+  fillMods();
   const s = $('stage');
   const prev = stageName || (new URLSearchParams(location.search).get('stage') || 'CENTRAL').toUpperCase();   // ?stage=METRO
   // "Midtown (CENTRAL)", but "UFO" once when the title is the file's name
@@ -2238,11 +2502,12 @@ function init(r) {
   game.stage = r.gameStage || '';
   setRunning(!!r.gameRunning);
   if (r.discError || !r.stages.length) {
-    msg(r.discError || `No stages on this disc (${cfg.disc}). Is it War of the Monsters (NTSC-U)?`,
-        { level: 'err', toast: ['Open settings', () => $('settings').click()] });
+    msg(r.discError || 'No stages on this disc. Is it War of the Monsters (NTSC-U)?',
+        { level: 'err', toast: ['Open settings', () => openSettings('disc')], detail: cfg.disc || '' });
     return;
   }
   s.value = r.stages.some((x) => x.name === prev) ? prev : r.stages[0].name;
+  if (!load && s.value === stageName) { refreshList(); showWinner(); return; }
   loadStage(s.value);
 }
 
@@ -2258,6 +2523,10 @@ if (new URLSearchParams(location.search).has('debug')) {
                        redo, resetAll, applyPatch, frameAll, resetSel, gameLine, post, setRunning, applyTheme, refreshList,
                        msg, toast, openOutput, closeOutput, showStatus, setGameState, readCheck, gameResult,
                        setMode, turnBy, showSummary, secOf, SECTIONS, get mode() { return modeNow(); },
+                       ask, askUnsaved, unsavedCount, switchMod, setMod, moveTo, fillMods, pickMod, openSettings, checkPaths, showPaths,
+                       showWinner, winnerOf, checkFromServer, init,
+                       get stageHave() { return stageHave; }, set stageHave(v) { stageHave = v; },
+                       get modList() { return modList; }, set modList(v) { modList = v; }, get savedJson() { return savedJson; },
                        gizmo, boxes, hoverBox, marks, hover, hoverPick: pickAt, hoverStep, syncMarks, syncBoxes,
                        boxCenter: (o) => new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()), setGrid, setTool, setSnap, showKeys, showHint,
                        focusSelection, HINTS, get hintKey() { return hint.key; }, get hoverCount() { return hover.n; },

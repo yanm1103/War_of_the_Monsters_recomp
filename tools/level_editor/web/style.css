@@ -194,6 +194,8 @@ kbd { font: 600 11px/1 var(--font-mono); padding: 2px 5px; border: 1px solid var
 #bar .field > select { padding-left: 28px; max-width: 230px; }
 #bar .field > input { padding-left: 28px; }
 #bar .field.mod { width: 170px; }
+#bar .field.mod > select { flex: 1; width: 0; max-width: none; }
+#bar .field.mod.none > select { border-color: var(--warn); color: var(--fg-2); }
 #bar .field:hover > .pre.ic, #bar .field:focus-within > .pre.ic { color: var(--fg-2); }
 /* the game's state next to its buttons: a dot (pulsing while it starts or reloads) and a short text */
 .game-ind { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-2); font-size: 12px; white-space: nowrap;
@@ -425,7 +427,10 @@ details.fold[open] > summary { margin-bottom: 8px; }
   #toolBar .tgl { width: var(--h-ctl); padding: 0; }
 }
 #pedBar { top: 52px; right: 8px; gap: 6px; }
-#keepNote { position: absolute; top: 52px; left: 8px; max-width: min(520px, 55%); margin: 0; box-shadow: var(--shadow-pop); z-index: 2; }
+/* notes over the view's upper left (under the tool bar): the mod that wins in the game, what the file keeps */
+#notes { position: absolute; top: 52px; left: 8px; max-width: min(520px, 55%); display: flex; flex-direction: column; gap: 8px; z-index: 2;
+         pointer-events: none; }
+#notes > .callout { margin: 0; box-shadow: var(--shadow-pop); pointer-events: auto; }
 /* loading: a veil over the view and a card with a spinner */
 #busy { position: absolute; inset: 0; display: grid; place-items: center; z-index: 6; background: color-mix(in srgb, var(--bg) 55%, transparent); }
 .busy-card { display: flex; align-items: center; gap: 14px; padding: 16px 20px; max-width: 360px; background: var(--surface-1);
@@ -506,6 +511,48 @@ dialog label input:not([type=checkbox]):not([type=radio]), dialog label select {
 dialog .row.end { margin: 16px 0 0; gap: 8px; }
 .dlg-head { display: flex; align-items: center; gap: 8px; margin: -4px -6px 12px 0; }
 .dlg-head h2 { margin: 0; flex: 1; }
+/* the dialogs with a head (title, close), a body that scrolls and a foot with the buttons on the right */
+dialog.dlg { padding: 0; max-height: calc(100vh - 48px); }
+dialog.dlg:focus { outline: none; }
+dialog.dlg > form { display: flex; flex-direction: column; max-height: calc(100vh - 48px); }
+dialog.dlg .dlg-head { flex: none; height: 52px; margin: 0; padding: 0 12px 0 20px; border-bottom: 1px solid var(--line); }
+dialog.dlg .dlg-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 16px 20px; }
+dialog.dlg .dlg-body > :first-child { margin-top: 0; }
+dialog.dlg .dlg-foot { flex: none; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 12px 20px;
+                       border-top: 1px solid var(--line); background: var(--surface-1); border-radius: 0 0 var(--r-dlg) var(--r-dlg); }
+dialog.dlg .callout { font-size: 12px; line-height: 18px; }
+/* a question: an icon, the text, an optional note */
+.ask-body { display: flex; gap: 12px; align-items: flex-start; }
+.ask-ic { width: 24px; height: 24px; color: var(--warn); margin-top: 2px; }
+.ask-tx { flex: 1; min-width: 0; }
+.ask-tx p { margin: 0; }
+.ask-tx .callout { margin: 10px 0 0; }
+/* Settings: sections, one block per path (label, badge; field, Browse; help; why not) */
+#dlg { width: 600px; }
+#dlg .sec-title { margin: 18px 0 8px; }
+#dlg .dlg-body > .sec-title:first-child { margin-top: 0; }
+.set-row { display: flex; align-items: center; gap: 12px; }
+.set-l { color: var(--fg-2); min-width: 56px; }
+.pf { margin: 0 0 14px; }
+.pf-top { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.pf-top > label { margin: 0; display: inline; color: var(--fg-2); flex: 1; }
+.pf-row { display: flex; gap: 6px; }
+.pf-row > input { flex: 1; width: 0; }
+.pstate { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; line-height: 16px; color: var(--muted); white-space: nowrap; }
+.pstate .ic { width: 14px; height: 14px; }
+.pstate.ok { color: var(--ok); } .pstate.warn { color: var(--warn); } .pstate.err { color: var(--danger); }
+.perr { font-size: 12px; line-height: 16px; margin-top: 4px; color: var(--danger); }
+.perr.warn { color: var(--warn); }
+#dlg details.adv { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 12px; }
+#dlg details.adv > summary { margin: 0; }
+#dlg details.adv[open] > summary { margin-bottom: 12px; }
+#dlg details.adv:not([open]) > summary.bad::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--danger);
+                                                    margin-left: 4px; }
+/* New mod / Save into which mod? */
+#modDlg { width: 460px; }
+#modDlg .fl:first-of-type, #modDlg .fl { margin-top: 10px; }
+#modDlg #mdText { margin: 0; }
+#modDlg .callout { margin: 10px 0 0; }
 /* Keyboard shortcuts: two columns of key | what it does */
 #keysDlg { width: 640px; }
 .keys-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; }

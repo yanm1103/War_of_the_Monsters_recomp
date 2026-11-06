@@ -1741,8 +1741,9 @@ def cmd_collision(disc, name, check=False):
         check_collision(st)
 
 
-def check_collision(st):
-    """Box rule and cell rule over every path of the grid; True when both hold everywhere they can be checked."""
+def check_collision(st, out=None):
+    """Box rule and cell rule over every path of the grid; True when both hold everywhere they can be checked. out (a dict)
+    gets the counts: box_ok, box_bad, worst (the largest error) and worst_at (its path), cell_ok, paths, skipped."""
     g = st.grid
     box_ok = box_bad = cell_ok = 0
     skipped = collections.Counter()
@@ -1764,6 +1765,9 @@ def check_collision(st):
     print("  box rule: %d ok (error <= 1), %d off, not redone %s; worst %.2f at %07x" % (
         box_ok, box_bad, dict(skipped) or 0, worst[0], worst[1]))
     print("  cell rule: %d of %d paths listed in exactly the cells their box covers" % (cell_ok, len(g.paths)))
+    if out is not None:
+        out.update(box_ok=box_ok, box_bad=box_bad, worst=worst[0], worst_at=worst[1], cell_ok=cell_ok, paths=len(g.paths),
+                   skipped=dict(skipped))
     return box_bad == 0 and cell_ok == len(g.paths)
 
 

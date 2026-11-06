@@ -20,6 +20,7 @@ import glob
 import json
 import math
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -117,19 +118,27 @@ def save_config(cfg):
 STAGE_FILES = (("LVL", ("NGP", "PTR", "TEX", "RTX")), ("PTS", ("SPT", "PUP", "FOP", "PED", "AIP")), ("RST", ("MRS",)))
 
 
-def disc_error(disc):
-    """None when the disc can be read, else why not."""
+def disc_check(disc):
+    """None when the disc can be read, else (a word or two for the Settings badge, why not)."""
     if not disc:
-        return "no disc set: pick the game's .iso or the extracted disc folder in Settings"
+        return "Not set", "Game disc not set."
     if os.path.isdir(disc):
-        return None if os.path.isdir(os.path.join(disc, "LVL")) else "%s has no LVL folder" % disc
+        if os.path.isdir(os.path.join(disc, "LVL")):
+            return None
+        return "Not a disc", "This folder isn't an extracted disc. Pick the folder with LVL and PTS inside, or the .iso itself."
     if not os.path.isfile(disc):
-        return "%s does not exist" % disc
+        return "Not found", "File not found. Was it moved or renamed?"
     try:
         modkit.disc_iso(disc)
         return None
-    except (OSError, ValueError, IndexError) as e:   # IndexError: a file shorter than the ISO9660 header
-        return "%s is not a disc image (%s); a .bin/.cue is not read: use the .iso" % (disc, e or type(e).__name__)
+    except (OSError, ValueError, IndexError):   # IndexError: a file shorter than the ISO9660 header
+        return "Can't read", "This file isn't a disc image the editor can read. Use the .iso (not .bin/.cue)."
+
+
+def disc_error(disc):
+    """None when the disc can be read, else why not."""
+    bad = disc_check(disc)
+    return bad[1] if bad else None
 
 
 def is_iso(disc):
@@ -313,25 +322,89 @@ def stage_env(cfg, disc, name, mod=""):
     return env
 
 
+# lp.stats keys the summary names, in this order (the others are details of how the patch was laid out)
+STAT_WORDS = (("moved", "moved"), ("copies", "copies"), ("deleted", "deleted"), ("ped segments", "sidewalks"),
+              ("ped groups changed", "pedestrian groups changed"), ("ped groups added", "pedestrian groups added"),
+              ("ped groups deleted", "pedestrian groups deleted"), ("ped groups off", "pedestrian groups off"))
+
+
+def stats_text(stats):
+    return ", ".join("%d %s" % (stats[k], w) for k, w in STAT_WORDS if stats.get(k)) or "nothing changed"
+
+
+def hex_handle(h):
+    try:
+        return "0x%X" % int(str(h), 16)
+    except ValueError:
+        return str(h)
+
+
 def check_patch(disc, name, patch):
-    """lvl.py patch on a fresh copy of the stage: the log lines, the path cuts and the collision check."""
+    """lvl.py patch on a fresh copy of the stage: the log lines, the path cuts and the collision check, and from them a summary,
+    the problems ({level: err or warn, text, kind, handle and reason for an entry the game skips}) and notes."""
     buf = io.StringIO()
     root = stage_root(disc, name)
+    coll = {}
     with contextlib.redirect_stdout(buf):
         st = lvl.Stage(name, root)
         lp = lvl.LevelPatch(st)
         lp.apply(patch)
         pts = lvl.stage_points(root, name)
         nets = {"fodder": lvl.net_from_points(pts.get("FOP", [])), "ped": lvl.net_from_points(pts.get("PED", []))}
-        lp.apply_peds(patch, nets)      # the game hook's order: objects, pedestrians, then the path cuts
+        try:
+            lp.apply_peds(patch, nets)      # the game hook's order: objects, pedestrians, then the path cuts
+        except lvl.PatchError as err:       # only a full arena gets here (as lvl.py patch)
+            lp.log.append("pedestrians: stopped halfway: %s" % err)
         for line in lp.log:
             print(line)
         print("%s: %s" % (name, ", ".join("%s %d" % kv for kv in sorted(lp.stats.items())) or "nothing changed"))
-        for line in lvl.cut_nets(lp.footprints, nets) + (lp.ped_report(nets) if patch.get("peds") else []):
+        cuts = lvl.cut_nets(lp.footprints, nets)
+        report = lp.ped_report(nets) if patch.get("peds") else []
+        for line in cuts + report:
             print(line)
         st.grid = lvl.Grid(st.img, st.grid.addr)
-        ok = lvl.check_collision(st)
-    return {"ok": bool(ok) and not lp.stats.get("skipped"), "lines": buf.getvalue().splitlines()}
+        lvl.check_collision(st, coll)
+    objs = patch.get("objects") if isinstance(patch.get("objects"), list) else []
+    problems, infos = [], []
+    for line in lp.log:
+        m = re.match(r"entry (\d+) skipped: (.*)$", line)
+        if m:
+            k = int(m.group(1))
+            e = objs[k] if k < len(objs) and isinstance(objs[k], dict) else {}
+            h = hex_handle(e["handle"]) if e.get("handle") is not None else ""
+            problems.append({"level": "err", "kind": "entry", "handle": h, "reason": m.group(2),
+                             "text": "%s was not applied: %s" % (h or "Entry %d" % (k + 1), m.group(2))})
+            continue
+        m = re.match(r"pedestrian group (\d+) skipped: (.*)$", line)
+        if m:
+            problems.append({"level": "err", "kind": "ped", "reason": m.group(2),
+                             "text": "Pedestrian group %d was not applied: %s" % (int(m.group(1)) + 1, m.group(2))})
+            continue
+        m = re.match(r"pedestrians: stopped halfway: (.*)$", line)
+        if m:
+            problems.append({"level": "err", "kind": "ped", "text": "The pedestrians were applied only in part: %s" % m.group(1)})
+    if coll.get("box_bad"):
+        problems.append({"level": "err", "kind": "collision",
+                         "text": "Collision boxes: %d out of place (worst %.1f units)" % (coll["box_bad"], coll["worst"])})
+    if coll.get("cell_ok", 0) < coll.get("paths", 0):
+        problems.append({"level": "err", "kind": "collision",
+                         "text": "Collision cells: %d boxes listed in the wrong cells" % (coll["paths"] - coll["cell_ok"])})
+    for line in report:
+        m = re.match(r"pedestrians: group \S+ \((\d+)\) at .* has no sidewalk", line)
+        if m:
+            problems.append({"level": "warn", "kind": "ped",
+                             "text": "A pedestrian group of %s people has no sidewalk near it, so nobody walks there" % m.group(1)})
+    cars = sum(1 for l in cuts if re.match(r"vehicles: link \d+-\d+ cut", l))
+    walks = sum(1 for l in cuts if re.match(r"pedestrians: segment \d+-\d+ (removed|\(.*clipped)", l))
+    cut = [("%d car %s" % (n, "path" if n == 1 else "paths")) if i == 0 else ("%d sidewalk %s" % (n, "segment" if n == 1 else "segments"))
+           for i, n in enumerate((cars, walks)) if n]
+    if cut:
+        infos.append("Cut %s under the objects" % " and ".join(cut))
+    n = sum(1 for p in problems if p["level"] == "err")
+    summary = ("Check passed: %s. Collision OK." % stats_text(lp.stats)) if not n else \
+        "Check found %d %s" % (n, "problem" if n == 1 else "problems")
+    return {"ok": not n, "summary": summary, "problems": problems, "infos": infos, "collision": coll,
+            "lines": buf.getvalue().splitlines()}
 
 
 def bad_mod(mod):
@@ -428,6 +501,10 @@ def stop_game():
     return was
 
 
+class SettingsError(RuntimeError):
+    """A setting is missing or wrong: the page offers to open Settings (code "settings")."""
+
+
 def reload_game(name):
     if not game_running():
         raise RuntimeError("no game opened by the editor is running: use Test in game")
@@ -439,7 +516,7 @@ def reload_game(name):
 
 def launch_game(cfg, name, training):
     if not cfg.get("game") or not os.path.exists(cfg["game"]):
-        raise RuntimeError("game not found: set it in Settings (wotm.exe)")
+        raise SettingsError("Can't find the game (wotm.exe).")
     env = dict(os.environ)
     os.makedirs(CACHE, exist_ok=True)
     env.update({"WOTM_MODS": os.path.abspath(cfg["mods"]), "WOTM_MATCH": "3,%d" % LEVEL_NUM.get(name, 1),
@@ -450,7 +527,7 @@ def launch_game(cfg, name, training):
         # the clone's runtime run as run_live.ps1 does: the disc image, native movies and drawing, no emulated VU1/VIF1/GS
         iso = cfg.get("iso") or (cfg["disc"] if is_iso(cfg["disc"]) else "")
         if not iso or not os.path.exists(iso):
-            raise RuntimeError("disc image not found: set the ISO in Settings (the dev runtime reads the stage from it)")
+            raise SettingsError("The dev runtime needs a disc image (.iso).")
         env.update({"PS2X_CD_IMAGE": iso, "PS2X_FMV": "1", "PS2X_SCENE": "1",
                     "PS2X_NO_VU1": "1", "PS2X_NO_VIF1": "1", "PS2X_NO_GS": "1"})
     args = [cfg["game"]] + ([cfg["elf"]] if cfg.get("elf") else [])
@@ -466,9 +543,97 @@ def launch_game(cfg, name, training):
     return " ".join(args)
 
 
+def is_clone():
+    """Run from the repo (not the release exe): Settings shows the developer fields (ELF, working folder, dev disc)."""
+    return not getattr(sys, "frozen", False) and os.path.isdir(os.path.join(REPO, ".git"))
+
+
 def init_reply(cfg):
     return {"config": cfg, "stages": STAGES.list(cfg["disc"]), "mods": list_mods(cfg), "discError": disc_error(cfg["disc"]),
-            "gameRunning": game_running(), "gameStage": GAME["stage"] if game_running() else ""}
+            "gameRunning": game_running(), "gameStage": GAME["stage"] if game_running() else "",
+            "clone": is_clone() or bool(cfg.get("elf")), "canBrowse": BROWSE["window"] is not None}
+
+
+def path_states(b):
+    """Settings' badges for the paths typed so far: {key: {state: ok, warn, err or idle, short, text}} for the keys given."""
+    out = {}
+
+    def put(key, state, short, text=""):
+        out[key] = {"state": state, "short": short, "text": text}
+
+    def file_state(key, v, empty):
+        if not v:
+            put(key, *empty)
+        elif os.path.isfile(v):
+            put(key, "ok", "Found")
+        else:
+            put(key, "err", "Not found", "Folder, not a file." if os.path.isdir(v) else "File not found. Was it moved or renamed?")
+
+    def disc_state(key, v, empty):
+        if not v and empty:
+            return put(key, *empty)
+        bad = disc_check(v)
+        if bad:
+            return put(key, "warn" if not v else "err", *bad)
+        n = len(STAGES.list(v))
+        if not n:
+            return put(key, "err", "No stages", "No stages on this disc. Is it War of the Monsters (NTSC-U)?")
+        put(key, "ok", "Found", "%s, %d stages" % ("Extracted folder" if os.path.isdir(v) else "Disc image", n))
+
+    v = lambda k: str(b.get(k) or "").strip()     # noqa: E731
+    if "disc" in b:
+        disc_state("disc", v("disc"), None)
+    if "mods" in b:
+        d = v("mods")
+        if not d:
+            put("mods", "err", "Not set", "Saving needs the folder the game reads mods from.")
+        elif os.path.isdir(d):
+            n = len([m for m in os.listdir(d) if os.path.isdir(os.path.join(d, m)) and not m.startswith(("_", "."))])
+            put("mods", "ok", "Found", "%d %s" % (n, "mod" if n == 1 else "mods"))
+        elif os.path.isfile(d):
+            put("mods", "err", "Not a folder", "This is a file, not a folder.")
+        else:
+            put("mods", "warn", "Not found", "The folder is created when you save.")
+    if "game" in b:
+        file_state("game", v("game"), ("warn", "Not set", "Test in game needs it."))
+    if "elf" in b:
+        file_state("elf", v("elf"), ("idle", "Not used", "The release wotm.exe takes no ELF."))
+    if "cwd" in b:
+        d = v("cwd")
+        if not d:
+            put("cwd", "idle", "The game's folder")
+        else:
+            put("cwd", *(("ok", "Found") if os.path.isdir(d) else ("err", "Not found", "Folder not found.")))
+    if "iso" in b:
+        if os.path.isdir(v("iso")):
+            put("iso", "err", "Not an .iso", "The dev runtime reads a disc image, not a folder.")
+        else:
+            disc_state("iso", v("iso"), ("idle", "Not used", "Empty: the game disc, when it is an .iso."))
+    return out
+
+
+# Browse buttons in Settings: only in the pywebview window (its file dialog); a plain browser gives the page no file paths
+BROWSE = {"window": None}
+
+
+def browse(kind, current):
+    """The pywebview file dialog for one Settings field; the path picked, or "" when cancelled."""
+    import webview      # noqa: PLC0415 - only with the pywebview window
+    w = BROWSE["window"]
+    fd = getattr(webview, "FileDialog", None)
+    folder = fd.FOLDER if fd else webview.FOLDER_DIALOG
+    opener = fd.OPEN if fd else webview.OPEN_DIALOG
+    cur = (current or "").strip()
+    start = cur if os.path.isdir(cur) else os.path.dirname(cur) if cur and os.path.isdir(os.path.dirname(cur)) else ""
+    if kind in ("mods", "cwd"):
+        r = w.create_file_dialog(folder, directory=start)
+    else:
+        types = {"disc": ("Disc image (*.iso)", "All files (*.*)"), "iso": ("Disc image (*.iso)", "All files (*.*)"),
+                 "game": ("Program (*.exe)", "All files (*.*)") if os.name == "nt" else ("All files (*.*)",)}
+        r = w.create_file_dialog(opener, directory=start, file_types=types.get(kind, ("All files (*.*)",)))
+    if isinstance(r, str):
+        return r
+    return r[0] if r else ""
 
 
 # ------------------------------------------------------------------------------------------------------------- server
@@ -512,9 +677,15 @@ class Handler(BaseHTTPRequestHandler):
                     except (OSError, ValueError):
                         pass
                 facts = STAGES.facts(cfg["disc"], q["name"])
+                # the mods with a file for this stage, and the one the game uses (the last by name)
+                mod = q.get("mod", "")
+                have = [m for m in list_mods(cfg) if os.path.isfile(patch_path(cfg, m, q["name"]))]
+                winner = patch_winner(cfg, mod, q["name"]) if mod and not bad_mod(mod) else \
+                    (sorted(have, key=str.lower)[-1] if have else "")
                 return self.send(200, {"objects": describe(q["name"], objs, on, facts, load_names()), "patch": patch,
-                                       "env": stage_env(cfg, cfg["disc"], q["name"], q.get("mod", "")),
-                                       "peds": pedsapi.stage_peds(st, stage_root(cfg["disc"], q["name"]))})
+                                       "env": stage_env(cfg, cfg["disc"], q["name"], mod),
+                                       "peds": pedsapi.stage_peds(st, stage_root(cfg["disc"], q["name"])),
+                                       "have": have, "winner": winner, "others": [m for m in have if m != mod]})
             if u.path == "/api/hud":
                 mod = q.get("mod", "").strip()
                 return self.send(200, HUD.panel(cfg["disc"], cfg["mods"], mod if mod and not bad_mod(mod) else "", q["stage"]))
@@ -563,6 +734,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {"ok": True, "file": USER_NAMES})
             if self.path == "/api/check":
                 return self.send(200, check_patch(cfg["disc"], b["name"], b["patch"]))
+            if self.path == "/api/paths":       # Settings' badges for what is typed (nothing is saved)
+                return self.send(200, path_states(b))
+            if self.path == "/api/browse":
+                if BROWSE["window"] is None:
+                    return self.send(400, {"error": "Browse works in the editor's own window only: type the path."})
+                return self.send(200, {"path": browse(b.get("kind", ""), b.get("path", ""))})
             if self.path == "/api/bye":         # the page closed: see main()
                 LIFE["bye"] = time.monotonic()
                 return self.send(200, {"ok": True})
@@ -570,7 +747,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {"ok": True, "stopped": stop_game(), "running": False})
             if self.path in ("/api/save", "/api/test", "/api/reload", "/api/hud/replace", "/api/hud/remove"):
                 mod = (b.get("mod") or "").strip()
-                if bad_mod(mod):
+                # Test without saving writes nothing: no mod needed
+                if bad_mod(mod) and not (self.path == "/api/test" and not b.get("save", True) and not mod):
                     return self.send(400, {"error": bad_mod_reason(mod), "code": "mod"})
                 if self.path == "/api/hud/replace":
                     return self.send(200, {"lines": HUD.replace(cfg["disc"], cfg["mods"], mod, b["stage"], b["role"], b["png"],
@@ -588,11 +766,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200, {"ok": True, "lines": [], "launched": launch_game(cfg, name, b.get("training", True))})
                 res = check_patch(cfg["disc"], name, b["patch"])
                 res["saved"] = save_patch(cfg, mod, name, b["patch"])
-                win = patch_winner(cfg, mod, name)
-                if win != mod:
-                    res["lines"].append("warning: mod \"%s\" also has levels/%s.json and the game uses that one "
-                                        "(the last mod by name wins)" % (win, name))
-                    res["ok"] = False
+                # another mod with this stage's file that loads later wins in the game: the page says so (not a check problem)
+                res["winner"] = patch_winner(cfg, mod, name)
+                res["have"] = [m for m in list_mods(cfg) if os.path.isfile(patch_path(cfg, m, name))]
                 if self.path == "/api/test":
                     res["launched"] = launch_game(cfg, name, b.get("training", True))
                 if self.path == "/api/reload":
@@ -600,6 +776,8 @@ class Handler(BaseHTTPRequestHandler):
                     res["reloading"] = True
                 return self.send(200, res)
             return self.send(404, {"error": "not found"})
+        except SettingsError as e:
+            return self.send(400, {"error": str(e), "code": "settings"})
         except Exception as e:      # noqa: BLE001
             traceback.print_exc()
             return self.send(500, {"error": "%s: %s" % (type(e).__name__, e)})
@@ -610,7 +788,7 @@ def open_window(url, window):
     if window:
         try:
             import webview      # noqa: PLC0415 - optional
-            webview.create_window("WotM Level Editor", url, width=1600, height=950)
+            BROWSE["window"] = webview.create_window("WotM Level Editor", url, width=1600, height=950)
             webview.start()
             return True
         except ImportError:
