@@ -589,8 +589,15 @@ it in its own window instead (`pywebview` when installed, otherwise Edge/Chrome 
   sideways, **E** up, **Q** down, **Shift** faster, right drag looks around, the wheel moves forward. Orbit: left
   drag orbits, right drag pans, the wheel zooms. In both, a click selects the object under it (buildings, pickups, props), **G** move
   gizmo, **R** turn gizmo (about the vertical only), **F** frames the selection, **Ctrl+D** copies it, **Del** deletes it, **Esc**
-  deselects. The right panel takes position and heading by number, **Snap** (10 units, 15 degrees) and **Reset** (back to the disc's
-  place, copies removed).
+  deselects. The right panel takes position and heading by number, **Snap** (steps set beside it, 10 units and 15 degrees by
+  default; they also set the arrow keys' step), **Drop** (**End**: down or up onto the first surface under the object's middle,
+  another object's roof included) and **Reset** (back to the disc's place, copies removed). **Grid** (top right of the view) draws
+  a 100-unit grid at the base of the selection.
+- **Several objects:** Shift+click (or Ctrl+click, also in the list) adds or takes out one, Shift+left drag selects the ones whose
+  middle falls in the box (only the kinds ticked in the list), **Ctrl+A** selects everything the list shows. The gizmo and the fields
+  act on the last one picked (yellow outline); the others (orange) follow it by the same move or turn, and Drop, Duplicate, Delete
+  and Reset act on all of them. **Arrows** move the selection along the world axis nearest to where the camera looks,
+  **PgUp/PgDn** up and down (Shift: ten steps).
 - **Carry the objects on top** (on by default): moving, turning, copying, deleting or resetting a building does the same to the pickups
   that rest on it (`lvl.py objects`, `on <handle>`).
 - **List:** every object by handle, with a filter, the kinds, and **Changed** (only the edited ones; a dot marks them).

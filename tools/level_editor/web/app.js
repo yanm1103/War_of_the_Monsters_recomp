@@ -45,10 +45,17 @@ orbit.screenSpacePanning = true;
 const gizmo = new TransformControls(camera, canvas);
 gizmo.setSize(0.9);
 scene.add(gizmo);
-const selBox = new THREE.BoxHelper(undefined, 0xffcc33);
-selBox.visible = false;
-scene.add(selBox);
+const boxes = [];   // one outline per selected item; the primary one (gizmo, fields) in yellow
+const grid = new THREE.GridHelper(20000, 200, 0x8a96a8, 0x566070);
+grid.material.transparent = true;
+grid.material.opacity = 0.45;
+grid.visible = false;
+scene.add(grid);
 let stageRoot = null;
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('wotmLevelEditor.' + k); return v === null ? d : v; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('wotmLevelEditor.' + k, v); } catch (e) { /* no storage */ } },
+};
 
 function resize() {
   const r = canvas.parentElement.getBoundingClientRect();
@@ -89,9 +96,10 @@ function setView(on) {
   orbit.enabled = !on && !gizmo.dragging;
   fly.keys.clear();
   try { localStorage.setItem('wotmLevelEditor.view', on ? 'fly' : 'orbit'); } catch (e) { /* ignore */ }
-  $('hint').textContent = on
-    ? 'Fly view (V: orbit) · WASD move · E up · Q down · Shift fast · Right drag: look · Wheel: forward · Click: select · G move · R turn · F focus · Ctrl+D copy · Del delete'
-    : 'Orbit view (V: fly) · Left drag: orbit · Right drag: pan · Wheel: zoom · Click: select · G move · R turn · F focus · Ctrl+D copy · Del delete';
+  const common = 'Click: select · Shift+click: add · Shift+drag: box · Ctrl+A: all listed · G move · R turn · Arrows/PgUp/PgDn nudge · End drop · F focus · Ctrl+D copy · Del delete';
+  $('hint').textContent = (on
+    ? 'Fly view (V: orbit) · WASD move · E up · Q down · Shift fast · Right drag: look · Wheel: forward · '
+    : 'Orbit view (V: fly) · Left drag: orbit · Right drag: pan · Wheel: zoom · ') + common;
 }
 function flyStep() {
   const now = performance.now(), dt = Math.min(0.1, (now - fly.last) / 1000);
@@ -135,13 +143,14 @@ function loop() {
   requestAnimationFrame(loop);
   flyStep();
   if (orbit.enabled) orbit.update();
-  if (sel && selBox.visible) selBox.setFromObject(sel.node);
+  syncBoxes();
   renderer.render(scene, camera);
 }
 
 // ------------------------------------------------------------------ model
 // rec: one object of the stage (handle). item: what can be selected, the object itself or one of its copies.
-let cfg = {}, stageName = '', recs = [], byHandle = new Map(), itemOf = new Map(), sel = null, history = [], dirty = false;
+// group: every selected item; sel: the one the gizmo and the fields act on (the last picked), the others follow it.
+let cfg = {}, stageName = '', recs = [], byHandle = new Map(), itemOf = new Map(), sel = null, group = [], history = [], dirty = false;
 
 function setWorld(node, posGame, heading, rec) {
   const qWorld = new THREE.Quaternion().setFromAxisAngle(Y, THREE.MathUtils.degToRad(heading - rec.h0)).multiply(rec.q0);
@@ -220,11 +229,10 @@ function snapshot() {
 function undo() {
   if (!history.length) return;
   const p = JSON.parse(history.pop());
-  const keep = sel && !sel.copy ? sel.rec : null;
+  const keep = group.filter((it) => !it.copy).map((it) => it.rec.item);
   resetAll();
   applyPatch(p);
-  select(keep ? keep.item : null);
-  refreshList();
+  selectMany(keep);
 }
 
 // ------------------------------------------------------------------ loading
@@ -308,51 +316,89 @@ function label(item) {
   const i = item.rec.info;
   return item.copy ? `${i.handle} copy ${item.rec.copies.indexOf(item) + 1}` : i.handle;
 }
+function shownKinds() {
+  return new Set([...document.querySelectorAll('.kinds input[data-kind]')].filter((x) => x.checked).map((x) => x.dataset.kind));
+}
+function listed() {   // the items the list shows: kind boxes, "Changed" and the filter text
+  const f = $('filter').value.trim().toLowerCase(), kinds = shownKinds(), onlyChanged = $('changedOnly').checked;
+  return items().filter((it) => {
+    const i = it.rec.info;
+    if (!kinds.has(i.kind) || (onlyChanged && !changed(it.rec))) return false;
+    return !f || `${label(it)} ${i.kind} ${i.id.toString(16)}`.toLowerCase().includes(f);
+  });
+}
 function refreshList() {
-  const f = $('filter').value.trim().toLowerCase();
-  const kinds = new Set([...document.querySelectorAll('.kinds input[data-kind]')].filter((x) => x.checked).map((x) => x.dataset.kind));
-  const onlyChanged = $('changedOnly').checked;
   const ul = $('list');
   ul.textContent = '';
-  let n = 0;
-  for (const it of items()) {
+  const shown = listed();
+  for (const it of shown) {
     const i = it.rec.info;
-    if (!kinds.has(i.kind)) continue;
-    if (onlyChanged && !changed(it.rec)) continue;
-    const text = `${label(it)} ${i.kind} ${i.id.toString(16)}`.toLowerCase();
-    if (f && !text.includes(f)) continue;
     const li = document.createElement('li');
     li.innerHTML = `<span class="k">${i.kind}</span><span class="h"></span>`;
     li.querySelector('.h').textContent = label(it);
     if (it === sel) li.className = 'sel';
+    else if (group.includes(it)) li.className = 'sel2';
     if (!it.copy && changed(it.rec)) li.classList.add('changed');
     if (!it.copy && it.rec.deleted) li.classList.add('deleted');
-    li.onclick = () => { select(it); focus(it); };
+    li.onclick = (e) => {
+      if (e.shiftKey || e.ctrlKey) select(it, 'toggle');
+      else { select(it); focus(it); }
+    };
     ul.appendChild(li);
-    n++;
   }
-  $('count').textContent = `${n} shown · ${buildPatch().objects.length} changed`;
+  $('count').textContent = `${shown.length} shown · ${group.length > 1 ? group.length + ' selected · ' : ''}${buildPatch().objects.length} changed`;
   document.title = `WotM Level Editor — ${stageName}${dirty ? ' *' : ''}`;
 }
 
-function select(item) {
-  sel = item && item.node.visible ? item : null;
+// mode: 'set' (only this one), 'toggle' (Shift/Ctrl click), 'add'
+function select(item, mode = 'set') {
+  if (item && !item.node.visible) item = null;
+  if (mode === 'set') group = item ? [item] : [];
+  else if (item) {
+    const i = group.indexOf(item);
+    if (i < 0) group.push(item);
+    else if (mode === 'toggle') group.splice(i, 1);
+  }
+  sel = item && group.includes(item) ? item : group[group.length - 1] || null;
+  showSel();
+}
+function selectMany(list, add = false) {
+  const vis = list.filter((it) => it.node.visible);
+  group = add ? [...group, ...vis.filter((it) => !group.includes(it))] : vis;
+  sel = group[group.length - 1] || null;
+  showSel();
+}
+function showSel() {
   gizmo.detach();
-  selBox.visible = !!sel;
   $('props').hidden = !sel;
   $('noSel').hidden = !!sel;
   if (sel) {
     gizmo.attach(sel.node);
-    selBox.setFromObject(sel.node);
     const i = sel.rec.info;
     $('pTitle').textContent = label(sel);
     $('pSub').textContent = `${i.kind} · id 0x${i.id.toString(16)} · ${i.states} states · ${i.paths} collision paths` +
       (i.on ? ` · on ${i.on}` : '');
-    $('onCount').textContent = sel.attached.length;
+    $('pGroup').textContent = group.length > 1 ? `${group.length} selected: the others follow this one.` : '';
+    $('onCount').textContent = group.reduce((n, it) => n + it.attached.length, 0);
     $('pWarn').textContent = i.paths === 0 && i.kind !== 'pickup' ? 'No collision of its own.' : '';
     showProps();
   }
+  syncBoxes();
   refreshList();
+}
+function syncBoxes() {
+  while (boxes.length < group.length) { const b = new THREE.BoxHelper(undefined, 0xffcc33); scene.add(b); boxes.push(b); }
+  boxes.forEach((b, n) => {
+    const it = group[n];
+    b.visible = !!it && it.node.visible;
+    if (!b.visible) return;
+    b.setFromObject(it.node);
+    b.material.color.set(it === sel ? 0xffcc33 : 0xff8a3d);
+  });
+  if (grid.visible) {   // at the base of the selection, else at the stage's origin
+    const box = sel ? new THREE.Box3().setFromObject(sel.node) : null;
+    grid.position.y = box && !box.isEmpty() ? box.min.y + 0.5 : 0;
+  }
 }
 function showProps() {
   if (!sel) return;
@@ -361,12 +407,25 @@ function showProps() {
 }
 
 // ------------------------------------------------------------------ editing
+// Every change moves sel; the rest of the group and what they carry follow it by the same world delta.
+function movers() {
+  const out = new Set(group.filter((it) => it !== sel && it.node.visible));
+  if ($('carry').checked) for (const it of group) for (const a of it.attached) if (a.node.visible) out.add(a);
+  out.delete(sel);
+  return [...out];
+}
+function startMove() { return { inv: sel.node.matrixWorld.clone().invert(), att: movers().map((a) => [a, a.node.matrixWorld.clone()]) }; }
+function carry(start) {
+  const delta = sel.node.matrixWorld.clone().multiply(start.inv);
+  for (const [a, m0] of start.att) setWorldMatrix(a.node, delta.clone().multiply(m0));
+}
+
 let dragStart = null;
 gizmo.addEventListener('dragging-changed', (e) => {
   orbit.enabled = !e.value && !fly.on;
   if (e.value && sel) {
     snapshot();
-    dragStart = { inv: sel.node.matrixWorld.clone().invert(), att: carried().map((a) => [a, a.node.matrixWorld.clone()]) };
+    dragStart = startMove();
   } else {
     dragStart = null;
     refreshList();
@@ -378,11 +437,6 @@ gizmo.addEventListener('objectChange', () => {
   if (dragStart) carry(dragStart);
   showProps();
 });
-function carried() { return $('carry').checked && sel ? sel.attached.filter((a) => a.node.visible) : []; }
-function carry(start) {
-  const delta = sel.node.matrixWorld.clone().multiply(start.inv);
-  for (const [a, m0] of start.att) setWorldMatrix(a.node, delta.clone().multiply(m0));
-}
 
 function setTool(mode) {
   gizmo.setMode(mode);
@@ -391,82 +445,177 @@ function setTool(mode) {
   $('tMove').classList.toggle('on', mode === 'translate');
   $('tTurn').classList.toggle('on', mode === 'rotate');
 }
-function setSnap(on) {
-  gizmo.setTranslationSnap(on ? 10 : null);
-  gizmo.setRotationSnap(on ? THREE.MathUtils.degToRad(15) : null);
+function snapMove() { return Math.max(0.1, +$('snapMove').value || 10); }
+function snapTurn() { return Math.max(0.1, +$('snapTurn').value || 15); }
+function setSnap() {
+  const on = $('snap').checked;
+  gizmo.setTranslationSnap(on ? snapMove() : null);
+  gizmo.setRotationSnap(on ? THREE.MathUtils.degToRad(snapTurn()) : null);
+  store.set('snap', on ? '1' : '0'); store.set('snapMove', snapMove()); store.set('snapTurn', snapTurn());
 }
 
 function editFromInputs() {
   if (!sel) return;
   snapshot();
-  const start = { inv: sel.node.matrixWorld.clone().invert(), att: carried().map((a) => [a, a.node.matrixWorld.clone()]) };
+  const start = startMove();
   setWorld(sel.node, [+$('px').value, +$('py').value, +$('pz').value], +$('ph').value, sel.rec);
   carry(start);
+  refreshList();
+}
+
+// arrows: along the world axis nearest to where the camera looks (Shift ×10); PageUp/PageDown: up and down
+let lastNudge = -Infinity;
+function nudge(fwd, side, up, big) {
+  if (!sel) return;
+  const now = performance.now();
+  if (now - lastNudge > 700) snapshot();   // one undo step per burst of key repeats
+  lastNudge = now;
+  const d = camera.getWorldDirection(new THREE.Vector3());
+  const f = Math.abs(d.x) > Math.abs(d.z) ? new THREE.Vector3(Math.sign(d.x), 0, 0) : new THREE.Vector3(0, 0, Math.sign(d.z) || -1);
+  const right = new THREE.Vector3(-f.z, 0, f.x);
+  const step = ($('snap').checked ? snapMove() : 10) * (big ? 10 : 1);
+  const v = f.multiplyScalar(fwd).addScaledVector(right, side).add(new THREE.Vector3(0, up, 0)).multiplyScalar(step);
+  const start = startMove();
+  setWorldMatrix(sel.node, new THREE.Matrix4().makeTranslation(v.x, v.y, v.z).multiply(sel.node.matrixWorld));
+  carry(start);
+  showProps();
+  refreshList();
+}
+
+function visibleChain(o) { for (; o; o = o.parent) if (!o.visible) return false; return true; }
+
+// End: each selected item down (or up) onto the first surface under its middle, its own meshes and what it carries aside
+function dropToGround() {
+  if (!group.length || !stageRoot) return;
+  snapshot();
+  const ray = new THREE.Raycaster(), down = new THREE.Vector3(0, -1, 0);
+  let n = 0;
+  for (const it of group) {
+    if (!it.node.visible) continue;
+    const att = $('carry').checked ? it.attached.filter((a) => a.node.visible && !group.includes(a)) : [];
+    const skip = new Set();
+    for (const x of [it, ...att]) x.node.traverse((o) => skip.add(o));
+    const box = new THREE.Box3().setFromObject(it.node);
+    if (box.isEmpty()) continue;
+    const c = box.getCenter(new THREE.Vector3());
+    ray.set(new THREE.Vector3(c.x, box.max.y + 1, c.z), down);
+    const hit = ray.intersectObject(stageRoot, true).find((h) => !skip.has(h.object) && visibleChain(h.object));
+    if (!hit) continue;
+    const m = new THREE.Matrix4().makeTranslation(0, hit.point.y - box.min.y, 0);
+    for (const x of [it, ...att]) setWorldMatrix(x.node, m.clone().multiply(x.node.matrixWorld));
+    n++;
+  }
+  log(`dropped ${n} of ${group.length} on the surface below` + (n < group.length ? ' (nothing under the others)' : ''));
+  showProps();
   refreshList();
 }
 
 function duplicate() {
   if (!sel) return;
   snapshot();
-  const box = new THREE.Box3().setFromObject(sel.node);
+  const box = new THREE.Box3();
+  for (const it of group) box.expandByObject(it.node);
   const step = Math.max(40, box.getSize(new THREE.Vector3()).x + 20);
-  const p = posOf(sel), h = headingOf(sel);
-  const off = [step, 0, 0];
-  const item = makeCopy(sel.rec, [p[0] + off[0], p[1] + off[1], p[2]], h);
-  if ($('carry').checked) {
-    for (const a of sel.attached) {
-      if (!a.node.visible) continue;
-      const ap = posOf(a);
-      item.attached.push(makeCopy(a.rec, [ap[0] + off[0], ap[1] + off[1], ap[2]], headingOf(a)));
-    }
+  const made = [], done = new Set();
+  const copyOf = (it) => {
+    const p = posOf(it);
+    const c = makeCopy(it.rec, [p[0] + step, p[1], p[2]], headingOf(it));
+    done.add(it);
+    return c;
+  };
+  for (const it of group) {
+    if (!it.node.visible || done.has(it)) continue;
+    const c = copyOf(it);
+    made.push(c);
+    if ($('carry').checked) for (const a of it.attached) if (a.node.visible && !group.includes(a)) c.attached.push(copyOf(a));
   }
-  select(item);
+  selectMany(made);
 }
 
+function hideRec(it) {
+  if (it.copy) { if (it.rec.copies.includes(it)) removeCopy(it); }
+  else { it.rec.deleted = true; it.node.visible = false; }
+}
 function remove() {
-  if (!sel) return;
+  if (!group.length) return;
   snapshot();
-  const it = sel;
-  if (it.copy) removeCopy(it);
-  else {
-    it.rec.deleted = true;
-    it.node.visible = false;
-    if ($('carry').checked) for (const a of it.attached) { if (a.copy) removeCopy(a); else { a.rec.deleted = true; a.node.visible = false; } }
+  for (const it of [...group]) {
+    hideRec(it);
+    if ($('carry').checked) for (const a of it.attached) hideRec(a);
   }
   select(null);
 }
 
 function resetSel() {
-  if (!sel) return;
+  if (!group.length) return;
   snapshot();
-  const rec = sel.rec;
-  const recsToReset = [rec, ...($('carry').checked ? rec.item.attached.map((a) => a.rec) : [])];
-  for (const r of recsToReset) {
+  const rs = new Set();
+  for (const it of group) {
+    rs.add(it.rec);
+    if ($('carry').checked) for (const a of it.rec.item.attached) rs.add(a.rec);
+  }
+  for (const r of rs) {
     for (const c of [...r.copies]) removeCopy(c);
     r.deleted = false;
     r.node.visible = true;
     setWorldMatrix(r.node, r.m0);
   }
-  select(rec.item);
+  selectMany([...rs].map((r) => r.item));
 }
 
-// picking: a click that did not drag
-let down = null;
-canvas.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY]; });
-canvas.addEventListener('pointerup', (e) => {
-  if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4 || gizmo.dragging || e.button !== 0) return;
+// picking: a click that did not drag (Shift/Ctrl: add or take out); Shift + left drag: box select
+const ndc = (e) => {
   const r = canvas.getBoundingClientRect();
+  return new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1);
+};
+let down = null, band = null;
+canvas.parentElement.addEventListener('pointerdown', (e) => {   // capture: before OrbitControls sees it
+  down = [e.clientX, e.clientY];
+  if (e.button === 0 && e.shiftKey && gizmo.axis === null) {
+    band = { x: e.clientX, y: e.clientY };
+    orbit.enabled = false;
+  }
+}, true);
+canvas.addEventListener('pointermove', (e) => {
+  if (!band) return;
+  const r = canvas.getBoundingClientRect(), el = $('band');
+  Object.assign(el.style, {
+    left: Math.min(band.x, e.clientX) - r.left + 'px', top: Math.min(band.y, e.clientY) - r.top + 'px',
+    width: Math.abs(e.clientX - band.x) + 'px', height: Math.abs(e.clientY - band.y) + 'px',
+  });
+  el.hidden = Math.hypot(e.clientX - band.x, e.clientY - band.y) < 5;
+});
+canvas.addEventListener('pointerup', (e) => {
+  const b = band;
+  band = null;
+  $('band').hidden = true;
+  orbit.enabled = !fly.on && !gizmo.dragging;
+  if (b && Math.hypot(e.clientX - b.x, e.clientY - b.y) >= 5) {
+    const a = ndc({ clientX: b.x, clientY: b.y }), z = ndc(e);
+    const x0 = Math.min(a.x, z.x), x1 = Math.max(a.x, z.x), y0 = Math.min(a.y, z.y), y1 = Math.max(a.y, z.y);
+    const kinds = shownKinds();
+    const inside = items().filter((it) => {
+      if (!kinds.has(it.rec.info.kind) || !visibleChain(it.node)) return false;
+      const bx = new THREE.Box3().setFromObject(it.node);
+      if (bx.isEmpty()) return false;
+      const p = bx.getCenter(new THREE.Vector3()).project(camera);
+      return p.z < 1 && p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
+    });
+    selectMany(inside, true);
+    return;
+  }
+  if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4 || gizmo.dragging || e.button !== 0) return;
   const ray = new THREE.Raycaster();
-  ray.setFromCamera(new THREE.Vector2((e.clientX - r.left) / r.width * 2 - 1, -(e.clientY - r.top) / r.height * 2 + 1), camera);
-  const visible = (o) => { for (; o; o = o.parent) if (!o.visible) return false; return true; };
+  ray.setFromCamera(ndc(e), camera);
+  const add = e.shiftKey || e.ctrlKey;
   for (const hit of ray.intersectObject(stageRoot || scene, true)) {
-    if (!visible(hit.object)) continue;
+    if (!visibleChain(hit.object)) continue;
     for (let o = hit.object; o; o = o.parent) {
-      if (itemOf.has(o)) { select(itemOf.get(o)); return; }
+      if (itemOf.has(o)) { select(itemOf.get(o), add ? 'toggle' : 'set'); return; }
     }
     break;      // the first visible thing is not an object (ground, a road): keep looking at nothing
   }
-  select(null);
+  if (!add) select(null);
 });
 
 // ------------------------------------------------------------------ saving and testing
@@ -520,7 +669,15 @@ async function watchGame() {
 }
 $('tMove').onclick = () => setTool('translate');
 $('tTurn').onclick = () => setTool('rotate');
-$('snap').onchange = (e) => setSnap(e.target.checked);
+for (const id of ['snap', 'snapMove', 'snapTurn']) $(id).onchange = setSnap;
+$('snap').checked = store.get('snap', '0') === '1';
+$('snapMove').value = store.get('snapMove', '10');
+$('snapTurn').value = store.get('snapTurn', '15');
+setSnap();
+$('grid').checked = store.get('grid', '0') === '1';
+grid.visible = $('grid').checked;
+$('grid').onchange = (e) => { grid.visible = e.target.checked; store.set('grid', e.target.checked ? '1' : '0'); };
+$('drop').onclick = dropToGround;
 $('dup').onclick = duplicate;
 $('del').onclick = remove;
 $('reset').onclick = resetSel;
@@ -545,8 +702,15 @@ window.addEventListener('keydown', (e) => {
   if (e.ctrlKey && k === 'z') { e.preventDefault(); undo(); }
   else if (e.ctrlKey && k === 's') { e.preventDefault(); post('save'); }
   else if (e.ctrlKey && k === 'd') { e.preventDefault(); duplicate(); }
+  else if (e.ctrlKey && k === 'a') { e.preventDefault(); selectMany(listed()); }
   else if (k === 'delete') remove();
   else if (e.ctrlKey || e.altKey || e.metaKey) return;
+  else if (k.startsWith('arrow') && sel) {
+    e.preventDefault();
+    nudge(k === 'arrowup' ? 1 : k === 'arrowdown' ? -1 : 0, k === 'arrowright' ? 1 : k === 'arrowleft' ? -1 : 0, 0, e.shiftKey);
+  }
+  else if ((k === 'pageup' || k === 'pagedown') && sel) { e.preventDefault(); nudge(0, 0, k === 'pageup' ? 1 : -1, e.shiftKey); }
+  else if (k === 'end') { e.preventDefault(); dropToGround(); }
   else if (fly.on && 'wasdqe'.includes(k) && k.length === 1) { e.preventDefault(); fly.keys.add(k); }
   else if (fly.on && k === 'shift') fly.keys.add(k);
   else if (k === 'v') setView(!fly.on);
@@ -573,6 +737,9 @@ function init(r) {
 setTool('translate');
 orbit.enabled = false;
 setView(fly.on);
-if (new URLSearchParams(location.search).has('debug')) window.wotmDebug = { camera, fly, flyStep, setView };
+if (new URLSearchParams(location.search).has('debug')) {
+  window.wotmDebug = { camera, fly, flyStep, setView, select, selectMany, items, listed, dropToGround, nudge, duplicate, remove,
+                       undo, buildPatch, posOf, get group() { return group; }, get sel() { return sel; } };
+}
 loop();
 api('/api/init').then(init).catch((e) => log(`init: ${e.message}`, 'err'));

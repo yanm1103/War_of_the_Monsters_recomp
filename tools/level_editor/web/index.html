@@ -37,7 +37,9 @@
   </aside>
   <section id="view">
     <canvas id="canvas"></canvas>
-    <div id="hint" class="muted">Left drag: orbit · Right drag: pan · Wheel: zoom · Click: select · W move · E turn · F focus · Ctrl+D copy · Del delete</div>
+    <div id="band" hidden></div>
+    <div id="overlay"><label title="A 100-unit grid at the base of the selection"><input type="checkbox" id="grid"> Grid</label></div>
+    <div id="hint" class="muted"></div>
     <div id="busy" hidden>Loading…</div>
   </section>
   <aside id="right">
@@ -45,15 +47,21 @@
     <div id="props" hidden>
       <h2 id="pTitle"></h2>
       <div class="muted" id="pSub"></div>
+      <div class="note" id="pGroup"></div>
       <div class="row"><span>Position</span>
         <input id="px" type="number" step="1"><input id="py" type="number" step="1"><input id="pz" type="number" step="1"></div>
       <div class="row"><span>Heading</span><input id="ph" type="number" step="5"><span class="muted">deg</span></div>
       <div class="row tools">
         <button id="tMove" class="toggle on" title="G">Move</button>
         <button id="tTurn" class="toggle" title="R">Turn</button>
-        <label title="Snap the gizmo"><input type="checkbox" id="snap"> Snap</label>
+      </div>
+      <div class="row snap">
+        <label title="Snap the gizmo and the arrow keys to these steps"><input type="checkbox" id="snap"> Snap</label>
+        <input id="snapMove" type="number" min="0.1" step="5" title="Move step"><span class="muted">units</span>
+        <input id="snapTurn" type="number" min="0.1" step="5" title="Turn step"><span class="muted">deg</span>
       </div>
       <div class="row tools">
+        <button id="drop" title="Put on the surface below (End)">Drop</button>
         <button id="dup" title="Ctrl+D">Duplicate</button>
         <button id="del" class="danger" title="Delete">Delete</button>
         <button id="reset" title="Back to the disc's place (the object and its copies)">Reset</button>
