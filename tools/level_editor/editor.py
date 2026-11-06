@@ -4,7 +4,9 @@ patch (docs/guides/MODS.md, "Level patches") into a mod; "Test" opens the game i
 
   python tools/level_editor/editor.py [--browser | --serve] [--port N]
 
---browser opens the default browser; --serve only serves (open the printed address yourself).
+--browser opens the default browser; --serve only serves (open the printed address yourself). The address is
+http://127.0.0.1:47197/ (--port changes it); when that port is taken by an editor already running, its window opens again,
+when by something else, a free port is used.
 
 The window is a local web page (web/, three.js) served by this script on 127.0.0.1; it opens in a pywebview window when the
 module is installed (pip install pywebview), otherwise in Edge/Chrome app mode or the default browser. Everything about the stage
@@ -24,6 +26,7 @@ import threading
 import time
 import traceback
 import urllib.parse
+import urllib.request
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -330,11 +333,39 @@ def open_window(url, force_browser):
     return False
 
 
+DEFAULT_PORT = 47197     # from SCUS_971.97
+
+
+class Server(ThreadingHTTPServer):
+    # on Windows SO_REUSEADDR lets a second server bind a port already in use: off there, so a taken port is noticed
+    allow_reuse_address = os.name != "nt"
+    daemon_threads = True
+
+
+def editor_at(port):
+    """Is a level editor already answering on this port?"""
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:%d/api/init" % port, timeout=2) as r:
+            return "stages" in json.load(r)
+    except (OSError, ValueError):
+        return False
+
+
 def main(argv):
-    port = int(argv[argv.index("--port") + 1]) if "--port" in argv else 0
+    port = int(argv[argv.index("--port") + 1]) if "--port" in argv else DEFAULT_PORT
     Handler.cfg = load_config()
     os.makedirs(CACHE, exist_ok=True)
-    srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    try:
+        srv = Server(("127.0.0.1", port), Handler)
+    except OSError:
+        if editor_at(port):
+            url = "http://127.0.0.1:%d/" % port
+            print("WotM level editor already running at", url)
+            if "--serve" not in argv:
+                open_window(url, "--browser" in argv)
+            return 0
+        print("port %d is taken: using a free one" % port)
+        srv = Server(("127.0.0.1", 0), Handler)
     url = "http://127.0.0.1:%d/" % srv.server_address[1]
     print("WotM level editor at", url)
     threading.Thread(target=srv.serve_forever, daemon=True).start()

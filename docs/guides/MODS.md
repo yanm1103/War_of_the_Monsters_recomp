@@ -577,7 +577,8 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
 
 ### Level editor (`tools/level_editor/editor.py`)
 `python tools/level_editor/editor.py` opens the stage in 3D and writes the patch above. It is a local page (three.js, in
-`tools/level_editor/web/`) served by the script on `127.0.0.1`: in a `pywebview` window when the module is installed
+`tools/level_editor/web/`) served by the script at `http://127.0.0.1:47197/` (`--port N` changes it; with the port taken by an
+editor already running, that one's window opens again; by something else, a free port): in a `pywebview` window when the module is installed
 (`pip install pywebview`), otherwise in Edge/Chrome app mode, or the default browser (`--browser`); `--serve` only serves. The window is
 in English, with a dark and a light theme (in the settings, the cog at the top right).
 - **Top bar:** the stage, the mod (its `levels/<STAGE>.json` loads with the stage), **Undo** (Ctrl+Z), **Check** (`lvl.py patch` on the
