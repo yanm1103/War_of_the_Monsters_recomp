@@ -880,16 +880,40 @@ class LevelPatch:
         self.w32(h, (self.img.u32(h) & ~63) | 9)
         self.stats["deleted"] += 1
 
+    CLONE_HEAD = {1: (0x20, lambda img, n: img.u16(n + 8)), 6: (0xC, lambda img, n: img.u8(n + 0xB)),
+                  3: (0x1C, lambda img, n: img.u32(n + 8)), 4: (0x50, lambda img, n: img.u32(n + 8))}
+
+    def clone_private(self, n, top=True):
+        """Copy of n and of the GROUP/SWITCH/TRANSLATE/ROTATE below it that have no other parent; shared nodes stay shared."""
+        img, st, base = self.img, self.st, self.img.base
+        o = self.op(n)
+        if o not in self.CLONE_HEAD or (not top and len(st.parents.get(n, ())) != 1):
+            return n
+        head, count = self.CLONE_HEAD[o]
+        size = head + 4 * count(img, n)
+        a = self.alloc(size, 16)
+        img.d[a - base:a - base + size] = img.d[n - base:n - base + size]
+        for s_old in child_slots(img, n):
+            s_new = a + (s_old - n)
+            c = img.u32(s_old) & MASK
+            if c:
+                nc = self.clone_private(c, False)
+                if nc != c:
+                    self.set_ptr(s_new, nc)
+                    st.parents[nc] = [a]
+        self.stats["nodes cloned"] += 1
+        return a
+
     def copy(self, h, places):
-        """Copies of the object under handle h: a new handle, INTERACTIVE_STATE and DESTRUCTIBLE each, sharing the states below;
-        a GROUP in the parent's slot holds the original and the copies. Each copy gets its own collision paths."""
+        """Copies of the object under handle h: a new handle, INTERACTIVE_STATE and DESTRUCTIBLE each, sharing the states below
+        (a pickup: its own handle, id GROUP, SWITCH and the GROUPs between, sharing the meshes); a GROUP in the parent's slot holds
+        the original and the copies. Each copy gets its own collision paths."""
         img, st, base = self.img, self.st, self.img.base
         kids = children(img, h)
         ist = next((c for c in kids if self.op(c) == 39), None)
         if any(x != ist and self.op(x) == 39 for x in st.subtree(h)):
             raise PatchError("copy of %07x: it has destructibles inside it (not supported yet)" % h)
-        if any(self.op(c) == 1 and 0x12C0 <= st.ident(c) <= 0x13EB for c in kids):
-            raise PatchError("copy of %07x: pickups cannot be copied yet" % h)
+        pickup = any(self.op(c) == 1 and 0x12C0 <= st.ident(c) <= 0x13EB for c in kids)
         p = st.parents[h][0]
         before, old_pos, paths = self.world(h, False), self.world(h)[3][:3], self.paths_through(h)
         wrap = self.alloc(0x20 + 4 * (1 + len(places)), 16)
@@ -904,8 +928,11 @@ class LevelPatch:
         st.parents[wrap], st.parents[h] = [p], [wrap]
         size = (0x1C if self.op(h) == 3 else 0x50) + 4 * img.u32(h + 8)
         for i, pl in enumerate(places):
-            hc = self.alloc(size, 16)
-            img.d[hc - base:hc - base + size] = img.d[h - base:h - base + size]
+            if pickup:      # LevelPickups/Pickup::init write into the id GROUP (id2, numKids) and the SWITCH (whichChild)
+                hc = self.clone_private(h)
+            else:
+                hc = self.alloc(size, 16)
+                img.d[hc - base:hc - base + size] = img.d[h - base:h - base + size]
             st.parents[hc] = [wrap]
             self.w32(wrap + 0x24 + 4 * i, hc)
             twins = {}

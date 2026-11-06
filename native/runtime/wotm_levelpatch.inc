@@ -698,13 +698,37 @@ struct Stage
     struct Place { V3 pos; double heading; };
     // Copias do objeto da alca h: alca, INTERACTIVE_STATE e DESTRUCTIBLE novos para cada uma, com os estados de baixo em comum; um
     // GROUP no lugar do original no pai segura o original e as copias. Cada copia ganha os seus caminhos de colisao.
+    // Copia de n e dos GROUP/SWITCH/TRANSLATE/ROTATE abaixo dele que nao tem outro pai; o que e compartilhado fica compartilhado
+    uint32_t clonePrivate(uint32_t n, bool top)
+    {
+        uint32_t head, count;
+        switch (op(n))
+        {
+        case GROUP: head = 0x20, count = u16(n + 8); break;
+        case SWITCH: head = 0xC, count = u8(n + 0xB); break;
+        case TRANSLATE: head = 0x1C, count = u32(n + 8); break;
+        case ROTATE: head = 0x50, count = u32(n + 8); break;
+        default: return n;
+        }
+        if (!top && (!parents.count(n) || parents[n].size() != 1)) return n;
+        const uint32_t size = head + 4 * std::min<uint32_t>(count, 8192);
+        const uint32_t a = alloc(size, 16);
+        copyBytes(a, n, size);
+        for (uint32_t s : childSlots(n))
+            if (const uint32_t c = u32(s) & kMask; c && ok(c))
+                if (const uint32_t nc = clonePrivate(c, false); nc != c) setPtr(a + (s - n), nc), parents[nc] = {a};
+        ++stats["nodes cloned"];
+        return a;
+    }
+
     void copy(uint32_t h, const std::vector<Place> &places)
     {
         uint32_t ist = 0;
+        bool pickup = false;
         for (uint32_t c : children(h))
         {
             if (op(c) == INTERACTIVE && !ist) ist = c;
-            if (op(c) == GROUP && ident(c) >= 0x12C0 && ident(c) <= 0x13EB) throw PatchError(fmt("copia de %07x: pickup ainda nao copia", h));
+            if (op(c) == GROUP && ident(c) >= 0x12C0 && ident(c) <= 0x13EB) pickup = true;
         }
         for (uint32_t x : subtree(h))
             if (x != ist && op(x) == INTERACTIVE) throw PatchError(fmt("copia de %07x: tem destrutiveis dentro (ainda nao copia)", h));
@@ -726,8 +750,11 @@ struct Stage
         const uint32_t size = (op(h) == TRANSLATE ? 0x1C : 0x50) + 4 * u32(h + 8);
         for (size_t i = 0; i < places.size(); ++i)
         {
-            uint32_t hc = alloc(size, 16);
-            copyBytes(hc, h, size);
+            uint32_t hc;
+            if (pickup)   // LevelPickups/Pickup::init escrevem no GROUP do id (id2, numKids) e no SWITCH (whichChild)
+                hc = clonePrivate(h, true);
+            else
+                hc = alloc(size, 16), copyBytes(hc, h, size);
             parents[hc] = {wrap};
             w32(wrap + 0x24 + 4 * uint32_t(i), hc);
             std::unordered_map<uint32_t, uint32_t> twins;

@@ -559,7 +559,8 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   turning is about the handle). `delete`: the object leaves the stage (drawing, collision, registration). `copies`: new copies, each with
   `pos` and an optional `heading`; they share the original's states and meshes, break on their own and get their own collision.
 - Works on destructibles (buildings), pickups (cars, trees, rooftop objects) and props. Copies: buildings without other destructibles
-  inside them, and props; not pickups.
+  inside them, props and pickups (a pickup copy has its own handle, id `GROUP` and `SWITCH`, so it breaks and is picked up on its
+  own).
 - Objects that sit on a building (water tanks and vents on the roof, items on its sidewalk base) are pickups of their own and do not
   follow it: move or delete them in the same patch. `lvl.py objects` marks them with `on <handle>`.
 - Traffic and pedestrians follow their own paths (`PTS/<FASE>.FOP` and `.PED`, `FORMATS.md`, "Path nets") and never look at the
