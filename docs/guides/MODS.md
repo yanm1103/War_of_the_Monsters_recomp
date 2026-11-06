@@ -138,7 +138,7 @@ the skeleton, the mesh, the animations and the locators are the `.glb`'s (`tools
 skeleton"). Any base but Congar (its code moves 8 of its bones by number). What the `.glb` holds:
 - an armature (bone names and hierarchy are free) and the meshes weighted to it; up to 3 bones per vertex (the heaviest kept);
   a mesh parented to a bone without weights follows that bone;
-- actions named `a<id>` with the game's ids (`a090` is the idle; `tools/pose.py --list` on the base shows the ids). An id of the
+- actions named `a<id>` with the game's ids (`a090` is the idle; `tools/pose.py --list` on the base shows the ids, `docs/ANIM_IDS.md` what each one is). An id of the
   base type that the `.glb` lacks gets the rest pose for the base's length, so every move still has an animation. The footsteps
   and dust come from the height of the hand and foot locators; the sounds and the throw channels come from the base's animation
   with the same id. With the scene at 60 fps before the export one Blender frame is one game frame (the log warns when the keys
@@ -166,6 +166,12 @@ fire comes out or close a jaw the model's bind pose leaves open (`"turn"`). Each
 bind pose, so a foot that is not flat there stays tilted in every move; the Biped map lays the feet flat (`"level"`). The base's layers (looking around, flinches) keep only rotations, as the game adds them on top of the main
 animation (`MODELS_3D.md`, "New skeleton"). The game lights monsters brightly: a texture made for another game may need
 darkening to keep its look.
+The model can also bring moves of its own: `--own clips.json` replaces the base's animation with the same id (a walk, a
+punch from the model's own game; `docs/ANIM_IDS.md` says which id is which), each clip giving the world of the model's joints
+per frame; keep the base's length for attacks and hit reactions, where the game times the move by the animation. A weapon
+that appears only in some moves is a rigid mesh on a joint in the `.dae` (a node with `instance_geometry` under the joint)
+and `"props": {"<node>": {"show": "<base node>"}}` in the map: it is seen as much as that node of the base is (its scale),
+e.g. a sword on the hand that follows the base's own sword parts.
 
 ## The kit on the command line (`tools/modkit.py`)
 

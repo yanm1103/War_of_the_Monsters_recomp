@@ -16,7 +16,7 @@ Leia antes de começar: `README.md` (setup), `docs/ANALYSIS.md` (o que se sabe d
 - `TOOLS.md` (`tools/`, headers, difftest), `PITFALLS.md` (pegadinhas do gcc 2.95 e do build NM), `SPINE.md` (fluxo do jogo), `PCSX2_TESTING.md` (halfcpp no PCSX2).
 - `MODS.md` (pasta `mods/`, texturas em PNG, `tools/modkit.py`), `MODELS_3D.md` (monstro animado direto do disco), `WEB_VIEWER.md` (avaliação do viewer no navegador; o viewer está pronto em https://yanm1103.github.io/wotm-model-museum/).
 - Investigações datadas em `docs/investigacoes/<data>/`. Encerrada (o que ela pedia já está no código) é apagada; o que ficar pendente vai para o `TODO.md`, e as referências viram `<commit>:docs/investigacoes/...` (ler com `git show`).
-- `docs/FORMATS.md`: formatos de arquivo do jogo (fase, monstro, som, filme, save do memory card).
+- `docs/FORMATS.md`: formatos de arquivo do jogo (fase, monstro, som, filme, save do memory card). `docs/ANIM_IDS.md`: o que é cada id de animação dos monstros (0..299).
 
 ## Documentação: três tipos de texto, cada um no seu lugar
 - **Referência** (`README.md`, este arquivo, `docs/*.md`, `docs/guides/*.md`, `GLOSSARY.md`, `CONTRIBUTING.md`): como as coisas são hoje, no presente. Escrita **em inglês**, menos este arquivo; `TODO.md`, commits e `docs/investigacoes/` seguem em português. Sem datas, sem "antes era", sem "feito/corrigido em", sem contar como foi testado. Um número medido só entra se for usado (ex.: "9619 ticks por field").

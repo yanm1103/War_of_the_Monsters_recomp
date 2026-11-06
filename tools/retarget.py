@@ -3,7 +3,7 @@
 that `modkit.py monster rig` (tools/ngprig.py) takes.
 
   python tools/retarget.py <source.glb> <model.dae> <map.json> <out.glb> [--size F | --height H] [--front +y|-y]
-                           [--clips 90,1,...]
+                           [--clips 90,1,...] [--own clips.json]
 
 - source.glb: the base costume as the kit exports it (`modkit.py monster mesh export`, e.g. LIZARD0.glb, "WotM" root): its
   skeleton and its actions `a<id>` are the motion.
@@ -25,9 +25,16 @@ that `modkit.py monster rig` (tools/ngprig.py) takes.
     the size) or the mean of some joints. Every locator of the source that the map does not name goes on the joint its
     source bone maps to (or the nearest mapped ancestor), with the source offset scaled.
   - "keep": joints kept without a source (they hold the rest pose against their parent).
+  - "props": {node: {"show": source node}}: a rigid mesh of the model (a node with instance_geometry under a joint) is seen as
+    much as that source node is in each clip (its scale: a weapon shown only in some moves). Props the map leaves out are
+    always seen.
   Joints the map does not reach are rigid on the nearest kept ancestor: their weights go to it.
 - Size: the model is scaled to the source's height (`--size 1.2` = 20% taller; `--height H` in game units), feet on the
   ground. The out.glb is in the game's axes and units (the "WotM" root), so ngprig takes it as is.
+- --own clips.json: the model's own animations, in place of the source's with the same id (or as new ids):
+  {"clips": [{"name": "a090", "frames": N, "joints": {joint: [[qx, qy, qz, qw, x, y, z] per frame]}}]}, each the joint's
+  world in the model's scene (the .dae's axes and units, at 60 frames a second). Kept joints a clip leaves out hold their
+  rest against their parent; the map does not act on these clips.
 
 Only the standard library: it runs where the mod kit runs. Guide: docs/guides/MODS.md ("Own skeleton"); docs/guides/MODELS_3D.md.
 """
@@ -187,6 +194,7 @@ class Model:
         self.joints = []          # [{"name", "parent", "world"}]
         jidx = {}                 # sid / id / name -> joint index
         inst = []                 # (node world, instance_controller element)
+        rigid = []                # (node name, joint, node world, instance_geometry element)
         scene = root.find(NS + "library_visual_scenes/" + NS + "visual_scene")
         if scene is None:
             raise RetargetError("%s: no visual scene" % path)
@@ -202,6 +210,9 @@ class Model:
                         jidx.setdefault(k, me)
             for ic in n.findall(NS + "instance_controller"):
                 inst.append((W, ic))
+            for ig in n.findall(NS + "instance_geometry"):
+                if me is not None:   # a rigid prop on a joint
+                    rigid.append((n.get("name") or n.get("id"), me, W, ig))
             for c in n.findall(NS + "node"):
                 walk(c, W, me)
         for n in scene.findall(NS + "node"):
@@ -335,6 +346,40 @@ class Model:
         if not self.tris:
             raise RetargetError("%s: no skinned triangles" % path)
 
+        self.props = []           # [{"name", "joint", "tris": [(image path, [(pos, normal, uv) x3])]}], scene space
+        for name, ji, W_node, ig in rigid:
+            geo = by_id.get(ig.get("url", "#")[1:])
+            mesh = geo.find(NS + "mesh") if geo is not None else None
+            if mesh is None:
+                continue
+            msrc = {s.get("id"): s for s in mesh.findall(NS + "source")}
+            vsrc = {i.get("semantic"): i.get("source")[1:] for i in mesh.find(NS + "vertices").findall(NS + "input")}
+
+            def vec(sid, n):
+                a = _floats(msrc[sid].find(NS + "float_array"))
+                return [a[i:i + n] for i in range(0, len(a) - n + 1, n)]
+            P = vec(vsrc["POSITION"], 3)
+            bmat = {im.get("symbol"): im.get("target", "#")[1:] for im in ig.iter(NS + "instance_material")}
+            tris = []
+            for prims in mesh.findall(NS + "triangles"):
+                inputs = {}
+                for i in prims.findall(NS + "input"):
+                    inputs.setdefault(i.get("semantic"), (int(i.get("offset")), i.get("source")[1:]))
+                st = max(o for o, _s in inputs.values()) + 1
+                p = [int(x) for x in prims.find(NS + "p").text.split()]
+                N = vec(inputs["NORMAL"][1], 3) if "NORMAL" in inputs else None
+                T = vec(inputs["TEXCOORD"][1], 2) if "TEXCOORD" in inputs else None
+                img = material_image(bmat.get(prims.get("material"), prims.get("material")))
+                cs = []
+                for e in range(len(p) // st):
+                    pp = apply(W_node, P[p[e * st + inputs["VERTEX"][0]]])
+                    nn = _unit(apply(W_node, N[p[e * st + inputs["NORMAL"][0]]], 0.0)) if N is not None else [0.0, 0.0, 1.0]
+                    uv = T[p[e * st + inputs["TEXCOORD"][0]]] if T is not None else [0.0, 0.0]
+                    cs.append((pp, nn, [uv[0], 1.0 - uv[1]]))
+                tris += [(img, cs[k:k + 3]) for k in range(0, len(cs) - 2, 3)]
+            if tris:
+                self.props.append({"name": name, "joint": ji, "tris": tris})
+
 
 # ---------------------------------------------------------------- the source (kit .glb)
 
@@ -387,7 +432,7 @@ class Source:
 
 # ---------------------------------------------------------------- the retarget
 
-def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front="+y", clips=None, log=print):
+def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front="+y", clips=None, own=None, log=print):
     src = Source(src_path)
     mdl = Model(model_path)
     cfg = load_map(map_path)
@@ -625,6 +670,33 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
             pt = apply(Kmat[j0], g)
         locs["loc_%03x" % lid] = (jid(spec["joint"]), pt)
 
+    # ---- rigid props: in the space of the kept joint above them; seen as much as the source node "show" is (its scale)
+    pcfg = cfg.get("props", {})
+    extra = sorted(set(pcfg) - {pr["name"] for pr in mdl.props})
+    if extra:
+        raise RetargetError("map: props not in the model (a rigid mesh on a joint): %s" % ", ".join(extra))
+    props = []
+    for pr in mdl.props:
+        h = holder(pr["joint"])
+        Gi = inv(G0[h])
+        tl = [(img, [(apply(Gi, to_game_p(p)), _unit(apply(Gi, apply(Cm, n, 0.0), 0.0)), uv) for p, n, uv in cs])
+              for img, cs in pr["tris"]]
+        show = pcfg.get(pr["name"], {}).get("show")
+        props.append({"name": pr["name"], "joint": h, "tris": tl, "show": src.node(show) if show else None})
+        log("prop %s on %s%s" % (pr["name"], J[h]["name"], ", seen with %s" % show if show else ""))
+
+    def prop_scale(pi, clip, t, cache):
+        b = props[pi]["show"]
+        if b is None:
+            return 1.0
+        W = src.world(b, clip, t, cache) if clip is not None else src.rest[b]
+        return sum(math.sqrt(sum(W[r][c] ** 2 for r in range(3))) for c in range(3)) / 3.0
+    src_clip = {}
+    for nm, clip, frames in src.clips:
+        m = re.match(r"a(\d+)", nm)
+        if m:
+            src_clip.setdefault(int(m.group(1)), (clip, frames))
+
     # ---- motion
     rest_src = {}
     for b in {x for bb in bones.values() for x in (bb["a"], bb["b"]) if x is not None}:
@@ -647,6 +719,7 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
         if want is not None and (not m or int(m.group(1)) not in want):
             continue
         tracks = {i: ([], []) for i in korder}   # joint -> (quats, positions) local
+        pscale = {}                              # prop -> scale per frame
         for f in range(frames):
             t = f / FPS
             cache = {}
@@ -674,10 +747,55 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
                 L = mul(inv(Wt[p]), Wt[i]) if p is not None else Wt[i]
                 tracks[i][0].append(quat_of(L))
                 tracks[i][1].append(pos(L))
-        anims.append((nm, frames, tracks))
+            for pi in range(len(props)):
+                pscale.setdefault(pi, []).append(prop_scale(pi, clip, t, cache))
+        anims.append((nm, frames, tracks, pscale))
     log("%d actions retargeted, %d joints kept (%s), %d locators" % (
         len(anims), len(korder), ", ".join(J[i]["name"] for i in korder), len(locs)))
-    write_glb(out_path, mdl, J, korder, kparent, Lk, A, out_tris, locs, anims, log)
+
+    # ---- the model's own clips: each joint's world in the model's scene, per frame
+    if own:
+        oc = json.load(open(own, encoding="utf-8"))
+        done = []
+        for clip in oc.get("clips", []):
+            nm, frames, jd = clip["name"], int(clip["frames"]), clip["joints"]
+            if not re.fullmatch(r"a\d+(_loop|_once)?", nm):
+                raise RetargetError("own clip %s: the name is a<id> (a090), with _loop or _once for a new id" % nm)
+            miss = sorted(n for n in jd if n not in mdl.names)
+            if miss:
+                raise RetargetError("own clip %s: joints not in the model: %s" % (nm, ", ".join(miss)))
+            for n, ks in jd.items():
+                if len(ks) != frames:
+                    raise RetargetError("own clip %s: joint %s has %d frames, not %d" % (nm, n, len(ks), frames))
+            given = {mdl.names[n]: ks for n, ks in jd.items()}
+            aid = int(re.match(r"a(\d+)", nm).group(1))
+            sc = src_clip.get(aid)   # the props follow the source's clip with the same id, over the same share of time
+            tracks = {i: ([], []) for i in korder}
+            pscale = {}
+            for f in range(frames):
+                cache = {}
+                for pi in range(len(props)):
+                    t = f / float(max(1, frames - 1)) * (sc[1] - 1) / FPS if sc else 0.0
+                    pscale.setdefault(pi, []).append(prop_scale(pi, sc[0] if sc else None, t, cache))
+                Wt = {}
+                for i in korder:
+                    p = kparent[i]
+                    k = given.get(i)
+                    if k is not None:
+                        Wd = with_pos(quat_col(k[f][:4]), k[f][4:7])
+                        Wt[i] = with_pos(rot3(mul(Cm, Wd)), to_game_p(pos(Wd)))
+                    elif p is not None:
+                        Wt[i] = mul(Wt[p], Lk[i])
+                    else:
+                        Wt[i] = A[i]
+                    L = mul(inv(Wt[p]), Wt[i]) if p is not None else Wt[i]
+                    tracks[i][0].append(quat_of(L))
+                    tracks[i][1].append(pos(L))
+            anims = [a for a in anims if int(re.match(r"a(\d+)", a[0]).group(1)) != aid]
+            anims.append((nm, frames, tracks, pscale))
+            done.append(nm)
+        log("%d own clips: %s" % (len(done), ", ".join(done)))
+    write_glb(out_path, mdl, J, korder, kparent, Lk, A, out_tris, locs, anims, log, props)
     return out_path
 
 
@@ -712,7 +830,7 @@ def ngprig_locator_id(name):
 
 # ---------------------------------------------------------------- the .glb
 
-def write_glb(path, mdl, J, korder, kparent, Lk, A, tris, locs, anims, log):
+def write_glb(path, mdl, J, korder, kparent, Lk, A, tris, locs, anims, log, props=()):
     binb = bytearray()
     j = {"asset": {"version": "2.0", "generator": "WotM tools/retarget.py"}, "scene": 0, "scenes": [{"nodes": [0]}],
          "nodes": [], "meshes": [], "materials": [], "textures": [], "images": [], "samplers": [{}],
@@ -755,7 +873,7 @@ def write_glb(path, mdl, J, korder, kparent, Lk, A, tris, locs, anims, log):
         j["nodes"].append({"name": nm, "translation": lp, "rotation": q})
         j["nodes"][nidx[ji]].setdefault("children", []).append(len(j["nodes"]) - 1)
     # mesh: one primitive per image
-    imgs = sorted({img for img, _t in tris if img}, key=str)
+    imgs = sorted({img for img, _t in list(tris) + [x for pr in props for x in pr["tris"]] if img}, key=str)
     mat_of = {}
     for k, im in enumerate(imgs):
         data = open(im, "rb").read()
@@ -768,7 +886,8 @@ def write_glb(path, mdl, J, korder, kparent, Lk, A, tris, locs, anims, log):
         mat_of[im] = k
     sj = {i: q for q, i in enumerate(korder)}
     prims = []
-    for im in imgs + ([None] if any(img is None for img, _t in tris) else []):
+    body_imgs = [im for im in imgs if any(img == im for img, _t in tris)]
+    for im in body_imgs + ([None] if any(img is None for img, _t in tris) else []):
         P, N, T, JJ, WW, idx = [], [], [], [], [], []
         seen = {}
         for img, tri in tris:
@@ -799,12 +918,41 @@ def write_glb(path, mdl, J, korder, kparent, Lk, A, tris, locs, anims, log):
                        "inverseBindMatrices": acc("f", 5126, "MAT4", [[m[r][c] for c in range(4) for r in range(4)] for m in ibm])})
     j["nodes"].append({"name": "body", "mesh": 0, "skin": 0})
     j["nodes"][0]["children"].append(len(j["nodes"]) - 1)
-    # animations: rotation per joint that moves, translation where it moves
+    # rigid props: a mesh node under their joint, in its space
+    pnode = []
+    for pr in props:
+        pp = []
+        for im in sorted({img for img, _t in pr["tris"]}, key=str):
+            P, N, T, idx = [], [], [], []
+            for img, tri in pr["tris"]:
+                if img != im:
+                    continue
+                for c in tri:
+                    idx.append(len(P))
+                    P.append(c[0])
+                    N.append(c[1])
+                    T.append(c[2])
+            p = {"attributes": {"POSITION": acc("f", 5126, "VEC3", P, True), "NORMAL": acc("f", 5126, "VEC3", N),
+                                "TEXCOORD_0": acc("f", 5126, "VEC2", T)}, "indices": acc("I", 5125, "SCALAR", idx), "mode": 4}
+            if im is not None:
+                p["material"] = mat_of[im]
+            pp.append(p)
+        j["meshes"].append({"name": pr["name"], "primitives": pp})
+        pnode.append(len(j["nodes"]))
+        j["nodes"].append({"name": pr["name"], "mesh": len(j["meshes"]) - 1})
+        j["nodes"][nidx[pr["joint"]]].setdefault("children", []).append(pnode[-1])
+    # animations: rotation per joint that moves, translation where it moves, the props' scale
     times = {}
-    for nm, frames, tracks in anims:
+    for nm, frames, tracks, pscale in anims:
         if frames not in times:
             times[frames] = acc("f", 5126, "SCALAR", [f / FPS for f in range(frames)], True)
         an = {"name": nm, "samplers": [], "channels": []}
+        for pi, ss in sorted(pscale.items()):
+            if props[pi]["show"] is None:
+                continue
+            an["samplers"].append({"input": times[frames], "output": acc("f", 5126, "VEC3", [[x, x, x] for x in ss]),
+                                   "interpolation": "LINEAR"})
+            an["channels"].append({"sampler": len(an["samplers"]) - 1, "target": {"node": pnode[pi], "path": "scale"}})
         for i, (qs, ps) in tracks.items():
             q0 = quat_of(Lk[i])
             if any(abs(abs(sum(a * b for a, b in zip(q, q0))) - 1.0) > 1e-7 for q in qs):
@@ -850,9 +998,10 @@ def main(argv):
     g.add_argument("--height", type=float, help="height in game units")
     ap.add_argument("--front", choices=("+y", "-y"), default="+y", help="the way the model faces (Z up)")
     ap.add_argument("--clips", help="only these animation ids (e.g. 90,1)")
+    ap.add_argument("--own", help="the model's own clips (JSON) in place of the source's with the same id")
     a = ap.parse_args(argv)
     try:
-        build(a.source, a.model, a.map, a.out, a.size, a.height, a.front, a.clips)
+        build(a.source, a.model, a.map, a.out, a.size, a.height, a.front, a.clips, a.own)
     except (RetargetError, ngpanim.AnimError, OSError, KeyError, ValueError) as e:
         print("error: %s" % e, file=sys.stderr)
         return 1
