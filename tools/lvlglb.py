@@ -57,13 +57,19 @@ def export(st, objs, disc, out, lod=99, on=None):
         prims = []
         for slot, tris in sorted(groups.items()):
             verts, index, idx = {}, [], []
+            # As = Av * At / 0x80 (alfa da textura ate 0xFF): o glTF so tem a textura ate 1,0, entao o ganho vai para o vertice
+            gain = 1.0
+            if md.abe and slot != ngp.SLOT_NOTEX:
+                s = slot if slot < min(img.u16(node + 0x5A), 5) else 0
+                gain = lib.alpha_max(img.u16(node + 0x50 + 2 * s),
+                                     img.u32(node + 0x70 + 0x30 * s) | (img.u32(node + 0x74 + 0x30 * s) << 32)) / 128.0
             for tri in tris:
                 for v in tri:
                     p = gltf.to_y_up((v.x, v.y, v.z))
                     ln = (v.nx * v.nx + v.ny * v.ny + v.nz * v.nz) ** 0.5
                     nn = gltf.to_y_up((v.nx / ln, v.ny / ln, v.nz / ln)) if ln > 1e-6 else (0.0, 1.0, 0.0)
-                    c = (min(1.0, v.r / 128.0), min(1.0, v.g / 128.0), min(1.0, v.b / 128.0),
-                         min(1.0, v.a / 128.0) if md.abe else 1.0)
+                    a = min(1.0, v.a * gain / 128.0) if md.abe else 1.0
+                    c = (min(1.0, v.r / 128.0), min(1.0, v.g / 128.0), min(1.0, v.b / 128.0), 1.0 if a >= 0.9 else a)
                     k = (p, nn, (v.u, v.v), c)
                     if k not in verts:
                         verts[k] = len(verts)
@@ -75,8 +81,10 @@ def export(st, objs, disc, out, lod=99, on=None):
             if slot != ngp.SLOT_NOTEX:
                 attrs["TEXCOORD_0"] = g.accessor("f", 2, [k[2] for k in index])
             ctype, fmt = (5123, "H") if len(index) < 65536 else (5125, "I")
+            # alfa de vertice >= 1 em tudo: opaco (o three.js nao grava Z nos BLEND e o resto da fase aparece atras)
+            blend = md.abe and any(k[3][3] < 1.0 for k in index)
             prims.append({"attributes": attrs, "indices": g.accessor(fmt, 1, idx, ctype=ctype, target=34963),
-                          "material": material(node, slot, md.abe)})
+                          "material": material(node, slot, blend)})
             stats["triangles"] += len(tris)
         g.j["meshes"].append({"name": "obj_%x" % node, "primitives": prims})
         mesh_of[node] = len(g.j["meshes"]) - 1

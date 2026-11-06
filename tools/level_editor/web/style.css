@@ -14,7 +14,11 @@ body { display: grid; grid-template-rows: auto 1fr 140px; background: var(--bg);
        font: 13px/1.4 "Segoe UI", system-ui, sans-serif; overflow: hidden; }
 button, input, select { font: inherit; color: var(--fg); background: var(--panel2); border: 1px solid var(--line);
                         border-radius: 4px; padding: 4px 9px; }
-button { cursor: pointer; }
+button { cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
+.ic { display: inline-block; width: 16px; height: 16px; background: currentColor; flex: none;
+      -webkit-mask: var(--ic) center / contain no-repeat; mask: var(--ic) center / contain no-repeat; }
+button.icon { padding: 4px 6px; }
+button.icon .ic { width: 18px; height: 18px; }
 button:hover { border-color: var(--accent); }
 button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 button.danger { color: var(--danger); }
@@ -66,5 +70,5 @@ aside { background: var(--panel); padding: 8px; overflow: auto; min-height: 0; }
 dialog { background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; width: 560px; }
 dialog::backdrop { background: rgba(0, 0, 0, .45); }
 dialog label { display: block; margin: 8px 0; color: var(--muted); }
-dialog label input { display: block; width: 100%; margin-top: 3px; }
+dialog label input, dialog label select { display: block; width: 100%; margin-top: 3px; }
 dialog h2 { margin-top: 0; font-size: 16px; }

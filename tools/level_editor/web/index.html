@@ -15,13 +15,12 @@
   <label>Stage <select id="stage"></select></label>
   <label>Mod <input id="mod" list="mods" placeholder="my_mod" spellcheck="false"><datalist id="mods"></datalist></label>
   <span class="sep"></span>
-  <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
-  <button id="check" title="Apply the patch to the disc's stage and check the collision">Check</button>
-  <button id="save" title="Save mods/&lt;mod&gt;/levels/&lt;STAGE&gt;.json (Ctrl+S)">Save</button>
-  <button id="test" class="primary" title="Save and open the game in this stage (training mode)">Test in game</button>
+  <button id="undo" title="Undo (Ctrl+Z)"><i class="ic" style="--ic:url(vendor/mdi/undo.svg)"></i>Undo</button>
+  <button id="check" title="Apply the patch to the disc's stage and check the collision"><i class="ic" style="--ic:url(vendor/mdi/check-circle-outline.svg)"></i>Check</button>
+  <button id="save" title="Save mods/&lt;mod&gt;/levels/&lt;STAGE&gt;.json (Ctrl+S)"><i class="ic" style="--ic:url(vendor/mdi/content-save.svg)"></i>Save</button>
+  <button id="test" class="primary" title="Open the game in this stage (training mode)"><i class="ic" style="--ic:url(vendor/mdi/play.svg)"></i>Test in game</button>
   <span class="grow"></span>
-  <button id="settings" title="Disc, mods folder and game">Settings</button>
-  <button id="theme" title="Light / dark theme">Light</button>
+  <button id="settings" class="icon" title="Settings"><i class="ic" style="--ic:url(vendor/mdi/cog.svg)"></i></button>
 </header>
 <main>
   <aside id="left">
@@ -67,12 +66,21 @@
 <dialog id="dlg">
   <form method="dialog">
     <h2>Settings</h2>
+    <label>Theme<select id="sTheme"><option value="dark">Dark</option><option value="light">Light</option></select></label>
     <label>Disc folder (extracted ISO, with LVL/ and PTS/)<input id="sDisc" spellcheck="false"></label>
     <label>Mods folder<input id="sMods" spellcheck="false"></label>
     <label>Game (wotm.exe)<input id="sGame" spellcheck="false"></label>
     <label>ELF to pass to the game (empty for the release wotm.exe)<input id="sElf" spellcheck="false"></label>
     <label>Game working folder<input id="sCwd" spellcheck="false"></label>
+    <label>Disc image for the game (.iso; only with an ELF, the dev runtime reads the stage from it)<input id="sIso" spellcheck="false"></label>
     <div class="row end"><button value="cancel">Cancel</button><button id="sOk" value="ok" class="primary">Save</button></div>
+  </form>
+</dialog>
+<dialog id="testDlg">
+  <form method="dialog">
+    <h2>Test in game</h2>
+    <p>This stage has unsaved changes. The game loads the saved file.</p>
+    <div class="row end"><button value="cancel">Cancel</button><button value="nosave">Test the saved file</button><button value="save" class="primary">Save and test</button></div>
   </form>
 </dialog>
 <script type="module" src="app.js"></script>

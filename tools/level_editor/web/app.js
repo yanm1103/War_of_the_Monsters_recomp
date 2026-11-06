@@ -60,7 +60,6 @@ new ResizeObserver(resize).observe(canvas.parentElement);
 
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
-  $('theme').textContent = t === 'dark' ? 'Light' : 'Dark';
   renderer.setClearColor(getComputedStyle(document.documentElement).getPropertyValue('--view').trim());
 }
 
@@ -400,15 +399,15 @@ canvas.addEventListener('pointerup', (e) => {
 });
 
 // ------------------------------------------------------------------ saving and testing
-async function post(kind) {
+async function post(kind, save = true) {
   const mod = $('mod').value.trim();
-  const body = { name: stageName, mod, patch: buildPatch(), training: true };
+  const body = { name: stageName, mod, patch: buildPatch(), training: true, save };
   try {
     log(`${kind}…`);
     const res = await api(kind === 'check' ? '/api/check' : `/api/${kind}`, body);
     log(res.lines, res.ok ? '' : 'err');
     if (res.saved) { log(`saved ${res.saved}`, 'ok'); dirty = false; }
-    if (res.launched) log(`game: ${res.launched}`, 'ok');
+    if (res.launched) { log(`game: ${res.launched}`, 'ok'); watchGame(); }
     if (kind !== 'check' && mod !== cfg.mod) { cfg.mod = mod; api('/api/config', { mod }); }
     refreshList();
   } catch (e) {
@@ -427,7 +426,27 @@ document.querySelectorAll('.kinds input').forEach((x) => (x.onchange = refreshLi
 $('undo').onclick = undo;
 $('check').onclick = () => post('check');
 $('save').onclick = () => post('save');
-$('test').onclick = () => post('test');
+$('test').onclick = () => {
+  if (!dirty) { post('test', false); return; }
+  $('testDlg').returnValue = '';
+  $('testDlg').showModal();
+};
+$('testDlg').addEventListener('close', () => {
+  const v = $('testDlg').returnValue;
+  if (v === 'save' || v === 'nosave') post('test', v === 'save');
+});
+// what the stage patch did in the game: the [fase] lines of its log, a few seconds after the launch
+async function watchGame() {
+  let seen = 0;
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 1500));
+    let lines = [];
+    try { lines = (await fetch('/api/gamelog').then((r) => r.json())).lines || []; } catch (e) { return; }
+    for (const l of lines.slice(seen)) log(`game ${l}`, /ignorad|invalid|falh/i.test(l) ? 'err' : '');
+    seen = Math.max(seen, lines.length);
+    if (lines.some((l) => /depois:|ignorad|desligad/i.test(l))) return;
+  }
+}
 $('tMove').onclick = () => setTool('translate');
 $('tTurn').onclick = () => setTool('rotate');
 $('snap').onchange = (e) => setSnap(e.target.checked);
@@ -435,19 +454,18 @@ $('dup').onclick = duplicate;
 $('del').onclick = remove;
 $('reset').onclick = resetSel;
 for (const id of ['px', 'py', 'pz', 'ph']) $(id).onchange = editFromInputs;
-$('theme').onclick = () => {
-  const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-  applyTheme(t);
-  api('/api/config', { theme: t });
-};
 $('settings').onclick = () => {
   $('sDisc').value = cfg.disc || ''; $('sMods').value = cfg.mods || ''; $('sGame').value = cfg.game || '';
-  $('sElf').value = cfg.elf || ''; $('sCwd').value = cfg.cwd || '';
+  $('sElf').value = cfg.elf || ''; $('sCwd').value = cfg.cwd || ''; $('sIso').value = cfg.iso || '';
+  $('sTheme').value = document.documentElement.dataset.theme;
+  $('dlg').returnValue = '';
   $('dlg').showModal();
 };
+$('sTheme').onchange = (e) => applyTheme(e.target.value);   // preview; Cancel goes back
 $('dlg').addEventListener('close', async () => {
-  if ($('dlg').returnValue !== 'ok') return;
-  const r = await api('/api/config', { disc: $('sDisc').value, mods: $('sMods').value, game: $('sGame').value, elf: $('sElf').value, cwd: $('sCwd').value });
+  if ($('dlg').returnValue !== 'ok') { applyTheme(cfg.theme || 'dark'); return; }
+  const r = await api('/api/config', { disc: $('sDisc').value, mods: $('sMods').value, game: $('sGame').value, elf: $('sElf').value,
+                                       cwd: $('sCwd').value, iso: $('sIso').value, theme: $('sTheme').value });
   init(r);
 });
 window.addEventListener('keydown', (e) => {

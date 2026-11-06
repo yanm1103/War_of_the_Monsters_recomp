@@ -14,6 +14,7 @@ comes from tools/lvl.py (objects, patch, path cuts, collision check) and tools/l
 """
 import contextlib
 import io
+import glob
 import json
 import os
 import shutil
@@ -56,13 +57,15 @@ def default_game():
     rt = os.path.join(os.path.dirname(REPO), "wotm-recomp-win")
     exe = os.path.join(rt, "build_dev", "ps2xRuntime", "wotm.exe")
     if os.path.exists(exe):
-        return {"game": exe, "elf": os.path.join(rt, "discroot", "SCUS_971.97"), "cwd": os.path.join(rt, "discroot")}
+        isos = sorted(glob.glob(os.path.join(REPO, "ISO", "*.iso")))
+        return {"game": exe, "elf": os.path.join(rt, "discroot", "SCUS_971.97"), "cwd": os.path.join(rt, "discroot"),
+                "iso": isos[0] if isos else ""}
     here = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
     for d in (here, os.path.dirname(here)):
         exe = os.path.join(d, "wotm.exe" if os.name == "nt" else "wotm")
         if os.path.exists(exe):
-            return {"game": exe, "elf": "", "cwd": d}
-    return {"game": "", "elf": "", "cwd": ""}
+            return {"game": exe, "elf": "", "cwd": d, "iso": ""}
+    return {"game": "", "elf": "", "cwd": "", "iso": ""}
 
 
 def load_config():
@@ -169,6 +172,22 @@ def list_mods(cfg):
     return sorted(m for m in os.listdir(d) if os.path.isdir(os.path.join(d, m)) and not m.startswith(("_", ".")))
 
 
+def game_log(cfg):
+    """The game's log: stderr of the clone's runtime (kept in the cache), or the wotm.log the release exe writes."""
+    if cfg.get("elf"):
+        return os.path.join(CACHE, "game.log")
+    return os.path.join(cfg.get("cwd") or os.path.dirname(cfg.get("game") or "."), "wotm.log")
+
+
+def game_stage_lines(cfg):
+    """The [fase] lines of the game's log (what the patch did in the game)."""
+    try:
+        with open(game_log(cfg), encoding="utf-8", errors="replace") as f:
+            return [l.rstrip() for l in f if l.startswith("[fase]")]
+    except OSError:
+        return []
+
+
 def launch_game(cfg, name, training):
     if not cfg.get("game") or not os.path.exists(cfg["game"]):
         raise RuntimeError("game not found: set it in Settings (wotm.exe)")
@@ -177,10 +196,17 @@ def launch_game(cfg, name, training):
                 "WOTM_FULLSCREEN": "0", "WOTM_LEVELPATCH": "1"})
     if training:
         env["WOTM_TRAINING"] = "1"
+    if cfg.get("elf"):
+        # the clone's runtime run as run_live.ps1 does: the disc image, native movies and drawing, no emulated VU1/VIF1/GS
+        if not cfg.get("iso") or not os.path.exists(cfg["iso"]):
+            raise RuntimeError("disc image not found: set the ISO in Settings (the dev runtime reads the stage from it)")
+        env.update({"PS2X_CD_IMAGE": cfg["iso"], "PS2X_FMV": "1", "PS2X_SCENE": "1",
+                    "PS2X_NO_VU1": "1", "PS2X_NO_VIF1": "1", "PS2X_NO_GS": "1"})
     args = [cfg["game"]] + ([cfg["elf"]] if cfg.get("elf") else [])
     cwd = cfg.get("cwd") or os.path.dirname(cfg["game"])
     # with the ELF (the clone's runtime) stderr is the log; with no argument wotm.exe writes wotm.log itself
-    log = open(os.path.join(CACHE, "game.log"), "w") if cfg.get("elf") else subprocess.DEVNULL
+    os.makedirs(CACHE, exist_ok=True)
+    log = open(game_log(cfg), "w") if cfg.get("elf") else subprocess.DEVNULL
     subprocess.Popen(args, cwd=cwd, env=env, stdout=subprocess.DEVNULL, stderr=log)
     return " ".join(args)
 
@@ -225,6 +251,8 @@ class Handler(BaseHTTPRequestHandler):
                     except (OSError, ValueError):
                         pass
                 return self.send(200, {"objects": describe(objs, on), "patch": patch})
+            if u.path == "/api/gamelog":
+                return self.send(200, {"lines": game_stage_lines(cfg)})
             if u.path == "/api/glb":
                 with open(STAGES.glb(cfg["disc"], q["name"]), "rb") as f:
                     return self.send(200, f.read(), "model/gltf-binary")
@@ -248,7 +276,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             b = self.body()
             if self.path == "/api/config":
-                cfg.update({k: v for k, v in b.items() if k in ("disc", "mods", "game", "elf", "cwd", "theme", "mod")})
+                cfg.update({k: v for k, v in b.items() if k in ("disc", "mods", "game", "elf", "cwd", "iso", "theme", "mod")})
                 save_config(cfg)
                 return self.send(200, {"config": cfg, "stages": STAGES.list(cfg["disc"]), "mods": list_mods(cfg)})
             if self.path == "/api/check":
@@ -257,6 +285,9 @@ class Handler(BaseHTTPRequestHandler):
                 mod, name = b["mod"].strip(), b["name"]
                 if not mod or any(c in mod for c in "\\/:*?\"<>|") or mod.startswith(("_", ".")):
                     return self.send(400, {"error": "pick a mod name (letters, digits, no leading _)"})
+                if self.path == "/api/test" and not b.get("save", True):
+                    return self.send(200, {"ok": True, "lines": [],
+                                           "launched": launch_game(cfg, name, b.get("training", True))})
                 res = check_patch(cfg["disc"], name, b["patch"])
                 path = patch_path(cfg, mod, name)
                 os.makedirs(os.path.dirname(path), exist_ok=True)
