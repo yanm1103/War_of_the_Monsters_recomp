@@ -98,6 +98,11 @@ struct Custom {
     std::string kind;         // regras proprias do port ("kind": "mecha" = escudo e laser, wotm_custom.inc); vazio = as do tipo
     int special = 0;          // tipo cujo golpe especial o custom usa ("special": "congar"; wotm_custom.inc); 0 = o do tipo
     bool specialRoar = false;   // "specialRoar": o especial comeca com o grito dele (o som do cinema de entrada; wotm_custom.inc)
+    // "fallBlend": quadros em que a camada da subida do pulo (animacao 33) some depois do pico, para a queda (34) aparecer
+    // inteira (0 = corte; -1 = como o jogo: peso pela velocidade vertical ate perto do chao; wotm_custom.inc)
+    int fallBlend = -1;
+    // "landOnTouch": a camada do pouso do pulo (animacao 35) so entra no toque no chao, sem pose de preparo no ar (wotm_custom.inc)
+    bool landOnTouch = false;
     std::string cameraFrom;    // MonsterLongNames do .CHR da camera ("lizard"); vazio = a do proprio tipo
     float cameraScale = 1.f;    // distancias da camera emprestada
     std::string narrator;       // narrator/<nome>.mp3 (vazio = o do tipo)
@@ -617,6 +622,9 @@ private:
                 c.shotColor = color(v, "shotColor", "monstro " + where);
                 if (const json::Value *ki = v.get("kind"); ki && ki->type == json::Value::Str) c.kind = lower(ki->s);
                 if (const json::Value *sr = v.get("specialRoar")) c.specialRoar = sr->asBool(false);
+                if (const json::Value *fb = v.get("fallBlend"); fb && fb->type == json::Value::Int && fb->i >= 0 && fb->i <= 120)
+                    c.fallBlend = int(fb->i);
+                if (const json::Value *lt = v.get("landOnTouch")) c.landOnTouch = lt->asBool(false);
                 if (const json::Value *sp = v.get("special"); sp && sp->type == json::Value::Str) {
                     const MonsterInfo *b = customBase(lower(sp->s));
                     if (b && b->type != c.type && *specialNeeds(b->type))

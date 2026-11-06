@@ -539,6 +539,70 @@ namespace wotm_custom
         }
     }
 
+    // "fallBlend": na queda do pulo (StateJump sub 6 e 8) o jogo mantem por cima da queda (animacao 34) a camada da subida
+    // (blend9C, animacao 33) com peso pela velocidade vertical, e ela so sai perto do chao. No Ultra-V as duas poses sao quase
+    // iguais; num custom com animacoes proprias a mistura vira uma pose do meio. Com "fallBlend": N a camada some em N quadros
+    // a partir do pico (0 = corte) e a queda aparece inteira.
+    // "landOnTouch": perto do chao, ainda no ar (sub 8), o jogo poe por cima a camada do pouso (blend104, animacao 35) parada no
+    // primeiro quadro, uma pose de quem se prepara para pousar. Com "landOnTouch": true ela fica escondida no ar e entra inteira
+    // no toque (sub 9), onde o jogo a avanca pelo impacto e passa para o levantar (39).
+    constexpr uint32_t kJumpUpdate = wotm::fn::update__9StateJump;
+    // JumpFlyBase::subState; pesos da blend9C e da blend104 (AnimBlend +0x48, o que o update grava)
+    constexpr uint32_t kJumpSub = 0x18, kJumpRiseWeight = 0x9C + 0x48, kJumpLandWeight = 0x104 + 0x48;
+    PS2Runtime::RecompiledFunction g_origJumpUpdate = nullptr;
+    struct FallFade { uint32_t state = 0; uint32_t sub = 0; uint32_t n = 0; float w0 = 0.f; };
+    FallFade g_fallFade[8];
+
+    void jumpUpdate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t st = ctx->pc == kJumpUpdate ? GPR_U32(ctx, 4) : 0;
+        g_origJumpUpdate(rdram, ctx, runtime);
+        const wotm::mods::Custom *cu = st ? ownFilesCustom(rdram, cRd32(rdram, st + kStateOwner)) : nullptr;
+        if (!cu || (cu->fallBlend < 0 && !cu->landOnTouch))
+            return;
+        FallFade *f = nullptr;
+        for (FallFade &e : g_fallFade)
+            if (e.state == st || (!f && !e.state))
+                f = &e;
+        if (!f)
+            f = &g_fallFade[0];
+        const uint32_t sub = cRd32(rdram, st + kJumpSub);
+        auto weight = [&](uint32_t off) { return reinterpret_cast<float *>(rdram + ((st + off) & 0x01FFFFFFu)); };
+        static const bool log = std::getenv("WOTM_ANIMLOG") != nullptr;
+        if (f->state != st)
+            *f = {st, 0, 0, 0.f};
+        const uint32_t was = f->sub;
+        f->sub = sub;
+        if ((sub == 6 || sub == 8) && cu->fallBlend >= 0)
+        {
+            float *w = weight(kJumpRiseWeight);
+            if (was != 6 && was != 8)
+            {
+                f->n = 0;
+                f->w0 = *w;
+                if (log)
+                    std::fprintf(stderr, "[custom] %s: queda do pulo, camada da subida %.2f some em %d quadros\n", cu->id.c_str(), *w,
+                                 cu->fallBlend);
+            }
+            ++f->n;
+            const float k = cu->fallBlend > 0 ? 1.f - float(f->n) / float(cu->fallBlend) : 0.f;
+            const float target = f->w0 * (k > 0.f ? k : 0.f);
+            if (target < *w)
+                *w = target;
+        }
+        if (cu->landOnTouch && sub == 8)
+            *weight(kJumpLandWeight) = 0.f;
+        else if (cu->landOnTouch && sub == 9 && was == 8 && cRd32(rdram, cRd32(rdram, st + kStateOwner) + kCurState) == st)
+        {   // so com o pulo ainda no estado: pousando com velocidade o jogo ja passou para o Run no mesmo quadro e mandou a camada
+            // sumir (rampOut com a taxa do peso zero); religada depois disso ela ficaria para sempre
+            *weight(kJumpLandWeight) = 1.f;
+            if (log)
+                std::fprintf(stderr, "[custom] %s: pouso no toque\n", cu->id.c_str());
+        }
+        if (sub != 6 && sub != 8 && sub != 9)
+            f->state = 0;
+    }
+
     void spinUpdate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t m = ctx->pc == kSpinUpdate ? READ32(GPR_U32(ctx, 4) + kStateOwner) : 0;
@@ -1650,6 +1714,8 @@ void wotmCustomInstall(PS2Runtime &runtime)
         runtime.registerFunction(kInitWeapon, &initWeapon);
     if ((g_origCrowdInto = runtime.lookupFunction(kCrowdInto)))
         runtime.registerFunction(kCrowdInto, &crowdInto);
+    if ((g_origJumpUpdate = runtime.lookupFunction(kJumpUpdate)))
+        runtime.registerFunction(kJumpUpdate, &jumpUpdate);
     if (const char *e = std::getenv("WOTM_ANIMLOG"); e && *e && *e != '0')
     {
         if ((g_origAnimStart = runtime.lookupFunction(kAnimStartFn)))

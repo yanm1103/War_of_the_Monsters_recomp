@@ -399,6 +399,13 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
 - `specialRoar`: `true` = the special starts with the monster's cry (`MonsterSound::playSignatureSound`, the fight entry cinematic's
   sound, from its own bank when it has one), when it enters the special's state. Togera's fire breath has no cry of its own. Log:
   `[custom] godzilla: grito no especial`.
+- `fallBlend`: frames (0 to 120) over which the jump's rising layer (animation 33) fades out after the apex, so the fall (34)
+  shows on its own; 0 = a cut. Without it the game keeps the rising layer over the fall, weighted by the vertical speed, until
+  near the ground: fine when the two poses are alike (Ultra-V), a blend of two poses when they are not. Log (`WOTM_ANIMLOG`):
+  `[custom] cj: queda do pulo, camada da subida 1.00 some em 6 quadros`.
+- `landOnTouch`: `true` = the jump's landing layer (animation 35) only comes in when the feet touch the ground. Without it the
+  game puts it on near the ground, still in the air, held on its first frame (a pose bracing for the landing). Log:
+  `[custom] cj: pouso no toque`.
 - `ai`: whether a CPU can use it (default no); without it the select screen shows "PLAYERS ONLY" in the CPU's box. With `"ai": true` the CPU can
   pick it in the select screen's CUSTOM slot; the launcher only offers customs to the player. A custom with a playable base fights as a CPU
   (`WOTM_MATCH=1,moddedtogera,1`, with `"base": "togera"`: walks, attacks, breathes fire and loses the round like a Togera), and Jelly and
