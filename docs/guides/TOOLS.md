@@ -40,6 +40,20 @@
   - `lvlnames.py <STAGE>`: names for the `lvl.py` objects (level editor): a content signature per object (vertices in the handle's
     frame and the decoded pixels of its textures, the same for the same model in any stage) and the rule names (special ids, pickup
     type, hit point class, size); model names by signature in `tools/level_editor/names.json`.
+  - `lvlprop.py build <in.glb> <prop dir> --stage <STAGE> [--units blender|game] [--scale S | --height H] [--name NAME]`: a static
+    prop of one stage from a `.glb`, as a mini image prelinked at 0xA00000 (`<NAME>.NGP`, word 0 = 1, word 1 = the root) with a
+    `<NAME>.PTR` in the monster layout (pointers; texIds and OBJECT GS contexts that hold the prop's texture slot until the loader
+    writes the stage texId and a live context), a `<NAME>.preview.glb` decoded back from the packets it wrote (`lvlglb`'s
+    conventions; materials name `tex<texId>`, images only with `--preview-tex`) and a `prop.json` (stage, slot -> texId, template,
+    bounds, collision). Tree: GROUP (0x0003) -> one OBJECT per texture (split at the 13-bit `numVerts`) + GROUP 0x0102 -> a
+    6-plane `COLL_VOL` box from the bounds. The OBJECT header and GIF tags come from the stage's first OBJECT that round-trips in
+    `vifpkt` with fog, one texture and the asked ABE (rule `first-object-roundtrip`); strips keep each triangle's winding (a strip
+    that would start at an odd place of its section repeats its first vertex). `blender` units: Z up, meters, 18 game units per
+    meter by default, COLOR_0 linear to sRGB x 128; `game` units: a piece of `lvlglb`'s export, raw colors. Materials `tex<texId>`
+    reuse the stage's textures; other images, `state<N>_*` meshes and skins are refused, `coll_*`/`hull_*` skipped. `info <prop
+    dir> [--at ADDR]` relocates a prop (default the level arena, 0x3E00000) and reads every node, packet and fixup back;
+    `load_prop(folder)` returns the `Prop` (`ngp`, `ptr`, `root`, `textures`, `bounds`, `relocate(at)`, `resolve(at, ctx_of)`) the
+    level patch uses, and `stage_ctx` the context a texId takes. Standard library only.
   - `ngp.decode_mesh`: port of the native `decodeObject` (texture per section, ADC like the GS, sprites), used by `gltf.py`.
 - `.sh` scripts must be created by heredoc in bash; writing with Python on Windows leaves CRLF and the WSL `sh` breaks (`sed -i 's/\r$//'` fixes it).
 - The per-function state lives in `config/status.csv` (`python3 tools/progress.py`, ~12 s via WSL, needs `disc/`); the README has no progress block.
