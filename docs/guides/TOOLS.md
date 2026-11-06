@@ -13,6 +13,10 @@
   - `tex.py list|export|inject`: `.TEX`/`.RTX` textures to PNG with `manifest.json` (palette found through the `.NGP` objects) and PNG/TGA back, at the same size (current palette or `--new-palette`).
   - `snd989.py wav|vpk|vag|bnk-replace`: sound to WAV and WAV back to `.VPK`, `.VAG` and sounds inside a `.BNK` (ADPCM encoder that simulates the game's decoder).
   - `gltf.py <arquivo.NGP> <saida.glb>`: static geometry with textures in binary glTF (Blender, three.js, web viewer). Posed monsters not yet: the skeleton and the animation curves still need evaluating (see the docstring).
+  - `lvl.py summary|objects|collision|points|mrs`: a stage as the level editor sees it: placeable objects (handle, position,
+    states), the collision grid and paths (`--check` redoes every box and cell list by the disc's rules), the `PTS/*` points and the
+    `.MRS` settings (`FORMATS.md`, "Stage objects", "Stage collision", "Stage points"). `Stage.footprint` gives the image ranges a
+    deep copy of an object takes.
   - `ngp.decode_mesh`: port of the native `decodeObject` (texture per section, ADC like the GS, sprites), used by `gltf.py`.
 - `.sh` scripts must be created by heredoc in bash; writing with Python on Windows leaves CRLF and the WSL `sh` breaks (`sed -i 's/\r$//'` fixes it).
 - The per-function state lives in `config/status.csv` (`python3 tools/progress.py`, ~12 s via WSL, needs `disc/`); the README has no progress block.

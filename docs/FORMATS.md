@@ -71,7 +71,11 @@ Read with `tools/snd989.py` (banks, statistics, WAV export) and played by `nativ
 
 **SPU2 ADPCM.** 16-byte blocks: `(filtro << 4) | shift`, flags (1 = end of segment, 2 = repeat from the loop start, 4 = loop start) and 14 bytes with 28 4-bit samples; filters `(0,0) (60,0) (115,-52) (98,-55) (122,-60)` / 64.
 
-**`.MRS` (`disc/RST`) is not audio:** 48 KB of floats per stage.
+**`.MRS` (`disc/RST/<STAGE>.MRS`) is not audio:** it is a `resetcom` settings file (the format of the `.AIC`), read in
+`InitBeforeDbLoad`. Three floats of header, then entries `{s32 key, s32 size (with its 8-byte head), body}` up to key 1; the rest of the
+file is buffer garbage. Keys: 2 background RGBA (4 × s32), 3 ambient RGB (3 floats), 4 fog `{minR, maxR, maxV, farClip}` + RGB (s32), 5
+three lights (r[3], g[3], b[3], heading[3], pitch[3]), 7 time of day `{speed, s32 tod, time}`, 0xBBA default ground height
+(`hdSetDefaultHeight`), 0xBC2/0xBC3/0xBC4 dust, trail and debris colors. No positions. Reader: `python tools/lvl.py mrs <STAGE>`.
 
 ## `.NGP` image
 Prelinked to address **0xA00000** (the level one is decompressed there). Word 0 = N (number of root nodes), words 1..N = pointers
@@ -84,6 +88,23 @@ Three (file zero) or four (monsters) lists, each a `contagem` followed by `conta
 - **monster** (`dbsRelocateViaPtrListFile`, `idx` > 0): (header) words 1..N += `endereço_real - 0xA00000`; (1) pointers (same sum);
   (2) 16-bit texture ids += highest id of the previous file; (3) GS words: `TBP0` += end of the previous file's textures, and the ones
   marked 0x1B/0x2C/0x24 add the end of the previous file's resources to the low 14-bit field.
+
+## Stage points (`PTS/<STAGE>.SPT/.PUP/.FOP/.PED/.AIP`, `PointToolKit`)
+All five load through `PointToolKit::loadPoints` (0x21DD80) into a 0x4000 buffer: `u32 version 0x12282000`, `u32 count`, then
+`count` records of 64 bytes, so at most 255 points per file. The tool's `exportPoints` turns them into the game's structure once, at
+load; the file is not read again. Record: `xyzw` floats (+0x00, Z up; `w` is read by no `exportPoints`), `s32 numLinks` (+0x10), up
+to 6 `s32` links (+0x14, index of another point of the same file), then per format from +0x2C. Reader: `python tools/lvl.py points <STAGE>`.
+
+| File | Loaded in | Goes to | Bytes from +0x2C |
+|---|---|---|---|
+| `.SPT` start points | `InitAfterDbLoad` | `StartPoints` (lists of 1, 2, 20 and 20 points; one past the capacity overwrites the last) | list `u8` (0 story first life, 1 player first life in modes 2..6, 2 AI first life and default, 3 respawn), angle `u8` (`b · 360/255`, above 180 minus 360; yaw around Z), `u8` settle on the ground (`hdHatTest` below the point) |
+| `.PUP` power-ups | `InitAfterDbLoad` (needs the models the `.NGP` registers) | `PowerUps::CreatePowerUp` (100 active at most); `exportPoints` kills all and recreates them | type `u8` (`PowerUp::Type`: 0..2 health, 3..5 stamina, 6/7 small, 8 special weapon, 9 cloak, 10..19 story items), flags `u8` (`PowerUp::m_flags`: bit 0 shadow, bit 1 re-settles the shadow, bit 2 also lowers the rest height). No angle: the rotation is random |
+| `.FOP` vehicles, `.PED` pedestrians | `InitBeforeDbLoad` | `PathNet::fodder` / `PathNet::ped` (below), same `PathTool::exportPoints` | width `u8[6]` per link, node type `u8` (+0x32), drop `u8[6]` per link (+0x33). Links use the low 16 bits. In `.PED` every node has one link and the links pair up: each pedestrian path is one segment, walked by the nearest `PedGroup` in a lane of `width · 10` |
+| `.AIP` AI monsters | `InitBeforeDbLoad` | `AiPathNet::monster` (0x5B80 bytes): up to 300 nodes and 450 segments; a two-way link is one segment | width `u8[6]` per link (corridor of `width · 10 + 100` to each side, height 200), node type `u8` (+0x32): the segment's mask is `1 << type`, and the navigator stays on the mask it is on, so the types split the net |
+
+Without a file the tool keeps 0 points (`.FOP`/`.PED`: the 2 default nodes below). Two stages load extra files into their own tool
+instances and export them mid-fight: Baytown (`sanFranInitAfter`: `QUAKE.AIP`, `QUAKE.FOP`, which the disc does not have, and
+`QUAKE.PUP`, on the earthquake) and Atomic Island (`threeMileInitAfter`: `CRATER.PUP`, when the crater switches).
 
 ## Path nets (`PTS/<STAGE>.FOP`, `PathNet`)
 `InitBeforeDbLoad` loads the stage's `.FOP` into `PathNet::fodder` (0x7CA4D0, 0x3010 bytes); 13 stages have one, and without it
@@ -115,6 +136,65 @@ Id = high 14 bits of the node's first word. Nodes with opcode 0x1F and 0x27 are 
 | 0x2710..0x3E7F | per-stage end points (threemile, tokyo 0x2743, canyon2, airport, FinalBoss, BigShot) |
 
 Pickups keep the `Interactives` slot id in the `hierhead`: `Interactives::addInteractive` returns that index.
+
+## Stage objects (what a level patch moves)
+Reader: `python tools/lvl.py objects <STAGE>` (kind, handle, position, heading, states, collision paths).
+- **Destructible:** `T|R` (the handle: `TRANSLATE` `trans` at +0x10, or `ROTATE` 4x4 at +0x10 with the translation in row 3) →
+  `INTERACTIVE_STATE` → `DESTRUCTIBLE` → one `GROUP` per state. Every state's meshes and collision are local to the handle (the
+  coarsest LOD is in world coordinates with an inverse `TRANSLATE` right under the `LOD`, which stays consistent when the handle
+  moves). Some have no handle (the `INTERACTIVE_STATE` hangs straight from a `GROUP`, mesh in world coordinates) and some share
+  their handle with siblings (the Capitol and its columns): moving one alone needs a `TRANSLATE` of its own. Destructibles can sit
+  inside a state of another (signs and water tanks on the roofs) and move with it. No `INTERACTIVE_STATE` or `DESTRUCTIBLE` has
+  two parents: each building is its own copy, while meshes, `LOD`s, `CONTROL`s, debris meshes and GS context blocks inside them are
+  shared between buildings.
+- **Pickup** (cars, trees, posts): a root `GROUP` of their own holds `T|R` → `GROUP` (id 0x12C0..0x13EB) → `SWITCH` → `GROUP` →
+  shared `CONTROL`; the game draws each through the `Pickup`'s `_cs`.
+- **Prop:** the topmost transform under a world `GROUP` with an `OBJECT` below and no destructible or pickup inside.
+- **What the load keeps** (`dbInitDb` walks every root but `ANIM_MGR` with `dbsTraverse`, which visits every destructible state and
+  both `CONTROL` children and passes each node's world position and matrix to `dbProcInteractive`):
+  - `Destructibles::AddDestruct`: pointers to the `DESTRUCTIBLE` (+0x24) and the `INTERACTIVE_STATE` (+0x28) and a copy of the world
+    position (+0x40) and transposed matrix (+0x50), which debris and camera actions use; 1500 at most (checked).
+  - `Interactives::addInteractive`: `s_dbInteractive[1024]` with no bound check; the index goes into `id2` (bits 7..17) of the node.
+  - Special ids in `AddDestruct`: `sanFranSaveInteractive` (0x275D..0x2762), the CANYON2 columns (0x2775..0x2777, array of 4) and the
+    CAPITOL ones (0x27AE..0x27B3, array of 8), with one `s_numPillars` for both: a copy has to clear `id1`.
+  - `Pickup::init`: a `_cs` from `CsPool` (1024) with copies of position and rotation; it writes `whichChild = 0` in the `SWITCH` and
+    `numKids = 1` in the `GROUP`. `Pickup::initAfterDbLoad` puts the `_cs` in the collision grid.
+  - Emitters with `isAutoStart` (bit 3 of +0x5C) create their effect at the world position during the load; the others on their
+    first draw (`hierParticleNode`), at that frame's matrix. `LIGHT` nodes (lens flare) are read every frame.
+  - `dbsTraverse` writes the image: a `GROUP` with flag 0x10/0x20/0x80 becomes `NULL` (op 9) depending on the mode.
+- So moving, removing or copying an object for real changes the image **before** `dbInitDb`; after it, a new handle position only
+  moves the drawing and the collision tests (not the collision boxes, below).
+- Vertex colors carry the baked lighting and move with the object; no stage object casts a shadow.
+
+## Stage collision (`COLL_GRID`, paths, hulls)
+Reader: `python tools/lvl.py collision <STAGE> [--check]` (`--check` redoes every path's box and cells by the rules below).
+- **Grid (op 15, `_HierCollisionGrid`):** one per stage, a root of the image; `dbInitDb` hands it to `hdSaveColGrid` (`colGrid`).
+  `s16 nCols` (+4), `s16 nRows` (+6), `cellSize` (+8, 200 in every stage), `minX, minY, maxX, maxY` (+0xC), `csListArr` (+0x1C, one
+  list of moving `_cs` per cell, zero on the disc, nodes from a pool of 1024), then `cells[nCols · nRows]` (+0x20), cell
+  `row · nCols + col` with `col = floor((x - minX) / cellSize)`. Each cell is a list of `_HierListNode {next, path}` (8 bytes).
+- **Path (`_HierCollisionPath`, 0x24 + 4 · length):** world box `min` (+0), `max` (+0xC), `traceId` (+0x18, stamped by `HdItCell`),
+  `s32 length` (+0x1C), flags (+0x20, bit 0 `triggerVol`: only `tdTest` takes it), `path[length]` (+0x24): the nodes from a root
+  `GROUP` down to the collision leaf. Nothing builds paths or cells at run time.
+  - Box rule: the leaf's local box (hull corners or the vertices its triangles use) with its 8 corners taken to the world through the
+    path's `TRANSLATE`/`ROTATE` (within 1 unit); for paths through `CHAR_INSTANCE`/`ANIM_XFORM` the pose the box comes from is unknown.
+  - Cell rule: a path is listed in exactly the cells its box covers in XY, clamped to the grid.
+  - On the disc the collision block closes the image: each path followed by its own list nodes (one per cell), then `csListArr`, then
+    the grid. There is no slack: a path that covers more cells needs new list nodes.
+- **Matrices are read at query time:** `hdTraversePath` (0x201F98) rebuilds the world matrix from the path's `TRANSLATE`, `ROTATE`
+  (taken as orthonormal) and `ANIM_XFORM` and checks `SWITCH`, `DESTRUCTIBLE` and `NULL` on the way; `SCALE` is not handled. A path is
+  live only while `DESTRUCTIBLE.child[INTERACTIVE_STATE.whichChild]` is its next node, so each destructible state collides with its
+  own paths; state 0 always collides, and the broken states of most buildings have none.
+- **Leaves:** `POLY_COLL` (op 42, `_hierpolycollisiongroup`: `numObjs` +4, objects +8; each object has `vertexPool` (+0, local),
+  `u16 numPolys` (+4), `u16 numBBoxes` (+6), `bboxOrigin` (+8), `bboxScale` (+0x14), a box tree of 14-byte nodes (+0x18), then
+  8-byte triangles `{u8 idx[4] (3 read), u16 matId, bbox bits}`); `COLL_VOL` (op 10, convex hull: `s16 numPlanes` +4, `matId` +8,
+  local sphere +0x10, planes `{n, d}` from +0x20, inside when `n · p < d`); `COLL_TRIG` (op 11, camera trigger: a BSP of 0x20-byte
+  nodes at +4, tested by `bspPointTest`). Leaves are read-only and may be shared by several paths.
+- **What a level patch updates:** moving or turning a handle means writing the node and then, for every path that passes through it,
+  the box and the cells (new list nodes from new memory when it covers more cells; a box outside the grid rectangle is invisible to
+  `hdLosTest`). Turning an object whose handle is a `TRANSLATE` needs a new `ROTATE` in its place, in the parent and in each path's
+  chain. Turning the handle into `NULL` (9) before `dbInitDb` removes drawing, collision and registration. A copy needs new paths
+  (the old chain with copies of the handle, `INTERACTIVE_STATE` and `DESTRUCTIBLE`; state groups and leaves can be shared) and their
+  list nodes.
 
 ## Meshes (`HierObject::polyPkt`)
 Reference readers: `tools/ngp.py` (Python, offline, straight from the disc) and `native/wotm_native.hpp` (`decodeObject`, C++, reads EE RAM). Writer: `tools/vifpkt.py` (packet to geometry and back; byte-exact on every packet of the 44 monster `.NGP`).
