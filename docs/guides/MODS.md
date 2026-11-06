@@ -601,10 +601,13 @@ it in its own window instead (`pywebview` when installed, otherwise Edge/Chrome 
 - **Carry the objects on top** (on by default): moving, turning, copying, deleting or resetting a building does the same to the pickups
   that rest on it (`lvl.py objects`, `on <handle>`).
 - **List:** every object by handle, with a filter, the kinds, and **Changed** (only the edited ones; a dot marks them).
-- **Settings:** the theme, the disc folder (the extracted ISO, with `LVL/` and `PTS/`), the mods folder and the game. In a clone
-  they default to `disc/`, `mods/` and the runtime next to the repo (`wotm-recomp-win/build_dev/ps2xRuntime/wotm.exe` with the ELF
-  in `discroot` and the first `ISO/*.iso` as `PS2X_CD_IMAGE`, the way `run_live` starts it); otherwise `wotm.exe` next to the
-  editor. They are kept in `~/.wotm_level_editor.json`.
+- **Settings:** the theme, the game disc (the `.iso` itself, or an extracted folder with `LVL/` and `PTS/`), the mods folder and
+  the game. With a `.iso`, a stage's files (`LVL/<STAGE>.NGP/.PTR/.TEX/.RTX`, its `PTS/` files and `RST/<STAGE>.MRS`) are copied
+  once into the mod kit's cache of that image (`%LOCALAPPDATA%\WotM\modkit_disc\<key>`) and read from there; a `.bin`/`.cue`
+  image is not read. In a clone they default to `disc/` (else the first `ISO/*.iso`), `mods/` and the runtime next to the repo
+  (`wotm-recomp-win/build_dev/ps2xRuntime/wotm.exe` with the ELF in `discroot` and the first `ISO/*.iso` as `PS2X_CD_IMAGE`, the
+  way `run_live` starts it; with the disc set to a `.iso`, that one); otherwise `wotm.exe` next to the editor and the `iso=` of
+  its `wotm.ini`. They are kept in `~/.wotm_level_editor.json`.
 - The 3D scene is `python tools/lvlglb.py <STAGE> <out.glb>` (`TOOLS.md`), cached per user (`%LOCALAPPDATA%\WotM\level_editor`); the
   first open of a stage takes a few seconds. What it does not show like the game: particles and sprites, animated parts (rest pose),
   the GS blend modes (blended meshes whose vertex alpha times the texture's raw alpha reaches 1 are drawn opaque, as the GS does),

@@ -35,8 +35,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS = os.path.dirname(HERE)
 REPO = os.path.dirname(TOOLS)
 sys.path.insert(0, TOOLS)
+import hashlib  # noqa: E402
 import lvl      # noqa: E402
 import lvlglb   # noqa: E402
+import modkit   # noqa: E402 - the disc as a folder or a .iso (disc_iso, disc_cache, disc_listdir), as the mod kit reads it
 
 WEB = os.path.join(HERE, "web")
 CONFIG = os.path.join(os.path.expanduser("~"), ".wotm_level_editor.json")
@@ -71,8 +73,19 @@ def default_game():
     return {"game": "", "elf": "", "cwd": "", "iso": ""}
 
 
+def default_disc():
+    """The extracted disc/ of the clone, else its first ISO/*.iso, else the mod kit's choice (the release: iso= of wotm.ini)."""
+    if not getattr(sys, "frozen", False):
+        if os.path.isdir(os.path.join(REPO, "disc", "LVL")):
+            return os.path.join(REPO, "disc")
+        isos = sorted(glob.glob(os.path.join(REPO, "ISO", "*.iso")))
+        if isos:
+            return isos[0]
+    return modkit.default_disc()
+
+
 def load_config():
-    cfg = {"disc": os.path.join(REPO, "disc"), "mods": os.path.join(REPO, "mods"), "theme": "dark", "mod": ""}
+    cfg = {"disc": default_disc(), "mods": os.path.join(REPO, "mods"), "theme": "dark", "mod": ""}
     cfg.update(default_game())
     try:
         with open(CONFIG, encoding="utf-8") as f:
@@ -88,6 +101,47 @@ def save_config(cfg):
 
 
 # ------------------------------------------------------------------------------------------------------------- stage data
+# The files of one stage: with a .iso they are copied once into the mod kit's cache of that image (modkit.disc_cache) and read
+# from there like a folder, so lvl.py and lvlglb.py do not change.
+STAGE_FILES = (("LVL", ("NGP", "PTR", "TEX", "RTX")), ("PTS", ("SPT", "PUP", "FOP", "PED", "AIP")), ("RST", ("MRS",)))
+
+
+def disc_error(disc):
+    """None when the disc can be read, else why not."""
+    if not disc:
+        return "no disc set: pick the game's .iso or the extracted disc folder in Settings"
+    if os.path.isdir(disc):
+        return None if os.path.isdir(os.path.join(disc, "LVL")) else "%s has no LVL folder" % disc
+    if not os.path.isfile(disc):
+        return "%s does not exist" % disc
+    try:
+        modkit.disc_iso(disc)
+        return None
+    except (OSError, ValueError, IndexError) as e:   # IndexError: a file shorter than the ISO9660 header
+        return "%s is not a disc image (%s); a .bin/.cue is not read: use the .iso" % (disc, e or type(e).__name__)
+
+
+def is_iso(disc):
+    return bool(disc) and os.path.isfile(disc) and disc_error(disc) is None
+
+
+def stage_root(disc, name):
+    """The folder to read the stage from: the disc folder itself, or the cache with the stage's files copied from the .iso."""
+    iso = modkit.disc_iso(disc)
+    if not iso:
+        return disc
+    root = modkit.disc_cache(disc)
+    with iso.lock:
+        for d, exts in STAGE_FILES:
+            for e in exts:
+                rel = "%s/%s.%s" % (d, name.upper(), e)
+                f = iso.find(rel)
+                q = os.path.join(root, d, "%s.%s" % (name.upper(), e))
+                if f and not f[2] and not (os.path.isfile(q) and os.path.getsize(q) == f[1]):
+                    iso.extract(rel, q)
+    return root
+
+
 class Stages:
     """Stage objects and scene, cached: lvl.Stage takes ~0.5 s, the .glb ~3 s (kept on disk, keyed by the .NGP and lvlglb.py)."""
 
@@ -96,15 +150,16 @@ class Stages:
         self.info = {}
 
     def list(self, disc):
-        d = os.path.join(disc, "LVL")
-        names = sorted(f[:-4].upper() for f in os.listdir(d) if f.upper().endswith(".NGP")) if os.path.isdir(d) else []
+        if disc_error(disc):
+            return []
+        names = sorted({n.rsplit(".", 1)[0].upper() for n in modkit.disc_listdir(disc, "LVL") if n.upper().endswith(".NGP")})
         return [{"name": n, "title": STAGE_TITLE.get(n, n), "level": LEVEL_NUM.get(n)} for n in names]
 
     def objects(self, disc, name):
         key = (disc, name)
         with self.lock:
             if key not in self.info:
-                st = lvl.Stage(name, disc)
+                st = lvl.Stage(name, stage_root(disc, name))
                 objs = st.objects()
                 on = st.on_top(objs)
                 self.info[key] = (st, objs, on)
@@ -112,11 +167,12 @@ class Stages:
 
     def glb(self, disc, name):
         st, objs, on = self.objects(disc, name)
-        ngp_path = os.path.join(disc, "LVL", name + ".NGP")
-        stamp = "%d-%d-%d" % (os.path.getsize(ngp_path), int(os.path.getmtime(ngp_path)),
-                              int(os.path.getmtime(os.path.join(TOOLS, "lvlglb.py"))))
+        root = stage_root(disc, name)
+        ngp_path = os.path.join(root, "LVL", name + ".NGP")
+        stamp = "%d-%d-%d" % (os.path.getsize(ngp_path), int(os.path.getmtime(ngp_path)), lvlglb_stamp())
         os.makedirs(CACHE, exist_ok=True)
-        path = os.path.join(CACHE, "%s.glb" % name)
+        # one cache file per disc and stage (two discs never share a scene)
+        path = os.path.join(CACHE, "%s-%s.glb" % (name, hashlib.sha1(os.path.abspath(disc).lower().encode()).hexdigest()[:8]))
         with self.lock:
             try:
                 with open(path + ".stamp") as f:
@@ -124,11 +180,18 @@ class Stages:
             except OSError:
                 fresh = False
             if not fresh:
-                lvlglb.export(st, objs, disc, path + ".tmp", on=on)
+                lvlglb.export(st, objs, root, path + ".tmp", on=on)
                 os.replace(path + ".tmp", path)
                 with open(path + ".stamp", "w") as f:
                     f.write(stamp)
         return path
+
+
+def lvlglb_stamp():
+    """The exporter's version for the scene cache: lvlglb.py's date (in the frozen exe, the exe's)."""
+    p = getattr(lvlglb, "__file__", None)
+    p = p if p and os.path.exists(p) else sys.executable
+    return int(os.path.getmtime(p))
 
 
 STAGES = Stages()
@@ -148,14 +211,15 @@ def describe(objs, on):
 def check_patch(disc, name, patch):
     """lvl.py patch on a fresh copy of the stage: the log lines, the path cuts and the collision check."""
     buf = io.StringIO()
+    root = stage_root(disc, name)
     with contextlib.redirect_stdout(buf):
-        st = lvl.Stage(name, disc)
+        st = lvl.Stage(name, root)
         lp = lvl.LevelPatch(st)
         lp.apply(patch)
         for line in lp.log:
             print(line)
         print("%s: %s" % (name, ", ".join("%s %d" % kv for kv in sorted(lp.stats.items())) or "nothing changed"))
-        pts = lvl.stage_points(disc, name)
+        pts = lvl.stage_points(root, name)
         nets = {"fodder": lvl.net_from_points(pts.get("FOP", [])), "ped": lvl.net_from_points(pts.get("PED", []))}
         for line in lvl.cut_nets(lp.footprints, nets):
             print(line)
@@ -201,9 +265,10 @@ def launch_game(cfg, name, training):
         env["WOTM_TRAINING"] = "1"
     if cfg.get("elf"):
         # the clone's runtime run as run_live.ps1 does: the disc image, native movies and drawing, no emulated VU1/VIF1/GS
-        if not cfg.get("iso") or not os.path.exists(cfg["iso"]):
+        iso = cfg.get("iso") or (cfg["disc"] if is_iso(cfg["disc"]) else "")
+        if not iso or not os.path.exists(iso):
             raise RuntimeError("disc image not found: set the ISO in Settings (the dev runtime reads the stage from it)")
-        env.update({"PS2X_CD_IMAGE": cfg["iso"], "PS2X_FMV": "1", "PS2X_SCENE": "1",
+        env.update({"PS2X_CD_IMAGE": iso, "PS2X_FMV": "1", "PS2X_SCENE": "1",
                     "PS2X_NO_VU1": "1", "PS2X_NO_VIF1": "1", "PS2X_NO_GS": "1"})
     args = [cfg["game"]] + ([cfg["elf"]] if cfg.get("elf") else [])
     cwd = cfg.get("cwd") or os.path.dirname(cfg["game"])
@@ -212,6 +277,10 @@ def launch_game(cfg, name, training):
     log = open(game_log(cfg), "w") if cfg.get("elf") else subprocess.DEVNULL
     subprocess.Popen(args, cwd=cwd, env=env, stdout=subprocess.DEVNULL, stderr=log)
     return " ".join(args)
+
+
+def init_reply(cfg):
+    return {"config": cfg, "stages": STAGES.list(cfg["disc"]), "mods": list_mods(cfg), "discError": disc_error(cfg["disc"])}
 
 
 # ------------------------------------------------------------------------------------------------------------- server
@@ -243,7 +312,7 @@ class Handler(BaseHTTPRequestHandler):
         cfg = self.cfg
         try:
             if u.path == "/api/init":
-                return self.send(200, {"config": cfg, "stages": STAGES.list(cfg["disc"]), "mods": list_mods(cfg)})
+                return self.send(200, init_reply(cfg))
             if u.path == "/api/stage":
                 st, objs, on = STAGES.objects(cfg["disc"], q["name"])
                 patch = {}
@@ -281,7 +350,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/api/config":
                 cfg.update({k: v for k, v in b.items() if k in ("disc", "mods", "game", "elf", "cwd", "iso", "theme", "mod")})
                 save_config(cfg)
-                return self.send(200, {"config": cfg, "stages": STAGES.list(cfg["disc"]), "mods": list_mods(cfg)})
+                return self.send(200, init_reply(cfg))
             if self.path == "/api/check":
                 return self.send(200, check_patch(cfg["disc"], b["name"], b["patch"]))
             if self.path in ("/api/save", "/api/test"):

@@ -76,12 +76,12 @@
   <form method="dialog">
     <h2>Settings</h2>
     <label>Theme<select id="sTheme"><option value="dark">Dark</option><option value="light">Light</option></select></label>
-    <label>Disc folder (extracted ISO, with LVL/ and PTS/)<input id="sDisc" spellcheck="false"></label>
+    <label>Game disc (the .iso, or an extracted folder with LVL/ and PTS/)<input id="sDisc" spellcheck="false" placeholder="C:\Games\War of the Monsters.iso"></label>
     <label>Mods folder<input id="sMods" spellcheck="false"></label>
     <label>Game (wotm.exe)<input id="sGame" spellcheck="false"></label>
     <label>ELF to pass to the game (empty for the release wotm.exe)<input id="sElf" spellcheck="false"></label>
     <label>Game working folder<input id="sCwd" spellcheck="false"></label>
-    <label>Disc image for the game (.iso; only with an ELF, the dev runtime reads the stage from it)<input id="sIso" spellcheck="false"></label>
+    <label>Disc image for the dev runtime (.iso; only with an ELF; empty: the game disc above when it is an .iso)<input id="sIso" spellcheck="false"></label>
     <div class="row end"><button value="cancel">Cancel</button><button id="sOk" value="ok" class="primary">Save</button></div>
   </form>
 </dialog>

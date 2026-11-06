@@ -729,7 +729,7 @@ function init(r) {
   const s = $('stage');
   const prev = stageName || 'CENTRAL';
   s.innerHTML = r.stages.map((x) => `<option value="${x.name}">${x.title} (${x.name})</option>`).join('');
-  if (!r.stages.length) { log(`no stages in ${cfg.disc}/LVL: set the disc folder in Settings`, 'err'); return; }
+  if (r.discError || !r.stages.length) { log(r.discError || `no stages in ${cfg.disc}: set the game disc in Settings`, 'err'); return; }
   s.value = r.stages.some((x) => x.name === prev) ? prev : r.stages[0].name;
   loadStage(s.value);
 }
