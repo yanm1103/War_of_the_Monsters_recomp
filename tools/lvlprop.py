@@ -23,7 +23,7 @@ GROUP 0x0102 -> COLL_VOL (op 10, 6 planes from the visual's bounds). OBJECTs and
 Template ("first-object-roundtrip"): the first OBJECT of the stage's world root, by address, that round-trips in vifpkt and is
 rigid, one texture, strip sections with fog (PRIM.FGE), texture and the asked ABE (default 1, the stages' majority),
 fogBurnThru below 255, no alphaSort, environment map, UV scroll, color animation nor animated or sky node above it. The OBJECT
-header (shadow and light bits, fogBurnThru) and the GIF tags come from it.
+header (shadow bits, fogBurnThru) and the GIF tags come from it; pointLight (0x80, the fire's lights) is always on.
 Units: `blender` (default) is a Blender scene (Z up, meters, the scene's X/Y are the game's) scaled by S game units per meter
 (default 18, about the size of the game's cars and buildings); `game` is a glb in game units (tools/lvlglb.py), scale 1. Node
 transforms are baked into the vertices; the scene origin is the prop's pivot. Colors: `blender` COLOR_0 (linear) to sRGB x 128,
@@ -500,6 +500,7 @@ def level_object(mb, header, batches, slot, light):
     bits = struct.unpack_from("<I", header, 0xC)[0]
     bits = (bits & ~(0x1FFF << 16)) | (nverts << 16)
     bits = (bits | 0x100) if light == "dir" else (bits & ~0x100)
+    bits |= 0x80   # pointLight always on: a prop takes the fire's light in every stage (the shadow bits follow the template)
     mb.u32(a + 0xC, bits)
     ctr, rad, _lo, _hi = _sphere(_batch_points(batches))
     for c in range(3):
