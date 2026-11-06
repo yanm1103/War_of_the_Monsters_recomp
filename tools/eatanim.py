@@ -22,6 +22,9 @@ roles.json (nomes de nos do .glb; o `roles` escreve um palpite, confira):
    "arm": ["bone20","bone21","bone22"],   # ombro ... mao, do pai para o filho
    "mouth": [x, y, z],            # boca no repouso, no espaco do jogo (o locator 0x80B); ou "mouth_node": "st_..."
    "forward": [x, y, 0]}          # opcional: para onde o monstro olha (padrao: do tronco para a boca, no plano do chao)
+  opcionais: "jaw" (osso do queixo: abre na mordida), "tip" (no da ponta da mao; o pulso fica parado e a ponta vai ao alvo),
+  "pelvis" + "legs" ([[quadril, joelho, tornozelo], ...]) + "crouch" (unidades): a bacia desce no pegar e os pes ficam plantados,
+  "lean" (graus do tronco ao pegar, padrao 40), "jaw_open" (25), "head_back" (14). tools/eatanim_togera.json e o do Togera.
 Espaco do jogo: o que o no "WotM" guarda (Z para cima).
 Os ossos que as animacoes novas nao mexem ficam parados no primeiro quadro do idle (regra do import de animacao nova).
 """
@@ -185,6 +188,8 @@ class Rig:
             t, q, s = self.g.rest(k)
             if pose and k in pose:
                 q = pose[k]
+            if pose and ("T", k) in pose:   # a pose may also move a node (the pelvis, for the crouch)
+                t = pose[("T", k)]
             L = np.eye(4)
             L[:3, :3] = q2m(q) * s
             L[:3, 3] = t
@@ -206,11 +211,12 @@ class Rig:
         pose[i] = m2q(Wp.T @ q2m(R) @ Wi)
 
 
-def ccd(rig, pose, chain, target, iters=40):
-    """Leva a ponta da cadeia ao alvo girando cada junta (CCD); pose: osso -> quaternion local."""
-    end = chain[-1]
+def ccd(rig, pose, chain, target, end=None, iters=60):
+    """Leva a ponta (`end`, por padrao o ultimo osso) ao alvo girando as juntas da cadeia (CCD); pose: osso -> quaternion local."""
+    joints = chain if end is not None else chain[:-1]
+    end = chain[-1] if end is None else end
     for _ in range(iters):
-        for j in reversed(chain[:-1]):
+        for j in reversed(joints):
             pj, pe = rig.pos(j, pose), rig.pos(end, pose)
             if np.linalg.norm(target - pj) < 1e-6 or np.linalg.norm(pe - pj) < 1e-6:
                 continue
@@ -273,29 +279,55 @@ def load_roles(g, rig, path):
     fwd[2] = 0
     if np.linalg.norm(fwd) < 1e-6:
         raise SystemExit("nao deu para achar a frente do monstro; ponha \"forward\" no roles.json")
-    return dict(head=head, spine=spine, arm=arm, mouth=mouth, fwd=fwd / np.linalg.norm(fwd))
+    return dict(head=head, spine=spine, arm=arm, mouth=mouth, fwd=fwd / np.linalg.norm(fwd), jaw=need("jaw"), tip=need("tip"),
+                pelvis=need("pelvis"), legs=[[g.name[n] for n in leg] for leg in r.get("legs", [])], crouch=float(r.get("crouch", 0)),
+                lean=float(r.get("lean", 40)), jaw_open=float(r.get("jaw_open", 25)), head_back=float(r.get("head_back", 14)),
+                )
 
 
 def key_poses(g, rig, R):
-    """Poses-chave (osso -> quaternion local) do pegar e do comer."""
+    """Poses-chave (osso -> quaternion local; ("T", osso) -> translacao) do pegar e do comer."""
     lat = np.cross([0, 0, 1.0], R["fwd"])   # girar +a em torno disto baixa a frente (cabecear)
-    hand = R["arm"][-1]
-    drive = [i for i in R["arm"] + [R["head"], R["spine"]] if i is not None]
+    arm, head, jaw, spine, pelvis = R["arm"], R["head"], R["jaw"], R["spine"], R["pelvis"]
+    end = R["tip"] if R["tip"] is not None else arm[-1]
+    drive = arm + [head] + [i for i in (jaw, spine, pelvis) if i is not None] + [n for leg in R["legs"] for n in leg]
     rest = {i: g.rest(i)[1] for i in drive}
+    if pelvis is not None:
+        rest[("T", pelvis)] = g.rest(pelvis)[0].copy()
     height = max(rig.pos(i)[2] for i in range(len(g.nodes)) if i != g.root)
-    mouth_off = R["mouth"] - rig.pos(R["head"])   # a boca anda junto da cabeca: recalculada em cada pose
-    def mouth_of(pose):
-        return rig.pos(R["head"], pose) + rig.rot(R["head"], pose) @ (np.linalg.inv(rig.rot(R["head"])) @ mouth_off)
+    ankles = [rig.pos(leg[-1]) for leg in R["legs"]]
+    mouth_off = np.linalg.inv(rig.rot(head)) @ (R["mouth"] - rig.pos(head))   # a boca anda junto da cabeca
 
-    def lean(pose, ang):
-        if R["spine"] is not None:
-            rig.rotate_world(R["spine"], pose, qaxis(lat, ang))
+    def mouth_of(pose):
+        return rig.pos(head, pose) + rig.rot(head, pose) @ mouth_off
+
+    def pitch(pose, node, deg):
+        rig.rotate_world(node, pose, qaxis(lat, math.radians(deg)))
+
+    def lean(pose, deg):
+        if spine is not None:
+            pitch(pose, spine, deg)
+
+    def crouch(pose, f):
+        """Baixa a bacia em f * crouch e planta os pes onde estavam (os joelhos dobram)."""
+        if pelvis is None or not R["crouch"] or not f:
+            return
+        par = g.parent.get(pelvis)
+        Wp = rig.rot(par, pose) if par is not None and par != g.root else np.eye(3)
+        pose[("T", pelvis)] = rest[("T", pelvis)] - Wp.T @ np.array([0, 0, R["crouch"] * f])
+        for leg, ankle in zip(R["legs"], ankles):
+            ccd(rig, pose, leg, ankle)
+
+    def to(pose, target):
+        ccd(rig, pose, arm[:-1] if end != arm[-1] else arm, target, end=end)   # com ponta propria, o pulso (ultimo osso) fica como esta
 
     P = {"rest": dict(rest)}
-    p = dict(rest)   # inclinado, mao no chao a frente (o mais longe que o braco alcanca)
-    lean(p, math.radians(40))
-    sh = rig.pos(R["arm"][0], p)
-    reach = sum(float(np.linalg.norm(rig.pos(b) - rig.pos(a))) for a, b in zip(R["arm"], R["arm"][1:]))
+    p = dict(rest)   # agachado e inclinado, mao no chao a frente (o mais longe que o braco alcanca)
+    crouch(p, 1.0)
+    lean(p, R["lean"])
+    sh = rig.pos(arm[0], p)
+    pts = [rig.pos(n) for n in arm + ([end] if end != arm[-1] else [])]
+    reach = sum(float(np.linalg.norm(b - a)) for a, b in zip(pts, pts[1:]))
     zg = 0.04 * height
     dz = float(sh[2] - zg)
     if dz >= 0.9 * reach:
@@ -303,23 +335,27 @@ def key_poses(g, rig, R):
     else:
         tz, hd = zg, math.sqrt(0.81 * reach * reach - dz * dz)
     ground = np.array([sh[0] + R["fwd"][0] * hd, sh[1] + R["fwd"][1] * hd, tz])
-    ccd(rig, p, R["arm"], ground)
+    to(p, ground)
     P["reach"] = p
     p = dict(rest)   # mao na boca, cabeca um pouco baixa
-    lean(p, math.radians(8))
-    rig.rotate_world(R["head"], p, qaxis(lat, math.radians(10)))
-    ccd(rig, p, R["arm"], mouth_of(p))
+    crouch(p, 0.25)
+    lean(p, 8)
+    pitch(p, head, 10)
+    to(p, mouth_of(p))
     P["hold"] = p
-    q = {i: p[i].copy() for i in p}   # boca aberta: cabeca para tras, mao ainda na boca
-    rig.rotate_world(R["head"], q, qaxis(lat, math.radians(-24)))
-    ccd(rig, q, R["arm"], mouth_of(q))
+    q = {i: p[i].copy() for i in p}   # boca aberta: cabeca para tras (e queixo para baixo, se ha um osso dele)
+    pitch(q, head, -R["head_back"])
+    if jaw is not None:
+        pitch(q, jaw, R["jaw_open"])
+    to(q, mouth_of(q))
     P["open"] = q
-    q = {i: p[i].copy() for i in p}   # mordida: cabeca para baixo
-    rig.rotate_world(R["head"], q, qaxis(lat, math.radians(18)))
-    ccd(rig, q, R["arm"], mouth_of(q))
+    q = {i: p[i].copy() for i in p}   # mordida: cabeca para baixo, queixo fechado
+    pitch(q, head, 18)
+    to(q, mouth_of(q))
     P["bite"] = q
     P["mouth_of"] = mouth_of
     P["ground"] = ground
+    P["end"] = end
     return P
 
 
@@ -335,20 +371,21 @@ def sample(keys, frame):
         if f0 <= frame <= f1:
             u = 0.0 if f1 == f0 else (frame - f0) / (f1 - f0)
             u = u * u * (3 - 2 * u)
-            return {i: slerp(a[i], b[i], u) for i in a}
+            return {i: (a[i] + (b[i] - a[i]) * u if isinstance(i, tuple) else slerp(a[i], b[i], u)) for i in a}
     return dict(keys[-1][1])
 
 
 def add_animation(g, name, keys, wid):
     n = keys[-1][0] + 1
     times = g.add(np.arange(n, dtype=float) / FPS)
-    nodes = sorted(keys[0][1])
+    nodes = sorted(keys[0][1], key=lambda i: (isinstance(i, tuple), i[1] if isinstance(i, tuple) else i))
     frames = [sample(keys, f) for f in range(n)]
     channels, samplers = [], []
     for i in nodes:
         out = g.add(np.array([frames[f][i] for f in range(n)]))
         samplers.append({"input": times, "output": out, "interpolation": "LINEAR"})
-        channels.append({"sampler": len(samplers) - 1, "target": {"node": i, "path": "rotation"}})
+        channels.append({"sampler": len(samplers) - 1, "target": {"node": i[1] if isinstance(i, tuple) else i,
+                                                                  "path": "translation" if isinstance(i, tuple) else "rotation"}})
     g.j.setdefault("animations", []).append({"name": name, "channels": channels, "samplers": samplers, "extras": {"wotmAnim": wid, "frames": n}})
 
 
@@ -385,7 +422,11 @@ def eval_pose(g, name, frame):
             pose = {}
             for ch in a["channels"]:
                 s = a["samplers"][ch["sampler"]]
-                pose[ch["target"]["node"]] = qnorm(g.read(s["output"])[min(frame, a["extras"]["frames"] - 1)])
+                v = g.read(s["output"])[min(frame, a["extras"]["frames"] - 1)]
+                if ch["target"]["path"] == "translation":
+                    pose[("T", ch["target"]["node"])] = v
+                else:
+                    pose[ch["target"]["node"]] = qnorm(v)
             return pose, a["extras"]["frames"]
     raise SystemExit("sem a animacao %s" % name)
 
@@ -395,7 +436,7 @@ def cmd_check(argv):
     rig = Rig(g)
     R = load_roles(g, rig, argv[1])
     P = key_poses(g, rig, R)
-    hand, ok = R["arm"][-1], True
+    hand, ok = P["end"], True
     for anim, frame, what, target in (("a299", 79, "mao na boca ao fim do pegar", None), ("a299", 22, "mao no chao no meio do pegar", P["ground"]),
                                       ("a298", 0, "mao na boca ao comecar a comer", None), ("a298", 83, "de volta ao repouso", rig.pos(hand))):
         pose, n = eval_pose(g, anim, frame)
