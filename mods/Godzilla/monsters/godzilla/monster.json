@@ -1,0 +1,15 @@
+{
+  "id": "godzilla",
+  "name": "GODZILLA",
+  "costumeName": "GODZILLA 90s",
+  "base": "togera",
+  "costume": 0,
+  "files": true,
+  "narrator": "godzilla_90s",
+  "fireColor": "#3A8BFF",
+  "ai": true,
+  "specialRoar": true,
+  "portrait": "portrait.png",
+  "portraitTex": 3,
+  "logo": "logo.png"
+}

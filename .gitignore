@@ -5,12 +5,10 @@
 *.rom
 *.elf
 
-# Arquivos de monstro gerados do disco do usuário (tools/mechamon.py grava em mods/Mecha/monsters/mecha/files/): são do jogo
-/mods/**/*.NGP
-/mods/**/*.PTR
-/mods/**/*.TEX
-/mods/**/*.RTX
-/mods/**/*.CHR
+# Mods vão inteiros para o repo (CLAUDE.md, regra 1), menos o que um script refaz do disco do usuário:
+# o Mecha (tools/mechamon.py) e as pastas de trabalho do modkit
+/mods/Mecha/monsters/mecha/files/
+/mods/_work/
 
 # Saída gerada pelo splat (contém código do jogo)
 asm/
