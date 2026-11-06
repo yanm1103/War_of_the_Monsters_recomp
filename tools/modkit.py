@@ -606,6 +606,8 @@ KINDS = ("mecha",)   # regras proprias do port ("kind" do monster.json, wotm_cus
 # dono traz
 SPECIAL_NEEDS = {"robo-47": "the shock wave effect", "ultra-v": "the hook's ball", "preytor": "the bugs", "magmo": "the lava rocks",
                  "agamo": "the head", "zorgulon": "the disc", "assboss": "the cannon shells"}
+# ... menos os que o rig import copia para os arquivos proprios (tools/ngpgraft.py SPECIALS)
+SPECIAL_PARTS = ("robo-47",)
 
 
 def norm(s):
@@ -1261,11 +1263,14 @@ def rig_import(disc, work, mods, mod, cid, glb, front=None, scale=None, height=N
     src = disc_file(disc, stem + ".NGP")
     if not src or not disc_file(disc, stem + ".PTR") or not disc_file(disc, stem + ".TEX"):
         raise SystemExit("rig import: %s.NGP/.PTR/.TEX are not on the disc" % stem)
+    import ngpgraft
+    data = _json_obj(os.path.join(monster_dir(mods, mod, cid), "monster.json"))
+    layers = ngpgraft.LAYERS.get(base_name(str((data or {}).get("special", ""))), ())
     tmp = tempfile.mkdtemp(prefix="wotm_rig_")
     name = os.path.basename(stem)
     try:
         try:
-            res = ngprig.build(src, glb, tmp, name=name, front=front, scale=scale, height=height, log=print)
+            res = ngprig.build(src, glb, tmp, name=name, front=front, scale=scale, height=height, layer_ids=layers, log=print)
         except (ngprig.RigError, ngpanim.AnimError, ngpmesh.MeshError) as e:
             raise SystemExit("rig import: %s" % e)
         files = {ext: os.path.join(tmp, name + ext) for ext in (".NGP", ".PTR", ".TEX", ".RTX")}
@@ -1287,9 +1292,31 @@ def rig_import(disc, work, mods, mod, cid, glb, front=None, scale=None, height=N
         shutil.rmtree(tmp, ignore_errors=True)
     with open(_blender_rec(work, rel), "w", encoding="utf-8") as f:
         json.dump({"rig": glb, "rig_pngs": pngs}, f, indent=1)
-    files_on(mods, mod, cid, _json_obj(os.path.join(monster_dir(mods, mod, cid), "monster.json")))
+    special_parts(disc, work, rel, data)
+    files_on(mods, mod, cid, data)
     print("send it to the mod: %s" % pack_hint(mod))
     return res
+
+
+def special_parts(disc, work, rel, data):
+    """O especial emprestado ("special") que precisa de pecas do .NGP do dono (tools/ngpgraft.py): copia-as nos arquivos proprios
+    da pasta de trabalho `rel`. Sem "special" que precise, ou ja com as pecas, nao faz nada."""
+    import ngpgraft
+    sp = base_name(str((data or {}).get("special", "")))
+    if sp not in ngpgraft.SPECIALS:
+        return False
+    d = os.path.join(work, *rel.split("/"))
+    try:
+        done = ngpgraft.graft(d, sp, lambda r: disc_file(disc, r), log=print)
+    except ngpgraft.GraftError as e:
+        raise SystemExit("special %s: %s" % (sp, e))
+    if done:
+        st = load_state(work)
+        for n in os.listdir(d):
+            if n.upper().endswith((".NGP", ".PTR", ".TEX", ".RTX")):
+                st["files"].setdefault("%s/%s" % (rel, n), {"sha1": "", "imported": True})
+        save_state(work, st)
+    return done
 
 
 def monster_duplicate(mods, mod, work, cid, new):
@@ -1464,10 +1491,11 @@ def check(disc, mods, only=None):
                     if v.get("special") and not base_name(str(v["special"])):
                         note += " WARNING: \"special\" %r is not a monster (%s, %s); the game keeps the base's special" % (
                             v["special"], ", ".join(MONSTERS), ", ".join(CUSTOM_BASES))
-                    elif v.get("special") and base_name(str(v["special"])) in SPECIAL_NEEDS:
+                    elif v.get("special") and base_name(str(v["special"])) in SPECIAL_NEEDS and not (
+                            v.get("files") and base_name(str(v["special"])) in SPECIAL_PARTS):
                         sp = base_name(str(v["special"]))
-                        note += " WARNING: the %s special uses %s, which only its own model has; the game keeps the base's special" % (
-                            sp, SPECIAL_NEEDS[sp])
+                        note += " WARNING: the %s special uses %s, which only its own model has; the game keeps the base's special%s" % (
+                            sp, SPECIAL_NEEDS[sp], " (Import rig... copies it into the monster's files)" if sp in SPECIAL_PARTS else "")
                     elif v.get("special") and not v.get("files") and base_prefix(str(v.get("base", ""))) not in CUSTOM_BASES.values():
                         note += " WARNING: \"special\" only applies with \"files\" (the game cannot tell this monster from the base's)"
             elif m:

@@ -1829,7 +1829,7 @@ class App:
         sb_ = modkit.base_name(str(data.get("special", ""))) if data.get("special") else None
         special = tk.StringVar(value=self.base_label(sb_) if sb_ else self.BASE_SPECIAL)
         ttk.Label(p, text="Special").grid(row=6, column=0, sticky="w", padx=(0, 8), pady=2)
-        ttk.Combobox(p, textvariable=special, values=[self.BASE_SPECIAL] + [t for t, b in self.BASES if b not in modkit.SPECIAL_NEEDS],
+        ttk.Combobox(p, textvariable=special, values=[self.BASE_SPECIAL] + [t for t, b in self.BASES if b not in modkit.SPECIAL_NEEDS or b in modkit.SPECIAL_PARTS],
                      width=28, state="readonly").grid(
             row=6, column=1, sticky="w", pady=2)
         ai = tk.BooleanVar(value=bool(data.get("ai")))

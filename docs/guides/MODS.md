@@ -396,6 +396,20 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   Preytor's bugs, Magmo's lava rocks, Agamo's head, Zorgulon's disc, Goliath's cannon shells): on another body they do not start, hold
   the monster in the windup or crash the game, so the port keeps the base's special and logs why. Log: `[custom] fire_togera: especial
   do congar`. In the kit window: **Special** in the monster's group.
+  **Robo-47's homing missile** works on a custom with its own skeleton (`files` from **Import rig...**): the rig import copies the
+  missile (weapon model 4005) and the shock dome (`SpecFxAnim` 0x11FF, with its 3 animations) from the disc's `MON/ROBOT0.NGP` into
+  the custom's `.NGP` (`tools/ngpgraft.py`; by hand: `python tools/ngpgraft.py <files folder> robo-47`), under ids the game ignores (model + 0x100, `SpecFxAnim` + 0x80) so it does not clash with
+  a Robo-47 in the same fight. The port registers the copied dome for that monster, gives it to `SpecFxAnim::isInstanceAvailable` and
+  `getInstance` in place of the game's id, points animation slot 191 (the dome the special plays while aiming; the game fills it with
+  the type's id + 5) at it, and swaps the copied missile into `Weapons::m_epNodes[13]` while `Weapon::InitWeapon` builds one of that
+  monster's missiles. The special adds three animations on top of the pose (`StateRobotSpecial::init` blends): 166 and 167 (aim,
+  scrubbed by a percentage, 50% = straight ahead) and 161 (the shot), so the rig writes them as layers: rotations only, as the
+  difference from the action's first frame (`ngpgraft.LAYERS`). 160 (windup) ends in the aim pose, which the game holds until the shot;
+  162 is the winddown. The missile leaves from locator `extra1` (0x816). Its sounds are in Robo-47's bank: a `ROBOT_S.BNK` in the
+  folder is used for them (in Robo-47's bank slot while this monster's sounds play), otherwise they only sound with a Robo-47 in the
+  fight. Logs: `[mods] monstro CJ/monsters/cj: especial do robo-47 com as pecas dos arquivos proprios`, `[custom] SpecFxAnim copiada
+  0x127f (do 0x11ff) registrada para o dup 0`, `[custom] cj: animacao 191 do especial na copia 0x127f`, `[custom] cj: projetil 13 do
+  especial com o modelo proprio (no 0x10a5)`.
 - `specialRoar`: `true` = the special starts with the monster's cry (`MonsterSound::playSignatureSound`, the fight entry cinematic's
   sound, from its own bank when it has one), when it enters the special's state. Togera's fire breath has no cry of its own. Log:
   `[custom] godzilla: grito no especial`.

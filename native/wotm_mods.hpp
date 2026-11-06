@@ -60,9 +60,59 @@ inline const MonsterInfo *customBase(const std::string &s) {
 // Golpe especial de outro tipo ("special" do monster.json): vazio = serve; senao, o objeto do .NGP do dono que ele usa. O banco de
 // dados registra esses modelos a partir do monstro que os traz (efeito, insetos, cabeca, disco, projeteis); num corpo de outro tipo
 // eles nao existem e o golpe nao comeca, prende o monstro no preparo ou derruba o jogo.
+// Um custom com arquivos proprios pode trazer copias dessas pecas com ids que o jogo ignora (tools/ngpgraft.py: modelo de arma
+// 4000..4042 -> id + 0x100, SpecFxAnim -> id + 0x80); o port as registra so para ele (wotm_custom.inc). Ids que o .NGP proprio
+// precisa ter para o especial do tipo valer; vazio = esse especial ainda nao sabe usar pecas copiadas.
+inline std::vector<uint32_t> specialParts(int type) {
+    switch (type) {
+    case 2: return {4005 + 0x100, 0x11FF + 0x80};   // o missil (arma 13) e a cupula de choque que ele abre no impacto
+    default: return {};
+    }
+}
+// Ids dos nos de um .NGP de monstro (cru, pre-ligado em 0xA00000): raizes e GROUPs ate 4 niveis abaixo delas
+inline std::vector<uint32_t> ngpNodeIds(const std::filesystem::path &p) {
+    std::vector<uint32_t> out;
+    std::ifstream in(p, std::ios::binary);
+    if (!in) return out;
+    const std::vector<uint8_t> d((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    constexpr uint32_t kBase = 0xA00000;
+    auto u32 = [&](uint32_t a, uint32_t &v) {
+        if (a < kBase || a - kBase + 4 > d.size()) return false;
+        std::memcpy(&v, d.data() + (a - kBase), 4);
+        return true;
+    };
+    auto walk = [&](auto &&self, uint32_t n, int depth) -> void {
+        uint32_t w = 0, cnt = 0;
+        if (depth > 4 || !u32(n & 0x0FFFFFFFu, w)) return;
+        out.push_back(w >> 18);
+        if ((w & 63) != 1 || !u32((n & 0x0FFFFFFFu) + 8, cnt)) return;
+        for (uint32_t k = 0, c = 0; k < (cnt & 0xFFFFu) && k < 512; ++k)
+            if (u32((n & 0x0FFFFFFFu) + 0x20 + 4 * k, c)) self(self, c, depth + 1);
+    };
+    uint32_t roots = 0;
+    if (d.size() < 8 || !u32(kBase, roots)) return out;
+    for (uint32_t i = 0, r = 0; i < roots && i < 16; ++i)
+        if (u32(kBase + 4 + 4 * i, r)) walk(walk, r, 0);
+    return out;
+}
+// O .NGP dos arquivos proprios ("files") traz todos os `ids`
+inline bool filesHaveIds(const std::filesystem::path &files, const std::vector<uint32_t> &ids) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    for (auto it = fs::directory_iterator(files, ec); it != fs::directory_iterator(); it.increment(ec)) {
+        if (ec) break;
+        std::string ext = it->path().extension().string();
+        for (char &ch : ext) ch = char(std::toupper(static_cast<unsigned char>(ch)));
+        if (ext != ".NGP") continue;
+        const std::vector<uint32_t> have = ngpNodeIds(it->path());
+        if (std::all_of(ids.begin(), ids.end(), [&](uint32_t i) { return std::find(have.begin(), have.end(), i) != have.end(); }))
+            return true;
+    }
+    return false;
+}
 inline const char *specialNeeds(int type) {
     switch (type) {
-    case 2: return "a onda de choque (SpecFxAnim do ROBOT)";
+    case 2: return "o missil e a cupula de choque (arma 4005 e SpecFxAnim 0x11FF do ROBOT)";
     case 4: return "a bola do gancho (OgreMace, do SHOGUN)";
     case 5: return "os insetos (HomingBug, do MANTIS)";
     case 8: return "as rochas de lava (armas do LAVA)";
@@ -95,7 +145,10 @@ struct Custom {
     // .BNK da pasta "files": banco de som proprio, com os indices do banco do tipo (wotm_snd.inc o troca em volta dos sons desta
     // instancia); vazio = o do tipo
     std::filesystem::path bank;
-    std::string kind;         // regras proprias do port ("kind": "mecha" = escudo e laser, wotm_custom.inc); vazio = as do tipo
+    // .BNK da pasta "files" com o prefixo do dono do especial emprestado ("special"; ROBOT_S.BNK): os sons que o especial toca
+    // do banco desse tipo saem dele (wotm_snd.inc); vazio = os do banco do jogo, que so existe com esse monstro na luta
+    std::filesystem::path specialBank;
+    std::string kind;        // regras proprias do port ("kind": "mecha" = escudo e laser, wotm_custom.inc); vazio = as do tipo
     int special = 0;          // tipo cujo golpe especial o custom usa ("special": "congar"; wotm_custom.inc); 0 = o do tipo
     bool specialRoar = false;   // "specialRoar": o especial comeca com o grito dele (o som do cinema de entrada; wotm_custom.inc)
     // "fallBlend": quadros em que a camada da subida do pulo (animacao 33) some depois do pico, para a queda (34) aparecer
@@ -510,13 +563,15 @@ private:
         std::error_code ec;
         fs::path chr, aicAny, aic[3];
         c.bank.clear();
+        c.specialBank.clear();
+        const MonsterInfo *sp = c.special ? monsterInfo(c.special) : nullptr;
         for (auto it = fs::recursive_directory_iterator(c.files, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
             if (ec) break;
             if (!it->is_regular_file(ec)) continue;
             const std::string ext = key(it->path().extension().string()), stem = key(it->path().stem().string());
             fs::path *slot = nullptr;
             if (ext == ".CHR") slot = &chr;
-            else if (ext == ".BNK") slot = &c.bank;
+            else if (ext == ".BNK") slot = sp && stem.rfind(sp->prefix, 0) == 0 ? &c.specialBank : &c.bank;
             else if (ext == ".AIC") slot = !stem.empty() && stem.back() >= '0' && stem.back() <= '2' ? &aic[stem.back() - '0'] : &aicAny;
             if (!slot) continue;
             if (!slot->empty())
@@ -547,6 +602,8 @@ private:
         }
         if (!c.bank.empty())
             what += std::string(what.empty() ? "" : ", ") + "som " + c.bank.filename().string();
+        if (!c.specialBank.empty())
+            what += std::string(what.empty() ? "" : ", ") + "som do especial " + c.specialBank.filename().string();
         if (!what.empty())
             std::fprintf(stderr, "[mods] monstro %s: %s (RST/%s)\n", c.id.c_str(), what.c_str(), c.resetStem.c_str());
     }
@@ -627,9 +684,14 @@ private:
                 if (const json::Value *lt = v.get("landOnTouch")) c.landOnTouch = lt->asBool(false);
                 if (const json::Value *sp = v.get("special"); sp && sp->type == json::Value::Str) {
                     const MonsterInfo *b = customBase(lower(sp->s));
-                    if (b && b->type != c.type && *specialNeeds(b->type))
-                        std::fprintf(stderr, "[mods] monstro %s: o especial do %s usa %s, que so o modelo dele traz; fica o do tipo\n",
-                                     where.c_str(), b->name, specialNeeds(b->type));
+                    const std::vector<uint32_t> parts = b ? specialParts(b->type) : std::vector<uint32_t>{};
+                    if (b && b->type != c.type && *specialNeeds(b->type) && !parts.empty() && !c.files.empty() && filesHaveIds(c.files, parts)) {
+                        c.special = b->type;
+                        std::fprintf(stderr, "[mods] monstro %s: especial do %s com as pecas dos arquivos proprios\n", where.c_str(), b->name);
+                    } else if (b && b->type != c.type && *specialNeeds(b->type))
+                        std::fprintf(stderr, "[mods] monstro %s: o especial do %s usa %s, que so o modelo dele traz%s; fica o do tipo\n",
+                                     where.c_str(), b->name, specialNeeds(b->type),
+                                     parts.empty() ? "" : " (copia nos arquivos proprios: tools/ngpgraft.py)");
                     else if (b && b->type != c.type)
                         c.special = b->type;
                     else if (!b)

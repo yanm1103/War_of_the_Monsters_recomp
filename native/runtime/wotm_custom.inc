@@ -1445,6 +1445,7 @@ namespace wotm_custom
                                          0x102A8 /* RockSpecial */,        0x10790 /* AirStrike */,   0,
                                          0x10F60 /* CannonHands */,        0x11130 /* UltraTazer */,  0x11130 /* UltraTazer */};
     PS2Runtime::RecompiledFunction g_origInitDynamics = nullptr;
+    void ownFxSlot(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, const wotm::mods::Custom &cu);
     void initDynamics(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         if (ctx->pc != kInitDynamics)
@@ -1464,6 +1465,7 @@ namespace wotm_custom
         WRITE32(m + kSpecialState, st);
         const int16_t delta = static_cast<int16_t>(READ16(vt + kVInit));
         wotm_modes4::call(rdram, ctx, runtime, READ32(vt + kVInit + 4), {st + static_cast<uint32_t>(static_cast<int32_t>(delta)), m});
+        ownFxSlot(rdram, ctx, runtime, m, *cu);
         ctx->pc = ra;
         static std::set<std::string> logged;
         if (logged.insert(cu->id).second)
@@ -1476,6 +1478,125 @@ namespace wotm_custom
                     who = b.name;
             std::fprintf(stderr, "[custom] %s: especial do %s\n", cu->id.c_str(), who);
         }
+    }
+    // Pecas do especial emprestado nos arquivos proprios (tools/ngpgraft.py; Registry: specialParts). Alguns especiais usam modelos
+    // que o banco de dados registra a partir do .NGP do dono (dbProcInteractive): o missil do Robo-47 e o modelo de arma 4005
+    // (Weapons::m_epNodes[13], um so para todos) e a cupula de choque e a instancia de SpecFxAnim 0x11FF (uma por monstro, pelo
+    // m_curDupId do arquivo, com as 3 animacoes dela). A copia no .NGP do custom vem com ids que o jogo ignora (arma + 0x100,
+    // SpecFxAnim + 0x80), entao nao briga com um Robo-47 na mesma luta:
+    // - o dbProcInteractive registra a SpecFxAnim copiada como o jogo faz com a dele (addInstance com o m_curDupId);
+    // - o isInstanceAvailable/getInstance de um custom com especial emprestado pede o id da copia quando ela existe para ele (o
+    //   RobotSpecial::transitionOK so deixa o especial comecar com uma cupula livre; o Weapon::DetonateWeapon a abre);
+    // - o Weapon::InitWeapon do projetil do especial poe na m_epNodes do tipo, so durante a chamada, a copia do arquivo do dono.
+    constexpr uint32_t kProcInteractive = wotm::fn::dbProcInteractive__FP9_hierheadP8_fvectorPA3_f,
+                       kFxAvail = wotm::fn::isInstanceAvailable__10SpecFxAnimP7Monsteri,
+                       kFxGet = wotm::fn::getInstance__10SpecFxAnimP7Monsteri, kFxAdd = wotm::fn::addInstance__10SpecFxAnimP9_hierheadi,
+                       kFxReset = wotm::fn::initBeforeDbLoad__10SpecFxAnim;
+    constexpr uint32_t kCurDupId = 0x120448, kWeapons = 0x112490, kFileStatus = wotm::sym::fileStatus, kNgpAddrs = 0x3C, kNgpCount = 0x74;
+    constexpr uint32_t kFxShift = 0x80, kWeaponShift = 0x100;
+    constexpr uint32_t kWeaponNode[][2] = {{13, 4005}};   // tipo de Weapon -> id do modelo (Weapons::AddWeaponEpNode)
+    PS2Runtime::RecompiledFunction g_origProcInteractive = nullptr, g_origFxAvail = nullptr, g_origFxGet = nullptr, g_origFxReset = nullptr;
+    std::set<uint64_t> g_ownFx;   // SpecFxAnim copiadas registradas nesta carga: id << 32 | dup
+    bool specFxId(uint32_t id) { return id - 0x11F9u < 2u || id == 0x11FD || id == 0x11FE || id == 0x11FF || id == 0x1201; }
+    void procInteractive(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t h = ctx->pc == kProcInteractive ? GPR_U32(ctx, 4) : 0;
+        const uint32_t id = h ? READ32(h) >> 18 : 0;
+        if (!h || id < kFxShift || !specFxId(id - kFxShift))
+        {
+            g_origProcInteractive(rdram, ctx, runtime);
+            return;
+        }
+        const uint32_t ra = GPR_U32(ctx, 31), dup = READ32(kGameObj + kCurDupId);
+        wotm_modes4::call(rdram, ctx, runtime, kFxAdd, {h, dup});
+        static std::set<uint64_t> logged;
+        if (g_ownFx.insert(uint64_t(id) << 32 | dup).second && logged.insert(uint64_t(id) << 32 | dup).second)
+            std::fprintf(stderr, "[custom] SpecFxAnim copiada %#x (do %#x) registrada para o dup %u\n", id, id - kFxShift, dup);
+        ctx->pc = ra;
+    }
+    void fxReset(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        g_ownFx.clear();
+        g_origFxReset(rdram, ctx, runtime);
+    }
+    // isInstanceAvailable(Monster *, int id) e getInstance(Monster *, int id): a copia do custom no lugar do id do jogo
+    template <uint32_t A, PS2Runtime::RecompiledFunction *Orig>
+    void fxFind(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (ctx->pc == A && !g_ownFx.empty())
+        {
+            const uint32_t m = GPR_U32(ctx, 4), id = GPR_U32(ctx, 5);
+            if (m && specFxId(id) && g_ownFx.count(uint64_t(id + kFxShift) << 32 | READ32(m + kDupId)))
+                if (const wotm::mods::Custom *cu = ownFilesCustom(rdram, m); cu && cu->special)
+                    ctx->r[5] = _mm_set_epi64x(0, static_cast<int64_t>(id + kFxShift));
+        }
+        (*Orig)(rdram, ctx, runtime);
+    }
+    // Monster::m_anims[191] e a animacao 0 da instancia (id do tipo + 5, dup) que o initAfterDbLoad acha: no Robo-47, a cupula
+    // 0x11FF, que o RobotSpecial toca enquanto mira. No custom com o especial emprestado ela vira a copia dele (o id + 5 do tipo
+    // base aponta para outra coisa: no Ultra-V, o efeito 0x1201 do gancho).
+    constexpr uint32_t kFxSlot = 0x1CF0 + 16 * 191;
+    void ownFxSlot(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, const wotm::mods::Custom &cu)
+    {
+        const uint32_t dup = READ32(m + kDupId);
+        for (const uint64_t e : g_ownFx)
+            if (uint32_t(e) == dup)
+            {
+                const uint32_t id = uint32_t(e >> 32);
+                wotm_modes4::call(rdram, ctx, runtime, kGetHandle, {m + kFxSlot, id, dup, 0});
+                static std::set<std::string> logged;
+                if (logged.insert(cu.id).second)
+                    std::fprintf(stderr, "[custom] %s: animacao 191 do especial na copia %#x\n", cu.id.c_str(), id);
+                return;
+            }
+    }
+    // O no `id` nas raizes (e GROUPs ate 4 niveis abaixo) da imagem .NGP carregada que contem o no raiz do monstro `m`
+    uint32_t ownNode(uint8_t *rdram, uint32_t m, uint32_t id)
+    {
+        const uint32_t cs = m ? cRd32(rdram, m + kCs) & 0x1FFFFFFFu : 0, ep = cs ? cRd32(rdram, cs) & 0x1FFFFFFFu : 0;   // _cs +0: o no
+        uint32_t img = 0;
+        const int n = static_cast<int8_t>(cRd8(rdram, kFileStatus + kNgpCount));
+        for (int k = 0; ep && k < n; ++k)
+            if (const uint32_t a = cRd32(rdram, kFileStatus + kNgpAddrs + 4u * uint32_t(k)) & 0x1FFFFFFFu; a && a <= ep && a > img)
+                img = a;
+        if (!img)
+            return 0;
+        uint32_t found = 0;
+        auto walk = [&](auto &&self, uint32_t node, int depth) -> void {
+            node &= 0x1FFFFFFFu;
+            if (found || depth > 4 || !animRamOk(node, 0x24u))
+                return;
+            const uint32_t w = cRd32(rdram, node);
+            if (w >> 18 == id)
+            {
+                found = node;
+                return;
+            }
+            if ((w & 63) == 1)
+                for (uint32_t k = 0, c = (cRd32(rdram, node + 8) & 0xFFFFu); k < c && k < 512; ++k)
+                    self(self, cRd32(rdram, node + 0x20 + 4 * k), depth + 1);
+        };
+        for (uint32_t i = 0, roots = cRd32(rdram, img); i < roots && i < 16; ++i)
+            walk(walk, cRd32(rdram, img + 4 + 4 * i), 0);
+        return found;
+    }
+    // Modelo proprio do projetil `type` do custom dono `m` (com especial emprestado); 0 = o do jogo
+    uint32_t ownWeaponNode(uint8_t *rdram, uint32_t m, uint32_t type)
+    {
+        const wotm::mods::Custom *cu = m ? ownFilesCustom(rdram, m) : nullptr;
+        if (!cu || !cu->special)
+            return 0;
+        for (const auto &e : kWeaponNode)
+            if (e[0] == type)
+                if (const uint32_t node = ownNode(rdram, m, e[1] + kWeaponShift))
+                {
+                    static std::set<std::string> logged;
+                    if (logged.insert(cu->id).second)
+                        std::fprintf(stderr, "[custom] %s: projetil %u do especial com o modelo proprio (no %#x)\n", cu->id.c_str(), type,
+                                     e[1] + kWeaponShift);
+                    return node;
+                }
+        return 0;
     }
     // Cor do fogo ("fireColor" da skin ou do custom; MODS.md): os efeitos do Togera criados por um monstro com cor propria saem
     // dela. Os ganchos de quem os cria guardam o monstro (g_fxOwner): FireBreath::Activate e TestCollis (o bafo e o acerto dele),
@@ -1619,7 +1740,18 @@ namespace wotm_custom
     void initWeapon(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t w = ctx->pc == kInitWeapon ? GPR_U32(ctx, 4) : 0;
-        g_origInitWeapon(rdram, ctx, runtime);
+        const uint32_t type = w ? READ32(w + kWeaponType) : 0, own = w && type < 45 ? ownWeaponNode(rdram, weaponOwner(rdram, w), type) : 0;
+        const uint32_t slot = kGameObj + kWeapons + 4 * type, prev = own ? READ32(slot) : 0;
+        if (own)
+        {
+            const uint32_t ra = GPR_U32(ctx, 31);
+            WRITE32(slot, own);
+            g_origInitWeapon(rdram, ctx, runtime);
+            wotmFinishGuestCall(rdram, ctx, runtime, ra);
+            WRITE32(slot, prev);
+        }
+        else
+            g_origInitWeapon(rdram, ctx, runtime);
         const uint32_t color = w ? weaponShotColor(rdram, w, weaponOwner(rdram, w)) : 0;
         if (!color)
             return;
@@ -1712,6 +1844,14 @@ void wotmCustomInstall(PS2Runtime &runtime)
         runtime.registerFunction(kDetonate, &detonate);
     if ((g_origInitWeapon = runtime.lookupFunction(kInitWeapon)))
         runtime.registerFunction(kInitWeapon, &initWeapon);
+    if ((g_origProcInteractive = runtime.lookupFunction(kProcInteractive)))
+        runtime.registerFunction(kProcInteractive, &procInteractive);
+    if ((g_origFxReset = runtime.lookupFunction(kFxReset)))
+        runtime.registerFunction(kFxReset, &fxReset);
+    if ((g_origFxAvail = runtime.lookupFunction(kFxAvail)))
+        runtime.registerFunction(kFxAvail, &fxFind<kFxAvail, &g_origFxAvail>);
+    if ((g_origFxGet = runtime.lookupFunction(kFxGet)))
+        runtime.registerFunction(kFxGet, &fxFind<kFxGet, &g_origFxGet>);
     if ((g_origCrowdInto = runtime.lookupFunction(kCrowdInto)))
         runtime.registerFunction(kCrowdInto, &crowdInto);
     if ((g_origJumpUpdate = runtime.lookupFunction(kJumpUpdate)))

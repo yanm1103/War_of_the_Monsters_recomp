@@ -750,7 +750,7 @@ def sphere(pts):
     return ctr, max(math.dist(ctr, p) for p in pts)
 
 
-def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, height=None, fill=True, log=print):
+def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, height=None, fill=True, layer_ids=(), log=print):
     base = BaseInfo(base_path, log)
     rig = Rig(glb_path, base, front, scale, height, log)
     name = name or os.path.splitext(os.path.basename(base_path))[0]
@@ -918,6 +918,8 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
             frames = ba["frames"]
         if loop is None:
             loop = bool(ba["loop"]) if ba else aid in ngpanim.LOOPING_IDS
+        if aid in layer_ids:   # the special scrubs or runs it once by percent
+            loop = False
         vals = {}
         prev = [[0.0, 0.0, 0.0] for _ in xf]
         for r in RG:
@@ -969,7 +971,12 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
         for pid in PAPPY_IDS:
             v = base.curve_at(aid, pid, frames)
             vals[pappy_ch[pid]] = v if v is not None else [0.0] * frames
-        if ba and ba["layer"]:
+        own_layer = aid in layer_ids or (ba is None and aid in ngpanim.LAYER_IDS)
+        if own_layer and clip is not None:
+            # a layer the base lacks (or has as a plain animation; `layers`, from a borrowed special): authored over the
+            # pose it is added to, the first frame is that pose and the game adds the difference from it
+            vals = {c: [x - v[0] for x in v] if c in layer_rot else v for c, v in vals.items()}
+        if own_layer or (ba is not None and ba["layer"]):
             # added to the main animation: only the rotations that leave the rest (rest angles are 0), as deltas
             vals = {c: v for c, v in vals.items() if c in layer_rot and max(abs(x) for x in v) > 1e-3}
             if not vals:

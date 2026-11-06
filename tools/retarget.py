@@ -26,8 +26,8 @@ that `modkit.py monster rig` (tools/ngprig.py) takes.
     source bone maps to (or the nearest mapped ancestor), with the source offset scaled.
   - "keep": joints kept without a source (they hold the rest pose against their parent).
   - "props": {node: {"show": source node}}: a rigid mesh of the model (a node with instance_geometry under a joint) is seen as
-    much as that source node is in each clip (its scale: a weapon shown only in some moves). Props the map leaves out are
-    always seen.
+    much as that source node is in each clip (its scale: a weapon shown only in some moves; hidden in an own clip with an id
+    the source lacks); "show": [160, 161] = seen only in the actions with those ids. Props the map leaves out are always seen.
   Joints the map does not reach are rigid on the nearest kept ancestor: their weights go to it.
 - Size: the model is scaled to the source's height (`--size 1.2` = 20% taller; `--height H` in game units), feet on the
   ground. The out.glb is in the game's axes and units (the "WotM" root), so ngprig takes it as is.
@@ -685,14 +685,20 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
         tl = [(img, [(apply(Gi, to_game_p(p)), _unit(apply(Gi, apply(Cm, n, 0.0), 0.0)), uv) for p, n, uv in cs])
               for img, cs in pr["tris"]]
         show = pcfg.get(pr["name"], {}).get("show")
-        props.append({"name": pr["name"], "joint": h, "tris": tl, "show": src.node(show) if show else None})
+        ids = set(int(x) for x in show) if isinstance(show, list) else None
+        props.append({"name": pr["name"], "joint": h, "tris": tl, "show": src.node(show) if show and ids is None else None,
+                      "ids": ids})
         log("prop %s on %s%s" % (pr["name"], J[h]["name"], ", seen with %s" % show if show else ""))
 
-    def prop_scale(pi, clip, t, cache):
+    def prop_scale(pi, clip, t, cache, aid=None):
+        if props[pi]["ids"] is not None:
+            return 1.0 if aid in props[pi]["ids"] else 0.0
         b = props[pi]["show"]
         if b is None:
             return 1.0
-        W = src.world(b, clip, t, cache) if clip is not None else src.rest[b]
+        if clip is None:   # an own clip with a new id: the source has no such move
+            return 0.0
+        W = src.world(b, clip, t, cache)
         return sum(math.sqrt(sum(W[r][c] ** 2 for r in range(3))) for c in range(3)) / 3.0
     src_clip = {}
     for nm, clip, frames in src.clips:
@@ -751,7 +757,7 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
                 tracks[i][0].append(quat_of(L))
                 tracks[i][1].append(pos(L))
             for pi in range(len(props)):
-                pscale.setdefault(pi, []).append(prop_scale(pi, clip, t, cache))
+                pscale.setdefault(pi, []).append(prop_scale(pi, clip, t, cache, int(m.group(1)) if m else None))
         anims.append((nm, frames, tracks, pscale))
     log("%d actions retargeted, %d joints kept (%s), %d locators" % (
         len(anims), len(korder), ", ".join(J[i]["name"] for i in korder), len(locs)))
@@ -782,7 +788,7 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
                 cache = {}
                 for pi in range(len(props)):
                     t = f / float(max(1, frames - 1)) * (sc[1] - 1) / FPS if sc else 0.0
-                    pscale.setdefault(pi, []).append(prop_scale(pi, sc[0] if sc else None, t, cache))
+                    pscale.setdefault(pi, []).append(prop_scale(pi, sc[0] if sc else None, t, cache, aid))
                 Wt = {}
                 for i in korder:
                     p = kparent[i]
@@ -956,7 +962,7 @@ def write_glb(path, mdl, J, korder, kparent, Lk, A, tris, locs, anims, log, prop
             times[frames] = acc("f", 5126, "SCALAR", [f / FPS for f in range(frames)], True)
         an = {"name": nm, "samplers": [], "channels": []}
         for pi, ss in sorted(pscale.items()):
-            if props[pi]["show"] is None:
+            if props[pi]["show"] is None and props[pi]["ids"] is None:
                 continue
             an["samplers"].append({"input": times[frames], "output": acc("f", 5126, "VEC3", [[x, x, x] for x in ss]),
                                    "interpolation": "LINEAR"})
