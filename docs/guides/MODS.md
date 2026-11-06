@@ -565,7 +565,8 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
 - Traffic and pedestrians follow their own paths (`PTS/<FASE>.FOP` and `.PED`, `FORMATS.md`, "Path nets") and never look at the
   collision, so the patch cuts those paths around each collision box in its new place (moved, turned and copied objects). A vehicle
   link whose lane (`width · 10` to each side of the line) crosses a box is removed both ways, and vehicles turn back at the node before
-  it. A pedestrian segment keeps its longest free part, or is removed when less than 30 units are left. Flying paths (helicopter,
+  it. Pedestrians are cut only by walls (boxes rising 40 units above the sidewalk; curbs and low bases are walked over) and stop 15
+  units from them: each segment keeps its free parts of 30 units or more, on both sides of the building. Flying paths (helicopter,
   saucer) stay. A deleted building leaves an empty lot with no path through it.
 - Check before playing: `python tools/lvl.py patch CENTRAL mods/<mod>/levels/CENTRAL.json` applies the patch to the disc's image, prints
   what changed, each redone collision box, and checks the collision of the result (box rule and cell rule, `FORMATS.md`, "Stage

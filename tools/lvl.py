@@ -525,21 +525,27 @@ def seg_in_poly(a, b, poly, margin):
 
 
 GROUND_NODE_TYPES = (0, 3)      # PathNet node types that drive on the ground (car, tank/truck); 1 and 2 fly
-PED_MIN_LEN = 30.0              # a pedestrian segment shorter than this after clipping is removed
+PED_MIN_LEN = 30.0              # a pedestrian piece shorter than this after clipping is dropped
+PED_MARGIN = 15.0               # pedestrians: distance kept from a wall (the disc's own segments run right along walls)
+PED_WALL = 40.0                 # pedestrians: a box that rises less than this above the segment is walked over (curbs, pads)
+NET_NODES = 255                 # PathNet holds 256 nodes; the tool loads at most 255
 
 
 def cut_nets(fps, nets):
     """Vehicles and pedestrians walk PathNet::fodder and ::ped without looking at the collision. For each solid box placed by
-    the patch (`fps`), cut the vehicle links whose lane (width*10 to each side) crosses it, both ways (PathNode::removePath);
-    clip each pedestrian segment (a pair of nodes linked to each other) to its longest part outside, or remove it, and drop
-    the pedestrian nodes left with no link (PedGroup reads paths[0] of the nearest node without looking at the count).
+    the patch (`fps`), cut the vehicle links whose lane (width*10 to each side) crosses it, both ways (PathNode::removePath).
+    Pedestrians: only walls cut (boxes rising PED_WALL above the segment), with PED_MARGIN; each segment (a pair of nodes linked
+    to each other) keeps its free parts, the first in its own nodes and the others as new pairs, and the pedestrian nodes left
+    with no link leave the list (PedGroup reads paths[0] of the nearest node without looking at the count).
     nets: {"fodder"|"ped": [{"pos": [x, y, z], "type": t, "links": [[node, width, drop], ...]}]}, changed in place."""
     log = []
 
-    def covered(a, b, margin):
+    def covered(a, b, margin, wall=None):
         out = []
         for poly, zmin, zmax in fps:
             if max(a[2], b[2]) < zmin - 50.0 or min(a[2], b[2]) > zmax:
+                continue
+            if wall is not None and zmax - max(a[2], b[2]) < wall:
                 continue
             iv = seg_in_poly(a, b, poly, margin)
             if iv:
@@ -564,15 +570,17 @@ def cut_nets(fps, nets):
         log.append("vehicles: link %d-%d cut" % (i, k))
 
     nodes = nets.get("ped") or []
-    for i, n in enumerate(nodes):
-        for k, w, _ in list(n["links"]):
+    for i in range(len(nodes)):
+        n = nodes[i]
+        for k, w, d in list(n["links"]):
             if k >= len(nodes) or k < i and any(l[0] == i for l in nodes[k]["links"]):
                 continue
             a, b = n["pos"], nodes[k]["pos"]
-            ivs = covered(a, b, w * 10.0)
+            ivs = covered(a, b, PED_MARGIN, PED_WALL)
             if not ivs:
                 continue
             pair = len(n["links"]) == 1 and [l[0] for l in nodes[k]["links"]] == [i]
+            seg = math.dist(a, b)
             gaps, t = [], 0.0
             for t0, t1 in sorted(ivs):
                 if t0 > t:
@@ -580,16 +588,22 @@ def cut_nets(fps, nets):
                 t = max(t, t1)
             if t < 1.0:
                 gaps.append((t, 1.0))
-            g = max(gaps, key=lambda q: q[1] - q[0], default=None)
-            seg = math.dist(a, b)
-            if pair and g and (g[1] - g[0]) * seg >= PED_MIN_LEN:
-                na = [a[j] + g[0] * (b[j] - a[j]) for j in range(3)]
-                nb = [a[j] + g[1] * (b[j] - a[j]) for j in range(3)]
-                n["pos"], nodes[k]["pos"] = na, nb
-                log.append("pedestrians: segment %d-%d clipped to %.0f of %.0f" % (i, k, (g[1] - g[0]) * seg, seg))
-            else:
+            gaps = [g for g in gaps if (g[1] - g[0]) * seg >= PED_MIN_LEN] if pair else []
+            if not gaps:
                 unlink(nodes, i, k)
                 log.append("pedestrians: segment %d-%d removed" % (i, k))
+                continue
+            at = lambda t: [a[j] + t * (b[j] - a[j]) for j in range(3)]     # noqa: E731
+            n["pos"], nodes[k]["pos"] = at(gaps[0][0]), at(gaps[0][1])
+            pieces = ["%.0f" % ((gaps[0][1] - gaps[0][0]) * seg)]
+            for g in gaps[1:]:
+                if len(nodes) + 2 > NET_NODES:
+                    break
+                m = len(nodes)
+                nodes.append({"pos": at(g[0]), "type": n["type"], "links": [[m + 1, w, d]], "copy_of": i})
+                nodes.append({"pos": at(g[1]), "type": n["type"], "links": [[m, w, d]], "copy_of": k})
+                pieces.append("%.0f (new %d-%d)" % ((g[1] - g[0]) * seg, m, m + 1))
+            log.append("pedestrians: segment %d-%d (%.0f) clipped to %s" % (i, k, seg, " + ".join(pieces)))
     keep = [i for i, n in enumerate(nodes) if n["links"]]
     if len(keep) < len(nodes):
         log.append("pedestrians: %d nodes removed, %d left" % (len(nodes) - len(keep), len(keep)))
