@@ -560,8 +560,8 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   `pos` and an optional `heading`; they share the original's states and meshes, break on their own and get their own collision.
 - Works on destructibles (buildings), pickups (cars, trees, rooftop objects) and props. Copies: buildings without other destructibles
   inside them, and props; not pickups.
-- Objects that sit on a building (water tanks and vents on the roof are pickups of their own, `pickup` lines with a high Z) do not
-  follow it: move or delete them in the same patch.
+- Objects that sit on a building (water tanks and vents on the roof, items on its sidewalk base) are pickups of their own and do not
+  follow it: move or delete them in the same patch. `lvl.py objects` marks them with `on <handle>`.
 - Traffic and pedestrians follow their own paths (`PTS/<FASE>.FOP` and `.PED`, `FORMATS.md`, "Path nets") and never look at the
   collision, so the patch cuts those paths around each collision box in its new place (moved, turned and copied objects). A vehicle
   link whose lane (`width · 10` to each side of the line) crosses a box is removed both ways, and vehicles turn back at the node before

@@ -360,6 +360,35 @@ class Stage:
             out.append(self._describe(n, "prop", through, handle=n))
         return out
 
+    def on_top(self, objs, tol=25.0):
+        """{pickup handle: handle of the destr/prop it rests on}: the pickup's position is inside the XY hull of one of the
+        object's solid collision boxes and within `tol` of that box's top. Rooftop water tanks, vents and antennas are pickups of
+        their own and do not follow their building; an editor moves, turns, copies and deletes them with it."""
+        through = self.paths_through()
+        tops = []
+        for o in objs:
+            if o["kind"] == "pickup" or not o["handle"]:
+                continue
+            seen = set()
+            for x in self.subtree(o["handle"]):
+                for p in through.get(x, ()):
+                    if p.addr in seen or p.trigger:
+                        continue
+                    seen.add(p.addr)
+                    c = self.path_corners(p)
+                    if c:
+                        tops.append((o["handle"], hull2d(c), max(q[2] for q in c)))
+        out = {}
+        for o in objs:
+            if o["kind"] != "pickup" or not o["handle"]:
+                continue
+            x, y, z = o["pos"]
+            for h, poly, top in tops:
+                if abs(z - top) <= tol and seg_in_poly((x, y), (x, y), poly, 1.0):
+                    out[o["handle"]] = h
+                    break
+        return out
+
     def _describe(self, node, kind, through, handle=None):
         img = self.img
         if handle is None:
@@ -1032,18 +1061,21 @@ def cmd_summary(disc, names):
 def cmd_objects(disc, name, csv_path=None):
     st = Stage(name, disc)
     objs = st.objects()
+    on = st.on_top(objs)
     for o in objs:
-        print("%-6s node %07x handle %-9s %07x id %#06x pos (%8.1f %8.1f %7.1f) heading %6.1f states %d paths %3d%s%s" % (
+        o["on"] = on.get(o["handle"], 0)
+        print("%-6s node %07x handle %-9s %07x id %#06x pos (%8.1f %8.1f %7.1f) heading %6.1f states %d paths %3d%s%s%s" % (
             o["kind"], o["node"], o["handle_op"], o["handle"] or 0, o["id"], o["pos"][0], o["pos"][1], o["pos"][2], o["heading"],
-            o["states"], o["n_paths"], " shared-handle" if o["handle_shared"] else "", " nested" if o["nested"] else ""))
+            o["states"], o["n_paths"], " shared-handle" if o["handle_shared"] else "", " nested" if o["nested"] else "",
+            " on %07x" % o["on"] if o["on"] else ""))
     if csv_path:
         keys = ["kind", "node", "handle", "handle_op", "id", "pos", "heading", "states", "handle_shared", "nested", "parents",
-                "n_nodes", "n_obj", "n_emit", "n_anim", "n_paths", "chain"]
+                "n_nodes", "n_obj", "n_emit", "n_anim", "n_paths", "on", "chain"]
         with open(csv_path, "w", newline="") as f:
             w = csv.writer(f)
             w.writerow(keys)
             for o in objs:
-                w.writerow(["%x" % o[k] if k in ("node", "handle") and o[k] else
+                w.writerow(["%x" % o[k] if k in ("node", "handle", "on") and o[k] else
                             "%.1f;%.1f;%.1f" % o[k] if k == "pos" else o[k] for k in keys])
     print("%d objects: %s" % (len(objs), dict(collections.Counter(o["kind"] for o in objs))))
 

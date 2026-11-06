@@ -16,8 +16,10 @@
   - `lvl.py summary|objects|collision|points|mrs|patch`: a stage as the level editor sees it: placeable objects (handle, position,
     states), the collision grid and paths (`--check` redoes every box and cell list by the disc's rules), the `PTS/*` points and the
     `.MRS` settings (`FORMATS.md`, "Stage objects", "Stage collision", "Stage points"). `Stage.footprint` gives the image ranges a
-    deep copy of an object takes. `patch <STAGE> <json>` applies a level patch (`MODS.md`, "Level patches") to the image the way the
-    game hook does and checks the collision of the result.
+    deep copy of an object takes. `objects` ends a pickup's line with `on <handle>` when it rests on that object (`Stage.on_top`:
+    inside the XY hull of one of its solid boxes, within 25 of the box's top; rooftop tanks and vents, and sidewalk items on a
+    building's base). `patch <STAGE> <json>` applies a level patch (`MODS.md`, "Level patches") to the image the way the game hook
+    does, cuts the vehicle and pedestrian paths (`cut_nets`) and checks the collision of the result.
   - `ngp.decode_mesh`: port of the native `decodeObject` (texture per section, ADC like the GS, sprites), used by `gltf.py`.
 - `.sh` scripts must be created by heredoc in bash; writing with Python on Windows leaves CRLF and the WSL `sh` breaks (`sed -i 's/\r$//'` fixes it).
 - The per-function state lives in `config/status.csv` (`python3 tools/progress.py`, ~12 s via WSL, needs `disc/`); the README has no progress block.
