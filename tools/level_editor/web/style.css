@@ -58,6 +58,12 @@ aside { background: var(--panel); padding: 8px; overflow: auto; min-height: 0; }
 #band { position: absolute; border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); pointer-events: none; }
 #overlay { position: absolute; top: 6px; right: 8px; background: color-mix(in srgb, var(--panel) 80%, transparent);
            border: 1px solid var(--line); border-radius: 4px; padding: 2px 8px; }
+#list li .h { overflow: hidden; text-overflow: ellipsis; }
+#list li .hd { margin-left: auto; color: var(--muted); font-size: 11px; }
+#list li.rule .h { color: var(--muted); font-style: italic; }
+#list li.sel .hd, #list li.sel.rule .h { color: inherit; }
+.small { font-size: 11px; }
+#props .row input:not([type]) { flex: 1; min-width: 0; }
 #list li.sel2 { background: color-mix(in srgb, var(--accent) 35%, transparent); }
 .note { color: var(--accent); margin-top: 4px; }
 .row.snap input[type=number] { width: 58px; }

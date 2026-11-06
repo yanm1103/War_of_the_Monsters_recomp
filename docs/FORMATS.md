@@ -148,7 +148,11 @@ Reader: `python tools/lvl.py objects <STAGE>` (kind, handle, position, heading, 
   two parents: each building is its own copy, while meshes, `LOD`s, `CONTROL`s, debris meshes and GS context blocks inside them are
   shared between buildings.
 - **Pickup** (cars, trees, posts): a root `GROUP` of their own holds `T|R` → `GROUP` (id 0x12C0..0x13EB) → `SWITCH` → `GROUP` →
-  shared `CONTROL`; the game draws each through the `Pickup`'s `_cs`.
+  shared `CONTROL`; the game draws each through the `Pickup`'s `_cs`. The type is `id1 - 0x1388` (`LevelPickups::createPickup`;
+  the disc uses 1..27): 9 `MissileTruckPickup`, 10 `TankPickup`, 11 and 12 `HeliPickup` (12 military), 24 `TurretPickup`, 25
+  `UfoPickup`, 27 `SubwayPickup`, 13 and 21 two-handed `RigidPickup`, 7 the one that impales, 14 the generator (shock), 3 the tanker
+  (shock wave); in types 2, 3, 15 and 26, `id2` bit 0 makes it a `CarPickup` that drives in the traffic. Type 5 is not built.
+- No object stores a name: the files hold numbers only (`texId`s, ids), and the ELF names classes, not objects.
 - **Prop:** the topmost transform under a world `GROUP` with an `OBJECT` below and no destructible or pickup inside.
 - **What the load keeps** (`dbInitDb` walks every root but `ANIM_MGR` with `dbsTraverse`, which visits every destructible state and
   both `CONTROL` children and passes each node's world position and matrix to `dbProcInteractive`):

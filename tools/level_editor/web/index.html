@@ -20,6 +20,7 @@
   <button id="check" title="Apply the patch to the disc's stage and check the collision"><i class="ic" style="--ic:url(vendor/mdi/check-circle-outline.svg)"></i>Check</button>
   <button id="save" title="Save mods/&lt;mod&gt;/levels/&lt;STAGE&gt;.json (Ctrl+S)"><i class="ic" style="--ic:url(vendor/mdi/content-save.svg)"></i>Save</button>
   <button id="test" class="primary" title="Open the game in this stage (training mode)"><i class="ic" style="--ic:url(vendor/mdi/play.svg)"></i>Test in game</button>
+  <button id="reload" disabled><i class="ic" style="--ic:url(vendor/mdi/refresh.svg)"></i>Reload in game</button>
   <span class="grow"></span>
   <button id="settings" class="icon" title="Settings"><i class="ic" style="--ic:url(vendor/mdi/cog.svg)"></i></button>
 </header>
@@ -48,6 +49,9 @@
       <h2 id="pTitle"></h2>
       <div class="muted" id="pSub"></div>
       <div class="note" id="pGroup"></div>
+      <div class="row"><span>Name</span><input id="pName" spellcheck="false" title="This object's name (kept in the patch; the game ignores it)"></div>
+      <div class="row"><span>Model</span><input id="pModel" spellcheck="false" title="The name of every object with this model, in every stage (your names file)"></div>
+      <div class="muted small" id="pModelNote"></div>
       <div class="row"><span>Position</span>
         <input id="px" type="number" step="1"><input id="py" type="number" step="1"><input id="pz" type="number" step="1"></div>
       <div class="row"><span>Heading</span><input id="ph" type="number" step="5"><span class="muted">deg</span></div>

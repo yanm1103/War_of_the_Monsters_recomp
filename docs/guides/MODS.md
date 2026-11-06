@@ -558,6 +558,8 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   prints each collision box, which shows where the building ends up). `heading`: the world heading in degrees (the `heading` column;
   turning is about the handle). `delete`: the object leaves the stage (drawing, collision, registration). `copies`: new copies, each with
   `pos` and an optional `heading`; they share the original's states and meshes, break on their own and get their own collision.
+- `names` (`{"<handle>": "Hotel"}`, at the top beside `objects`) and `name` in a copy: labels for the level editor; the game and
+  `lvl.py` ignore them. A patch with names only still carries `"objects": []`.
 - Works on destructibles (buildings), pickups (cars, trees, rooftop objects) and props. Copies: buildings without other destructibles
   inside them, props and pickups (a pickup copy has its own handle, id `GROUP` and `SWITCH`, so it breaks and is picked up on its
   own).
@@ -600,7 +602,14 @@ it in its own window instead (`pywebview` when installed, otherwise Edge/Chrome 
   **PgUp/PgDn** up and down (Shift: ten steps).
 - **Carry the objects on top** (on by default): moving, turning, copying, deleting or resetting a building does the same to the pickups
   that rest on it (`lvl.py objects`, `on <handle>`).
-- **List:** every object by handle, with a filter, the kinds, and **Changed** (only the edited ones; a dot marks them).
+- **List:** every object by name (its handle beside it), with a filter (name, rule name, handle, kind, id), the kinds, and
+  **Changed** (only the edited ones; a dot marks them).
+- **Names** (`tools/lvlnames.py`): the disc has no object names. An object shows, in order, its own **Name** (right panel; kept in
+  the patch's `names`), its **Model** name (every object with the same mesh and textures, in every stage; kept in
+  `~/.wotm_level_editor_names.json`, over the repo's `tools/level_editor/names.json`), or a rule's name in grey italics: a stage's
+  special objects (reactor stacks, quake buildings, pillars), the pickup type (with "traffic" or "parked" for the cars that can
+  drive), the destructible's hit point class (`Building`, `Small object`, `Tower`), `Prop` or `Terrain piece` (over 500 units).
+  The panel shows the size and how many objects of the stage share the model.
 - **Settings:** the theme, the game disc (the `.iso` itself, or an extracted folder with `LVL/` and `PTS/`), the mods folder and
   the game. With a `.iso`, a stage's files (`LVL/<STAGE>.NGP/.PTR/.TEX/.RTX`, its `PTS/` files and `RST/<STAGE>.MRS`) are copied
   once into the mod kit's cache of that image (`%LOCALAPPDATA%\WotM\modkit_disc\<key>`) and read from there; a `.bin`/`.cue`

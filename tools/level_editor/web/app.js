@@ -169,11 +169,11 @@ function headingOf(item) {
   return wrapDeg(item.rec.h0 + THREE.MathUtils.radToDeg(2 * Math.atan2(q.y, q.w)));
 }
 
-function makeCopy(rec, pos, heading) {
+function makeCopy(rec, pos, heading, iname = '') {
   const node = rec.node.clone(true);
   rec.node.parent.add(node);
   node.visible = true;
-  const item = { rec, node, copy: true, attached: [] };
+  const item = { rec, node, copy: true, attached: [], iname };
   itemOf.set(node, item);
   rec.copies.push(item);
   setWorld(node, pos, heading, rec);
@@ -196,15 +196,21 @@ function buildPatch() {
       if (Math.hypot(p[0] - rec.pw[0], p[1] - rec.pw[1], p[2] - rec.pw[2]) > 0.05) e.pos = p.map(r1);
       if (Math.abs(wrapDeg(h - rec.h0)) > 0.05) e.heading = r1(h);
     }
-    if (rec.copies.length) e.copies = rec.copies.map((c) => ({ pos: posOf(c).map(r1), heading: r1(headingOf(c)) }));
+    if (rec.copies.length) {
+      e.copies = rec.copies.map((c) => Object.assign({ pos: posOf(c).map(r1), heading: r1(headingOf(c)) }, c.iname ? { name: c.iname } : {}));
+    }
     if (Object.keys(e).length > 2) objects.push(e);
   }
-  return { objects };
+  // instance names: a key the game ignores (docs/guides/MODS.md, "Level patches")
+  const names = {};
+  for (const rec of recs) if (rec.item.iname) names[rec.info.handle] = rec.item.iname;
+  return Object.keys(names).length ? { objects, names } : { objects };
 }
 
 function resetAll() {
   for (const rec of recs) {
     for (const c of [...rec.copies]) removeCopy(c);
+    rec.item.iname = '';
     rec.deleted = false;
     rec.node.visible = true;
     setWorldMatrix(rec.node, rec.m0);
@@ -215,9 +221,13 @@ function applyPatch(patch) {
   for (const e of (patch && patch.objects) || []) {
     const rec = byHandle.get(normHandle(e.handle));
     if (!rec) { log(`patch: ${e.handle} is not an object of ${stageName}; kept out`, 'err'); continue; }
-    for (const c of e.copies || []) makeCopy(rec, c.pos, c.heading ?? rec.h0);
+    for (const c of e.copies || []) makeCopy(rec, c.pos, c.heading ?? rec.h0, c.name || '');
     if (e.delete) { rec.deleted = true; rec.node.visible = false; }
     else if (e.pos || e.heading !== undefined) setWorld(rec.node, e.pos || rec.pw, e.heading ?? rec.h0, rec);
+  }
+  for (const [h, n] of Object.entries((patch && patch.names) || {})) {
+    const rec = byHandle.get(normHandle(h));
+    if (rec) rec.item.iname = String(n);
   }
 }
 
@@ -260,7 +270,7 @@ async function loadStage(name) {
         const q0 = new THREE.Quaternion(), s0 = new THREE.Vector3(), p = new THREE.Vector3();
         o.matrixWorld.decompose(p, q0, s0);
         const rec = { info: i, node: o, p0: i.pos, pw: toGame(p), m0: o.matrixWorld.clone(), h0: i.heading, q0, s0, copies: [], deleted: false };
-        rec.item = { rec, node: o, copy: false, attached: [] };
+        rec.item = { rec, node: o, copy: false, attached: [], iname: '' };
         recs.push(rec);
         byHandle.set(normHandle(i.handle), rec);
         itemOf.set(o, rec.item);
@@ -312,10 +322,12 @@ function changed(rec) {
   const p = posOf(rec.item);
   return Math.hypot(p[0] - rec.pw[0], p[1] - rec.pw[1], p[2] - rec.pw[2]) > 0.05 || Math.abs(wrapDeg(headingOf(rec.item) - rec.h0)) > 0.05;
 }
+// name: the instance's (patch), else the model's (names files), else the rule's (tools/lvlnames.py)
+function nameOf(item) { return item.iname || item.rec.info.name; }
 function label(item) {
-  const i = item.rec.info;
-  return item.copy ? `${i.handle} copy ${item.rec.copies.indexOf(item) + 1}` : i.handle;
+  return item.copy ? `${nameOf(item)} (copy ${item.rec.copies.indexOf(item) + 1})` : nameOf(item);
 }
+const dimsText = (d) => (d || []).map((x) => Math.round(x)).join(' × ');
 function shownKinds() {
   return new Set([...document.querySelectorAll('.kinds input[data-kind]')].filter((x) => x.checked).map((x) => x.dataset.kind));
 }
@@ -324,7 +336,7 @@ function listed() {   // the items the list shows: kind boxes, "Changed" and the
   return items().filter((it) => {
     const i = it.rec.info;
     if (!kinds.has(i.kind) || (onlyChanged && !changed(it.rec))) return false;
-    return !f || `${label(it)} ${i.kind} ${i.id.toString(16)}`.toLowerCase().includes(f);
+    return !f || `${label(it)} ${i.rule} ${i.handle} ${i.kind} ${i.id.toString(16)}`.toLowerCase().includes(f);
   });
 }
 function refreshList() {
@@ -334,8 +346,10 @@ function refreshList() {
   for (const it of shown) {
     const i = it.rec.info;
     const li = document.createElement('li');
-    li.innerHTML = `<span class="k">${i.kind}</span><span class="h"></span>`;
+    li.innerHTML = `<span class="k">${i.kind}</span><span class="h"></span><span class="hd"></span>`;
     li.querySelector('.h').textContent = label(it);
+    li.querySelector('.hd').textContent = i.handle;
+    if (!it.iname && i.nameSrc === 'rule') li.classList.add('rule');
     if (it === sel) li.className = 'sel';
     else if (group.includes(it)) li.className = 'sel2';
     if (!it.copy && changed(it.rec)) li.classList.add('changed');
@@ -376,8 +390,16 @@ function showSel() {
     gizmo.attach(sel.node);
     const i = sel.rec.info;
     $('pTitle').textContent = label(sel);
-    $('pSub').textContent = `${i.kind} · id 0x${i.id.toString(16)} · ${i.states} states · ${i.paths} collision paths` +
-      (i.on ? ` · on ${i.on}` : '');
+    const onName = i.on && byHandle.get(normHandle(i.on)) ? nameOf(byHandle.get(normHandle(i.on)).item) : '';
+    $('pSub').textContent = `${i.handle} · ${i.kind} · ${dimsText(i.dims)} · id 0x${i.id.toString(16)} · ${i.states} states · ` +
+      `${i.paths} collision paths` + (i.on ? ` · on ${onName} (${i.on})` : '');
+    $('pName').value = sel.iname;
+    $('pName').placeholder = i.name;
+    $('pModel').value = i.nameSrc === 'model' ? i.name : '';
+    $('pModel').placeholder = i.rule;
+    $('pModel').disabled = !i.sig;
+    const same = recs.filter((r) => r.info.sig && r.info.sig === i.sig).length;
+    $('pModelNote').textContent = i.sig ? `the same model: ${same} in this stage, and in any stage it appears` : 'no mesh: no model name';
     $('pGroup').textContent = group.length > 1 ? `${group.length} selected: the others follow this one.` : '';
     $('onCount').textContent = group.reduce((n, it) => n + it.attached.length, 0);
     $('pWarn').textContent = i.paths === 0 && i.kind !== 'pickup' ? 'No collision of its own.' : '';
@@ -619,21 +641,45 @@ canvas.addEventListener('pointerup', (e) => {
 });
 
 // ------------------------------------------------------------------ saving and testing
+async function gameLog() {
+  try { return await fetch('/api/gamelog').then((r) => r.json()); } catch (e) { return { lines: [], running: false }; }
+}
 async function post(kind, save = true) {
   const mod = $('mod').value.trim();
   const body = { name: stageName, mod, patch: buildPatch(), training: true, save };
   try {
     log(`${kind}…`);
+    const before = kind === 'reload' ? (await gameLog()).lines.length : 0;   // the log keeps every load of this run
     const res = await api(kind === 'check' ? '/api/check' : `/api/${kind}`, body);
     log(res.lines, res.ok ? '' : 'err');
     if (res.saved) { log(`saved ${res.saved}`, 'ok'); dirty = false; }
-    if (res.launched) { log(`game: ${res.launched}`, 'ok'); watchGame(); }
+    if (res.launched) { log(`game: ${res.launched}`, 'ok'); setRunning(true); watchGame(0); }
+    if (res.reloading) { log('game: reloading the stage (it loads the saved file)', 'ok'); watchGame(before); }
     if (kind !== 'check' && mod !== cfg.mod) { cfg.mod = mod; api('/api/config', { mod }); }
     refreshList();
   } catch (e) {
     log(`${kind}: ${e.message}`, 'err');
   }
 }
+// what the stage patch did in the game: its [fase] lines after `seen`, until the load's last line or ~30 s
+async function watchGame(seen) {
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 1500));
+    const { lines = [], running } = await gameLog();
+    setRunning(running);
+    const fresh = lines.slice(seen);
+    for (const l of fresh) log(`game ${l}`, /ignorad|invalid|falh/i.test(l) ? 'err' : '');
+    seen = Math.max(seen, lines.length);
+    if (fresh.some((l) => /depois:|ignorad|desligad|sem patch/i.test(l)) || !running) return;
+  }
+  log('game: no stage load seen yet (is a fight running? the reload waits for one)', 'err');
+}
+function setRunning(on) {
+  $('reload').disabled = !on;
+  $('reload').title = on ? 'Save and reload this stage in the open game (F10 in the game does the same)'
+                         : 'Reload the stage in a game opened with Test in game';
+}
+setInterval(async () => setRunning((await gameLog()).running), 4000);
 
 // ------------------------------------------------------------------ wiring
 $('stage').onchange = (e) => {
@@ -655,18 +701,7 @@ $('testDlg').addEventListener('close', () => {
   const v = $('testDlg').returnValue;
   if (v === 'save' || v === 'nosave') post('test', v === 'save');
 });
-// what the stage patch did in the game: the [fase] lines of its log, a few seconds after the launch
-async function watchGame() {
-  let seen = 0;
-  for (let i = 0; i < 20; i++) {
-    await new Promise((r) => setTimeout(r, 1500));
-    let lines = [];
-    try { lines = (await fetch('/api/gamelog').then((r) => r.json())).lines || []; } catch (e) { return; }
-    for (const l of lines.slice(seen)) log(`game ${l}`, /ignorad|invalid|falh/i.test(l) ? 'err' : '');
-    seen = Math.max(seen, lines.length);
-    if (lines.some((l) => /depois:|ignorad|desligad/i.test(l))) return;
-  }
-}
+$('reload').onclick = () => post('reload');
 $('tMove').onclick = () => setTool('translate');
 $('tTurn').onclick = () => setTool('rotate');
 for (const id of ['snap', 'snapMove', 'snapTurn']) $(id).onchange = setSnap;
@@ -682,6 +717,26 @@ $('dup').onclick = duplicate;
 $('del').onclick = remove;
 $('reset').onclick = resetSel;
 for (const id of ['px', 'py', 'pz', 'ph']) $(id).onchange = editFromInputs;
+$('pName').onchange = () => {
+  if (!sel) return;
+  snapshot();
+  sel.iname = $('pName').value.trim();
+  showSel();
+};
+$('pModel').onchange = async () => {
+  if (!sel || !sel.rec.info.sig) return;
+  const i = sel.rec.info, name = $('pModel').value.trim();
+  try {
+    const r = await api('/api/names', { sig: i.sig, name, kind: i.kind, ptype: i.ptype, dims: i.dims });
+    for (const rec of recs) {
+      if (rec.info.sig !== i.sig) continue;
+      rec.info.name = name || rec.info.rule;
+      rec.info.nameSrc = name ? 'model' : 'rule';
+    }
+    log(name ? `model named "${name}" (${r.file})` : `model name removed (${r.file})`, 'ok');
+  } catch (e) { log(`name: ${e.message}`, 'err'); }
+  showSel();
+};
 $('settings').onclick = () => {
   $('sDisc').value = cfg.disc || ''; $('sMods').value = cfg.mods || ''; $('sGame').value = cfg.game || '';
   $('sElf').value = cfg.elf || ''; $('sCwd').value = cfg.cwd || ''; $('sIso').value = cfg.iso || '';
@@ -729,6 +784,7 @@ function init(r) {
   const s = $('stage');
   const prev = stageName || 'CENTRAL';
   s.innerHTML = r.stages.map((x) => `<option value="${x.name}">${x.title} (${x.name})</option>`).join('');
+  setRunning(!!r.gameRunning);
   if (r.discError || !r.stages.length) { log(r.discError || `no stages in ${cfg.disc}: set the game disc in Settings`, 'err'); return; }
   s.value = r.stages.some((x) => x.name === prev) ? prev : r.stages[0].name;
   loadStage(s.value);

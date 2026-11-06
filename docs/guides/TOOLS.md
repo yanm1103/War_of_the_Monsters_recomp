@@ -24,6 +24,9 @@
     its handle, extras with kind, from, heading, states and `on`), its broken states as hidden `stateN` children, the rest under
     `rootN` (extras `ident`: 1 the world, 2 the sky). Meshes are shared between instances. The editor itself is
     `tools/level_editor/` (`MODS.md`, "Level editor"; three.js r160 vendored in `web/vendor/`, MIT).
+  - `lvlnames.py <STAGE>`: names for the `lvl.py` objects (level editor): a content signature per object (vertices in the handle's
+    frame and the decoded pixels of its textures, the same for the same model in any stage) and the rule names (special ids, pickup
+    type, hit point class, size); model names by signature in `tools/level_editor/names.json`.
   - `ngp.decode_mesh`: port of the native `decodeObject` (texture per section, ADC like the GS, sprites), used by `gltf.py`.
 - `.sh` scripts must be created by heredoc in bash; writing with Python on Windows leaves CRLF and the WSL `sh` breaks (`sed -i 's/\r$//'` fixes it).
 - The per-function state lives in `config/status.csv` (`python3 tools/progress.py`, ~12 s via WSL, needs `disc/`); the README has no progress block.

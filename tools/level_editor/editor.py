@@ -38,10 +38,14 @@ sys.path.insert(0, TOOLS)
 import hashlib  # noqa: E402
 import lvl      # noqa: E402
 import lvlglb   # noqa: E402
+import lvlnames  # noqa: E402
 import modkit   # noqa: E402 - the disc as a folder or a .iso (disc_iso, disc_cache, disc_listdir), as the mod kit reads it
 
 WEB = os.path.join(HERE, "web")
 CONFIG = os.path.join(os.path.expanduser("~"), ".wotm_level_editor.json")
+# model names (by content signature, tools/lvlnames.py): the repo's, and the user's over them
+REPO_NAMES = os.path.join(HERE, "names.json")
+USER_NAMES = os.path.join(os.path.expanduser("~"), ".wotm_level_editor_names.json")
 CACHE = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), ".cache"),
                      "WotM" if os.environ.get("LOCALAPPDATA") else "", "level_editor")
 # m_levelNum of each stage file (GameLevelNames; native/runtime/wotm_save.inc kLevels): WOTM_MATCH=<monster>,<levelNum>
@@ -165,14 +169,43 @@ class Stages:
                 self.info[key] = (st, objs, on)
             return self.info[key]
 
+    def facts(self, disc, name):
+        """lvlnames.facts per object (signature, size, rule inputs), kept on disk next to the scene (1 to 10 s per stage)."""
+        st, objs, on = self.objects(disc, name)
+        key = (disc, name, "facts")
+        with self.lock:
+            if key in self.info:
+                return self.info[key]
+        root = stage_root(disc, name)
+        ngp_path = os.path.join(root, "LVL", name + ".NGP")
+        stamp = "%d-%d-%d-%d" % (os.path.getsize(ngp_path), int(os.path.getmtime(ngp_path)), module_stamp(lvlnames),
+                                 lvlnames.SIG_VERSION)
+        path = os.path.join(CACHE, "%s-%s.facts.json" % (name, disc_key(disc)))
+        facts = None
+        try:
+            with open(path, encoding="utf-8") as f:
+                d = json.load(f)
+            if d.get("stamp") == stamp and len(d.get("facts", ())) == len(objs):
+                facts = d["facts"]
+        except (OSError, ValueError):
+            pass
+        if facts is None:
+            facts = lvlnames.facts(st, objs, root)
+            os.makedirs(CACHE, exist_ok=True)
+            with open(path + ".tmp", "w", encoding="utf-8") as f:
+                json.dump({"stamp": stamp, "facts": facts}, f)
+            os.replace(path + ".tmp", path)
+        with self.lock:
+            self.info[key] = facts
+        return facts
+
     def glb(self, disc, name):
         st, objs, on = self.objects(disc, name)
         root = stage_root(disc, name)
         ngp_path = os.path.join(root, "LVL", name + ".NGP")
-        stamp = "%d-%d-%d" % (os.path.getsize(ngp_path), int(os.path.getmtime(ngp_path)), lvlglb_stamp())
+        stamp = "%d-%d-%d" % (os.path.getsize(ngp_path), int(os.path.getmtime(ngp_path)), module_stamp(lvlglb))
         os.makedirs(CACHE, exist_ok=True)
-        # one cache file per disc and stage (two discs never share a scene)
-        path = os.path.join(CACHE, "%s-%s.glb" % (name, hashlib.sha1(os.path.abspath(disc).lower().encode()).hexdigest()[:8]))
+        path = os.path.join(CACHE, "%s-%s.glb" % (name, disc_key(disc)))   # two discs never share a scene
         with self.lock:
             try:
                 with open(path + ".stamp") as f:
@@ -187,24 +220,54 @@ class Stages:
         return path
 
 
-def lvlglb_stamp():
-    """The exporter's version for the scene cache: lvlglb.py's date (in the frozen exe, the exe's)."""
-    p = getattr(lvlglb, "__file__", None)
+def module_stamp(mod):
+    """A tool's version for the caches: its .py's date (in the frozen exe, the exe's)."""
+    p = getattr(mod, "__file__", None)
     p = p if p and os.path.exists(p) else sys.executable
     return int(os.path.getmtime(p))
+
+
+def disc_key(disc):
+    return hashlib.sha1(os.path.abspath(disc).lower().encode()).hexdigest()[:8]
 
 
 STAGES = Stages()
 
 
-def describe(objs, on):
+def load_names():
+    return lvlnames.load_names(REPO_NAMES, USER_NAMES)
+
+
+def set_model_name(sig, name, info):
+    """Writes (or, empty, removes) one model name in the user's names file."""
+    try:
+        with open(USER_NAMES, encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        d = {}
+    d.setdefault("version", 1)
+    d["sig"] = lvlnames.SIG_VERSION
+    models = d.setdefault("models", {})
+    if name:
+        models[sig] = dict({k: info[k] for k in ("kind", "type", "dims") if k in info}, name=name)
+    else:
+        models.pop(sig, None)
+    with open(USER_NAMES + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(d, f, indent=1)
+    os.replace(USER_NAMES + ".tmp", USER_NAMES)
+
+
+def describe(stage, objs, on, facts, names):
     out = []
-    for o in objs:
+    for o, f in zip(objs, facts):
         h = o["handle"] or o["node"]
+        name, src = lvlnames.name_of(stage, o["kind"], f, names)
         out.append({"handle": "0x%X" % h, "kind": o["kind"], "pos": [round(x, 1) for x in o["pos"]],
                     "heading": round(o["heading"], 1), "id": o["id"], "states": o["states"], "paths": o["n_paths"],
                     "movable": bool(o["handle"]),
-                    "on": "0x%X" % on[o["handle"]] if o["handle"] in on else ""})
+                    "on": "0x%X" % on[o["handle"]] if o["handle"] in on else "",
+                    "name": name, "nameSrc": src, "rule": lvlnames.rule_name(stage, o["kind"], f, names),
+                    "sig": f["sig"] or "", "dims": f["dims"], "ptype": f.get("ptype")})
     return out
 
 
@@ -255,12 +318,56 @@ def game_stage_lines(cfg):
         return []
 
 
+def save_patch(cfg, mod, name, patch):
+    """Writes (or, empty, removes) mods/<mod>/levels/<STAGE>.json; through a .tmp, since a running game may read it at any time."""
+    path = patch_path(cfg, mod, name)
+    if patch.get("objects") or patch.get("names"):
+        patch = dict(patch, objects=patch.get("objects") or [])   # the game logs "sem a lista objects" without it
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(patch, f, indent=1)
+        os.replace(path + ".tmp", path)
+        return path
+    if os.path.exists(path):
+        os.remove(path)
+        return "removed " + path
+    return None
+
+
+def patch_winner(cfg, mod, name):
+    """The mod whose levels/<STAGE>.json the game uses: with the same file in several mods, the last by name (case aside)."""
+    have = [m for m in list_mods(cfg) if os.path.isfile(patch_path(cfg, m, name))]
+    if mod not in have:
+        have.append(mod)
+    return sorted(have, key=str.lower)[-1]
+
+
+# The game the editor opened, and the file it watches for "reload the stage" (WOTM_LEVELRELOAD: "<STAGE> <counter>")
+GAME = {"proc": None, "count": 0}
+RELOAD_FILE = os.path.join(CACHE, "reload.txt")
+
+
+def game_running():
+    p = GAME["proc"]
+    return p is not None and p.poll() is None
+
+
+def reload_game(name):
+    if not game_running():
+        raise RuntimeError("no game opened by the editor is running: use Test in game")
+    GAME["count"] += 1
+    with open(RELOAD_FILE + ".tmp", "w", encoding="utf-8") as f:
+        f.write("%s %d\n" % (name, GAME["count"]))
+    os.replace(RELOAD_FILE + ".tmp", RELOAD_FILE)
+
+
 def launch_game(cfg, name, training):
     if not cfg.get("game") or not os.path.exists(cfg["game"]):
         raise RuntimeError("game not found: set it in Settings (wotm.exe)")
     env = dict(os.environ)
+    os.makedirs(CACHE, exist_ok=True)
     env.update({"WOTM_MODS": os.path.abspath(cfg["mods"]), "WOTM_MATCH": "3,%d" % LEVEL_NUM.get(name, 1),
-                "WOTM_FULLSCREEN": "0", "WOTM_LEVELPATCH": "1"})
+                "WOTM_FULLSCREEN": "0", "WOTM_LEVELPATCH": "1", "WOTM_LEVELRELOAD": RELOAD_FILE})
     if training:
         env["WOTM_TRAINING"] = "1"
     if cfg.get("elf"):
@@ -275,12 +382,13 @@ def launch_game(cfg, name, training):
     # with the ELF (the clone's runtime) stderr is the log; with no argument wotm.exe writes wotm.log itself
     os.makedirs(CACHE, exist_ok=True)
     log = open(game_log(cfg), "w") if cfg.get("elf") else subprocess.DEVNULL
-    subprocess.Popen(args, cwd=cwd, env=env, stdout=subprocess.DEVNULL, stderr=log)
+    GAME["proc"] = subprocess.Popen(args, cwd=cwd, env=env, stdout=subprocess.DEVNULL, stderr=log)
     return " ".join(args)
 
 
 def init_reply(cfg):
-    return {"config": cfg, "stages": STAGES.list(cfg["disc"]), "mods": list_mods(cfg), "discError": disc_error(cfg["disc"])}
+    return {"config": cfg, "stages": STAGES.list(cfg["disc"]), "mods": list_mods(cfg), "discError": disc_error(cfg["disc"]),
+            "gameRunning": game_running()}
 
 
 # ------------------------------------------------------------------------------------------------------------- server
@@ -322,9 +430,10 @@ class Handler(BaseHTTPRequestHandler):
                             patch = json.load(f)
                     except (OSError, ValueError):
                         pass
-                return self.send(200, {"objects": describe(objs, on), "patch": patch})
+                facts = STAGES.facts(cfg["disc"], q["name"])
+                return self.send(200, {"objects": describe(q["name"], objs, on, facts, load_names()), "patch": patch})
             if u.path == "/api/gamelog":
-                return self.send(200, {"lines": game_stage_lines(cfg)})
+                return self.send(200, {"lines": game_stage_lines(cfg), "running": game_running()})
             if u.path == "/api/glb":
                 with open(STAGES.glb(cfg["disc"], q["name"]), "rb") as f:
                     return self.send(200, f.read(), "model/gltf-binary")
@@ -351,27 +460,34 @@ class Handler(BaseHTTPRequestHandler):
                 cfg.update({k: v for k, v in b.items() if k in ("disc", "mods", "game", "elf", "cwd", "iso", "theme", "mod")})
                 save_config(cfg)
                 return self.send(200, init_reply(cfg))
+            if self.path == "/api/names":
+                if not b.get("sig"):
+                    return self.send(400, {"error": "this object has no mesh to name as a model"})
+                set_model_name(b["sig"], (b.get("name") or "").strip(),
+                               {"kind": b.get("kind"), "type": b.get("ptype"), "dims": b.get("dims")})
+                return self.send(200, {"ok": True, "file": USER_NAMES})
             if self.path == "/api/check":
                 return self.send(200, check_patch(cfg["disc"], b["name"], b["patch"]))
-            if self.path in ("/api/save", "/api/test"):
+            if self.path in ("/api/save", "/api/test", "/api/reload"):
                 mod, name = b["mod"].strip(), b["name"]
                 if not mod or any(c in mod for c in "\\/:*?\"<>|") or mod.startswith(("_", ".")):
                     return self.send(400, {"error": "pick a mod name (letters, digits, no leading _)"})
+                if self.path == "/api/reload" and not game_running():
+                    return self.send(400, {"error": "no game opened by the editor is running: use Test in game"})
                 if self.path == "/api/test" and not b.get("save", True):
-                    return self.send(200, {"ok": True, "lines": [],
-                                           "launched": launch_game(cfg, name, b.get("training", True))})
+                    return self.send(200, {"ok": True, "lines": [], "launched": launch_game(cfg, name, b.get("training", True))})
                 res = check_patch(cfg["disc"], name, b["patch"])
-                path = patch_path(cfg, mod, name)
-                os.makedirs(os.path.dirname(path), exist_ok=True)
-                if b["patch"].get("objects"):
-                    with open(path, "w", encoding="utf-8") as f:
-                        json.dump(b["patch"], f, indent=1)
-                    res["saved"] = path
-                elif os.path.exists(path):
-                    os.remove(path)
-                    res["saved"] = "removed " + path
+                res["saved"] = save_patch(cfg, mod, name, b["patch"])
+                win = patch_winner(cfg, mod, name)
+                if win != mod:
+                    res["lines"].append("warning: mod \"%s\" also has levels/%s.json and the game uses that one "
+                                        "(the last mod by name wins)" % (win, name))
+                    res["ok"] = False
                 if self.path == "/api/test":
                     res["launched"] = launch_game(cfg, name, b.get("training", True))
+                if self.path == "/api/reload":
+                    reload_game(name)
+                    res["reloading"] = True
                 return self.send(200, res)
             return self.send(404, {"error": "not found"})
         except Exception as e:      # noqa: BLE001
