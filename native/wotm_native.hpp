@@ -1253,6 +1253,7 @@ public:
 
     void invalidate() {
         cache_.clear();
+        texPackets_.clear();   // o .TEX de mod de uma fase pode ter mudado entre duas cargas
         for (auto &kv : tex_) if (kv.second.id) UnloadTexture(kv.second);
         tex_.clear();
         for (auto &kv : fontTex_) if (kv.second.id) UnloadTexture(kv.second);

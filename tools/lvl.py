@@ -8,7 +8,8 @@
   python tools/lvl.py mrs CENTRAL                     # RST/<STAGE>.MRS (background, fog, lights, time of day)
   python tools/lvl.py peds CENTRAL                    # pedestrian groups (0xBB8 roots) and the segments they walk
   python tools/lvl.py patch CENTRAL mods/X/levels/CENTRAL.json  # apply a level patch to the image and check its collision
-  options: --disc DIR (default: disc/ at the repo root); patch --shallow copies the way WOTM_LEVELPATCH_SHALLOW=1 does
+  options: --disc DIR (default: disc/ at the repo root); patch --shallow copies the way WOTM_LEVELPATCH_SHALLOW=1 does;
+  patch --mod DIR: the mod whose props/ the "props" models come from (default: the folder above the JSON's levels/)
 
 Formats: docs/FORMATS.md (".NGP image", "Fixups", "Stage collision", "Stage objects", "Stage points"). The rules this tool
 checks are the ones a level patch has to keep when it moves, removes or copies an object:
@@ -781,6 +782,17 @@ def _number(x):
     return isinstance(x, (int, float))
 
 
+def _child_nocase(d, name):
+    """The entry of directory d named `name` without regard to case (the hook's childNoCase), or None."""
+    try:
+        for f in sorted(os.listdir(d)) if d else ():
+            if f.upper() == name.upper():
+                return os.path.join(d, f)
+    except OSError:
+        pass
+    return None
+
+
 def registers_id(img, n):
     """The node has an id dbProcInteractive acts on (besides INTERACTIVE_STATE and DESTRUCTIBLE, which always register)."""
     i, o = img.u32(n) >> 18, img.u32(n) & 63
@@ -799,6 +811,10 @@ class LevelPatch:
     def __init__(self, st, shallow=False):
         self.st, self.img = st, st.img
         self.img.d = bytearray(self.img.d)
+        # the arena starts 0x80-aligned, like the hook's (a prop's packets are 0x80-aligned): the same allocations take the
+        # same bytes on both sides
+        self.img.d.extend(bytes((-st.end) % 0x80))
+        self.arena = st.end + (-st.end) % 0x80
         self.cells = {a: set(c) for a, c in st.grid.cells_of.items()}
         self.free = []
         self.log = []
@@ -827,7 +843,10 @@ class LevelPatch:
         self.w32(slot, (self.img.u32(slot) & ~MASK) | target)
 
     def arena_free(self):
-        return self.st.end + ARENA_SIZE - (self.img.base + len(self.img.d))
+        return self.arena + ARENA_SIZE - (self.img.base + len(self.img.d))
+
+    def arena_top(self):
+        return self.img.base + len(self.img.d)
 
     def alloc(self, size, align=4):
         d = self.img.d
@@ -835,8 +854,13 @@ class LevelPatch:
         if pad + size > self.arena_free():
             raise PatchError("the 1 MB arena is full")
         d.extend(bytes(pad + size))
-        self.stats["arena bytes"] = self.img.base + len(d) - self.st.end
+        self.stats["arena bytes"] = self.img.base + len(d) - self.arena
         return self.img.base + len(d) - size
+
+    def rollback(self, top):
+        """Gives back what the arena took since arena_top() was `top` (an entry refused after its first allocation)."""
+        del self.img.d[top - self.img.base:]
+        self.stats["arena bytes"] = top - self.arena
 
     def op(self, n):
         return self.img.u32(n) & 63
@@ -1478,6 +1502,189 @@ class LevelPatch:
             self.log.append("interactives: %d of %d before the patch, %d after (%d taken at load, %d debris pickups at most, "
                             "%d spare)" % (sum(a), INTERACTIVES, sum(b), b[0], b[1], b[2]))
 
+    def _prop_chains(self, root):
+        """Node chains from a prop's root down to each collision leaf (op 10, 11, 42), pre-order in slot order."""
+        out = []
+
+        def walk(n, chain, depth):
+            if depth > 16:
+                return
+            if self.op(n) in (10, 11, 42):
+                out.append(chain + [n])
+                return
+            for c in children(self.img, n):
+                walk(c, chain + [n], depth + 1)
+        walk(root, [], 0)
+        return out
+
+    def apply_props(self, patch, mod_dir):
+        """The patch's "props" (docs/guides/MODS.md, "Level patches"), after "objects" and before "peds": each entry {"id",
+        "model", "pos": [x, y, z], "heading", "name"} places a prop of <mod_dir>/props/<MODEL>/ (tools/lvlprop.py build). Each
+        model goes once to the arena (0x80-aligned), relocated, its texture slots turned into the stage's texIds and its
+        contexts copied from the first stage OBJECT (by address) with that texId; each entry is a TRANSLATE (no heading, or 0)
+        or a ROTATE over the model's root. They all hang from a new GROUP (flags 7) in the world GROUP's first slot, and each
+        collision leaf of each entry gets a path [world, props, T|R, root, ..., leaf] with its box by the 8-corner rule, its
+        cells and a footprint for cut_nets. Refused, with a line and nothing left in the arena: a model missing or of another
+        stage, a texId the stage's .TEX does not have or no OBJECT draws with, an entry whose box leaves the grid, a model
+        whose entries do not fit in the arena."""
+        props = patch.get("props") or []
+        if not props or not isinstance(props, list):
+            return
+        import lvlprop
+        st, img, g = self.st, self.img, self.st.grid
+        start = self.arena_top()
+        models, order = {}, []
+        for k, e in enumerate(props):
+            try:
+                if not isinstance(e, dict):
+                    raise PatchError("not an object")
+                name = str(e.get("model") or "").upper()
+                p3 = e.get("pos")
+                if not (isinstance(p3, list) and len(p3) == 3 and all(_number(x) for x in p3)):
+                    raise PatchError("without \"pos\" [x, y, z]")
+                hd = e.get("heading")
+                hd = float(hd) if _number(hd) else 0.0
+                if name not in models:
+                    models[name] = []
+                    order.append(name)
+                models[name].append((k, e, [float(x) for x in p3], hd))
+            except PatchError as err:
+                self.log.append("prop %d skipped: %s" % (k, err))
+                self.stats["skipped"] += 1
+        have = objs = None
+        made, summary = [], []          # made: (T|R, model root, chains)
+        reserve_group = 0x20 + 4 + 15
+        for name in order:
+            ents = models[name]
+            top = self.arena_top()
+            try:
+                pdir = _child_nocase(_child_nocase(mod_dir, "props"), name)
+                if not pdir or not os.path.isfile(os.path.join(pdir, "prop.json")):
+                    raise PatchError("model %s not in %s/props" % (name, os.path.basename(os.path.normpath(mod_dir))))
+                try:
+                    prop = lvlprop.load_prop(pdir)
+                except (lvlprop.PropError, OSError, ValueError, KeyError) as err:
+                    raise PatchError("model %s: %s" % (name, err))
+                if prop.stage.upper() != st.name:
+                    raise PatchError("model %s is a prop of %s, not of %s" % (name, prop.stage, st.name))
+                if have is None:
+                    have = lvlprop.stage_tex_ids(st.disc, st.name)
+                    objs = sorted(o for o in st.root_of if self.op(o) == 0)
+                    self.log.append("props: the stage's .TEX has %d textures" % len(have))
+                ctx = {}
+                for t in prop.textures:
+                    tid = int(t["texId"])
+                    if tid not in have:
+                        raise PatchError("model %s: tex%d is not in %s.TEX" % (name, tid, st.name))
+                    found = lvlprop.stage_ctx(img, tid, objs)
+                    if found is None:
+                        raise PatchError("model %s: no OBJECT of the stage draws with tex%d" % (name, tid))
+                    ctx[tid] = found
+                slots = {int(t["slot"]) for t in prop.textures}
+                for k, lst in ((1, prop.ptr[1]), (2, prop.ptr[2])):
+                    for off in lst:
+                        s = struct.unpack_from("<H" if k == 1 else "<I", prop.ngp, off)[0]
+                        if s not in slots:
+                            raise PatchError("model %s: slot %d without a texture in prop.json" % (name, s))
+                at = self.alloc(prop.size, 0x80)
+                img.d[at - img.base:at - img.base + prop.size] = prop.resolve(at, lambda tid: ctx[tid][1])
+                root = at + prop.root
+                chains = self._prop_chains(root)
+                mine, need = [], 0
+                for k, e, pos, hd in ents:
+                    t_top = self.arena_top()
+                    turn = abs(math.remainder(hd, 360.0)) > 1e-6
+                    t = self.alloc(0x54 if turn else 0x20, 16)
+                    if turn:
+                        cs, sn = math.cos(math.radians(hd)), math.sin(math.radians(hd))
+                        self.w32(t, 4)
+                        self.w32(t + 8, 1)
+                        for r, row in enumerate(((cs, sn, 0, 0), (-sn, cs, 0, 0), (0, 0, 1, 0), (pos[0], pos[1], pos[2], 1))):
+                            for c in range(4):
+                                self.wf32(t + 0x10 + 16 * r + 4 * c, row[c])
+                        self.w32(t + 0x50, root)
+                    else:
+                        self.w32(t, 3)
+                        self.w32(t + 8, 1)
+                        for i in range(3):
+                            self.wf32(t + 0x10 + 4 * i, pos[i])
+                        self.w32(t + 0x1C, root)
+                    cost, bad = 4, None
+                    for ch in chains:
+                        lb = aabb(leaf_points(img, ch[-1]))
+                        if not lb:
+                            bad = "leaf %07x without points" % ch[-1]
+                            break
+                        m = chain_matrix(img, [t] + ch[:-1], with_scale=False)
+                        bb = aabb([ngp.xform(m, (x, y, z)) for x in (lb[0][0], lb[1][0]) for y in (lb[0][1], lb[1][1])
+                                   for z in (lb[0][2], lb[1][2])])
+                        if bb[0][0] < g.min_x or bb[0][1] < g.min_y or bb[1][0] > g.max_x or bb[1][1] > g.max_y:
+                            bad = "box (%.1f %.1f)-(%.1f %.1f) leaves the grid (%.1f %.1f)-(%.1f %.1f)" % (
+                                bb[0][0], bb[0][1], bb[1][0], bb[1][1], g.min_x, g.min_y, g.max_x, g.max_y)
+                            break
+                        cost += 0x24 + 4 * (len(ch) + 3) + 3 + 8 * len(g.cells_for_box(bb[0], bb[1]))
+                    if bad:
+                        self.rollback(t_top)
+                        self.log.append("prop %d (%s) skipped: %s" % (k, e.get("id") or name, bad))
+                        self.stats["skipped"] += 1
+                        continue
+                    mine.append((t, root, chains))
+                    need += cost
+                if not mine:
+                    self.rollback(top)
+                    continue
+                if need + (0 if made else reserve_group) > self.arena_free():
+                    self.rollback(top)
+                    raise PatchError("model %s: %d entries take up to %d bytes more, the arena has %d left" % (
+                        name, len(mine), need, self.arena_free()))
+                made += mine
+                summary.append("%s x%d (%d bytes)" % (name, len(mine), prop.size))
+                self.stats["prop models"] += 1
+                for t in prop.textures:
+                    self.log.append("props: %s tex%d <- context of OBJECT %07x" % (name, int(t["texId"]), ctx[int(t["texId"])][0]))
+            except PatchError as err:
+                if self.arena_top() != top:
+                    self.rollback(top)
+                self.log.append("props of model %s skipped (%d): %s" % (name or "?", len(ents), err))
+                self.stats["skipped"] += len(ents)
+        if not made:
+            return
+        w = st.world
+        slot = child_slots(img, w)[0]
+        old = img.u32(slot) & MASK
+        wrap = self.alloc(0x20 + 4 * (1 + len(made)), 16)
+        self.w32(wrap, 1)
+        self.w32(wrap + 4, img.u32(w + 4))
+        self.w16(wrap + 8, 1 + len(made))
+        self.w16(wrap + 0xA, 7)                     # visual | collision | noFOV
+        self.w32(wrap + 0x20, old)
+        for i, (t, _r, _c) in enumerate(made):
+            self.w32(wrap + 0x24 + 4 * i, t)
+        self.set_ptr(slot, wrap)
+        st.parents[wrap], st.parents[old] = [w], [wrap]
+        self.through.add(wrap)
+        for t, root, chains in made:
+            st.parents[t] = [wrap]
+            st.parents[root].append(t)
+            for ch in chains:
+                nodes = [w, wrap, t] + ch
+                pa = self.alloc(0x24 + 4 * len(nodes))
+                self.w32(pa + 0x1C, len(nodes))
+                for i, n in enumerate(nodes):
+                    self.w32(pa + 0x24 + 4 * i, n)
+                wc = st.path_corners(Path(img, pa))
+                bb = aabb(wc)
+                self.footprints.append((hull2d(wc), bb[0][2], bb[1][2]))
+                for i in range(3):
+                    self.wf32(pa + 4 * i, bb[0][i])
+                    self.wf32(pa + 0xC + 4 * i, bb[1][i])
+                cells = g.cells_for_box(bb[0], bb[1])
+                self.set_cells(pa, cells)
+                self.redone[pa] = (bb, len(cells), "prop")
+                self.stats["prop paths"] += 1
+            self.stats["props"] += 1
+        self.log.append("props: %s; %d bytes of the arena" % (", ".join(summary), self.arena_top() - start))
+
     def apply_peds(self, patch, nets):
         """The patch's "peds" (docs/guides/MODS.md, "Level patches"), after "objects" and before cut_nets: "segments" replaces the
         pedestrian net (nets["ped"], changed in place), "groups" moves, recounts or deletes the disc's groups (handle + from) and
@@ -1771,17 +1978,22 @@ def check_collision(st, out=None):
     return box_bad == 0 and cell_ok == len(g.paths)
 
 
-def cmd_patch(disc, name, path, shallow=False):
-    """Apply a level patch to the disc image, print what changed and check the collision of the result (and of the copies)."""
+def cmd_patch(disc, name, path, shallow=False, mod_dir=None):
+    """Apply a level patch to the disc image, print what changed and check the collision of the result (and of the copies).
+    mod_dir: the mod folder the "props" models are looked up in (default: the folder above the JSON's levels/)."""
     st = Stage(name, disc)
     with open(path, encoding="utf-8") as f:
         patch = json.load(f)
     lp = LevelPatch(st, shallow)
     lp.apply(patch)
+    try:
+        lp.apply_props(patch, mod_dir or os.path.dirname(os.path.dirname(os.path.abspath(path))))
+    except PatchError as err:           # only a full arena gets here
+        lp.log.append("props: stopped halfway: %s" % err)
     pts = stage_points(disc, st.name)
     nets = {"fodder": net_from_points(pts.get("FOP", [])), "ped": net_from_points(pts.get("PED", []))}
     try:
-        lp.apply_peds(patch, nets)      # the hook's order: objects, pedestrians, then the path cuts
+        lp.apply_peds(patch, nets)      # the hook's order: objects, props, pedestrians, then the path cuts
     except PatchError as err:           # only a full arena gets here
         lp.log.append("pedestrians: stopped halfway: %s" % err)
     for line in lp.log:
@@ -1834,6 +2046,11 @@ def main(argv):
         i = argv.index("--disc")
         disc = argv[i + 1]
         del argv[i:i + 2]
+    mod_dir = None
+    if "--mod" in argv:
+        i = argv.index("--mod")
+        mod_dir = argv[i + 1]
+        del argv[i:i + 2]
     csv_path = None
     if "--csv" in argv:
         i = argv.index("--csv")
@@ -1860,7 +2077,7 @@ def main(argv):
         else:
             cmd_mrs(disc, names[0])
     elif cmd == "patch" and len(args) == 3:
-        return cmd_patch(disc, args[1].upper(), args[2], "--shallow" in flags)
+        return cmd_patch(disc, args[1].upper(), args[2], "--shallow" in flags, mod_dir)
     else:
         print(__doc__)
         return 1

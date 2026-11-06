@@ -156,3 +156,51 @@ usa da arena.
 - Textura nova, `coll_*`/`hull_*` (pulados com aviso), destrutível (`state<N>_*` recusado), malha com skin (recusada).
 - Uma caixa de espessura zero para prop plano (os quads: y 0..0); talvez valha uma espessura mínima no passo 3.
 - Tudo o que é no jogo: `apply_props`, R1, R3, R5, R11, R12; a escala padrão só se confirma com o R8b no jogo.
+
+## Passo 1, carga: a chave `props` no jogo e no `lvl.py`
+Código: `native/runtime/wotm_levelprops.inc` (`applyProps`, incluído pelo `wotm_levelpatch.inc` entre `objects` e `peds`) e
+`LevelPatch.apply_props` no `tools/lvl.py` (`lvl.py patch --mod <pasta>`; sem `--mod`, a pasta acima do `levels/` do JSON). Mesma
+sequência de alocações nos dois lados: por modelo (na ordem da primeira aparição) a imagem (0x80) e os T|R das entradas (16), depois o
+GROUP "props" (flags 7, ctx = o do mundo, no slot 0 do GROUP do mundo) e, por entrada e folha, o caminho `[mundo, props, T|R, raiz,
+GROUP 0x102, COLL_VOL]` e os nós de lista das células. Entrada fora da grade e modelo que não cabe devolvem a arena (`rollback`), então
+recusado não deixa nada. O `lvl.py` passou a começar a arena alinhada a 0x80 (o fim da imagem do CENTRAL é 0x11ABBC0, 0x40 fora do
+alinhamento; a do jogo, `kLevelArena`, é alinhada a MB); com alocação de 16 nada muda nos patches que já existiam.
+
+Outras mudanças: o `apply` do gancho aceita patch sem `objects` (antes logava "parou no meio: sem a lista objects" num patch só de
+`props`/`peds`; o `lvl.py` já lia a lista que falta como vazia). Recarga: contador `g_applied` (cargas com o patch aplicado) somado à
+`levelSignature` (`wotmLevelPatchLoads`), e o `texPackets_` limpo no `Scene::invalidate()`. A fase custom aceita prop da base
+(`aliasOf("LVL/<id>.NGP")`); o `lvl.py` não tem esse caso.
+
+Props de teste (locais, fora do commit): `mods/PropTest/props/BOX` (cubo de 1 m com `--scale 72`, sem cor de vértice, tex270) e `BOXD`
+(o mesmo com `--light dir`); patch `mods/PropTest/levels/CENTRAL.json`: BOX em (770, 630, 579,6) e BOXD em (830, 545, 579,6) no
+telhado do ponto de partida do jogador (SPT 0, lista 1; o telhado tem topo em 579,6 pela caixa do caminho 0x11A8E30), BOX girado 30°
+na rua em (760, -423, 0,5). Teste com `WOTM_MODS` numa pasta só com o PropTest (o `Teste` e o `LevelTest` também têm CENTRAL.json).
+
+### Provas
+- **R11** (paridade): `lvl.py patch` e o jogo dão as mesmas linhas e números: `.TEX` com 310 texturas, `BOX tex270 <- OBJECT
+  0b08290`, `BOX x2 (1216 bytes), BOXD x1 (1216 bytes); 2932 bytes da arena`, resumo `arena bytes 2932, new list nodes 6, prop
+  models 2, prop paths 3, props 3`, o mesmo link de veículo cortado e a regra da caixa "213 certas, 0 fora" / "240 de 240". Com
+  outro patch de recusas (pasta `modsbad`, rascunho) também: entrada sem `pos`, entrada fora da grade (caixa (1614 -36)-(1686 36)
+  contra a grade até x 1662,6), modelo `NOPE` ausente, `heading` 360 virando TRANSLATE e o CAR (2 texturas, 87 e 89, contextos de
+  0x1118C00 e 0xA5DC50): `BOX x1 (1216 bytes), CAR x1 (8864 bytes); 10436 bytes da arena` dos dois lados.
+- **Arena (R2)**: 3 entradas de 2 modelos de 1216 bytes tomam 2932 bytes: ~500 além das imagens (T 0x20 ou R 0x54, 4 no GROUP, caminho
+  0x3C, 8 por célula). A carga alta termina em 0x23ADA80 com 1 x 1: 26953 KB abaixo da arena (`[fase]   props: arena ...`, só no
+  jogo).
+- **R1**: `docs/screenshots/2026-11-06/2026-11-06_props_central.png` (wotm.exe, `WOTM_AIVSAI=0`, 18 s): os dois cubos no telhado,
+  ao lado do Togera parado. VU1CHECK no `ps2EntryRunner` não foi feito.
+- **Luz**: `2026-11-06_props_luz_dir.png` (recorte da mesma foto): à esquerda o BOXD (`dirLight`: topo claro, faces com tons
+  diferentes), à direita o BOX (0x80 em todo canto, as faces iguais, puxadas pelo verde das luzes pontuais da fase). Fica para o dono
+  escolher o padrão do `--light`.
+- **R3** (recarga): com o jogo aberto o BOX foi refeito com `--scale 108` e a recarga pedida pelo `WOTM_LEVELRELOAD` (sem tecla); depois
+  da recarga o BOX aparece maior ao lado do BOXD de 72 (`2026-11-06_props_recarga_f10.png`). A prova negativa (sem a soma na
+  `levelSignature`) não foi feita.
+- **R5**: o monstro do jogador acabou de pé no topo do BOXD (`2026-11-06_props_monstro_no_topo.png`, 34 s): `hdHatTest` acha o
+  casco. Câmera: na foto de 18 s ela foi empurrada pelos cubos (outro enquadramento que sem eles). Veículos: o BOX girado na rua corta
+  o link 9-14 (no BOX de 108, também o 9-10), e o carro volta no nó antes. Empurrar, câmera atrás e IA não foram medidos à parte.
+- `check_collision`: 0 fora da regra nos dois lados em todos os patches de teste.
+
+### O que ficou de fora
+- O editor (passo 2) ainda não chama `apply_props` (é do outro agente: `editor.py` usa `LevelPatch` direto).
+- O pivô de um prop vindo do `lvlglb` (`--units game`) é o centro do objeto recortado: o CAR em z 0 fica meio enterrado (caixa z
+  -9,4..9,4). Talvez o `build` deva pôr o pivô na base.
+- VU1CHECK (R1 no GS emulado), R12 (FPS com 10 props grandes) e R13 (lote CPU x CPU).

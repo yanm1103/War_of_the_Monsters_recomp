@@ -1,0 +1,346 @@
+// wotm_levelprops.inc: a chave "props" do patch de fase (MODS.md, "Level patches"). Incluido por wotm_levelpatch.inc dentro do namespace
+// wotm_levelpatch, depois do Stage e do childNoCase. tools/lvl.py (LevelPatch.apply_props) faz o mesmo na imagem do disco, nas mesmas
+// alocacoes e na mesma ordem: os bytes da arena e as linhas "props:" batem.
+// Um prop e uma mini-imagem pre-ligada em 0xA00000 (tools/lvlprop.py build: <MODELO>.NGP, <MODELO>.PTR e prop.json) em
+// <mod do JSON>/props/<MODELO>/, lida do sistema de arquivos a cada carga (fora do Registry: um prop novo vale no F10). Cada modelo vai
+// uma vez para a arena (alinhado a 0x80: os pacotes sao), relocado pela lista 1 do .PTR; a lista 2 (texIds) recebe o texId da fase do
+// slot e a lista 3 (gsTexCtx, 0x30 bytes) o contexto vivo do primeiro OBJECT da fase, por endereco, com aquele texId (o TBP0 o
+// texmActivateTexture remenda a cada upload). Cada entrada e um TRANSLATE (sem rumo) ou ROTATE sobre a raiz comum do modelo, todas num
+// GROUP novo (flags 7: visual, colisao, noFOV) no primeiro slot do GROUP do mundo, como os pedestres. Cada folha de colisao de cada
+// entrada ganha um caminho [mundo, props, T|R, raiz, ..., folha] com a caixa pela regra dos 8 cantos, as celulas e uma planta para o
+// cutNets. Recusado com uma linha e sem deixar nada na arena: modelo que falta ou de outra fase, texId fora do .TEX carregado ou sem
+// OBJECT que desenhe com ele, entrada com caixa fora da grade, modelo cujas entradas nao cabem na arena.
+
+struct PropModel
+{
+    std::string name, stage;
+    std::vector<uint8_t> ngp;
+    std::array<std::vector<uint32_t>, 3> ptr;
+    std::map<uint32_t, uint32_t> texOf;   // slot -> texId
+    uint32_t root = 0;                    // deslocamento da raiz na imagem
+};
+
+bool readHostFile(const std::filesystem::path &p, std::vector<uint8_t> &out)
+{
+    std::ifstream in(p, std::ios::binary);
+    if (!in) return false;
+    out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    return true;
+}
+
+// prop.json, .NGP e .PTR da pasta do modelo; "" ou o motivo da recusa
+std::string loadPropModel(const std::filesystem::path &dir, PropModel &m)
+{
+    std::vector<uint8_t> raw;
+    const std::filesystem::path pj = childNoCase(dir, "prop.json");
+    if (pj.empty() || !readHostFile(pj, raw)) return "sem prop.json";
+    json::Value meta;
+    std::string err;
+    if (!json::parse(std::string(raw.begin(), raw.end()), meta, &err) || meta.type != json::Value::Obj) return "prop.json invalido: " + err;
+    if (const json::Value *f = meta.get("format"); !f || f->asInt() != 1) return "prop.json sem \"format\": 1";
+    const json::Value *model = meta.get("model"), *stage = meta.get("stage"), *tex = meta.get("textures"), *files = meta.get("files");
+    if (!model || model->type != json::Value::Str || !stage || stage->type != json::Value::Str) return "prop.json sem \"model\" ou \"stage\"";
+    m.name = model->s, m.stage = stage->s;
+    for (char &c : m.stage) c = char(std::toupper(static_cast<unsigned char>(c)));
+    if (tex && tex->type == json::Value::Arr)
+        for (const json::Value &t : tex->arr)
+        {
+            const json::Value *s = t.get("slot"), *id = t.get("texId");
+            if (!s || !id || !s->isInt() || !id->isInt()) return "textura sem \"slot\" ou \"texId\"";
+            m.texOf[uint32_t(s->asInt())] = uint32_t(id->asInt());
+        }
+    auto fileName = [&](const char *key, const char *ext) {
+        const json::Value *v = files ? files->get(key) : nullptr;
+        return v && v->type == json::Value::Str ? v->s : m.name + ext;
+    };
+    const std::filesystem::path ngpP = childNoCase(dir, fileName("ngp", ".NGP")), ptrP = childNoCase(dir, fileName("ptr", ".PTR"));
+    if (ngpP.empty() || !readHostFile(ngpP, m.ngp)) return "sem o " + fileName("ngp", ".NGP");
+    if (ptrP.empty() || !readHostFile(ptrP, raw)) return "sem o " + fileName("ptr", ".PTR");
+    auto rd = [](const std::vector<uint8_t> &d, size_t o) { uint32_t v = 0; if (o + 4 <= d.size()) std::memcpy(&v, d.data() + o, 4); return v; };
+    if (m.ngp.size() < 16 || rd(m.ngp, 0) != 1) return "a palavra 0 da imagem nao e 1";
+    m.root = rd(m.ngp, 4) - kBase;
+    if (m.root >= m.ngp.size()) return "raiz fora da imagem";
+    size_t o = 0;
+    for (int k = 0; k < 3; ++k)
+    {
+        if (o + 4 > raw.size()) return "o .PTR acaba antes das tres listas";
+        const uint32_t n = rd(raw, o);
+        if (n > 1000000 || o + 4 + 4 * size_t(n) > raw.size()) return "lista do .PTR maior que o arquivo";
+        for (uint32_t i = 0; i < n; ++i)
+        {
+            const uint32_t off = rd(raw, o + 4 + 4 * size_t(i));
+            if (size_t(off) + (k == 1 ? 2 : k == 2 ? 0x30 : 4) > m.ngp.size()) return fmt("ajuste %d em 0x%X fora da imagem", k, off);
+            m.ptr[k].push_back(off);
+        }
+        o += 4 + 4 * size_t(n);
+    }
+    return "";
+}
+
+// texIds do .TEX da fase carregado (fileStatus.texAddr[0] ate texAddr[1]): o primeiro arquivo nao e relocado (texmRelocate soma so
+// nos seguintes), entao o id no pacote e o do disco (FORMATS.md, ".TEX and .RTX files")
+std::set<uint32_t> loadedTexIds(const Stage &st)
+{
+    std::set<uint32_t> out;
+    constexpr uint32_t kFs = wotm::sym::fileStatus;
+    if (st.u8(kFs + 0x38) < 1) return out;
+    const uint32_t a = st.u32(kFs) & kMask, b = st.u32(kFs + 4) & kMask;
+    if (!a || b <= a || b - a > 0x1000000u) return out;
+    uint32_t off = a + 16 * st.u32(a + 4);
+    for (int n = 0; off + 16 <= b && n < 4096; ++n)
+    {
+        out.insert(st.u16(off + 8));
+        const uint32_t size = st.u32(off);
+        if (!size) break;
+        const uint32_t next = off + (size >> 2) * 16;
+        if (next <= off) break;
+        off = next;
+    }
+    return out;
+}
+
+// Cadeias da raiz do prop ate cada folha de colisao (op 10, 11, 42), em pre-ordem na ordem dos slots (lvl.py _prop_chains)
+void propChains(const Stage &st, uint32_t n, std::vector<uint32_t> &chain, std::vector<std::vector<uint32_t>> &out, int depth)
+{
+    if (depth > 16) return;
+    const uint32_t o = st.op(n);
+    chain.push_back(n);
+    if (o == COLL_VOL || o == 11 || o == POLY_COLL)
+        out.push_back(chain);
+    else
+        for (uint32_t c : st.children(n)) propChains(st, c, chain, out, depth + 1);
+    chain.pop_back();
+}
+
+struct PropMade { uint32_t tr, root; std::vector<std::vector<uint32_t>> chains; };
+
+void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::filesystem::path &modDir, const std::string &stageName)
+{
+    const json::Value *props = patch.get("props");
+    if (!props || props->type != json::Value::Arr || props->arr.empty()) return;
+    std::string base = stageName;   // fase custom: o prop e da base (MYCITY -> CENTRAL)
+    if (const std::string al = Registry::get().aliasOf("LVL/" + stageName + ".NGP"); al.size() > 8 && al.rfind("LVL/", 0) == 0)
+        base = al.substr(4, al.size() - 8);
+    const uint32_t start = st.arenaTop;
+    struct Ent { size_t k; const json::Value *e; V3 pos; double hd; };
+    std::map<std::string, std::vector<Ent>> models;
+    std::vector<std::string> order;
+    for (size_t k = 0; k < props->arr.size(); ++k)
+    {
+        const json::Value &e = props->arr[k];
+        try
+        {
+            if (e.type != json::Value::Obj) throw PatchError("nao e um objeto");
+            std::string name;
+            if (const json::Value *m = e.get("model"); m && m->type == json::Value::Str) name = m->s;
+            for (char &c : name) c = char(std::toupper(static_cast<unsigned char>(c)));
+            Ent en{k, &e, {}, 0.0};
+            if (!Stage::num3(e.get("pos"), en.pos)) throw PatchError("sem \"pos\" [x, y, z]");
+            if (const json::Value *h = e.get("heading"); h && h->isInt()) en.hd = h->asNum();
+            if (!models.count(name)) order.push_back(name);
+            models[name].push_back(en);
+        }
+        catch (const PatchError &err)
+        {
+            st.log.push_back(fmt("prop %zu pulado: %s", k, err.what()));
+            ++st.stats["skipped"];
+        }
+    }
+    bool haveTex = false;
+    std::set<uint32_t> texIds;
+    std::vector<uint32_t> objs;
+    std::vector<PropMade> made;
+    std::vector<std::string> summary;
+    constexpr uint32_t kReserveGroup = 0x20 + 4 + 15;
+    for (const std::string &name : order)
+    {
+        const std::vector<Ent> &ents = models[name];
+        const uint32_t top = st.arenaTop;
+        try
+        {
+            const std::filesystem::path pdir = childNoCase(modDir, "props"), dir = pdir.empty() ? pdir : childNoCase(pdir, name);
+            if (dir.empty() || childNoCase(dir, "prop.json").empty())
+                throw PatchError(fmt("modelo %s fora de %s/props", name.c_str(), modDir.filename().string().c_str()));
+            PropModel pm;
+            if (const std::string e = loadPropModel(dir, pm); !e.empty()) throw PatchError(fmt("modelo %s: %s", name.c_str(), e.c_str()));
+            if (pm.stage != stageName && pm.stage != base)
+                throw PatchError(fmt("modelo %s e um prop de %s, nao de %s", name.c_str(), pm.stage.c_str(), stageName.c_str()));
+            if (!haveTex)
+            {
+                haveTex = true;
+                texIds = loadedTexIds(st);
+                for (uint32_t n : st.inTree)
+                    if (st.op(n) == OBJECT) objs.push_back(n);
+                std::sort(objs.begin(), objs.end());
+                st.log.push_back(fmt("props: o .TEX da fase tem %zu texturas", texIds.size()));
+            }
+            std::map<uint32_t, std::pair<uint32_t, uint32_t>> ctxFrom;   // texId -> (OBJECT, seu gsTexCtx com ele) (lvlprop.stage_ctx)
+            for (const auto &[slot, tid] : pm.texOf)
+            {
+                if (!texIds.count(tid)) throw PatchError(fmt("modelo %s: tex%u nao esta no %s.TEX", name.c_str(), tid, stageName.c_str()));
+                for (size_t i = 0; i < objs.size() && !ctxFrom.count(tid); ++i)
+                    for (uint32_t k = 0, o = objs[i]; k < std::min<uint32_t>(st.u16(o + 0x5A), 5); ++k)
+                        if (st.u16(o + 0x50 + 2 * k) == tid)
+                        {
+                            ctxFrom[tid] = {o, o + 0x70 + 0x30 * k};
+                            break;
+                        }
+                if (!ctxFrom.count(tid)) throw PatchError(fmt("modelo %s: nenhum OBJECT da fase desenha com tex%u", name.c_str(), tid));
+            }
+            for (int k = 1; k < 3; ++k)
+                for (uint32_t off : pm.ptr[k])
+                {
+                    uint32_t slot = 0;
+                    std::memcpy(&slot, pm.ngp.data() + off, k == 1 ? 2 : 4);
+                    if (!pm.texOf.count(slot)) throw PatchError(fmt("modelo %s: slot %u sem textura no prop.json", name.c_str(), slot));
+                }
+            // a imagem na arena: ponteiros relocados, slots trocados pelo texId e o contexto vivo
+            const uint32_t at = st.alloc(uint32_t(pm.ngp.size()), 0x80), delta = at - kBase;
+            std::memcpy(rdram + (at & PS2_RAM_MASK), pm.ngp.data(), pm.ngp.size());
+            st.w32(at + 4, st.u32(at + 4) + delta);
+            for (uint32_t off : pm.ptr[0]) st.w32(at + off, st.u32(at + off) + delta);
+            for (uint32_t off : pm.ptr[1]) st.w16(at + off, uint16_t(pm.texOf[st.u16(at + off)]));
+            for (uint32_t off : pm.ptr[2]) st.copyBytes(at + off, ctxFrom[pm.texOf[st.u32(at + off)]].second, 0x30);
+            const uint32_t root = at + pm.root;
+            std::vector<std::vector<uint32_t>> chains;
+            std::vector<uint32_t> chain;
+            propChains(st, root, chain, chains, 0);
+            std::vector<PropMade> mine;
+            int64_t need = 0;
+            for (const Ent &en : ents)
+            {
+                const uint32_t tTop = st.arenaTop;
+                const bool turn = std::fabs(std::remainder(en.hd, 360.0)) > 1e-6;
+                const uint32_t t = st.alloc(turn ? 0x54 : 0x20, 16);
+                if (turn)
+                {
+                    const double cs = std::cos(en.hd * kPi / 180.0), sn = std::sin(en.hd * kPi / 180.0);
+                    const double rows[4][4] = {{cs, sn, 0, 0}, {-sn, cs, 0, 0}, {0, 0, 1, 0}, {en.pos.v[0], en.pos.v[1], en.pos.v[2], 1}};
+                    st.w32(t, ROTATE);
+                    st.w32(t + 8, 1);
+                    for (int r = 0; r < 4; ++r)
+                        for (int c = 0; c < 4; ++c) st.wf32(t + 0x10 + 16 * r + 4 * c, rows[r][c]);
+                    st.w32(t + 0x50, root);
+                }
+                else
+                {
+                    st.w32(t, TRANSLATE);
+                    st.w32(t + 8, 1);
+                    for (int i = 0; i < 3; ++i) st.wf32(t + 0x10 + 4 * i, en.pos.v[i]);
+                    st.w32(t + 0x1C, root);
+                }
+                int64_t cost = 4;
+                std::string bad;
+                for (const std::vector<uint32_t> &ch : chains)
+                {
+                    Box lb, bb;
+                    if (!aabb(st.leafPoints(ch.back()), lb)) { bad = fmt("folha %07x sem pontos", ch.back()); break; }
+                    std::vector<uint32_t> nodes{t};
+                    nodes.insert(nodes.end(), ch.begin(), ch.end());
+                    const M4 m = st.chainMatrix(nodes, nodes.size() - 1, false);
+                    std::vector<V3> w;
+                    for (const V3 &c : corners(lb)) w.push_back(xform(m, c));
+                    aabb(w, bb);
+                    if (bb.mn.v[0] < st.minX || bb.mn.v[1] < st.minY || bb.mx.v[0] > st.maxX || bb.mx.v[1] > st.maxY)
+                    {
+                        bad = fmt("caixa (%.1f %.1f)-(%.1f %.1f) fora da grade (%.1f %.1f)-(%.1f %.1f)", bb.mn.v[0], bb.mn.v[1], bb.mx.v[0],
+                                  bb.mx.v[1], st.minX, st.minY, st.maxX, st.maxY);
+                        break;
+                    }
+                    cost += 0x24 + 4 * int64_t(ch.size() + 3) + 3 + 8 * int64_t(st.cellsFor(bb).size());
+                }
+                if (!bad.empty())
+                {
+                    st.rollback(tTop);
+                    const json::Value *id = en.e->get("id");
+                    st.log.push_back(fmt("prop %zu (%s) pulado: %s", en.k, id && id->type == json::Value::Str && !id->s.empty() ? id->s.c_str() : name.c_str(),
+                                         bad.c_str()));
+                    ++st.stats["skipped"];
+                    continue;
+                }
+                mine.push_back({t, root, chains});
+                need += cost;
+            }
+            if (mine.empty())
+            {
+                st.rollback(top);
+                continue;
+            }
+            if (need + (made.empty() ? kReserveGroup : 0) > int64_t(st.arenaFree()))
+            {
+                st.rollback(top);
+                throw PatchError(fmt("modelo %s: %zu entradas levam ate %lld bytes a mais, a arena tem %u livres", name.c_str(), mine.size(),
+                                     (long long)need, st.arenaFree()));
+            }
+            made.insert(made.end(), mine.begin(), mine.end());
+            summary.push_back(fmt("%s x%zu (%zu bytes)", name.c_str(), mine.size(), pm.ngp.size()));
+            ++st.stats["prop models"];
+            for (const auto &[slot, tid] : pm.texOf) st.log.push_back(fmt("props: %s tex%u <- contexto do OBJECT %07x", name.c_str(), tid, ctxFrom[tid].first));
+        }
+        catch (const PatchError &err)
+        {
+            if (st.arenaTop != top) st.rollback(top);
+            st.log.push_back(fmt("props do modelo %s pulados (%zu): %s", name.empty() ? "?" : name.c_str(), ents.size(), err.what()));
+            st.stats["skipped"] += int(ents.size());
+        }
+    }
+    if (made.empty()) return;
+    uint32_t world = 0;
+    for (uint32_t r : st.roots)
+        if (st.ident(r) == 1 && st.op(r) == GROUP) world = r;
+    const std::vector<uint32_t> slots = world ? st.childSlots(world) : std::vector<uint32_t>{};
+    if (slots.empty())
+    {   // o lvl.py nao tem este caso (le o GROUP do mundo de toda fase do disco); fica a imagem na arena, sem pendurar nada
+        st.log.push_back(fmt("props: %zu entradas sem lugar (a fase nao tem GROUP do mundo com filho)", made.size()));
+        return;
+    }
+    const uint32_t slot = slots[0], old = st.u32(slot) & kMask;
+    const uint32_t wrap = st.alloc(0x20 + 4 * uint32_t(1 + made.size()), 16);
+    st.w32(wrap, GROUP);
+    st.w32(wrap + 4, st.u32(world + 4));
+    st.w16(wrap + 8, uint16_t(1 + made.size()));
+    st.w16(wrap + 0xA, 7);   // visual | collision | noFOV
+    st.w32(wrap + 0x20, old);
+    for (size_t i = 0; i < made.size(); ++i) st.w32(wrap + 0x24 + 4 * uint32_t(i), made[i].tr);
+    st.setPtr(slot, wrap);
+    st.parents[wrap] = {world};
+    st.parents[old] = {wrap};
+    for (const PropMade &pm : made)
+    {
+        st.parents[pm.tr] = {wrap};
+        st.parents[pm.root].push_back(pm.tr);
+        for (const std::vector<uint32_t> &ch : pm.chains)
+        {
+            std::vector<uint32_t> nodes{world, wrap, pm.tr};
+            nodes.insert(nodes.end(), ch.begin(), ch.end());
+            const uint32_t pa = st.alloc(0x24 + 4 * uint32_t(nodes.size()));
+            st.w32(pa + 0x1C, uint32_t(nodes.size()));
+            for (size_t i = 0; i < nodes.size(); ++i) st.w32(pa + 0x24 + 4 * uint32_t(i), nodes[i]);
+            std::vector<V3> w;
+            Box bb;
+            st.pathCorners(st.path(pa), w);
+            aabb(w, bb);
+            st.footprints.push_back({hull2d(w), bb.mn.v[2], bb.mx.v[2]});
+            for (int i = 0; i < 3; ++i) st.wf32(pa + 4 * i, bb.mn.v[i]), st.wf32(pa + 0xC + 4 * i, bb.mx.v[i]);
+            const std::set<int> cs = st.cellsFor(bb);
+            st.setCells(pa, cs);
+            ++st.stats["prop paths"];
+            st.pathLines.push_back(fmt("caminho %07x  caixa (%.1f %.1f %.1f)-(%.1f %.1f %.1f)  %zu celulas  prop", pa, bb.mn.v[0], bb.mn.v[1],
+                                       bb.mn.v[2], bb.mx.v[0], bb.mx.v[1], bb.mx.v[2], cs.size()));
+        }
+        ++st.stats["props"];
+    }
+    std::string sum;
+    for (const std::string &s : summary) sum += (sum.empty() ? "" : ", ") + s;
+    st.log.push_back(fmt("props: %s; %u bytes da arena", sum.c_str(), st.arenaTop - start));
+    // Folga da arena e das cargas altas (monstros, texturas e .PTR acima de 32 MB param no comeco da arena, kHighCeiling): o fim da carga
+    // e o maior endereco das tres listas do fileStatus (.TEX, .NGP, .RTX), como no wotm_mods_hooks::ptrRelocate
+    constexpr uint32_t kFs = wotm::sym::fileStatus;
+    const uint32_t texN = st.u8(kFs + 0x38), ngpN = st.u8(kFs + 0x74), resN = st.u8(kFs + 0xB0);
+    uint32_t end = ngpN <= 13 ? st.u32(kFs + 0x3C + 4 * ngpN) & 0x1FFFFFFFu : 0;
+    if (texN <= 13) end = std::max(end, st.u32(kFs + 4 * texN) & 0x1FFFFFFFu);
+    if (resN <= 13) end = std::max(end, st.u32(kFs + 0x78 + 4 * resN) & 0x1FFFFFFFu);
+    st.log.push_back(fmt("props: arena %u de %u bytes usados; a carga vai ate 0x%07X (%s, %u KB abaixo da arena)", st.arenaTop - kArena,
+                         kArenaEnd - kArena, end, end > PS2_GUEST_RAM_SIZE ? "acima de 32 MB" : "abaixo de 32 MB",
+                         end < kArena ? (kArena - end) / 1024 : 0));
+}

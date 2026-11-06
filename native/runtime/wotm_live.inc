@@ -361,6 +361,7 @@ extern "C" __declspec(dllimport) void *__stdcall GetModuleHandleA(const char *);
 inline const char *g_stage = "idle";   // current native-layer stage, for crash diagnostics
 } // namespace wotm_live
 void wotmCrashTrace(void *exceptionContext);   // wotm_standalone.cpp
+unsigned wotmLevelPatchLoads();                // wotm_levelpatch.inc: cargas da fase com o patch ja aplicado
 namespace wotm_live
 {
 #ifdef _WIN32
@@ -419,7 +420,8 @@ struct State
 // invalidava a cena inteira por quadro: tela a ~16/s).
 inline uint32_t levelSignature(const wotm::Ram &ram)
 {
-    uint32_t h = ram.u32(wotm::addr::tempVramTexAddr) * 2654435761u;
+    // mais as cargas da fase com patch aplicado: a recarga (F10) da mesma fase traz a mesma imagem e os props nos mesmos enderecos
+    uint32_t h = (ram.u32(wotm::addr::tempVramTexAddr) ^ wotmLevelPatchLoads()) * 2654435761u;
     const uint32_t n = std::min<uint32_t>(ram.u32(0xA00000), 255u);
     for (uint32_t k = 0; k <= n; ++k)
         h = (h ^ ram.u32(0xA00000 + 4 * k)) * 16777619u;

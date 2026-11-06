@@ -627,6 +627,20 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   node nearest to it, so moving a group can move it to another sidewalk: `lvl.py patch` prints the segment each group walks
   (`walks 2-3 (725 long)`) and the segments nobody walks; the game logs the same report (`[fase]   pedestres: grupo ... anda em
   2-3`; also without `peds` with `WOTM_LEVELPATCH=2`).
+- `props` (at the top beside `objects`): new static objects made in Blender, placed in the stage.
+  ```json
+  "props": [{"id": "tower1", "model": "TOWER", "pos": [845.9, 1003.2, 0.5], "heading": 90, "name": "Water tower"}]
+  ```
+  `model` is a folder `mods/<mod>/props/<MODEL>/` of the same mod as the JSON (any case), written by `python tools/lvlprop.py build
+  <in.glb> mods/<mod>/props/<MODEL> --stage <FASE>` (`TOOLS.md`): `<MODEL>.NGP`, `<MODEL>.PTR`, `<MODEL>.preview.glb` (what the game
+  draws, for the editor) and `prop.json` (`stage`, `textures` as `{"slot", "texId"}`, `bounds`, `light`, counts). A prop belongs to
+  one stage: its textures are the stage's (materials `tex<texId>` in Blender). `pos` is where the model's origin goes; `heading` (degrees,
+  default 0) turns it about Z. Each entry collides as the box of the model's bounds (monsters stand on it and bump into it; vehicles
+  and pedestrians are cut around it like around a moved building) and is drawn with no view culling. Each model takes its file size
+  of the arena once, and each entry 100 to 200 bytes more. Skipped with a line: a model missing or made for another stage, a texture
+  the stage's `.TEX` does not have, an entry whose box leaves the collision grid. The props are read from the folder at every load,
+  so a prop rebuilt during a fight shows after a reload (F10). Log: `[fase]   props: TOWER x3 (1216 bytes); 1660 bytes da arena`,
+  the same numbers as `lvl.py patch`.
 - Check before playing: `python tools/lvl.py patch CENTRAL mods/<mod>/levels/CENTRAL.json` applies the patch to the disc's image, prints
   what changed, each redone collision box, and checks the collision of the result (box rule and cell rule, `FORMATS.md`, "Stage
   collision"). An entry that does not match is skipped with a line saying why.

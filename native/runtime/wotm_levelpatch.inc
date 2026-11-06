@@ -10,6 +10,7 @@
 // WOTM_LEVELPATCH_SHALLOW=1 faz copias rasas e WOTM_LEVELPATCH_BREAK quebra copias ou originais na luta (diagnostico, NATIVE.md).
 // O JSON e procurado e lido a cada carga da fase (findPatch): o editor grava e a recarga (wotm_levelreload.inc, RESTART) ja o pega.
 // WOTM_LEVELPATCH=0 desliga; =2 loga cada caminho refeito (a mesma linha do lvl.py patch).
+// Ordem: "objects", "props" (wotm_levelprops.inc), "peds" (wotm_levelpeds.inc), cutNets com as plantas de todos.
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -218,7 +219,7 @@ struct Stage
     std::unordered_set<uint32_t> inTree;
     uint32_t grid = 0;
     int cols = 0, rows = 0;
-    double cell = 200.0, minX = 0.0, minY = 0.0;
+    double cell = 200.0, minX = 0.0, minY = 0.0, maxX = 0.0, maxY = 0.0;
     std::map<uint32_t, std::set<int>> cells;   // caminho -> celulas em que esta listado
     std::vector<uint32_t> freeNodes;
     std::map<std::string, int> stats;
@@ -251,6 +252,12 @@ struct Stage
         arenaTop = a + size;
         stats["arena bytes"] = int(arenaTop - kArena);
         return a;
+    }
+    // Devolve o que a arena tomou desde que o topo era `top` (entrada recusada depois da primeira alocacao)
+    void rollback(uint32_t top)
+    {
+        arenaTop = top;
+        stats["arena bytes"] = int(arenaTop - kArena);
     }
 
     // Ponteiros de filho como o dbsTraverse desce, mais os estados do DESTRUCTIBLE e os dois filhos do CONTROL (lvl.py child_slots)
@@ -303,7 +310,7 @@ struct Stage
             if (op(r) == COLL_GRID) grid = r;
         if (!grid) return false;
         cols = s16(grid + 4), rows = s16(grid + 6);
-        cell = f32(grid + 8), minX = f32(grid + 0xC), minY = f32(grid + 0x10);
+        cell = f32(grid + 8), minX = f32(grid + 0xC), minY = f32(grid + 0x10), maxX = f32(grid + 0x14), maxY = f32(grid + 0x18);
         if (cols <= 0 || rows <= 0 || cols * rows > 65536 || cell <= 0.0) return false;
         // fim da imagem: a grade fecha o bloco de colisao (FORMATS.md, "Stage collision") e so a raiz ANIM_MGR vem depois dela
         hi = grid + 0x20 + 4 * uint32_t(cols * rows);
@@ -1216,7 +1223,8 @@ struct Stage
     void apply(const json::Value &patch)
     {
         const json::Value *objs = patch.get("objects");
-        if (!objs || objs->type != json::Value::Arr) throw PatchError("sem a lista \"objects\"");
+        if (!objs) return;   // so "props" ou "peds" (o lvl.py le a lista que falta como vazia)
+        if (objs->type != json::Value::Arr) throw PatchError("\"objects\" nao e uma lista");
         for (size_t k = 0; k < objs->arr.size(); ++k)
         {
             const json::Value &e = objs->arr[k];
@@ -1635,6 +1643,8 @@ bool findPatch(const std::string &name, Found &out)
     return any;
 }
 
+#include "wotm_levelprops.inc"
+
 void applyFor(uint8_t *rdram)
 {
     breakArm({});
@@ -1691,6 +1701,14 @@ void applyFor(uint8_t *rdram)
         st.log.push_back(fmt("parou no meio: %s", e.what()));
     }
     breakArm(st.wraps);
+    try
+    {
+        applyProps(st, rdram, v, f.host.parent_path().parent_path(), name);
+    }
+    catch (const PatchError &e)
+    {   // so a arena cheia chega aqui
+        st.log.push_back(fmt("props: parou no meio: %s", e.what()));
+    }
     std::vector<uint32_t> pedsMade;
     try
     {
@@ -1715,6 +1733,9 @@ void applyFor(uint8_t *rdram)
 // Cargas da fase desde o boot, contadas antes de o JSON ser lido: um pedido de recarga (wotm_levelreload.inc) feito antes dela ja foi
 // atendido por ela
 std::atomic<unsigned> g_loads{0};
+// Cargas com o patch ja aplicado: a levelSignature da cena nativa (wotm_live.inc) a soma, porque a recarga da mesma fase (F10)
+// reescreve a imagem e a arena com os mesmos enderecos e o cache de malhas so confere tag e duas palavras do pacote (packetSig)
+std::atomic<unsigned> g_applied{0};
 
 void dbInitDbHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
@@ -1726,11 +1747,14 @@ void dbInitDbHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             ++g_loads;
             g_wotmLevelReloadKey.store(false);   // F10 de antes desta carga (no menu, durante o LOAD): ja atendido
             applyFor(rdram);
+            ++g_applied;
         }
     }
     g_orig(rdram, ctx, runtime);
 }
 } // namespace wotm_levelpatch
+
+unsigned wotmLevelPatchLoads() { return wotm_levelpatch::g_applied.load(); }
 
 void wotmLevelPatchInstall(PS2Runtime &runtime)
 {

@@ -19,7 +19,9 @@
     deep copy of an object takes. `objects` ends a pickup's line with `on <handle>` when it rests on that object (`Stage.on_top`:
     inside the XY hull of one of its solid boxes, within 25 of the box's top; rooftop tanks and vents, and sidewalk items on a
     building's base). `patch <STAGE> <json>` applies a level patch (`MODS.md`, "Level patches") to the image the way the game hook
-    does, cuts the vehicle and pedestrian paths (`cut_nets`) and checks the collision of the result. `peds <STAGE>` lists the
+    does (objects, props, pedestrians, in that order), cuts the vehicle and pedestrian paths (`cut_nets`) and checks the collision of
+    the result; `--mod <dir>` is the mod whose `props/` the `props` models come from (default: the folder above the JSON's `levels/`).
+    The arena starts 0x80-aligned, as the hook's, so `arena bytes` is the same number on both sides. `peds <STAGE>` lists the
     pedestrian groups (handle, position, size) and the segment each one walks (`ped_groups`, `ped_bind`, `ped_report`).
   - `lvlglb.py <STAGE> <out.glb>`: the stage as a binary glTF for the level editor, one top-level node per `lvl.py` object (named by
     its handle, extras with kind, from, heading, states and `on`), its broken states as hidden `stateN` children, the rest under
