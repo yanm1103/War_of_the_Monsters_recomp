@@ -55,6 +55,10 @@ bool animOp(uint32_t o) { return o == CHAR_INSTANCE || o == ANIM_XFORM || o == S
 bool cbOp(uint32_t o) { return o <= 4 || o == 6 || o == 11 || o == 17 || o == 30 || o == 40 || o == 41; }
 constexpr uint32_t kPickupLo = 0x12C0, kPickupHi = 0x13EC, kExclLo = 0x7D0, kExclHi = 0x898, kKeepLo = 0x1A90, kKeepHi = 0x1B58;
 constexpr int64_t kInteractives = 1024, kInteractiveSpare = 32;   // Interactives::s_dbInteractive, sem checagem; folga dos monstros etc.
+// Acoes (ActionDispatch.cpp, lvl.py GLOBAL_ACTS/DOMINO_OFF): ANIM, RUNSCRIPT e GENERICEVENT agem sobre algo fixo da fase (a copia as tira);
+// o tipo 6 o DelayAction::doIt ignora (vira isso o DOMINO cujo alvo foi apagado)
+bool globalAct(uint32_t t) { return t == 2 || t == 12 || t == 14; }
+constexpr uint16_t kDominoOff = 6;
 
 PS2Runtime::RecompiledFunction g_orig = nullptr;
 int g_verbose = 1;
@@ -725,6 +729,38 @@ struct Stage
         w32(h, (u32(h) & ~63u) | NUL);
         ++stats["deleted"];
     }
+    // Os nos que o dbsTraverse alcanca a partir das raizes que ele anda (so esses o dbProcInteractive registra)
+    std::unordered_set<uint32_t> reached() const
+    {
+        std::unordered_set<uint32_t> seen;
+        std::vector<uint32_t> stack;
+        for (uint32_t r : roots)
+            if (op(r) != ANIM_MGR && seen.insert(r).second) stack.push_back(r);
+        while (!stack.empty())
+        {
+            const uint32_t x = stack.back();
+            stack.pop_back();
+            for (uint32_t c : travKids(x))
+                if (seen.insert(c).second) stack.push_back(c);
+        }
+        return seen;
+    }
+    // Depois dos apagados: DOMINO cujo alvo o dbsTraverse nao alcanca mais chamaria o ChangeState no Interactives 0 (NULL: o id2 do alvo
+    // fica 0); o tipo dele vira kDominoOff, no lugar
+    void cutIncoming()
+    {
+        const std::unordered_set<uint32_t> seen = reached();
+        std::unordered_set<uint32_t> done;
+        for (uint32_t n : seen)
+            if (op(n) == DESTRUCTIBLE)
+                for (const ActBlock &b : actBlocks(n))
+                    if (b.type == 8 && !done.count(b.a) && !seen.count(u32(b.a + 0xC) & kMask))
+                    {
+                        done.insert(b.a);
+                        w16(b.a, kDominoOff);
+                        ++stats["incoming dominoes cut"];
+                    }
+    }
     struct Place { V3 pos; double heading; };
     // Copia de n e dos GROUP/SWITCH/TRANSLATE/ROTATE abaixo dele que nao tem outro pai; o que e compartilhado fica compartilhado
     uint32_t clonePrivate(uint32_t n, bool top)
@@ -925,7 +961,7 @@ struct Stage
         return order;
     }
     // A acao a para uma copia: DOMINO que mira o proprio destrutivel do original vai para o da copia, os outros saem (quebrariam o
-    // vizinho do original); os GROUP/TRANSFORM acima de um que mudou sao clonados. 0 = nada sobrou
+    // vizinho do original), as globalAct tambem; os GROUP/TRANSFORM acima de um que mudou sao clonados. 0 = nada sobrou
     uint32_t rewriteAct(uint32_t a, const std::unordered_map<uint32_t, uint32_t> &twins, std::unordered_map<uint32_t, uint32_t> &memo, int depth)
     {
         if (!a || !ok(a, 8) || depth > 16) return a;
@@ -945,6 +981,8 @@ struct Stage
             else
                 out = 0, ++stats["dominoes dropped"];
         }
+        else if (globalAct(t))
+            out = 0, ++stats["global actions dropped"];
         else if (t == 0)
         {
             std::vector<uint32_t> words, nw, keep;
@@ -1006,6 +1044,7 @@ struct Stage
             {
                 w32(a + 0x5C, u32(n + 0x5C) & ~0x10u);   // isActivated
                 ++stats["emitters cloned"];
+                if (u32(n + 0x5C) & 8) ++stats["auto-start emitters cloned"];   // isAutoStart: um fx do fx[100] desde a carga e uma vaga do autoEmitters[128]
             }
             // id1 0: as pecas especiais da fase (chamines da 3-MILE, SANFRAN, colunas) e o que se registra uma vez ficam com o original;
             // id de pickup fica (o createPickup le o tipo), e o "nao perde vida" do DESTRUCTIBLE tambem
@@ -1230,6 +1269,7 @@ struct Stage
                 ++stats["skipped"];
             }
         }
+        if (stats.count("deleted")) cutIncoming();
         if (!objs->arr.empty())
         {
             const std::array<int64_t, 3> b = interactives();

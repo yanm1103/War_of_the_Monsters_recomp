@@ -707,7 +707,9 @@ CB_OPS = (0, 1, 2, 3, 4, 6, 11, 17, 30, 40, 41)   # dbsTraverse calls dbProcInte
 PICKUP_IDS = (0x12C0, 0x13EC)   # a node with an id here is a pickup (one per instance: LevelPickups::createPickup)
 EXCLUDED_IDS = (0x7D0, 0x898)   # ids dbProcInteractive ignores
 KEEP_DESTR_IDS = (0x1A90, 0x1B58)   # DESTRUCTIBLE id1 here: never loses health (Destructible::takeHit)
-INTERACTIVES = 1024             # Interactives::s_dbInteractive, unchecked
+GLOBAL_ACTS = (2, 12, 14)       # ANIM, RUNSCRIPT, GENERICEVENT: they act on something fixed in the level, so a copy drops them
+DOMINO_OFF = 6                  # an action type DelayAction::doIt skips: what a DOMINO aimed at a deleted object becomes
+INTERACTIVES = 1024            # Interactives::s_dbInteractive, unchecked
 INTERACTIVE_SPARE = 32          # monsters, helicopters, bugs: what the budget keeps free besides slot 0
 
 
@@ -774,6 +776,11 @@ def debris_pickups(img, d):
     return n
 
 
+def _number(x):
+    """What the hook's json isInt() takes: a number or a bool."""
+    return isinstance(x, (int, float))
+
+
 def registers_id(img, n):
     """The node has an id dbProcInteractive acts on (besides INTERACTIVE_STATE and DESTRUCTIBLE, which always register)."""
     i, o = img.u32(n) >> 18, img.u32(n) & 63
@@ -801,6 +808,8 @@ class LevelPatch:
         self.shallow = shallow      # WOTM_LEVELPATCH_SHALLOW: copies share all but the handle and the top state pair
         self.wraps = []             # GROUPs the copies made: child 0 is the original, the others its copies
         self.added_paths = []
+        self.through = set()        # GROUPs the patch put between two nodes of a path: the copies', their clones, the pedestrians'
+        self.unlinked_before = {pa for pa in self.cells if not self.path_linked(pa)}   # as on the disc: check_copies skips them
         self.interactives_before = self.interactives()
         self.interactives_used = sum(self.interactives_before)
 
@@ -1021,6 +1030,29 @@ class LevelPatch:
         self.w32(h, (self.img.u32(h) & ~63) | 9)
         self.stats["deleted"] += 1
 
+    def reached(self):
+        """The nodes dbsTraverse reaches from the roots it walks (dbProcInteractive registers only these)."""
+        roots = [r for r in self.st.roots if self.op(r) != 7]
+        seen, stack = set(roots), list(roots)
+        while stack:
+            for c in self._trav_kids(stack.pop()):
+                if c not in seen:
+                    seen.add(c)
+                    stack.append(c)
+        return seen
+
+    def cut_incoming(self):
+        """After the deletes: a DOMINO whose target dbsTraverse no longer reaches would call ChangeState on Interactives 0
+        (NULL: the target's id2 stays 0); its type goes to DOMINO_OFF, in place."""
+        img, seen, done = self.img, self.reached(), set()
+        for n in seen:
+            if self.op(n) == 31:
+                for a, t, _ in act_blocks(img, n):
+                    if t == 8 and a not in done and img.u32(a + 0xC) & MASK not in seen:
+                        done.add(a)
+                        self.w16(a, DOMINO_OFF)
+                        self.stats["incoming dominoes cut"] += 1
+
     CLONE_HEAD = {1: (0x20, lambda img, n: img.u16(n + 8)), 6: (0xC, lambda img, n: img.u8(n + 0xB)),
                   3: (0x1C, lambda img, n: img.u32(n + 8)), 4: (0x50, lambda img, n: img.u32(n + 8))}
 
@@ -1130,7 +1162,8 @@ class LevelPatch:
 
     def rewrite_act(self, a, twins, memo, depth=0):
         """Action a for a copy: a DOMINO aimed at the original's own destructible goes to the copy's, any other DOMINO is dropped
-        (it would break the original's neighbour) and the GROUPs/TRANSFORMs above a changed one are cloned. 0 = nothing left."""
+        (it would break the original's neighbour), so is every GLOBAL_ACTS one, and the GROUPs/TRANSFORMs above a changed one
+        are cloned. 0 = nothing left."""
         img, base = self.img, self.img.base
         if not a or not img.ok(a, 8) or depth > 16:
             return a
@@ -1148,6 +1181,9 @@ class LevelPatch:
             else:
                 out = 0
                 self.stats["dominoes dropped"] += 1
+        elif t in GLOBAL_ACTS:
+            out = 0
+            self.stats["global actions dropped"] += 1
         elif t == 0:
             words = [img.u32(a + 0xC + 4 * k) for k in range(min(img.u32(a + 8), 256))]
             new = [self.rewrite_act(w & MASK, twins, memo, depth + 1) for w in words]
@@ -1191,6 +1227,10 @@ class LevelPatch:
             elif o == 22:
                 self.w32(a + 0x5C, img.u32(n + 0x5C) & ~0x10)      # isActivated
                 self.stats["emitters cloned"] += 1
+                if img.u32(n + 0x5C) & 8:       # isAutoStart: a lasting fx of fx[100] from the load on, and a slot of autoEmitters[128]
+                    self.stats["auto-start emitters cloned"] += 1
+            if n in self.through:
+                self.through.add(a)
             # id1 0: the level's special pieces (3-MILE stacks, SANFRAN, pillars) and anything registered once stay with the
             # original; a pickup id stays (createPickup reads its type), and so does "never loses health" on a DESTRUCTIBLE
             keep = (o == 31 and KEEP_DESTR_IDS[0] <= ident < KEEP_DESTR_IDS[1]) or \
@@ -1283,6 +1323,7 @@ class LevelPatch:
                 self.set_ptr(s, wrap)
         st.parents[wrap], st.parents[h] = [p], [wrap]
         self.wraps.append(wrap)
+        self.through.add(wrap)
         for i, pl in enumerate(places):
             twins = {}
             if pickup:      # LevelPickups/Pickup::init write into the id GROUP (id2, numKids) and the SWITCH (whichChild)
@@ -1305,6 +1346,8 @@ class LevelPatch:
                     self.w32(np_ + 0x24 + 4 * k, (img.u32(pa + 0x24 + 4 * k) & ~MASK) | twins.get(nd, nd))
                 self.redo(np_, carry)
                 self.added_paths.append(np_)
+                if pa in self.unlinked_before:
+                    self.unlinked_before.add(np_)
                 self.stats["paths added"] += 1
             self.grow_spheres(hc, old_pos)
             self.w16(wrap + 8, 2 + i)
@@ -1347,15 +1390,34 @@ class LevelPatch:
                 stack.extend(children(self.img, x))
         return out
 
+    def _next_to(self, a, b):
+        """b is a child of a, or hangs from a through GROUPs the patch put in between (self.through)."""
+        img, stack, seen = self.img, [a], set()
+        while stack:
+            for c in children(img, stack.pop()):
+                if c == b:
+                    return True
+                if c in self.through and c not in seen:
+                    seen.add(c)
+                    stack.append(c)
+        return False
+
+    def path_linked(self, pa):
+        nodes = Path(self.img, pa).nodes
+        return all(self._next_to(a, b) for a, b in zip(nodes, nodes[1:]))
+
     def check_copies(self):
-        """Lines on the patched image: paths linked node to node (a copy's GROUP may sit between two), mutable nodes the copies
-        share with their originals, INTERACTIVE_STATEs dbsTraverse reaches twice. Second value: all hold."""
-        img, wraps = self.img, set(self.wraps)
-        linked = 0
+        """Lines on the patched image: paths linked node to node (a GROUP the patch put in may sit between two; the paths the
+        disc already has unlinked, and their copies, are only counted), mutable nodes the copies share with their originals,
+        INTERACTIVE_STATEs dbsTraverse reaches twice. Second value: all hold. hdTraversePath compares parent and child only at
+        a DESTRUCTIBLE and a SWITCH, so the game takes an unlinked path too; the check is for what the patch writes."""
+        img = self.img
+        linked = old = 0
         for pa in self.cells:
-            nodes = Path(img, pa).nodes
-            linked += all(b in children(img, a) or any(w in wraps and b in children(img, w) for w in children(img, a))
-                          for a, b in zip(nodes, nodes[1:]))
+            if self.path_linked(pa):
+                linked += 1
+            elif pa in self.unlinked_before:
+                old += 1
         shared = 0
         for w in self.wraps:
             kids = children(img, w)
@@ -1364,10 +1426,11 @@ class LevelPatch:
         v = self.visits()
         twice = sum(1 for n, c in v.items() if c > 1 and self.op(n) == 39)
         added = sum(1 for pa in self.added_paths if pa in self.cells)
-        lines = ["paths linked node to node: %d of %d (%d of them added by copies)" % (linked, len(self.cells), added),
+        lines = ["paths linked node to node: %d of %d (%d of them added by copies; %d unlinked as on the disc)" % (
+                     linked, len(self.cells), added, old),
                  "mutable nodes the copies share with their originals: %d" % shared,
                  "INTERACTIVE_STATEs reached more than once: %d" % twice]
-        return lines, linked == len(self.cells) and shared == 0 and twice == 0
+        return lines, linked + old == len(self.cells) and shared == 0 and twice == 0
 
     def apply(self, patch):
         """Every entry: {"handle", "from": [x, y, z], and "pos"/"heading", "delete": true or "copies": [{"pos", "heading"}]}.
@@ -1389,8 +1452,16 @@ class LevelPatch:
                     self.log.append("entry %d: handle %07x holds %d objects; they all go" % (k, h, len(children(img, h))))
                 moving = not e.get("delete") and ("pos" in e or "heading" in e)
                 extra = self.move_cost(h, e.get("heading") is not None) if moving else 0
-                if e.get("copies"):
-                    self.copy(h, e["copies"], extra)
+                cp = e.get("copies")
+                if isinstance(cp, list) and cp:
+                    places = []         # all checked before copy(), as the hook does: a bad one leaves nothing behind
+                    for c in cp:
+                        p3 = c.get("pos") if isinstance(c, dict) else None
+                        if not (isinstance(p3, list) and len(p3) == 3 and all(_number(x) for x in p3)):
+                            raise PatchError("a copy without \"pos\" [x, y, z]")
+                        hd = c.get("heading")
+                        places.append({"pos": [float(x) for x in p3], "heading": float(hd) if _number(hd) else None})
+                    self.copy(h, places, extra)
                 elif extra > self.arena_free():
                     raise PatchError("handle %07x: the move takes up to %d bytes, the arena has %d left" % (h, extra, self.arena_free()))
                 if e.get("delete"):
@@ -1400,6 +1471,8 @@ class LevelPatch:
             except (PatchError, KeyError, TypeError, ValueError) as err:
                 self.log.append("entry %d skipped: %s" % (k, err))
                 self.stats["skipped"] += 1
+        if self.stats["deleted"]:
+            self.cut_incoming()
         if patch.get("objects"):
             a, b = self.interactives_before, self.interactives()
             self.log.append("interactives: %d of %d before the patch, %d after (%d taken at load, %d debris pickups at most, "
@@ -1511,6 +1584,7 @@ class LevelPatch:
                 self.w32(wrap + 0x24 + 4 * i, t)
             self.set_ptr(slot, wrap)
             st.parents[wrap], st.parents[old] = [w], [wrap]
+            self.through.add(wrap)
             self.stats["ped groups added"] = len(made)
         self.ped_new = made
 
