@@ -557,12 +557,18 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
 - `pos`: the new world position of the handle (not of the building's center: the handle is often off to a side; `lvl.py patch`
   prints each collision box, which shows where the building ends up). `heading`: the world heading in degrees (the `heading` column;
   turning is about the handle). `delete`: the object leaves the stage (drawing, collision, registration). `copies`: new copies, each with
-  `pos` and an optional `heading`; they share the original's states and meshes, break on their own and get their own collision.
+  `pos` and an optional `heading`; each copy has its own copy of every part that changes when the object breaks (destructibles,
+  switches, smoke emitters) and shares the meshes with the original, so it breaks and smokes on its own and gets its own collision.
 - `names` (`{"<handle>": "Hotel"}`, at the top beside `objects`) and `name` in a copy: labels for the level editor; the game and
   `lvl.py` ignore them. A patch with names only still carries `"objects": []`.
-- Works on destructibles (buildings), pickups (cars, trees, rooftop objects) and props. Copies: buildings without other destructibles
-  inside them, props and pickups (a pickup copy has its own handle, id `GROUP` and `SWITCH`, so it breaks and is picked up on its
-  own).
+- Works on destructibles (buildings), pickups (cars, trees, rooftop objects) and props. Copies: buildings (with the destructibles
+  inside them), props and pickups (a pickup copy has its own handle, id `GROUP` and `SWITCH`, so it breaks and is picked up on its
+  own). A building with a destructible inside an animated part (a crane, a turning sign) is refused (`lvl.py patch` and the log say
+  which part). A domino of the original (breaking it knocks a neighbour down) stays in the copy only when the neighbour is in the copy
+  too; one aimed outside it is dropped, so breaking the copy never breaks the original's neighbours.
+- Copies cost room: each one takes arena bytes (1 MB for the whole patch) and slots in the game's table of breakable objects (1024).
+  An entry whose copies do not fit is skipped before anything is written. `lvl.py patch` and the log print the table's use:
+  `interactives: 348 of 1024 before the patch, 355 after (...)`.
 - Objects that sit on a building (water tanks and vents on the roof, items on its sidewalk base) are pickups of their own and do not
   follow it: move or delete them in the same patch. `lvl.py objects` marks them with `on <handle>`.
 - Traffic and pedestrians follow their own paths (`PTS/<FASE>.FOP` and `.PED`, `FORMATS.md`, "Path nets") and never look at the
@@ -714,8 +720,18 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   stage image is inflated at 0xA00000 with TEX0 relocated, and nothing has been registered yet); installed whenever `WOTM_LEVELPATCH`
   is not 0, and the JSON is looked up in the mods folder at that moment, not in the boot registry. A handle that turns becomes a new
   `ROTATE` in its parent and in its collision paths; a deleted handle becomes `NULL` (op 9) and its paths leave the grid cells; a copy is
-  a new handle, `INTERACTIVE_STATE` (id1 cleared) and `DESTRUCTIBLE`, held with the original by a new `GROUP` (noFOV) in the parent's slot,
-  plus copies of the original's paths. Every path through a changed handle gets its box redone (by the disc's rule, or the old box
+  held with the original by a new `GROUP` (noFOV) in the parent's slot, plus copies of the original's paths. A copy clones the handle's
+  spine: every node that changes at run time (`DESTRUCTIBLE`, `INTERACTIVE_STATE`, `SWITCH`, `PART_EMITTER`, and nodes with an id that
+  `dbProcInteractive` registers) and every node between them and the handle, once each (the image is a DAG); the rest (meshes,
+  animated parts: nothing is cloned below `CHAR_INSTANCE`, `ANIM_XFORM`, `SKEL_BONE`, `ANIM_SCALE`) stays shared. On the clones: the
+  `INTERACTIVE_STATE` id1 is cleared, the `DESTRUCTIBLE` id1 too (except 0x1A90..0x1B57, the "never loses health" range that
+  `Destructible::takeHit` reads), the emitter's `isActivated` (bit 4 of +0x5C) is cleared, single-piece ids go to 0 and pickup ids
+  stay. Each cloned `DESTRUCTIBLE` gets its own state actions: `ActGroup`/`ActTransform`/`ActDebris` blocks are cloned, an `ActDomino`
+  aimed at a node of the copy is pointed at its clone and one aimed outside is dropped. Before writing, the entry's worst case is
+  checked: arena bytes, and the `Interactives::s_dbInteractive[1024]` slots (unchecked in the retail), counted as the registrations
+  `dbsTraverse` makes at load, plus the debris pieces that carry a pickup, plus 32 spare. `WOTM_LEVELPATCH_SHALLOW=1` (`lvl.py patch
+  --shallow`) clones only the handle, its `INTERACTIVE_STATE` and its `DESTRUCTIBLE`, and `WOTM_LEVELPATCH_BREAK` breaks the copies or the
+  originals at a set time (`NATIVE.md`, variables). Every path through a changed handle gets its box redone (by the disc's rule, or the old box
   carried by the handle's change for animated chains and camera triggers) and its cell lists redone, and the `GROUP`s above the handle
   get their spheres grown to cover the object (the drawing culls a `GROUP` by its sphere). New nodes go to a 1 MB arena below the hooks'
   last MB (`wotm_mods_hooks::kLevelArena`; loads above 32 MB stop at `kHighCeiling`). Then `peds` (`wotm_levelpeds.inc`): `segments`

@@ -8,7 +8,7 @@
   python tools/lvl.py mrs CENTRAL                     # RST/<STAGE>.MRS (background, fog, lights, time of day)
   python tools/lvl.py peds CENTRAL                    # pedestrian groups (0xBB8 roots) and the segments they walk
   python tools/lvl.py patch CENTRAL mods/X/levels/CENTRAL.json  # apply a level patch to the image and check its collision
-  option: --disc DIR (default: disc/ at the repo root)
+  options: --disc DIR (default: disc/ at the repo root); patch --shallow copies the way WOTM_LEVELPATCH_SHALLOW=1 does
 
 Formats: docs/FORMATS.md (".NGP image", "Fixups", "Stage collision", "Stage objects", "Stage points"). The rules this tool
 checks are the ones a level patch has to keep when it moves, removes or copies an object:
@@ -701,6 +701,85 @@ def ped_net_segments(net):
     return out
 
 
+ARENA_SIZE = 0x100000           # the hook's arena for new nodes (wotm_mods_hooks::kLevelArenaSize)
+ANIM_OPS = (25, 17, 35, 38)     # CHAR_INSTANCE, ANIM_XFORM, SKEL_BONE, ANIM_SCALE: the deep copy shares what hangs below them
+CB_OPS = (0, 1, 2, 3, 4, 6, 11, 17, 30, 40, 41)   # dbsTraverse calls dbProcInteractive for these when they have an id
+PICKUP_IDS = (0x12C0, 0x13EC)   # a node with an id here is a pickup (one per instance: LevelPickups::createPickup)
+EXCLUDED_IDS = (0x7D0, 0x898)   # ids dbProcInteractive ignores
+KEEP_DESTR_IDS = (0x1A90, 0x1B58)   # DESTRUCTIBLE id1 here: never loses health (Destructible::takeHit)
+INTERACTIVES = 1024             # Interactives::s_dbInteractive, unchecked
+INTERACTIVE_SPARE = 32          # monsters, helicopters, bugs: what the budget keeps free besides slot 0
+
+
+def node_size(img, n):
+    """Bytes the deep copy clones for node n, or None for an op it does not know (or with more slots than child_slots walks)."""
+    o = img.u32(n) & 63
+    if o == 1:
+        return 0x20 + 4 * img.u16(n + 8)
+    if o in (3, 4, 30):
+        k = img.u32(n + 8)
+        return None if k > 8192 else {3: 0x1C, 4: 0x50, 30: 0x2C}[o] + 4 * k
+    if o == 6:
+        return 0xC + 4 * img.u8(n + 0xB)
+    if o == 2:
+        k = img.u32(n + 4)
+        return None if k > 16 else 0x20 + 16 * k
+    if o == 8:
+        return max(0x30, 0x20 + 4 * img.u8(n + 0xC))
+    if o == 39:
+        return 16
+    if o == 31:
+        k = img.u16(n + 0xA)
+        return None if k > 64 else 0xC + 12 * k
+    if o == 22:
+        return 0xB0
+    return None
+
+
+def act_blocks(img, d):
+    """The action blocks of DESTRUCTIBLE d's states, each once: [(address, type, size)] (GROUP 0, TRANSFORM 1, DEBRIS 3,
+    others 0x10; src/game/ActionDispatch.cpp, Debris.cpp)."""
+    out, seen = [], set()
+
+    def walk(a, depth):
+        a &= MASK
+        if not a or a in seen or not img.ok(a, 8) or depth > 16:
+            return
+        seen.add(a)
+        t = img.u16(a)
+        if t == 0:
+            n = min(img.u32(a + 8), 256)
+            out.append((a, t, 0xC + 4 * n))
+            for k in range(n):
+                walk(img.u32(a + 0xC + 4 * k), depth + 1)
+        elif t == 1:
+            out.append((a, t, 0x50))
+            walk(img.u32(a + 8), depth + 1)
+        elif t == 3:
+            out.append((a, t, 0x10 + 0x30 * min(img.u32(a + 8), 256)))
+        else:
+            out.append((a, t, 0x10))
+    for k in range(min(img.u16(d + 0xA), 64)):
+        walk(img.u32(d + 0x10 + 12 * k), 0)
+    return out
+
+
+def debris_pickups(img, d):
+    """Debris chunks of DESTRUCTIBLE d that turn into a pickup when they settle (each takes an Interactives slot then)."""
+    n = 0
+    for a, t, _ in act_blocks(img, d):
+        if t == 3:
+            for k in range(min(img.u32(a + 8), 256)):
+                n += (img.u16(a + 0x10 + 0x30 * k + 0xE) >> 5) & 31 != 0
+    return n
+
+
+def registers_id(img, n):
+    """The node has an id dbProcInteractive acts on (besides INTERACTIVE_STATE and DESTRUCTIBLE, which always register)."""
+    i, o = img.u32(n) >> 18, img.u32(n) & 63
+    return o in CB_OPS and i != 0 and not EXCLUDED_IDS[0] <= i < EXCLUDED_IDS[1]
+
+
 class LevelPatch:
     """A level patch (mods/<mod>/levels/<STAGE>.json, docs/MODS.md "Level patches") applied to the stage image the way
     native/runtime/wotm_levelpatch.inc applies it at the entry of dbInitDb: each entry names an object by its handle (the
@@ -710,7 +789,7 @@ class LevelPatch:
 
     FROM_TOL = 0.5
 
-    def __init__(self, st):
+    def __init__(self, st, shallow=False):
         self.st, self.img = st, st.img
         self.img.d = bytearray(self.img.d)
         self.cells = {a: set(c) for a, c in st.grid.cells_of.items()}
@@ -719,6 +798,11 @@ class LevelPatch:
         self.redone = {}            # path -> (box, cells, how)
         self.footprints = []        # (convex XY polygon, zmin, zmax) of every solid box in its new place
         self.stats = collections.Counter()
+        self.shallow = shallow      # WOTM_LEVELPATCH_SHALLOW: copies share all but the handle and the top state pair
+        self.wraps = []             # GROUPs the copies made: child 0 is the original, the others its copies
+        self.added_paths = []
+        self.interactives_before = self.interactives()
+        self.interactives_used = sum(self.interactives_before)
 
     # --- memory
     def w32(self, a, v):
@@ -733,9 +817,15 @@ class LevelPatch:
     def set_ptr(self, slot, target):
         self.w32(slot, (self.img.u32(slot) & ~MASK) | target)
 
+    def arena_free(self):
+        return self.st.end + ARENA_SIZE - (self.img.base + len(self.img.d))
+
     def alloc(self, size, align=4):
         d = self.img.d
-        d.extend(bytes((-(self.img.base + len(d))) % align + size))
+        pad = (-(self.img.base + len(d))) % align
+        if pad + size > self.arena_free():
+            raise PatchError("the 1 MB arena is full")
+        d.extend(bytes(pad + size))
         self.stats["arena bytes"] = self.img.base + len(d) - self.st.end
         return self.img.base + len(d) - size
 
@@ -955,54 +1045,257 @@ class LevelPatch:
         self.stats["nodes cloned"] += 1
         return a
 
-    def copy(self, h, places):
-        """Copies of the object under handle h: a new handle, INTERACTIVE_STATE and DESTRUCTIBLE each, sharing the states below
-        (a pickup: its own handle, id GROUP, SWITCH and the GROUPs between, sharing the meshes); a GROUP in the parent's slot holds
-        the original and the copies. Each copy gets its own collision paths."""
+    # --- deep copies (docs/guides/MODS.md, "Under the hood")
+    def _trav_kids(self, n):
+        return [] if self.op(n) == 38 else children(self.img, n)      # dbsTraverse does not go below ANIM_SCALE
+
+    def weights(self, roots):
+        """node -> (Interactives taken at load, debris pickups at most) by what dbsTraverse visits under it, once per way down."""
+        img, st, memo = self.img, self.st, {}
+        for r in roots:
+            if r in memo:
+                continue
+            memo[r] = None
+            stack = [[r, self._trav_kids(r), 0]]
+            while stack:
+                top = stack[-1]
+                n, ks, i = top
+                if i < len(ks):
+                    top[2] += 1
+                    if ks[i] not in memo:
+                        memo[ks[i]] = None
+                        stack.append([ks[i], self._trav_kids(ks[i]), 0])
+                    continue
+                stack.pop()
+                o = self.op(n)
+                load = 1 if o == 39 or (o in CB_OPS and PICKUP_IDS[0] <= st.ident(n) < PICKUP_IDS[1]) else 0
+                deb = debris_pickups(img, n) if o == 31 else 0
+                for c in ks:
+                    if memo[c]:
+                        load, deb = load + memo[c][0], deb + memo[c][1]
+                memo[n] = (load, deb)
+        return memo
+
+    def interactives(self):
+        """(slots taken at load, debris pickups at most, spare) over the whole image; the sum must fit 1024."""
+        roots = [r for r in self.st.roots if self.op(r) != 7]
+        w = self.weights(roots)
+        return 1 + sum(w[r][0] for r in roots), sum(w[r][1] for r in roots), INTERACTIVE_SPARE
+
+    def mutable(self, n):
+        """A node that keeps state per object: emitter (isActivated, cached matrix), SWITCH (whichChild), INTERACTIVE_STATE,
+        DESTRUCTIBLE, and a node whose id dbProcInteractive registers."""
+        return self.op(n) in (22, 6, 39, 31) or registers_id(self.img, n)
+
+    def _under_anim(self, h, a, seen, left):
+        stack = [a]
+        while stack:
+            x = stack.pop()
+            if x in seen:
+                continue
+            seen.add(x)
+            if self.op(x) == 39:
+                raise PatchError("copy of %07x: destructible %07x is inside an animated part (%s %07x)" % (
+                    h, x, OPN.get(self.op(a), self.op(a)), a))
+            left[0] += self.op(x) == 22
+            stack.extend(children(self.img, x))
+
+    def spine(self, h):
+        """What the deep copy of handle h clones, children first: h and every node of its subtree with a mutable node at or
+        below it. The walk stops at animated parts (they stay shared); returns (nodes, emitters left shared there)."""
+        img, memo, order, seen, left = self.img, {h: None}, [], set(), [0]
+        stack = [[h, children(img, h), 0]]
+        while stack:
+            top = stack[-1]
+            n, ks, i = top
+            if i < len(ks):
+                top[2] += 1
+                c = ks[i]
+                if c not in memo:
+                    memo[c] = None
+                    if self.op(c) in ANIM_OPS:
+                        self._under_anim(h, c, seen, left)
+                        memo[c] = False
+                    else:
+                        stack.append([c, children(img, c), 0])
+                continue
+            stack.pop()
+            memo[n] = n == h or self.mutable(n) or any(memo.get(c) for c in ks)
+            if memo[n]:
+                if node_size(img, n) is None:
+                    raise PatchError("copy of %07x: %s %07x, on the way to what it clones, has no known size" % (
+                        h, OPN.get(self.op(n), self.op(n)), n))
+                order.append(n)
+        return order, left[0]
+
+    def rewrite_act(self, a, twins, memo, depth=0):
+        """Action a for a copy: a DOMINO aimed at the original's own destructible goes to the copy's, any other DOMINO is dropped
+        (it would break the original's neighbour) and the GROUPs/TRANSFORMs above a changed one are cloned. 0 = nothing left."""
+        img, base = self.img, self.img.base
+        if not a or not img.ok(a, 8) or depth > 16:
+            return a
+        if a in memo:
+            return memo[a]
+        memo[a] = a
+        t, out = img.u16(a), a
+        if t == 8:
+            tg = img.u32(a + 0xC) & MASK
+            if tg in twins:
+                out = self.alloc(0x10, 16)
+                img.d[out - base:out - base + 0x10] = img.d[a - base:a - base + 0x10]
+                self.set_ptr(out + 0xC, twins[tg])
+                self.stats["dominoes redirected"] += 1
+            else:
+                out = 0
+                self.stats["dominoes dropped"] += 1
+        elif t == 0:
+            words = [img.u32(a + 0xC + 4 * k) for k in range(min(img.u32(a + 8), 256))]
+            new = [self.rewrite_act(w & MASK, twins, memo, depth + 1) for w in words]
+            if any(x != w & MASK for x, w in zip(new, words)):
+                keep = [w if x == w & MASK else x for x, w in zip(new, words) if x]
+                out = self.alloc(0xC + 4 * len(keep), 16)
+                img.d[out - base:out - base + 8] = img.d[a - base:a - base + 8]
+                self.w32(out + 8, len(keep))
+                for k, x in enumerate(keep):
+                    self.w32(out + 0xC + 4 * k, x)
+        elif t == 1:
+            w = img.u32(a + 8)
+            x = self.rewrite_act(w & MASK, twins, memo, depth + 1)
+            if x != w & MASK:
+                out = self.alloc(0x50, 16)          # 16-aligned: vu0CopyMatrix reads the matrix with lq
+                img.d[out - base:out - base + 0x50] = img.d[a - base:a - base + 0x50]
+                self.w32(out + 8, x or self.alloc(0xC, 16))     # an empty GROUP: doTransform does not test for null
+        memo[a] = out
+        return out
+
+    def deep_clone(self, order, twins):
+        """Clones `order` (children first) into the arena, twins gets original -> clone: child slots go to the clones, ids that
+        register once go to 0, emitters start unlit, and each DESTRUCTIBLE's dominoes are redirected or dropped."""
         img, st, base = self.img, self.st, self.img.base
+        for n in order:
+            size = node_size(img, n)
+            a = self.alloc(size, 16)
+            img.d[a - base:a - base + size] = img.d[n - base:n - base + size]
+            twins[n] = a
+            self.stats["nodes cloned"] += 1
+        for n in order:
+            a, o, ident = twins[n], self.op(n), st.ident(n)
+            for s in child_slots(img, n):
+                c = img.u32(s) & MASK
+                if c in twins:
+                    self.set_ptr(a + (s - n), twins[c])
+                    if not st.parents.get(twins[c]):
+                        st.parents[twins[c]] = [a]
+            if o == 39:
+                self.stats["destructibles copied"] += 1
+            elif o == 22:
+                self.w32(a + 0x5C, img.u32(n + 0x5C) & ~0x10)      # isActivated
+                self.stats["emitters cloned"] += 1
+            # id1 0: the level's special pieces (3-MILE stacks, SANFRAN, pillars) and anything registered once stay with the
+            # original; a pickup id stays (createPickup reads its type), and so does "never loses health" on a DESTRUCTIBLE
+            keep = (o == 31 and KEEP_DESTR_IDS[0] <= ident < KEEP_DESTR_IDS[1]) or \
+                   (o not in (39, 31) and (not registers_id(img, n) or PICKUP_IDS[0] <= ident < PICKUP_IDS[1]))
+            if ident and not keep:
+                self.w32(a, img.u32(n) & 0x3FFFF)
+                self.stats["ids cleared"] += 1
+        memo = {}
+        for n in order:
+            if self.op(n) == 31:
+                for k in range(min(img.u16(n + 0xA), 64)):
+                    slot = twins[n] + 0x10 + 12 * k
+                    act = img.u32(slot) & MASK
+                    na = self.rewrite_act(act, twins, memo)
+                    if na != act:
+                        self.w32(slot, na)
+
+    # --- what a copy may take (checked before anything is written, so a refused entry leaves nothing behind)
+    def cells_bound(self, p):
+        """Most cells path p can cover after a copy turns it: its box's XY diagonal on each axis."""
+        g = self.st.grid
+        n = int(math.floor((math.hypot(p.max[0] - p.min[0], p.max[1] - p.min[1]) + 2.0) / g.cell)) + 2
+        return min(n, g.cols) * min(n, g.rows)
+
+    def acts_bound(self, d):
+        return sum(size + 15 + (0xC + 15 if t == 1 else 0) for a, t, size in act_blocks(self.img, d) if t in (0, 1, 8))
+
+    def private_cost(self, n, top=True):
+        o = self.op(n)
+        if o not in self.CLONE_HEAD or (not top and len(self.st.parents.get(n, ())) != 1):
+            return 0
+        head, count = self.CLONE_HEAD[o]
+        return head + 4 * count(self.img, n) + 15 + sum(self.private_cost(c, False) for c in children(self.img, n))
+
+    def move_cost(self, h, turns):
+        cost = 0x50 + 4 * self.img.u32(h + 8) + 15 if self.op(h) == 3 and turns else 0
+        return cost + sum(8 * self.cells_bound(Path(self.img, pa)) for pa in self.paths_through(h))
+
+    def copy_cost(self, h, n, order, pickup):
+        img = self.img
+        if pickup:
+            per = self.private_cost(h)
+        else:
+            per = sum(node_size(img, x) + 15 for x in order) + sum(self.acts_bound(x) for x in order if self.op(x) == 31)
+        if self.op(h) == 3:
+            per += 0x50 + 4 * img.u32(h + 8) + 15       # to_rotate, when the copy turns
+        for pa in self.paths_through(h):
+            p = Path(img, pa)
+            per += 0x24 + 4 * p.length + 3 + 8 * self.cells_bound(p)
+        return 0x20 + 4 * (1 + n) + 15 + per * n
+
+    def copy(self, h, places, extra=0):
+        """Copies of the object under handle h, each in its own place; a GROUP in the parent's slot holds the original and the
+        copies. A pickup gets its own handle, id GROUP, SWITCH and the GROUPs between (clone_private); anything else a deep copy:
+        its own handle and every node that keeps state per object with the nodes between (spine), sharing meshes, collision,
+        GS contexts and actions. Each copy gets its own collision paths. `extra` is what the same entry's move takes after."""
+        img, st = self.img, self.st
         kids = children(img, h)
         ist = next((c for c in kids if self.op(c) == 39), None)
-        if any(x != ist and self.op(x) == 39 for x in st.subtree(h)):
-            raise PatchError("copy of %07x: it has destructibles inside it (not supported yet)" % h)
-        pickup = any(self.op(c) == 1 and 0x12C0 <= st.ident(c) <= 0x13EB for c in kids)
+        pickup = any(self.op(c) == 1 and PICKUP_IDS[0] <= st.ident(c) < PICKUP_IDS[1] for c in kids)
+        left = 0
+        if pickup:
+            order = []
+        elif self.shallow:
+            if any(x != ist and self.op(x) == 39 for x in st.subtree(h)):
+                raise PatchError("copy of %07x: it has destructibles inside it (a shallow copy cannot)" % h)
+            order = ([img.u32(ist + 0xC) & MASK, ist] if ist else []) + [h]
+        else:
+            order, left = self.spine(h)
+        cost = self.copy_cost(h, len(places), order, pickup) + extra
+        if cost > self.arena_free():
+            raise PatchError("copy of %07x: %d copies take up to %d bytes, the arena has %d left" % (
+                h, len(places), cost, self.arena_free()))
+        w = self.weights([h])[h]
+        need = len(places) * (w[0] + w[1])
+        if self.interactives_used + need > INTERACTIVES:
+            raise PatchError("copy of %07x: %d copies take %d interactives, %d of %d are taken" % (
+                h, len(places), need, self.interactives_used, INTERACTIVES))
+        self.interactives_used += need
         p = st.parents[h][0]
         before, old_pos, paths = self.world(h, False), self.world(h)[3][:3], self.paths_through(h)
         wrap = self.alloc(0x20 + 4 * (1 + len(places)), 16)
         self.w32(wrap, 1)
         self.w32(wrap + 4, img.u32(p + 4) if self.op(p) in (1, 3, 4, 30) else 0)
-        self.w16(wrap + 8, 1 + len(places))
+        self.w16(wrap + 8, 1)                       # numKids goes up as each copy is ready
         self.w16(wrap + 0xA, 7)                     # visual | collision | noFOV
         self.w32(wrap + 0x20, h)
         for s in child_slots(img, p):
             if img.u32(s) & MASK == h:
                 self.set_ptr(s, wrap)
         st.parents[wrap], st.parents[h] = [p], [wrap]
-        size = (0x1C if self.op(h) == 3 else 0x50) + 4 * img.u32(h + 8)
+        self.wraps.append(wrap)
         for i, pl in enumerate(places):
+            twins = {}
             if pickup:      # LevelPickups/Pickup::init write into the id GROUP (id2, numKids) and the SWITCH (whichChild)
                 hc = self.clone_private(h)
             else:
-                hc = self.alloc(size, 16)
-                img.d[hc - base:hc - base + size] = img.d[h - base:h - base + size]
+                self.deep_clone(order, twins)
+                hc = twins[h]
             st.parents[hc] = [wrap]
-            self.w32(wrap + 0x24 + 4 * i, hc)
-            twins = {}
-            if ist:
-                d0 = img.u32(ist + 0xC) & MASK
-                dsize = 0xC + 12 * img.u16(d0 + 0xA)
-                isc, dc = self.alloc(16), self.alloc(dsize)
-                img.d[isc - base:isc - base + 16] = img.d[ist - base:ist - base + 16]
-                img.d[dc - base:dc - base + dsize] = img.d[d0 - base:d0 - base + dsize]
-                self.w32(isc, img.u32(ist) & 0x3FFFF)       # id1 0: special ids (columns, SANFRAN) stay with the original
-                self.set_ptr(isc + 0xC, dc)
-                for s in child_slots(img, hc):
-                    if img.u32(s) & MASK == ist:
-                        self.set_ptr(s, isc)
-                st.parents[isc], st.parents[dc] = [hc], [isc]
-                twins = {ist: isc, d0: dc}
             hc = self.place(hc, pl["pos"], pl.get("heading"))
+            self.w32(wrap + 0x24 + 4 * i, hc)           # after place: a new ROTATE takes the TRANSLATE's place
             twins[h] = hc
             carry = ngp.mul(inv_affine(before), self.world(hc, False))
+            base = img.base
             for pa in paths:
                 q = Path(img, pa)
                 np_ = self.alloc(0x24 + 4 * q.length)
@@ -1011,9 +1304,70 @@ class LevelPatch:
                 for k, nd in enumerate(q.nodes):
                     self.w32(np_ + 0x24 + 4 * k, (img.u32(pa + 0x24 + 4 * k) & ~MASK) | twins.get(nd, nd))
                 self.redo(np_, carry)
+                self.added_paths.append(np_)
                 self.stats["paths added"] += 1
             self.grow_spheres(hc, old_pos)
+            self.w16(wrap + 8, 2 + i)
             self.stats["copies"] += 1
+        if left:
+            self.stats["emitters left shared"] += left * len(places)
+
+    # --- checks of the result (lvl.py patch only)
+    def visits(self):
+        """How many times dbsTraverse reaches each node from the roots it walks."""
+        roots = [r for r in self.st.roots if self.op(r) != 7]
+        indeg, seen, stack = collections.Counter(), set(roots), list(roots)
+        while stack:
+            for c in self._trav_kids(stack.pop()):
+                indeg[c] += 1
+                if c not in seen:
+                    seen.add(c)
+                    stack.append(c)
+        cnt = collections.Counter(roots)
+        q = [n for n in seen if not indeg[n]]
+        while q:
+            n = q.pop()
+            for c in self._trav_kids(n):
+                cnt[c] += cnt[n]
+                indeg[c] -= 1
+                if not indeg[c]:
+                    q.append(c)
+        return cnt
+
+    def reach_mutable(self, n):
+        seen, stack, out = set(), [n], set()
+        while stack:
+            x = stack.pop()
+            if x in seen:
+                continue
+            seen.add(x)
+            if self.mutable(x):
+                out.add(x)
+            if self.op(x) not in ANIM_OPS:
+                stack.extend(children(self.img, x))
+        return out
+
+    def check_copies(self):
+        """Lines on the patched image: paths linked node to node (a copy's GROUP may sit between two), mutable nodes the copies
+        share with their originals, INTERACTIVE_STATEs dbsTraverse reaches twice. Second value: all hold."""
+        img, wraps = self.img, set(self.wraps)
+        linked = 0
+        for pa in self.cells:
+            nodes = Path(img, pa).nodes
+            linked += all(b in children(img, a) or any(w in wraps and b in children(img, w) for w in children(img, a))
+                          for a, b in zip(nodes, nodes[1:]))
+        shared = 0
+        for w in self.wraps:
+            kids = children(img, w)
+            orig = self.reach_mutable(kids[0]) if kids else set()
+            shared += sum(len(orig & self.reach_mutable(c)) for c in kids[1:])
+        v = self.visits()
+        twice = sum(1 for n, c in v.items() if c > 1 and self.op(n) == 39)
+        added = sum(1 for pa in self.added_paths if pa in self.cells)
+        lines = ["paths linked node to node: %d of %d (%d of them added by copies)" % (linked, len(self.cells), added),
+                 "mutable nodes the copies share with their originals: %d" % shared,
+                 "INTERACTIVE_STATEs reached more than once: %d" % twice]
+        return lines, linked == len(self.cells) and shared == 0 and twice == 0
 
     def apply(self, patch):
         """Every entry: {"handle", "from": [x, y, z], and "pos"/"heading", "delete": true or "copies": [{"pos", "heading"}]}.
@@ -1033,15 +1387,23 @@ class LevelPatch:
                     raise PatchError("handle %07x is at (%.1f %.1f %.1f), not at \"from\" %s: another .NGP?" % (h, *pos, fr))
                 if len(children(img, h)) > 1:
                     self.log.append("entry %d: handle %07x holds %d objects; they all go" % (k, h, len(children(img, h))))
+                moving = not e.get("delete") and ("pos" in e or "heading" in e)
+                extra = self.move_cost(h, e.get("heading") is not None) if moving else 0
                 if e.get("copies"):
-                    self.copy(h, e["copies"])
+                    self.copy(h, e["copies"], extra)
+                elif extra > self.arena_free():
+                    raise PatchError("handle %07x: the move takes up to %d bytes, the arena has %d left" % (h, extra, self.arena_free()))
                 if e.get("delete"):
                     self.delete(h)
-                elif "pos" in e or "heading" in e:
+                elif moving:
                     self.move(h, e.get("pos") or pos, e.get("heading"))
             except (PatchError, KeyError, TypeError, ValueError) as err:
                 self.log.append("entry %d skipped: %s" % (k, err))
                 self.stats["skipped"] += 1
+        if patch.get("objects"):
+            a, b = self.interactives_before, self.interactives()
+            self.log.append("interactives: %d of %d before the patch, %d after (%d taken at load, %d debris pickups at most, "
+                            "%d spare)" % (sum(a), INTERACTIVES, sum(b), b[0], b[1], b[2]))
 
     def apply_peds(self, patch, nets):
         """The patch's "peds" (docs/guides/MODS.md, "Level patches"), after "objects" and before cut_nets: "segments" replaces the
@@ -1331,16 +1693,19 @@ def check_collision(st):
     return box_bad == 0 and cell_ok == len(g.paths)
 
 
-def cmd_patch(disc, name, path):
-    """Apply a level patch to the disc image, print what changed and check the collision of the result."""
+def cmd_patch(disc, name, path, shallow=False):
+    """Apply a level patch to the disc image, print what changed and check the collision of the result (and of the copies)."""
     st = Stage(name, disc)
     with open(path, encoding="utf-8") as f:
         patch = json.load(f)
-    lp = LevelPatch(st)
+    lp = LevelPatch(st, shallow)
     lp.apply(patch)
     pts = stage_points(disc, st.name)
     nets = {"fodder": net_from_points(pts.get("FOP", [])), "ped": net_from_points(pts.get("PED", []))}
-    lp.apply_peds(patch, nets)          # the hook's order: objects, pedestrians, then the path cuts
+    try:
+        lp.apply_peds(patch, nets)      # the hook's order: objects, pedestrians, then the path cuts
+    except PatchError as err:           # only a full arena gets here
+        lp.log.append("pedestrians: stopped halfway: %s" % err)
     for line in lp.log:
         print("  " + line)
     print("%s: %s" % (st.name, ", ".join("%s %d" % kv for kv in sorted(lp.stats.items())) or "nothing changed"))
@@ -1350,7 +1715,11 @@ def cmd_patch(disc, name, path):
         print("  " + line)
     st.grid = Grid(st.img, st.grid.addr)
     print("after the patch:")
-    return 0 if check_collision(st) else 1
+    ok = check_collision(st)
+    lines, copies_ok = lp.check_copies()
+    for line in lines:
+        print("  " + line)
+    return 0 if ok and copies_ok else 1
 
 
 def cmd_peds(disc, name):
@@ -1413,7 +1782,7 @@ def main(argv):
         else:
             cmd_mrs(disc, names[0])
     elif cmd == "patch" and len(args) == 3:
-        return cmd_patch(disc, args[1].upper(), args[2])
+        return cmd_patch(disc, args[1].upper(), args[2], "--shallow" in flags)
     else:
         print(__doc__)
         return 1

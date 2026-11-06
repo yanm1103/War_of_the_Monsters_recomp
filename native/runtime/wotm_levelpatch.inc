@@ -4,10 +4,13 @@
 // Interactives, Pickups, emissores e a grade de colisao copiam o que acham na travessia que vem logo depois). As regras sao as de
 // FORMATS.md ("Stage objects", "Stage collision"); tools/lvl.py patch aplica o mesmo patch na imagem do disco, na mesma ordem e com
 // as mesmas contas, e confere a colisao do resultado. Os nos novos (ROTATE no lugar de um TRANSLATE que gira, GROUP que segura o
-// original e as copias, copias da alca, do INTERACTIVE_STATE e do DESTRUCTIBLE, caminhos de colisao e nos de lista das celulas) vao
-// para a arena de 1 MB abaixo do MB dos ganchos (wotm_mods_hooks::kLevelArena), refeita a cada carga.
+// original e as copias, a espinha clonada de cada copia, acoes refeitas sem os dominos, caminhos de colisao e nos de lista das
+// celulas) vao para a arena de 1 MB abaixo do MB dos ganchos (wotm_mods_hooks::kLevelArena), refeita a cada carga. Cada entrada
+// confere antes de escrever o que pode tomar da arena e dos 1024 Interactives; a que nao cabe e pulada inteira.
+// WOTM_LEVELPATCH_SHALLOW=1 faz copias rasas e WOTM_LEVELPATCH_BREAK quebra copias ou originais na luta (diagnostico, NATIVE.md).
 // O JSON e procurado e lido a cada carga da fase (findPatch): o editor grava e a recarga (wotm_levelreload.inc, RESTART) ja o pega.
 // WOTM_LEVELPATCH=0 desliga; =2 loga cada caminho refeito (a mesma linha do lvl.py patch).
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdarg>
@@ -33,12 +36,29 @@ constexpr uint32_t kDbInitDb = wotm::fn::dbInitDb__FP9_dbheader10_vramAddrs, kLo
                    kLoadLevelFilesSize = 0x248;   // wotm_syms.h
 constexpr uint32_t kFsNames = wotm::sym::fileStatus + 0xB1;   // nome do arquivo 0 (a fase), 9 bytes
 constexpr double kFromTol = 0.5, kPi = 3.14159265358979323846;
-enum Op : uint32_t { OBJECT = 0, GROUP = 1, LOD = 2, TRANSLATE = 3, ROTATE = 4, SWITCH = 6, CONTROL = 8, NUL = 9, COLL_VOL = 10,
-                     COLL_GRID = 15, ANIM_XFORM = 17, ACTION_DATA = 23, CHAR_INSTANCE = 25, SCALE = 30, DESTRUCTIBLE = 31,
-                     SKEL_BONE = 35, ANIM_SCALE = 38, INTERACTIVE = 39, POLY_COLL = 42 };
+enum Op : uint32_t { OBJECT = 0, GROUP = 1, LOD = 2, TRANSLATE = 3, ROTATE = 4, SWITCH = 6, ANIM_MGR = 7, CONTROL = 8, NUL = 9,
+                     COLL_VOL = 10, COLL_GRID = 15, ANIM_XFORM = 17, PART_EMITTER = 22, ACTION_DATA = 23, CHAR_INSTANCE = 25,
+                     SCALE = 30, DESTRUCTIBLE = 31, SKEL_BONE = 35, ANIM_SCALE = 38, INTERACTIVE = 39, POLY_COLL = 42 };
+const char *opName(uint32_t o)   // tools/ngp.py OPNAMES
+{
+    static const char *const names[] = {"OBJECT", "GROUP", "LOD", "TRANSLATE", "ROTATE", "LIGHT", "SWITCH", "ANIM_MGR", "CONTROL", "NULL",
+                                        "COLL_VOL", "COLL_TRIG", "CHAR_ANIM", "TERRAIN", "TERRAIN_OBJ", "COLL_GRID", "PART_MGR",
+                                        "ANIM_XFORM", "BSP", "PARTICLE", "PART_FIELD", "PART_VISUAL", "PART_EMITTER", "ACTION_DATA",
+                                        "CHARACTER", "CHAR_INSTANCE", "op26", "op27", "op28", "op29", "SCALE", "DESTRUCTIBLE",
+                                        "DESTRUCT_TABLE", "ANIM_CONTROL", "ANIM_BLEND", "SKEL_BONE", "ANIM_PLAYER", "CAMERA",
+                                        "ANIM_SCALE", "INTERACTIVE", "ATTACHPT", "SCRIPT", "POLY_COLL", "ANIM_PROC"};
+    return o < sizeof names / sizeof *names ? names[o] : "op?";
+}
+// Copia profunda (lvl.py: ANIM_OPS, CB_OPS, PICKUP_IDS...): abaixo das partes animadas fica tudo em comum; os ops pelos quais o
+// dbsTraverse chama o dbProcInteractive quando tem id; ids de pickup (um por instancia), ignorados, e o "nao perde vida" do DESTRUCTIBLE
+bool animOp(uint32_t o) { return o == CHAR_INSTANCE || o == ANIM_XFORM || o == SKEL_BONE || o == ANIM_SCALE; }
+bool cbOp(uint32_t o) { return o <= 4 || o == 6 || o == 11 || o == 17 || o == 30 || o == 40 || o == 41; }
+constexpr uint32_t kPickupLo = 0x12C0, kPickupHi = 0x13EC, kExclLo = 0x7D0, kExclHi = 0x898, kKeepLo = 0x1A90, kKeepHi = 0x1B58;
+constexpr int64_t kInteractives = 1024, kInteractiveSpare = 32;   // Interactives::s_dbInteractive, sem checagem; folga dos monstros etc.
 
 PS2Runtime::RecompiledFunction g_orig = nullptr;
 int g_verbose = 1;
+bool g_shallow = false;   // WOTM_LEVELPATCH_SHALLOW=1: copia rasa (so a alca e o par de cima), para comparar
 
 struct V3 { double v[3]; };
 struct M4 { double m[4][4]; };
@@ -200,6 +220,10 @@ struct Stage
     std::map<std::string, int> stats;
     std::vector<std::string> log, pathLines;
     std::vector<Footprint> footprints;   // cada caixa solida no lugar novo, para cortar as redes de carros e pedestres
+    bool shallow = false;
+    std::vector<uint32_t> wraps;           // GROUPs das copias: filho 0 e o original, os outros as copias
+    std::array<int64_t, 3> interBefore{};  // Interactives antes do patch (carga + 1, destrocos com pickup, folga)
+    int64_t interUsed = 0;
 
     uint32_t u32(uint32_t a) const { uint32_t v; std::memcpy(&v, ram + (a & PS2_RAM_MASK), 4); return v; }
     uint16_t u16(uint32_t a) const { uint16_t v; std::memcpy(&v, ram + (a & PS2_RAM_MASK), 2); return v; }
@@ -702,8 +726,6 @@ struct Stage
         ++stats["deleted"];
     }
     struct Place { V3 pos; double heading; };
-    // Copias do objeto da alca h: alca, INTERACTIVE_STATE e DESTRUCTIBLE novos para cada uma, com os estados de baixo em comum; um
-    // GROUP no lugar do original no pai segura o original e as copias. Cada copia ganha os seus caminhos de colisao.
     // Copia de n e dos GROUP/SWITCH/TRANSLATE/ROTATE abaixo dele que nao tem outro pai; o que e compartilhado fica compartilhado
     uint32_t clonePrivate(uint32_t n, bool top)
     {
@@ -727,17 +749,366 @@ struct Stage
         return a;
     }
 
-    void copy(uint32_t h, const std::vector<Place> &places)
+    // ------------------------------------------------------------------ copia profunda (MODS.md, "Under the hood"; lvl.py, mesmos nomes)
+    uint32_t arenaFree() const { return kArenaEnd - arenaTop; }
+    // Bytes que a copia clona do no n; 0 = op sem tamanho conhecido (ou com mais filhos do que o childSlots anda)
+    uint32_t nodeSize(uint32_t n) const
+    {
+        switch (op(n))
+        {
+        case GROUP: return 0x20 + 4 * u16(n + 8);
+        case TRANSLATE:
+        case ROTATE:
+        case SCALE:
+        {
+            const uint32_t k = u32(n + 8);
+            return k > 8192 ? 0 : (op(n) == TRANSLATE ? 0x1C : op(n) == ROTATE ? 0x50 : 0x2C) + 4 * k;
+        }
+        case SWITCH: return 0xC + 4 * u8(n + 0xB);
+        case LOD: return u32(n + 4) > 16 ? 0 : 0x20 + 16 * u32(n + 4);
+        case CONTROL: return std::max<uint32_t>(0x30, 0x20 + 4 * u8(n + 0xC));
+        case INTERACTIVE: return 16;
+        case DESTRUCTIBLE: return u16(n + 0xA) > 64 ? 0 : 0xC + 12 * u16(n + 0xA);
+        case PART_EMITTER: return 0xB0;
+        default: return 0;
+        }
+    }
+    // Blocos de acao dos estados do DESTRUCTIBLE d, cada um uma vez: GROUP 0, TRANSFORM 1, DEBRIS 3, os outros 0x10 (ActionDispatch.cpp)
+    struct ActBlock { uint32_t a, type, size; };
+    void walkAct(uint32_t a, int depth, std::vector<ActBlock> &out, std::unordered_set<uint32_t> &seen) const
+    {
+        a &= kMask;
+        if (!a || seen.count(a) || !ok(a, 8) || depth > 16) return;
+        seen.insert(a);
+        const uint32_t t = u16(a);
+        if (t == 0)
+        {
+            const uint32_t n = std::min<uint32_t>(u32(a + 8), 256);
+            out.push_back({a, t, 0xC + 4 * n});
+            for (uint32_t k = 0; k < n; ++k) walkAct(u32(a + 0xC + 4 * k), depth + 1, out, seen);
+        }
+        else if (t == 1)
+        {
+            out.push_back({a, t, 0x50});
+            walkAct(u32(a + 8), depth + 1, out, seen);
+        }
+        else if (t == 3)
+            out.push_back({a, t, 0x10 + 0x30 * std::min<uint32_t>(u32(a + 8), 256)});
+        else
+            out.push_back({a, t, 0x10});
+    }
+    std::vector<ActBlock> actBlocks(uint32_t d) const
+    {
+        std::vector<ActBlock> out;
+        std::unordered_set<uint32_t> seen;
+        for (uint32_t k = 0; k < std::min<uint32_t>(u16(d + 0xA), 64); ++k) walkAct(u32(d + 0x10 + 12 * k), 0, out, seen);
+        return out;
+    }
+    // Pedacos de destroco que viram pickup ao parar (cada um toma um Interactive na luta)
+    int64_t debrisPickups(uint32_t d) const
+    {
+        int64_t n = 0;
+        for (const ActBlock &b : actBlocks(d))
+            if (b.type == 3)
+                for (uint32_t k = 0; k < std::min<uint32_t>(u32(b.a + 8), 256); ++k) n += ((u16(b.a + 0x10 + 0x30 * k + 0xE) >> 5) & 31) != 0;
+        return n;
+    }
+    bool registersId(uint32_t n) const { const uint32_t i = ident(n); return cbOp(op(n)) && i && !(i >= kExclLo && i < kExclHi); }
+    // No que guarda estado por objeto: emissor (isActivated, matriz), SWITCH (whichChild), INTERACTIVE_STATE, DESTRUCTIBLE, id registrado
+    bool mutableNode(uint32_t n) const
+    {
+        const uint32_t o = op(n);
+        return o == PART_EMITTER || o == SWITCH || o == INTERACTIVE || o == DESTRUCTIBLE || registersId(n);
+    }
+
+    // Interactives que o dbsTraverse registra abaixo de cada no (uma vez por caminho de descida): na carga e pedacos-pickup no pior caso
+    struct Weight { int64_t load = 0, deb = 0; bool done = false; };
+    std::vector<uint32_t> travKids(uint32_t n) const { return op(n) == ANIM_SCALE ? std::vector<uint32_t>{} : children(n); }
+    struct Frame { uint32_t n; std::vector<uint32_t> ks; size_t i; };
+    void weigh(uint32_t r, std::unordered_map<uint32_t, Weight> &memo) const
+    {
+        if (memo.count(r)) return;
+        memo[r];
+        std::vector<Frame> stack;
+        stack.push_back({r, travKids(r), 0});
+        while (!stack.empty())
+        {
+            Frame &top = stack.back();
+            if (top.i < top.ks.size())
+            {
+                const uint32_t c = top.ks[top.i++];
+                if (!memo.count(c))
+                {
+                    memo[c];
+                    stack.push_back({c, travKids(c), 0});
+                }
+                continue;
+            }
+            const uint32_t n = top.n, o = op(n);
+            Weight w;
+            w.load = o == INTERACTIVE || (cbOp(o) && ident(n) >= kPickupLo && ident(n) < kPickupHi);
+            w.deb = o == DESTRUCTIBLE ? debrisPickups(n) : 0;
+            for (uint32_t c : top.ks)
+                if (const Weight &k = memo[c]; k.done) w.load += k.load, w.deb += k.deb;
+            w.done = true;
+            memo[n] = w;
+            stack.pop_back();
+        }
+    }
+    // (tomados na carga com o slot 0, pedacos-pickup no pior caso, folga): a soma tem de caber em 1024
+    std::array<int64_t, 3> interactives() const
+    {
+        std::unordered_map<uint32_t, Weight> memo;
+        int64_t load = 1, deb = 0;
+        for (uint32_t r : roots)
+            if (op(r) != ANIM_MGR)
+            {
+                weigh(r, memo);
+                load += memo[r].load, deb += memo[r].deb;
+            }
+        return {load, deb, kInteractiveSpare};
+    }
+
+    void underAnim(uint32_t h, uint32_t a, std::unordered_set<uint32_t> &seen, int &left) const
+    {
+        std::vector<uint32_t> stack{a};
+        while (!stack.empty())
+        {
+            const uint32_t x = stack.back();
+            stack.pop_back();
+            if (!seen.insert(x).second) continue;
+            if (op(x) == INTERACTIVE)
+                throw PatchError(fmt("copia de %07x: o destrutivel %07x fica dentro de parte animada (%s %07x)", h, x, opName(op(a)), a));
+            left += op(x) == PART_EMITTER;
+            for (uint32_t c : children(x)) stack.push_back(c);
+        }
+    }
+    // O que a copia profunda da alca h clona, filhos antes: h e todo no da subarvore com um no mutavel nele ou abaixo dele. Nao desce
+    // nas partes animadas (ficam em comum; `left` = emissores deixados la)
+    std::vector<uint32_t> spine(uint32_t h, int &left) const
+    {
+        std::unordered_map<uint32_t, int8_t> memo;   // 0 em curso, 1 nao, 2 sim
+        std::unordered_set<uint32_t> seen;
+        std::vector<uint32_t> order;
+        std::vector<Frame> stack;
+        left = 0;
+        memo[h] = 0;
+        stack.push_back({h, children(h), 0});
+        while (!stack.empty())
+        {
+            Frame &top = stack.back();
+            if (top.i < top.ks.size())
+            {
+                const uint32_t c = top.ks[top.i++];
+                if (!memo.count(c))
+                {
+                    memo[c] = 0;
+                    if (animOp(op(c)))
+                    {
+                        underAnim(h, c, seen, left);
+                        memo[c] = 1;
+                    }
+                    else
+                        stack.push_back({c, children(c), 0});
+                }
+                continue;
+            }
+            const uint32_t n = top.n;
+            bool need = n == h || mutableNode(n);
+            for (uint32_t c : top.ks) need = need || memo[c] == 2;
+            stack.pop_back();
+            memo[n] = need ? 2 : 1;
+            if (!need) continue;
+            if (!nodeSize(n)) throw PatchError(fmt("copia de %07x: %s %07x, no caminho do que ela clona, nao tem tamanho conhecido", h, opName(op(n)), n));
+            order.push_back(n);
+        }
+        return order;
+    }
+    // A acao a para uma copia: DOMINO que mira o proprio destrutivel do original vai para o da copia, os outros saem (quebrariam o
+    // vizinho do original); os GROUP/TRANSFORM acima de um que mudou sao clonados. 0 = nada sobrou
+    uint32_t rewriteAct(uint32_t a, const std::unordered_map<uint32_t, uint32_t> &twins, std::unordered_map<uint32_t, uint32_t> &memo, int depth)
+    {
+        if (!a || !ok(a, 8) || depth > 16) return a;
+        if (const auto it = memo.find(a); it != memo.end()) return it->second;
+        memo[a] = a;
+        const uint32_t t = u16(a);
+        uint32_t out = a;
+        if (t == 8)
+        {
+            if (const auto it = twins.find(u32(a + 0xC) & kMask); it != twins.end())
+            {
+                out = alloc(0x10, 16);
+                copyBytes(out, a, 0x10);
+                setPtr(out + 0xC, it->second);
+                ++stats["dominoes redirected"];
+            }
+            else
+                out = 0, ++stats["dominoes dropped"];
+        }
+        else if (t == 0)
+        {
+            std::vector<uint32_t> words, nw, keep;
+            for (uint32_t k = 0; k < std::min<uint32_t>(u32(a + 8), 256); ++k) words.push_back(u32(a + 0xC + 4 * k));
+            bool changed = false;
+            for (uint32_t w : words)
+            {
+                nw.push_back(rewriteAct(w & kMask, twins, memo, depth + 1));
+                changed = changed || nw.back() != (w & kMask);
+            }
+            if (changed)
+            {
+                for (size_t k = 0; k < words.size(); ++k)
+                    if (nw[k]) keep.push_back(nw[k] == (words[k] & kMask) ? words[k] : nw[k]);
+                out = alloc(0xC + 4 * uint32_t(keep.size()), 16);
+                copyBytes(out, a, 8);
+                w32(out + 8, uint32_t(keep.size()));
+                for (size_t k = 0; k < keep.size(); ++k) w32(out + 0xC + 4 * uint32_t(k), keep[k]);
+            }
+        }
+        else if (t == 1)
+        {
+            const uint32_t w = u32(a + 8);
+            uint32_t x = rewriteAct(w & kMask, twins, memo, depth + 1);
+            if (x != (w & kMask))
+            {
+                out = alloc(0x50, 16);   // alinhado a 16: o vu0CopyMatrix le a matriz com lq
+                copyBytes(out, a, 0x50);
+                if (!x) x = alloc(0xC, 16);   // GROUP vazio: o doTransform nao testa nulo
+                w32(out + 8, x);
+            }
+        }
+        memo[a] = out;
+        return out;
+    }
+    // Clona `order` (filhos antes) na arena, twins = original -> clone: os ponteiros de filho vao para os clones, ids registrados uma vez
+    // vao a 0, emissores comecam apagados e os dominos de cada DESTRUCTIBLE sao refeitos
+    void deepClone(const std::vector<uint32_t> &order, std::unordered_map<uint32_t, uint32_t> &twins)
+    {
+        for (uint32_t n : order)
+        {
+            const uint32_t size = nodeSize(n), a = alloc(size, 16);
+            copyBytes(a, n, size);
+            twins[n] = a;
+            ++stats["nodes cloned"];
+        }
+        for (uint32_t n : order)
+        {
+            const uint32_t a = twins[n], o = op(n), id = ident(n);
+            for (uint32_t s : childSlots(n))
+                if (const auto it = twins.find(u32(s) & kMask); it != twins.end())
+                {
+                    setPtr(a + (s - n), it->second);
+                    if (parents[it->second].empty()) parents[it->second] = {a};
+                }
+            if (o == INTERACTIVE)
+                ++stats["destructibles copied"];
+            else if (o == PART_EMITTER)
+            {
+                w32(a + 0x5C, u32(n + 0x5C) & ~0x10u);   // isActivated
+                ++stats["emitters cloned"];
+            }
+            // id1 0: as pecas especiais da fase (chamines da 3-MILE, SANFRAN, colunas) e o que se registra uma vez ficam com o original;
+            // id de pickup fica (o createPickup le o tipo), e o "nao perde vida" do DESTRUCTIBLE tambem
+            const bool keep = (o == DESTRUCTIBLE && id >= kKeepLo && id < kKeepHi) ||
+                              (o != INTERACTIVE && o != DESTRUCTIBLE && (!registersId(n) || (id >= kPickupLo && id < kPickupHi)));
+            if (id && !keep) w32(a, u32(n) & 0x3FFFFu), ++stats["ids cleared"];
+        }
+        std::unordered_map<uint32_t, uint32_t> memo;
+        for (uint32_t n : order)
+            if (op(n) == DESTRUCTIBLE)
+                for (uint32_t k = 0; k < std::min<uint32_t>(u16(n + 0xA), 64); ++k)
+                {
+                    const uint32_t slot = twins[n] + 0x10 + 12 * k, act = u32(slot) & kMask;
+                    if (const uint32_t na = rewriteAct(act, twins, memo, 0); na != act) w32(slot, na);
+                }
+    }
+
+    // O maximo que uma entrada pode tomar, conferido antes de escrever (entrada recusada nao deixa nada): celulas pela diagonal da caixa
+    int64_t cellsBound(const Path &p) const
+    {
+        const int n = int(std::floor((std::hypot(p.box.mx.v[0] - p.box.mn.v[0], p.box.mx.v[1] - p.box.mn.v[1]) + 2.0) / cell)) + 2;
+        return int64_t(std::min(n, cols)) * std::min(n, rows);
+    }
+    int64_t actsBound(uint32_t d) const
+    {
+        int64_t b = 0;
+        for (const ActBlock &k : actBlocks(d))
+            if (k.type == 0 || k.type == 1 || k.type == 8) b += k.size + 15 + (k.type == 1 ? 0xC + 15 : 0);
+        return b;
+    }
+    int64_t privateCost(uint32_t n, bool top) const
+    {
+        uint32_t head, count;
+        switch (op(n))
+        {
+        case GROUP: head = 0x20, count = u16(n + 8); break;
+        case SWITCH: head = 0xC, count = u8(n + 0xB); break;
+        case TRANSLATE: head = 0x1C, count = u32(n + 8); break;
+        case ROTATE: head = 0x50, count = u32(n + 8); break;
+        default: return 0;
+        }
+        if (const auto it = parents.find(n); !top && (it == parents.end() || it->second.size() != 1)) return 0;
+        int64_t c = head + 4 * std::min<uint32_t>(count, 8192) + 15;
+        for (uint32_t k : children(n)) c += privateCost(k, false);
+        return c;
+    }
+    int64_t moveCost(uint32_t h, bool turns) const
+    {
+        int64_t c = op(h) == TRANSLATE && turns ? 0x50 + 4 * int64_t(u32(h + 8)) + 15 : 0;
+        for (uint32_t pa : pathsThrough(h)) c += 8 * cellsBound(path(pa));
+        return c;
+    }
+    int64_t copyCost(uint32_t h, size_t n, const std::vector<uint32_t> &order, bool pickup) const
+    {
+        int64_t per = 0;
+        if (pickup)
+            per = privateCost(h, true);
+        else
+            for (uint32_t x : order) per += nodeSize(x) + 15 + (op(x) == DESTRUCTIBLE ? actsBound(x) : 0);
+        if (op(h) == TRANSLATE) per += 0x50 + 4 * int64_t(u32(h + 8)) + 15;   // toRotate, quando a copia gira
+        for (uint32_t pa : pathsThrough(h))
+        {
+            const Path p = path(pa);
+            per += 0x24 + 4 * p.len + 3 + 8 * cellsBound(p);
+        }
+        return 0x20 + 4 * int64_t(1 + n) + 15 + per * int64_t(n);
+    }
+
+    // Copias do objeto da alca h, cada uma no seu lugar; um GROUP no lugar do original no pai segura o original e as copias. Pickup:
+    // alca, GROUP do id, SWITCH e os GROUPs entre eles proprios (clonePrivate); o resto, copia profunda: alca propria e todo no que
+    // guarda estado por objeto com os nos entre eles (spine), com malhas, colisao, contextos do GS e acoes em comum. Cada copia ganha os
+    // seus caminhos de colisao. `extra` e o que o movimento da mesma entrada toma depois.
+    void copy(uint32_t h, const std::vector<Place> &places, int64_t extra)
     {
         uint32_t ist = 0;
         bool pickup = false;
         for (uint32_t c : children(h))
         {
             if (op(c) == INTERACTIVE && !ist) ist = c;
-            if (op(c) == GROUP && ident(c) >= 0x12C0 && ident(c) <= 0x13EB) pickup = true;
+            if (op(c) == GROUP && ident(c) >= kPickupLo && ident(c) < kPickupHi) pickup = true;
         }
-        for (uint32_t x : subtree(h))
-            if (x != ist && op(x) == INTERACTIVE) throw PatchError(fmt("copia de %07x: tem destrutiveis dentro (ainda nao copia)", h));
+        int left = 0;
+        std::vector<uint32_t> order;
+        if (pickup) {}
+        else if (shallow)
+        {
+            for (uint32_t x : subtree(h))
+                if (x != ist && op(x) == INTERACTIVE) throw PatchError(fmt("copia de %07x: tem destrutiveis dentro (a copia rasa nao copia)", h));
+            if (ist) order = {u32(ist + 0xC) & kMask, ist};
+            order.push_back(h);
+        }
+        else
+            order = spine(h, left);
+        const int64_t cost = copyCost(h, places.size(), order, pickup) + extra;
+        if (cost > int64_t(arenaFree()))
+            throw PatchError(fmt("copia de %07x: %zu copias levam ate %lld bytes, a arena tem %u livres", h, places.size(), (long long)cost, arenaFree()));
+        std::unordered_map<uint32_t, Weight> wm;
+        weigh(h, wm);
+        const int64_t need = int64_t(places.size()) * (wm[h].load + wm[h].deb);
+        if (interUsed + need > kInteractives)
+            throw PatchError(fmt("copia de %07x: %zu copias levam %lld interactives, %lld de %lld ja tomados", h, places.size(), (long long)need,
+                                 (long long)interUsed, (long long)kInteractives));
+        interUsed += need;
         const uint32_t p = parentOf(h);
         const M4 before = world(h, false);
         const V3 oldPos = pos3(world(h));
@@ -746,40 +1117,25 @@ struct Stage
         const uint32_t po = op(p);
         w32(wrap, GROUP);
         w32(wrap + 4, po == GROUP || po == TRANSLATE || po == ROTATE || po == SCALE ? u32(p + 4) : 0);
-        w16(wrap + 8, uint16_t(1 + places.size()));
+        w16(wrap + 8, 1);     // numKids sobe quando cada copia fica pronta
         w16(wrap + 0xA, 7);   // visual | collision | noFOV
         w32(wrap + 0x20, h);
         for (uint32_t s : childSlots(p))
             if ((u32(s) & kMask) == h) setPtr(s, wrap);
         parents[wrap] = {p};
         parents[h] = {wrap};
-        const uint32_t size = (op(h) == TRANSLATE ? 0x1C : 0x50) + 4 * u32(h + 8);
+        wraps.push_back(wrap);
         for (size_t i = 0; i < places.size(); ++i)
         {
+            std::unordered_map<uint32_t, uint32_t> twins;
             uint32_t hc;
             if (pickup)   // LevelPickups/Pickup::init escrevem no GROUP do id (id2, numKids) e no SWITCH (whichChild)
                 hc = clonePrivate(h, true);
             else
-                hc = alloc(size, 16), copyBytes(hc, h, size);
+                deepClone(order, twins), hc = twins[h];
             parents[hc] = {wrap};
-            w32(wrap + 0x24 + 4 * uint32_t(i), hc);
-            std::unordered_map<uint32_t, uint32_t> twins;
-            if (ist)
-            {
-                const uint32_t d0 = u32(ist + 0xC) & kMask, dsize = 0xC + 12 * u16(d0 + 0xA);
-                const uint32_t isc = alloc(16), dc = alloc(dsize);
-                copyBytes(isc, ist, 16);
-                copyBytes(dc, d0, dsize);
-                w32(isc, u32(ist) & 0x3FFFFu);   // id1 0: os ids especiais (colunas, SANFRAN) ficam com o original
-                setPtr(isc + 0xC, dc);
-                for (uint32_t s : childSlots(hc))
-                    if ((u32(s) & kMask) == ist) setPtr(s, isc);
-                parents[isc] = {hc};
-                parents[dc] = {isc};
-                twins[ist] = isc;
-                twins[d0] = dc;
-            }
             hc = place(hc, places[i].pos, places[i].heading);
+            w32(wrap + 0x24 + 4 * uint32_t(i), hc);   // depois do place: o ROTATE novo toma o lugar do TRANSLATE
             twins[h] = hc;
             const M4 carry = carryFrom(before, hc);
             for (uint32_t pa : paths)
@@ -797,8 +1153,10 @@ struct Stage
                 ++stats["paths added"];
             }
             growSpheres(hc, oldPos);
+            w16(wrap + 8, uint16_t(2 + i));
             ++stats["copies"];
         }
+        if (left) stats["emitters left shared"] += left * int(places.size());
     }
 
     static bool num3(const json::Value *v, V3 &out)
@@ -840,6 +1198,9 @@ struct Stage
                         throw PatchError(fmt("a alca %07x esta em (%.1f %.1f %.1f), nao no \"from\" (%.1f %.1f %.1f): outro .NGP?", h, pos.v[0],
                                              pos.v[1], pos.v[2], from.v[0], from.v[1], from.v[2]));
                 if (children(h).size() > 1) log.push_back(fmt("item %zu: a alca %07x segura %zu objetos; vao todos", k, h, children(h).size()));
+                const json::Value *del = e.get("delete");
+                const bool moving = !(del && del->asBool()) && (e.get("pos") || e.get("heading"));
+                const int64_t extra = moving ? moveCost(h, !std::isnan(headingOf(e))) : 0;
                 if (const json::Value *cp = e.get("copies"); cp && cp->type == json::Value::Arr && !cp->arr.empty())
                 {
                     std::vector<Place> places;
@@ -850,11 +1211,13 @@ struct Stage
                         pl.heading = headingOf(c);
                         places.push_back(pl);
                     }
-                    copy(h, places);
+                    copy(h, places, extra);
                 }
-                if (const json::Value *d = e.get("delete"); d && d->asBool())
+                else if (extra > int64_t(arenaFree()))
+                    throw PatchError(fmt("alca %07x: o movimento leva ate %lld bytes, a arena tem %u livres", h, (long long)extra, arenaFree()));
+                if (del && del->asBool())
                     erase(h);
-                else if (e.get("pos") || e.get("heading"))
+                else if (moving)
                 {
                     V3 to = pos;
                     if (e.get("pos") && !num3(e.get("pos"), to)) throw PatchError("\"pos\" nao e [x, y, z]");
@@ -866,6 +1229,13 @@ struct Stage
                 log.push_back(fmt("item %zu pulado: %s", k, err.what()));
                 ++stats["skipped"];
             }
+        }
+        if (!objs->arr.empty())
+        {
+            const std::array<int64_t, 3> b = interactives();
+            log.push_back(fmt("interactives: %lld de %lld antes do patch, %lld depois (%lld na carga, %lld pedacos de destroco com pickup no "
+                              "pior caso, %lld de folga)", (long long)(interBefore[0] + interBefore[1] + interBefore[2]), (long long)kInteractives,
+                              (long long)(b[0] + b[1] + b[2]), (long long)b[0], (long long)b[1], (long long)b[2]));
         }
     }
 
@@ -1068,6 +1438,126 @@ std::string stageName(const uint8_t *rdram)
     return s;
 }
 
+// ------------------------------------------------------------------ WOTM_LEVELPATCH_BREAK=<s>[:copies|originals][,<s>[:...]]
+// Diagnostico da copia profunda (NATIVE.md): <s> segundos depois do primeiro TheGame::Update da carga, cada destrutivel das copias (ou
+// dos originais) do patch vai ao estado final pelo Destructible::ChangeState, como uma pancada faria; 4 s depois uma linha conta os
+// emissores e quantos ja acenderam de cada lado (a fumaca de um estado so acende quando o desenho passa por ela: a camera tem de ver) e
+// quais destrutiveis de fora do lado quebrado mudaram de estado nesses 4 s (um domino que escapou da copia; ou uma pancada da luta).
+struct BreakStep { double at; bool copies, done, reported; std::unordered_map<uint32_t, uint32_t> before; std::unordered_set<uint32_t> side; };
+std::vector<BreakStep> g_breakSteps;
+std::vector<uint32_t> g_breakWraps;   // GROUPs das copias da ultima carga
+std::chrono::steady_clock::time_point g_breakStart;
+bool g_breakStarted = false;
+PS2Runtime::RecompiledFunction g_origUpdate = nullptr;
+constexpr uint32_t kTheGameUpdate = wotm::fn::Update__7TheGame, kChangeState = wotm::fn::ChangeState__12DestructibleibT2,
+                   kInteractivesTab = wotm::sym::x_12Interactives_s_dbInteractive;
+
+void breakArm(const std::vector<uint32_t> &wraps)
+{
+    g_breakWraps = wraps;
+    g_breakStarted = false;
+    for (BreakStep &s : g_breakSteps) s.done = s.reported = false;
+}
+// Funcao do jogo com ate 4 argumentos inteiros; o contexto volta como estava (wotm_padsel::callGuest)
+void callGuest(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt, uint32_t fn, uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3)
+{
+    const PS2Runtime::RecompiledFunction f = rt->lookupFunction(fn);
+    if (!f) return;
+    const R5900Context saved = *ctx;
+    const uint32_t a[4] = {a0, a1, a2, a3};
+    for (int i = 0; i < 4; ++i) ctx->r[4 + i] = _mm_set_epi64x(0, static_cast<int64_t>(static_cast<int32_t>(a[i])));
+    ctx->r[31] = _mm_set_epi64x(0, 0);
+    ctx->pc = fn;
+    f(rdram, ctx, rt);
+    wotmFinishGuestCall(rdram, ctx, rt);
+    *ctx = saved;
+}
+// INTERACTIVE_STATEs e emissores de um lado (filho 0 dos GROUPs das copias = original, os outros = copias), sem descer nas partes animadas
+void breakSide(uint8_t *rdram, bool copies, std::vector<uint32_t> &ists, std::vector<uint32_t> &emitters)
+{
+    Stage s{rdram};
+    s.arenaTop = kArenaEnd;
+    std::unordered_set<uint32_t> seen;
+    for (uint32_t w : g_breakWraps)
+    {
+        const std::vector<uint32_t> kids = s.children(w);
+        for (size_t k = copies ? 1 : 0; k < (copies ? kids.size() : std::min<size_t>(1, kids.size())); ++k)
+        {
+            std::vector<uint32_t> stack{kids[k]};
+            while (!stack.empty())
+            {
+                const uint32_t x = stack.back();
+                stack.pop_back();
+                if (!seen.insert(x).second) continue;
+                if (s.op(x) == INTERACTIVE) ists.push_back(x);
+                if (s.op(x) == PART_EMITTER) emitters.push_back(x);
+                if (!animOp(s.op(x)))
+                    for (uint32_t c : s.children(x)) stack.push_back(c);
+            }
+        }
+    }
+}
+void breakTick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    const auto now = std::chrono::steady_clock::now();
+    if (!g_breakStarted) g_breakStart = now, g_breakStarted = true;
+    const double t = std::chrono::duration<double>(now - g_breakStart).count();
+    auto rd = [&](uint32_t a) { uint32_t v; std::memcpy(&v, rdram + (a & PS2_RAM_MASK), 4); return v; };
+    for (BreakStep &st : g_breakSteps)
+    {
+        if (!st.done && t >= st.at)
+        {
+            st.done = true;
+            std::vector<uint32_t> ists, em;
+            breakSide(rdram, st.copies, ists, em);
+            st.before.clear();
+            st.side = std::unordered_set<uint32_t>(ists.begin(), ists.end());
+            for (uint32_t i = 1; i < kInteractives; ++i)   // whichChild de todo destrutivel registrado, antes da quebra
+            {
+                const uint32_t d = rd(kInteractivesTab + 4 * i) & kMask;
+                if (d && rd(d) == 3) st.before[rd(d + 0x28) & kMask] = rd((rd(d + 0x28) & kMask) + 4);
+            }
+            int broke = 0;
+            for (uint32_t ist : ists)
+            {
+                const uint32_t id2 = (rd(ist) >> 7) & 0x7FFu, d = id2 ? rd(kInteractivesTab + 4 * id2) & kMask : 0;
+                if (!d || rd(d) != 3 || (rd(d + 0x28) & kMask) != ist) continue;   // Destructible: m_kind 3, m_istate
+                const uint32_t hd = rd(d + 0x24) & kMask, states = rd(hd + 8) >> 16;   // HierDestructible numKids (+0xA)
+                if (states < 2) continue;
+                callGuest(rdram, ctx, runtime, kChangeState, d, states - 1, 0, 0);
+                ++broke;
+            }
+            std::fprintf(stderr, "[fase] quebra (%s, %.0f s): %d de %zu destrutiveis levados ao estado final\n", st.copies ? "copias" : "originais",
+                         st.at, broke, ists.size());
+        }
+        if (st.done && !st.reported && t >= st.at + 4.0)
+        {
+            st.reported = true;
+            std::string line;
+            for (bool side : {true, false})
+            {
+                std::vector<uint32_t> ists, em;
+                breakSide(rdram, side, ists, em);
+                const size_t lit = std::count_if(em.begin(), em.end(), [&](uint32_t e) { return (rd(e + 0x5C) & 0x10u) != 0; });
+                line += fmt("%s%s: %zu emissores, %zu acesos", side ? "" : "; ", side ? "copias" : "originais", em.size(), lit);
+            }
+            std::vector<uint32_t> moved;
+            for (const auto &[ist, wc] : st.before)
+                if (!st.side.count(ist) && rd(ist + 4) != wc) moved.push_back(ist);
+            std::sort(moved.begin(), moved.end());
+            line += fmt("; fora do lado quebrado mudaram de estado: %zu", moved.size());
+            for (size_t i = 0; i < moved.size() && i < 8; ++i) line += fmt("%s%07x", i ? " " : " (", moved[i]);
+            if (!moved.empty()) line += moved.size() > 8 ? " ...)" : ")";
+            std::fprintf(stderr, "[fase] quebra +4 s: %s\n", line.c_str());
+        }
+    }
+}
+void updateHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    if (ctx->pc == kTheGameUpdate && !g_breakWraps.empty()) breakTick(rdram, ctx, runtime);
+    g_origUpdate(rdram, ctx, runtime);
+}
+
 // <mod>/levels/<FASE>.json procurado agora, a cada carga (um mod ou arquivo criado ou apagado depois do boot vale): as pastas de
 // Registry::dir() como no scan (sem '_'/'.' no comeco, em ordem de Registry::key, o ultimo vence), sem olhar maiusculas
 struct Found { std::filesystem::path host; std::string mod; };
@@ -1107,6 +1597,7 @@ bool findPatch(const std::string &name, Found &out)
 
 void applyFor(uint8_t *rdram)
 {
+    breakArm({});
     const std::string name = stageName(rdram);
     if (name.empty()) return;
     const std::string rel = "LEVELS/" + name + ".JSON";
@@ -1148,6 +1639,9 @@ void applyFor(uint8_t *rdram)
         return;
     }
     const std::string before = st.check();
+    st.shallow = g_shallow;
+    st.interBefore = st.interactives();
+    st.interUsed = st.interBefore[0] + st.interBefore[1] + st.interBefore[2];
     try
     {
         st.apply(v);
@@ -1156,6 +1650,7 @@ void applyFor(uint8_t *rdram)
     {   // so a arena cheia chega aqui: o que ja foi escrito fica
         st.log.push_back(fmt("parou no meio: %s", e.what()));
     }
+    breakArm(st.wraps);
     std::vector<uint32_t> pedsMade;
     try
     {
@@ -1209,6 +1704,29 @@ void wotmLevelPatchInstall(PS2Runtime &runtime)
     for (const auto &[rel, f] : Registry::get().files())
         if (rel.rfind("LEVELS/", 0) == 0 && rel.size() > 5 && rel.substr(rel.size() - 5) == ".JSON")
             std::fprintf(stderr, "[fase] patch %s (%s)\n", rel.c_str(), f.mod.c_str());
+    if (const char *e = std::getenv("WOTM_LEVELPATCH_SHALLOW"); e && std::atoi(e) > 0)
+    {
+        g_shallow = true;
+        std::fprintf(stderr, "[fase] copias rasas (WOTM_LEVELPATCH_SHALLOW=1)\n");
+    }
+    if (const char *e = std::getenv("WOTM_LEVELPATCH_BREAK"); e && *e)
+    {
+        std::string s = e;
+        for (size_t at = 0; at < s.size();)
+        {
+            const size_t comma = std::min(s.find(',', at), s.size());
+            const std::string item = s.substr(at, comma - at);
+            const size_t colon = item.find(':');
+            const std::string who = colon == std::string::npos ? "copies" : item.substr(colon + 1);
+            if (const double sec = std::atof(item.c_str()); sec > 0.0) g_breakSteps.push_back({sec, who != "originals", false, false});
+            at = comma + 1;
+        }
+        if (!g_breakSteps.empty() && (g_origUpdate = runtime.lookupFunction(kTheGameUpdate)))
+        {
+            runtime.registerFunction(kTheGameUpdate, &updateHook);
+            std::fprintf(stderr, "[fase] WOTM_LEVELPATCH_BREAK: %zu quebras marcadas\n", g_breakSteps.size());
+        }
+    }
     // o gancho fica mesmo sem patch no boot: o JSON e procurado a cada carga (findPatch)
     if (!(g_orig = runtime.lookupFunction(kDbInitDb)))
     {

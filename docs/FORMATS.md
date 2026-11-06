@@ -197,8 +197,10 @@ Reader: `python tools/lvl.py collision <STAGE> [--check]` (`--check` redoes ever
   the box and the cells (new list nodes from new memory when it covers more cells; a box outside the grid rectangle is invisible to
   `hdLosTest`). Turning an object whose handle is a `TRANSLATE` needs a new `ROTATE` in its place, in the parent and in each path's
   chain. Turning the handle into `NULL` (9) before `dbInitDb` removes drawing, collision and registration. A copy needs new paths
-  (the old chain with copies of the handle, `INTERACTIVE_STATE` and `DESTRUCTIBLE`; state groups and leaves can be shared) and their
-  list nodes.
+  and their list nodes: each path of the original with every node the copy cloned replaced by its clone (leaves and the unchanged
+  nodes between can be shared), so that `path[i+1]` stays a child of `path[i]`, as `hdTraversePath` requires of `DESTRUCTIBLE` and
+  `SWITCH`. A destructible inside the object must be cloned with its `INTERACTIVE_STATE` and every node above it up to the handle,
+  otherwise the copy's path goes through the original's state and collides by the original's damage.
 
 ## Meshes (`HierObject::polyPkt`)
 Reference readers: `tools/ngp.py` (Python, offline, straight from the disc) and `native/wotm_native.hpp` (`decodeObject`, C++, reads EE RAM). Writer: `tools/vifpkt.py` (packet to geometry and back; byte-exact on every packet of the 44 monster `.NGP`).
