@@ -151,6 +151,58 @@ def mod_pngs(mod_dir, stage):
     return out
 
 
+def panel(info, mod_dir, exported):
+    """What the editor's HUD panel shows for one stage: one row per role texture, with the disc PNG (in `exported`, from
+    export_stage) and the mod's PNG if it has one (anywhere in mod_dir)."""
+    stage = info["stage"]
+    have = mod_pngs(mod_dir, stage) if mod_dir and os.path.isdir(mod_dir) else {}
+    rows = []
+    for key, label, _ids, same in ROLES:
+        for e in info["roles"][key]:
+            name = png_name(stage, e)
+            rows.append({"role": key, "label": label, "same": same, "note": NOTES.get(key, ""), "png": name, "tex": e["tex"],
+                         "file": e["file"], "w": e["w"], "h": e["h"], "psm": e["psm"],
+                         "disc": os.path.join(exported, name) if os.path.isfile(os.path.join(exported, name)) else None,
+                         "mod": have.get(name.lower())})
+    return {"stage": stage, "version": info["version"], "rows": rows}
+
+
+def targets(infos, stage, role, every):
+    """Stages and PNG names a replacement of `role` in `stage` goes to: only that stage, or (every) each stage whose picture of
+    that role is the same kind: all stages for the roles that are the same in A and B, else the stages of the same version.
+    infos: {stage: stage_hud(...)}. [(stage, png name)]."""
+    if not every:
+        return [(stage, png_name(stage, e)) for e in infos[stage]["roles"][role]]
+    same = ROLE[role][3]
+    version = infos[stage]["version"]
+    out = []
+    for st, info in sorted(infos.items()):
+        if same or info["version"] == version:
+            out += [(st, png_name(st, e)) for e in info["roles"][role]]
+    return out
+
+
+def write_mod_png(mod_dir, name, data):
+    """Write a PNG (bytes) as <mod>/LVL/<name>, removing the same name elsewhere in the mod (the game takes any folder)."""
+    for old in [p for n, p in mod_pngs(mod_dir, name.split("_")[0]).items() if n == name.lower()]:
+        os.remove(old)
+    out = os.path.join(mod_dir, "LVL", name)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    tmp = out + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.replace(tmp, out)
+    return out
+
+
+def remove_mod_png(mod_dir, name):
+    """Remove the mod's PNG of that name, wherever it is in the mod. The removed paths."""
+    gone = [p for n, p in mod_pngs(mod_dir, name.split("_")[0]).items() if n == name.lower()]
+    for p in gone:
+        os.remove(p)
+    return gone
+
+
 def describe(info):
     lines = ["%s: HUD version %s" % (info["stage"], info["version"])]
     for key, label, _ids, same in ROLES:
