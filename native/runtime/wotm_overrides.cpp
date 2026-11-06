@@ -110,6 +110,8 @@ WotmFreeCamPose g_wotmFreeCamPose;
 #include "wotm_coop.inc"
 // Pasta mods/ que sobrepoe arquivos do disco (MODS.md): fileCdSearchFile e sceCdRead.
 #include "wotm_mods.inc"
+// Patches de fase (MODS.md, "Level patches"): mods/<mod>/levels/<FASE>.json move, gira, apaga e copia objetos na entrada do dbInitDb
+#include "wotm_levelpatch.inc"
 // Skins de mod na luta (item 8): sons do traje base e IAs sorteadas com skin
 #include "wotm_skins.inc"
 // Monstros custom (item 8, parte 2): Goliath Prime jogavel (visivel com IAs, toma dano delas)
@@ -2743,6 +2745,7 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
         return;
 
     wotmModsInstall(runtime, elfPath);
+    wotmLevelPatchInstall(runtime);   // depois do registro de mods: os patches moram em mods/<mod>/levels/
     if (const char *e = std::getenv("WOTM_RATEMIN"))
         g_minRate = std::atoi(e);
     g_turnLog = std::getenv("WOTM_TURNLOG") != nullptr;

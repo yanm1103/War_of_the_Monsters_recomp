@@ -540,6 +540,34 @@ all four are in `.gitignore`).
 the one of the RANDOM entry (`random`; without it, a mosaic of the game's pictures). Aspect ratio 2:1, any resolution. It wins over the repo's
 `levelpics/` folder (`NATIVE.md`, "Stage select").
 
+## Level patches (move, turn, delete and copy stage objects)
+`mods/<mod>/levels/<FASE>.json` (the stage's file name: `CENTRAL`, `VEGAS`, `TOKYO`...) changes the stage when it loads. Each entry names
+an object by its handle, the `TRANSLATE`/`ROTATE` that `python tools/lvl.py objects <FASE>` prints in the `handle` column, and repeats its
+position (`from`, the `pos` column), so a patch made for another `.NGP` does nothing:
+```json
+{
+  "objects": [
+    {"handle": "0xB18310", "from": [697.7, 972.2, 0.5], "pos": [1098.2, 664.1, 0.5],
+     "copies": [{"pos": [845.9, 1003.2, 0.5], "heading": 90.0}]},
+    {"handle": "0xB31DC0", "from": [663.0, 742.6, 0.5], "heading": 45.0},
+    {"handle": "0xB8A410", "from": [1044.6, 448.2, -0.8], "delete": true}
+  ]
+}
+```
+- `pos`: the new world position of the handle (not of the building's center: the handle is often off to a side; `lvl.py patch`
+  prints each collision box, which shows where the building ends up). `heading`: the world heading in degrees (the `heading` column;
+  turning is about the handle). `delete`: the object leaves the stage (drawing, collision, registration). `copies`: new copies, each with
+  `pos` and an optional `heading`; they share the original's states and meshes, break on their own and get their own collision.
+- Works on destructibles (buildings), pickups (cars, trees, rooftop objects) and props. Copies: buildings without other destructibles
+  inside them, and props; not pickups.
+- Objects that sit on a building (water tanks and vents on the roof are pickups of their own, `pickup` lines with a high Z) do not
+  follow it: move or delete them in the same patch.
+- Check before playing: `python tools/lvl.py patch CENTRAL mods/<mod>/levels/CENTRAL.json` applies the patch to the disc's image, prints
+  what changed, each redone collision box, and checks the collision of the result (box rule and cell rule, `FORMATS.md`, "Stage
+  collision"). An entry that does not match is skipped with a line saying why.
+- Log in the game: `[fase] CENTRAL <- <mod> (LEVELS/CENTRAL.JSON): ...` with the same counts as `lvl.py patch`, a line per skipped entry,
+  and the collision check before and after. `WOTM_LEVELPATCH=2` also prints each redone box; `=0` turns patches off.
+
 ## Under the hood (for those who touch the code)
 
 - **Files** (`native/wotm_mods.hpp`, `native/runtime/wotm_mods.inc`): every file the game reads goes through `fileCdSearchFile`
@@ -554,6 +582,15 @@ the one of the RANDOM entry (`random`; without it, a mosaic of the game's pictur
   `cache/army/` and enter the registry as the mod "army (gerado)" (`Registry::addGenerated`, before the scan), with or without the
   mods folder (`WOTM_MODS=0` included). A mod with its own
   `MON/ARMY.*` wins (`NATIVE.md`, "Army in versus fights").
+- **Level patches** (`native/runtime/wotm_levelpatch.inc`): hook at the entry of `dbInitDb` when `Shell::LoadLevelFiles` calls it (the
+  stage image is inflated at 0xA00000 with TEX0 relocated, and nothing has been registered yet). A handle that turns becomes a new
+  `ROTATE` in its parent and in its collision paths; a deleted handle becomes `NULL` (op 9) and its paths leave the grid cells; a copy is
+  a new handle, `INTERACTIVE_STATE` (id1 cleared) and `DESTRUCTIBLE`, held with the original by a new `GROUP` (noFOV) in the parent's slot,
+  plus copies of the original's paths. Every path through a changed handle gets its box redone (by the disc's rule, or the old box
+  carried by the handle's change for animated chains and camera triggers) and its cell lists redone, and the `GROUP`s above the handle
+  get their spheres grown to cover the object (the drawing culls a `GROUP` by its sphere). New nodes go to a 1 MB arena below the hooks'
+  last MB (`wotm_mods_hooks::kLevelArena`; loads above 32 MB stop at `kHighCeiling`). `tools/lvl.py` (`LevelPatch`) does the same in the
+  same order.
 - **Log:** `[mods] N arquivo(s) de <mods> em <pasta>` at boot and, on the first search of each file, `[mods] MON/LIZARD0.TEX <-
   teste_togera (110080 bytes; disco 110080)`.
 - **Mod files bigger than the disc's:** what limits them is where each loader puts the file, not the disc size (stage and menu files

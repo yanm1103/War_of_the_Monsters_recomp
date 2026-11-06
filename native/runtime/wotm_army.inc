@@ -183,7 +183,7 @@ bool appendArmy(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, const ch
     std::vector<uint8_t> d;
     if (!readArmy(name, d)) return false;
     const uint32_t k = rd8(rdram, countAddr), dst = phys(rd32(rdram, table + 4 * k));
-    const uint32_t ceiling = dst >= PS2_GUEST_RAM_SIZE ? uint32_t(PS2_RAM_SIZE) - 0x100000u : 0x1F10000u;
+    const uint32_t ceiling = dst >= PS2_GUEST_RAM_SIZE ? wotm_mods_hooks::kHighCeiling : 0x1F10000u;
     if (k > 12 || dst < 0xA00000u || dst + d.size() > ceiling)
     {
         std::fprintf(stderr, "[exercito] %s fora: sem espaco (arquivo %u em %#x, %zu bytes)\n", name, k, dst, d.size());

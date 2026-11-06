@@ -6,6 +6,7 @@
   python tools/lvl.py collision CENTRAL [--check]     # grid and paths; --check redoes every path's box and cells
   python tools/lvl.py points CENTRAL                  # PTS/<STAGE>.SPT/.PUP/.FOP/.PED/.AIP
   python tools/lvl.py mrs CENTRAL                     # RST/<STAGE>.MRS (background, fog, lights, time of day)
+  python tools/lvl.py patch CENTRAL mods/X/levels/CENTRAL.json  # apply a level patch to the image and check its collision
   option: --disc DIR (default: disc/ at the repo root)
 
 Formats: docs/FORMATS.md (".NGP image", "Fixups", "Stage collision", "Stage objects", "Stage points"). The rules this tool
@@ -18,6 +19,7 @@ Only the standard library; it reads the user's disc and writes nothing of the ga
 import bisect
 import collections
 import csv
+import json
 import math
 import os
 import struct
@@ -35,8 +37,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 # ------------------------------------------------------------------------------------------------------------- hierarchy
-def children(img, n):
-    """Children of a node as dbsTraverse walks them, plus the DESTRUCTIBLE states and both CONTROL children."""
+def child_slots(img, n):
+    """Addresses of a node's child pointers, as dbsTraverse walks them, plus the DESTRUCTIBLE states and both CONTROL children."""
     u32, u16, u8 = img.u32, img.u16, img.u8
     op = u32(n) & 63
     arrays = {1: (0x20, u16(n + 8)), 3: (0x1C, u32(n + 8)), 4: (0x50, u32(n + 8)), 30: (0x2C, u32(n + 8)),
@@ -44,19 +46,22 @@ def children(img, n):
               38: (0x60, u32(n + 4))}
     if op in arrays:
         off, cnt = arrays[op]
-        out = [u32(n + off + 4 * k) for k in range(min(cnt, 8192))]
-    elif op == 2:
-        out = [u32(n + 0x28 + 16 * k) for k in range(min(u32(n + 4), 16))]
-    elif op == 8:
-        out = [u32(n + 4), u32(n + 8)]
-    elif op == 23:
-        out = [u32(n + 4)]
-    elif op == 39:
-        out = [u32(n + 0xC)]
-    elif op == 31:
-        out = [u32(n + 0xC + 12 * k) for k in range(min(u16(n + 0xA), 64))]
-    else:
-        out = []
+        return [n + off + 4 * k for k in range(min(cnt, 8192))]
+    if op == 2:
+        return [n + 0x28 + 16 * k for k in range(min(u32(n + 4), 16))]
+    if op == 8:
+        return [n + 4, n + 8]
+    if op == 23:
+        return [n + 4]
+    if op == 39:
+        return [n + 0xC]
+    if op == 31:
+        return [n + 0xC + 12 * k for k in range(min(u16(n + 0xA), 64))]
+    return []
+
+
+def children(img, n):
+    out = [img.u32(s) for s in child_slots(img, n)]
     return [c & MASK for c in out if c and img.ok(c & MASK)]
 
 
@@ -428,6 +433,356 @@ class Stage:
         return sum(e - a for a, e in merged), merged, own, shared_top | (blocked - excl), outside
 
 
+# ------------------------------------------------------------------------------------------------------------- level patch
+def inv_affine(m):
+    """Inverse of a row-vector affine matrix (rows 0..2 linear, row 3 translation)."""
+    a = [r[:3] for r in m[:3]]
+    det = (a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+           + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]))
+    if abs(det) < 1e-12:
+        raise PatchError("singular matrix")
+    i = [[(a[1][1] * a[2][2] - a[1][2] * a[2][1]) / det, (a[0][2] * a[2][1] - a[0][1] * a[2][2]) / det,
+          (a[0][1] * a[1][2] - a[0][2] * a[1][1]) / det],
+         [(a[1][2] * a[2][0] - a[1][0] * a[2][2]) / det, (a[0][0] * a[2][2] - a[0][2] * a[2][0]) / det,
+          (a[0][2] * a[1][0] - a[0][0] * a[1][2]) / det],
+         [(a[1][0] * a[2][1] - a[1][1] * a[2][0]) / det, (a[0][1] * a[2][0] - a[0][0] * a[2][1]) / det,
+          (a[0][0] * a[1][1] - a[0][1] * a[1][0]) / det]]
+    t = m[3][:3]
+    return [i[0] + [0.0], i[1] + [0.0], i[2] + [0.0], [-sum(t[k] * i[k][c] for k in range(3)) for c in range(3)] + [1.0]]
+
+
+def _maxscale(m):
+    return math.sqrt(max(sum(m[r][c] ** 2 for c in range(3)) for r in range(3)))
+
+
+def _union(c1, r1, c2, r2):
+    """Smallest sphere holding both."""
+    d = math.dist(c1, c2)
+    if d + r2 <= r1:
+        return list(c1), r1
+    if d + r1 <= r2:
+        return list(c2), r2
+    r = (d + r1 + r2) / 2
+    k = (r - r1) / d
+    return [c1[i] + (c2[i] - c1[i]) * k for i in range(3)], r
+
+
+class PatchError(Exception):
+    pass
+
+
+class LevelPatch:
+    """A level patch (mods/<mod>/levels/<STAGE>.json, docs/MODS.md "Level patches") applied to the stage image the way
+    native/runtime/wotm_levelpatch.inc applies it at the entry of dbInitDb: each entry names an object by its handle (the
+    TRANSLATE/ROTATE `lvl.py objects` prints) and its position on the disc ("from"), and moves, turns, deletes or copies it.
+    Then the collision paths through it get their box and cell lists redone, and the GROUPs above it get their spheres grown.
+    New nodes go to an arena; here it is appended to the image."""
+
+    FROM_TOL = 0.5
+
+    def __init__(self, st):
+        self.st, self.img = st, st.img
+        self.img.d = bytearray(self.img.d)
+        self.cells = {a: set(c) for a, c in st.grid.cells_of.items()}
+        self.free = []
+        self.log = []
+        self.redone = {}            # path -> (box, cells, how)
+        self.stats = collections.Counter()
+
+    # --- memory
+    def w32(self, a, v):
+        struct.pack_into("<I", self.img.d, a - self.img.base, v & 0xFFFFFFFF)
+
+    def w16(self, a, v):
+        struct.pack_into("<H", self.img.d, a - self.img.base, v & 0xFFFF)
+
+    def wf32(self, a, v):
+        struct.pack_into("<f", self.img.d, a - self.img.base, v)
+
+    def set_ptr(self, slot, target):
+        self.w32(slot, (self.img.u32(slot) & ~MASK) | target)
+
+    def alloc(self, size, align=4):
+        d = self.img.d
+        d.extend(bytes((-(self.img.base + len(d))) % align + size))
+        self.stats["arena bytes"] = self.img.base + len(d) - self.st.end
+        return self.img.base + len(d) - size
+
+    def op(self, n):
+        return self.img.u32(n) & 63
+
+    def world(self, n, with_scale=True):
+        return chain_matrix(self.img, self.st.chain(n), with_scale)
+
+    # --- collision
+    def paths_through(self, n):
+        return [a for a in sorted(self.cells) if n in Path(self.img, a).nodes]
+
+    def _head(self, c):
+        return self.st.grid.addr + 0x20 + 4 * c
+
+    def _unlink(self, c, pa):
+        img, slot = self.img, self._head(c)
+        ln = img.u32(slot) & MASK
+        while ln:
+            if img.u32(ln + 4) & MASK == pa:
+                self.w32(slot, img.u32(ln))
+                self.free.append(ln)
+                return
+            slot, ln = ln, img.u32(ln) & MASK
+        raise PatchError("path %07x missing from cell %d" % (pa, c))
+
+    def _link(self, c, pa):
+        if self.free:
+            ln = self.free.pop()
+        else:
+            ln = self.alloc(8)
+            self.stats["new list nodes"] += 1
+        self.w32(ln, self.img.u32(self._head(c)))
+        self.w32(ln + 4, pa)
+        self.w32(self._head(c), ln)
+
+    def set_cells(self, pa, new):
+        old = self.cells.get(pa, set())
+        for c in sorted(old - new):
+            self._unlink(c, pa)
+        for c in sorted(new - old):
+            self._link(c, pa)
+        if new:
+            self.cells[pa] = set(new)
+        else:
+            self.cells.pop(pa, None)
+
+    def redo(self, pa, carry):
+        """New box and cells of path pa: by the disc's rule when the leaf allows it, else its old box carried by `carry`."""
+        p = Path(self.img, pa)
+        bb, how = self.st.path_box(p), "rule"
+        if bb is None:
+            corners = [(x, y, z) for x in (p.min[0], p.max[0]) for y in (p.min[1], p.max[1]) for z in (p.min[2], p.max[2])]
+            bb, how = aabb([ngp.xform(carry, c) for c in corners]), "carried"
+        for i in range(3):
+            self.wf32(pa + 4 * i, bb[0][i])
+            self.wf32(pa + 0xC + 4 * i, bb[1][i])
+        cells = self.st.grid.cells_for_box(bb[0], bb[1])
+        self.set_cells(pa, cells)
+        self.redone[pa] = (bb, len(cells), how)
+        self.stats["paths redone"] += 1
+
+    # --- drawing spheres
+    def obj_sphere(self, h):
+        """Local sphere around what hangs under handle h: the first GROUPs below it, through INTERACTIVE_STATE and DESTRUCTIBLE."""
+        img, out, stack = self.img, [], list(children(self.img, h))
+        while stack:
+            x = stack.pop()
+            o = self.op(x)
+            if o == 1:
+                out.append(([img.f32(x + 0x10 + 4 * i) for i in range(3)], img.f32(x + 0x1C)))
+            elif o in (39, 31):
+                stack.extend(children(img, x))
+            elif o != 9:
+                return None
+        if not out:
+            return None
+        c, r = out[0]
+        for c2, r2 in out[1:]:
+            c, r = _union(c, r, c2, r2)
+        return c, r
+
+    def grow_spheres(self, h, old_pos):
+        """The drawing skips a GROUP whose sphere is out of view: grow the ones above h to keep covering what hangs under it."""
+        img, st = self.img, self.st
+        W = self.world(h)
+        groups = [g for g in st.chain(h)[:-1] if self.op(g) == 1]
+        s = self.obj_sphere(h)
+        if s:
+            co, ro = list(ngp.xform(W, s[0])), s[1] * _maxscale(W)
+        else:   # nothing to measure: the nearest GROUP's sphere, carried from the old place
+            g = groups[-1]
+            M = chain_matrix(img, st.chain(g)[:-1])
+            cw = ngp.xform(M, [img.f32(g + 0x10 + 4 * i) for i in range(3)])
+            co, ro = list(W[3][:3]), img.f32(g + 0x1C) * _maxscale(M) + math.dist(cw, old_pos)
+        for g in groups:
+            M = chain_matrix(img, st.chain(g)[:-1])
+            k = _maxscale(M)
+            cw, rw = ngp.xform(M, [img.f32(g + 0x10 + 4 * i) for i in range(3)]), img.f32(g + 0x1C) * k
+            c, r = _union(cw, rw, co, ro)
+            if r <= rw + 1e-3:
+                continue
+            lc, lr = ngp.xform(inv_affine(M), c), r / k + 0.5
+            for i in range(3):
+                self.wf32(g + 0x10 + 4 * i, lc[i])
+            self.wf32(g + 0x1C, lr)
+            self.wf32(g + 0xC, lr * lr)
+            self.stats["spheres grown"] += 1
+
+    # --- handles
+    def replace(self, old, new):
+        """Put node `new` where `old` was: in its parent's child list and in every collision path."""
+        img, st = self.img, self.st
+        for pa in self.paths_through(old):
+            for k in range(Path(img, pa).length):
+                if img.u32(pa + 0x24 + 4 * k) & MASK == old:
+                    self.set_ptr(pa + 0x24 + 4 * k, new)
+        p = st.parents[old][0]
+        for s in child_slots(img, p):
+            if img.u32(s) & MASK == old:
+                self.set_ptr(s, new)
+        st.parents[new], st.parents[old] = list(st.parents[old]), []
+        for c in children(img, new):
+            st.parents[c] = [new if x == old else x for x in st.parents[c]]
+
+    def to_rotate(self, h):
+        """A ROTATE in place of TRANSLATE h (same children, identity rotation), so the object can turn."""
+        img = self.img
+        if img.u32(h + 0xC):
+            raise PatchError("TRANSLATE %07x has action data (+0xC): it cannot become a ROTATE" % h)
+        n = img.u32(h + 8)
+        r = self.alloc(0x50 + 4 * n, 16)
+        self.w32(r, (img.u32(h) & ~63) | 4)
+        self.w32(r + 4, img.u32(h + 4))
+        self.w32(r + 8, n)
+        for row in range(4):
+            for c in range(4):
+                self.wf32(r + 0x10 + 16 * row + 4 * c, 1.0 if row == c else 0.0)
+        for i in range(3):
+            self.wf32(r + 0x40 + 4 * i, img.f32(h + 0x10 + 4 * i))
+        for k in range(n):
+            self.w32(r + 0x50 + 4 * k, img.u32(h + 0x1C + 4 * k))
+        self.replace(h, r)
+        self.stats["TRANSLATE to ROTATE"] += 1
+        return r
+
+    def place(self, h, pos, heading):
+        """Write handle h so it sits at world `pos` with world `heading` (degrees, None = keep). Returns the handle, which is a
+        new ROTATE when a TRANSLATE has to turn."""
+        img = self.img
+        P = chain_matrix(img, self.st.chain(h)[:-1])
+        W = self.world(h)
+        o = self.op(h)
+        R = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] if o == 3 else \
+            [[img.f32(h + 0x10 + 16 * r + 4 * c) for c in range(3)] for r in range(3)]
+        delta = 0.0 if heading is None else heading - math.degrees(math.atan2(W[0][1], W[0][0]))
+        delta = (delta + 180.0) % 360.0 - 180.0
+        if abs(delta) > 1e-3:
+            cs, sn = math.cos(math.radians(delta)), math.sin(math.radians(delta))
+            R = [[r[0] * cs - r[1] * sn, r[0] * sn + r[1] * cs, r[2]] for r in R]
+            if o == 3:
+                h, o = self.to_rotate(h), 4
+        t = ngp.xform(inv_affine(P), pos)
+        if o == 3:
+            for i in range(3):
+                self.wf32(h + 0x10 + 4 * i, t[i])
+        else:
+            for r in range(3):
+                for c in range(3):
+                    self.wf32(h + 0x10 + 16 * r + 4 * c, R[r][c])
+            for i in range(3):
+                self.wf32(h + 0x40 + 4 * i, t[i])
+        return h
+
+    # --- edits
+    def move(self, h, pos, heading):
+        before, old_pos = self.world(h, False), self.world(h)[3][:3]
+        h = self.place(h, pos, heading)
+        carry = ngp.mul(inv_affine(before), self.world(h, False))
+        for pa in self.paths_through(h):
+            self.redo(pa, carry)
+        self.grow_spheres(h, old_pos)
+        self.stats["moved"] += 1
+
+    def delete(self, h):
+        for pa in self.paths_through(h):
+            self.set_cells(pa, set())
+            self.stats["paths removed"] += 1
+        self.w32(h, (self.img.u32(h) & ~63) | 9)
+        self.stats["deleted"] += 1
+
+    def copy(self, h, places):
+        """Copies of the object under handle h: a new handle, INTERACTIVE_STATE and DESTRUCTIBLE each, sharing the states below;
+        a GROUP in the parent's slot holds the original and the copies. Each copy gets its own collision paths."""
+        img, st, base = self.img, self.st, self.img.base
+        kids = children(img, h)
+        ist = next((c for c in kids if self.op(c) == 39), None)
+        if any(x != ist and self.op(x) == 39 for x in st.subtree(h)):
+            raise PatchError("copy of %07x: it has destructibles inside it (not supported yet)" % h)
+        if any(self.op(c) == 1 and 0x12C0 <= st.ident(c) <= 0x13EB for c in kids):
+            raise PatchError("copy of %07x: pickups cannot be copied yet" % h)
+        p = st.parents[h][0]
+        before, old_pos, paths = self.world(h, False), self.world(h)[3][:3], self.paths_through(h)
+        wrap = self.alloc(0x20 + 4 * (1 + len(places)), 16)
+        self.w32(wrap, 1)
+        self.w32(wrap + 4, img.u32(p + 4) if self.op(p) in (1, 3, 4, 30) else 0)
+        self.w16(wrap + 8, 1 + len(places))
+        self.w16(wrap + 0xA, 7)                     # visual | collision | noFOV
+        self.w32(wrap + 0x20, h)
+        for s in child_slots(img, p):
+            if img.u32(s) & MASK == h:
+                self.set_ptr(s, wrap)
+        st.parents[wrap], st.parents[h] = [p], [wrap]
+        size = (0x1C if self.op(h) == 3 else 0x50) + 4 * img.u32(h + 8)
+        for i, pl in enumerate(places):
+            hc = self.alloc(size, 16)
+            img.d[hc - base:hc - base + size] = img.d[h - base:h - base + size]
+            st.parents[hc] = [wrap]
+            self.w32(wrap + 0x24 + 4 * i, hc)
+            twins = {}
+            if ist:
+                d0 = img.u32(ist + 0xC) & MASK
+                dsize = 0xC + 12 * img.u16(d0 + 0xA)
+                isc, dc = self.alloc(16), self.alloc(dsize)
+                img.d[isc - base:isc - base + 16] = img.d[ist - base:ist - base + 16]
+                img.d[dc - base:dc - base + dsize] = img.d[d0 - base:d0 - base + dsize]
+                self.w32(isc, img.u32(ist) & 0x3FFFF)       # id1 0: special ids (columns, SANFRAN) stay with the original
+                self.set_ptr(isc + 0xC, dc)
+                for s in child_slots(img, hc):
+                    if img.u32(s) & MASK == ist:
+                        self.set_ptr(s, isc)
+                st.parents[isc], st.parents[dc] = [hc], [isc]
+                twins = {ist: isc, d0: dc}
+            hc = self.place(hc, pl["pos"], pl.get("heading"))
+            twins[h] = hc
+            carry = ngp.mul(inv_affine(before), self.world(hc, False))
+            for pa in paths:
+                q = Path(img, pa)
+                np_ = self.alloc(0x24 + 4 * q.length)
+                img.d[np_ - base:np_ - base + 0x24] = img.d[pa - base:pa - base + 0x24]
+                self.w32(np_ + 0x18, 0)
+                for k, nd in enumerate(q.nodes):
+                    self.w32(np_ + 0x24 + 4 * k, (img.u32(pa + 0x24 + 4 * k) & ~MASK) | twins.get(nd, nd))
+                self.redo(np_, carry)
+                self.stats["paths added"] += 1
+            self.grow_spheres(hc, old_pos)
+            self.stats["copies"] += 1
+
+    def apply(self, patch):
+        """Every entry: {"handle", "from": [x, y, z], and "pos"/"heading", "delete": true or "copies": [{"pos", "heading"}]}.
+        An entry that does not match the image is skipped with a line in the log."""
+        st, img = self.st, self.img
+        for k, e in enumerate(patch.get("objects", [])):
+            try:
+                hv = e.get("handle")
+                h = int(hv, 0) if isinstance(hv, str) else int(hv or 0)
+                if h not in st.root_of or self.op(h) not in (3, 4):
+                    raise PatchError("handle %07x is not a TRANSLATE/ROTATE of the stage" % h)
+                if len(st.parents[h]) != 1:
+                    raise PatchError("handle %07x has %d parents" % (h, len(st.parents[h])))
+                pos = self.world(h)[3][:3]
+                fr = e.get("from")
+                if not fr or max(abs(pos[i] - fr[i]) for i in range(3)) > self.FROM_TOL:
+                    raise PatchError("handle %07x is at (%.1f %.1f %.1f), not at \"from\" %s: another .NGP?" % (h, *pos, fr))
+                if len(children(img, h)) > 1:
+                    self.log.append("entry %d: handle %07x holds %d objects; they all go" % (k, h, len(children(img, h))))
+                if e.get("copies"):
+                    self.copy(h, e["copies"])
+                if e.get("delete"):
+                    self.delete(h)
+                elif "pos" in e or "heading" in e:
+                    self.move(h, e.get("pos") or pos, e.get("heading"))
+            except (PatchError, KeyError, TypeError, ValueError) as err:
+                self.log.append("entry %d skipped: %s" % (k, err))
+                self.stats["skipped"] += 1
+
+
 # ------------------------------------------------------------------------------------------------------------- points
 POINTS_MAGIC = 0x12282000
 POINT_EXTS = ("SPT", "PUP", "FOP", "PED", "AIP")
@@ -551,8 +906,13 @@ def cmd_collision(disc, name, check=False):
         st.name, g.addr, g.cols, g.rows, g.cell, g.min_x, g.max_x, g.min_y, g.max_y))
     print("  %d paths (%d triggers), %d cell entries; leaves %s" % (
         len(g.paths), sum(p.trigger for p in g.paths.values()), lists, dict(leaves)))
-    if not check:
-        return
+    if check:
+        check_collision(st)
+
+
+def check_collision(st):
+    """Box rule and cell rule over every path of the grid; True when both hold everywhere they can be checked."""
+    g = st.grid
     box_ok = box_bad = cell_ok = 0
     skipped = collections.Counter()
     worst = (0.0, 0)
@@ -573,6 +933,24 @@ def cmd_collision(disc, name, check=False):
     print("  box rule: %d ok (error <= 1), %d off, not redone %s; worst %.2f at %07x" % (
         box_ok, box_bad, dict(skipped) or 0, worst[0], worst[1]))
     print("  cell rule: %d of %d paths listed in exactly the cells their box covers" % (cell_ok, len(g.paths)))
+    return box_bad == 0 and cell_ok == len(g.paths)
+
+
+def cmd_patch(disc, name, path):
+    """Apply a level patch to the disc image, print what changed and check the collision of the result."""
+    st = Stage(name, disc)
+    with open(path, encoding="utf-8") as f:
+        patch = json.load(f)
+    lp = LevelPatch(st)
+    lp.apply(patch)
+    for line in lp.log:
+        print("  " + line)
+    print("%s: %s" % (st.name, ", ".join("%s %d" % kv for kv in sorted(lp.stats.items())) or "nothing changed"))
+    for pa, (bb, n, how) in sorted(lp.redone.items()):
+        print("  path %07x  box (%.1f %.1f %.1f)-(%.1f %.1f %.1f)  %d cells  %s" % (pa, *bb[0], *bb[1], n, how))
+    st.grid = Grid(st.img, st.grid.addr)
+    print("after the patch:")
+    return 0 if check_collision(st) else 1
 
 
 def cmd_points(disc, name):
@@ -618,6 +996,8 @@ def main(argv):
             cmd_points(disc, names[0])
         else:
             cmd_mrs(disc, names[0])
+    elif cmd == "patch" and len(args) == 3:
+        return cmd_patch(disc, args[1].upper(), args[2])
     else:
         print(__doc__)
         return 1
