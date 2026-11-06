@@ -265,7 +265,8 @@ A skin is a folder in `mods/<mod>/skins/<folder>/` with a `skin.json`:
 - `name`: what the select screen shows. `base`: disc costume (0 to 3) that provides whatever the folder does not bring, and the costume's sounds.
   `ai`: whether drawn AIs can use it (default no). `narrator`: `narrator/<nome>.mp3` spoken when the skin is confirmed in a select
   screen (empty, or the file missing: the custom's `narrator`, then the type's). `fireColor`: the colour of the fire (`"#FF7A1E"`;
-  empty = the custom's `fireColor`, then the game's); see `fireColor` under "Custom monsters".
+  empty = the custom's `fireColor`, then the game's); see `fireColor` under "Custom monsters". `shotColor`: the colour of the
+  default shot, the same way (see `shotColor` under "Custom monsters").
 - A mod skin is always unlocked: it does not go through the unlock screen.
 - What goes in the folder, from the simplest to the most complete:
   - **PNGs only**: model and textures of the base costume; the PNGs replace the textures. Name as in the base costume's export
@@ -349,6 +350,14 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   GS of `ps2EntryRunner`). Two green pieces are not particles and stay in the model files: the fireball's body is the texture
   `lizard0_t0001.png` (a recoloured PNG in the skin or in `files/`), and the crowd control swirl is the model with id 0x63 in
   `LIZARD0.NGP`, with green vertex colours (`0d800d`) that have to be recoloured in the skin's `.NGP`.
+- `shotColor`: `"#RRGGBB"`, the colour of the type's default shot (the projectile of the ranged attack, `Monster` +0x6878; Ultra-V's
+  red bolt, type 6) fired by this monster (own costume and skins without their own `shotColor`). Three parts take the colour, with
+  the same recolouring as `fireColor` (the white stays white): the effects created when the shot explodes (`Weapon::DetonateWeapon`;
+  Ultra-V's are `ShogunFlashBang` 112, `RedHalo` 116 and `WhiteFlash` 29), the point light the shot carries (`Weapon::InitWeapon`;
+  red on Ultra-V) and the shot's body (the model of the weapon type in `Weapons::m_epNodes`, id 4012 on Ultra-V, vertex colour
+  `255,64,64`), through the `colorQuad` of the shot's `_cs`, the per-object vertex colour multiplier the game itself applies (so it
+  also shows in the emulated GS of `ps2EntryRunner`). A pickup fired as a weapon, the special and the punch flashes keep the game's
+  colours. Log: `[custom] tiro: preset 112 na cor #FFD23A`.
 - `logo`: a 2:1 PNG with the name drawn (in the monster's folder or at the mod root; the game's are 256 × 128, 512 × 256 keeps it
   sharp in a large window), shown where the game shows its monsters' logos: under the model in the select screen and above the
   stage picture in the save list. Without it, the name in text (the save list never falls back to the base type's logo).

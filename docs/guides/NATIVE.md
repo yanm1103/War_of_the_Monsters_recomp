@@ -755,8 +755,8 @@ helicopters from `MON/ARMY.*` (below). The adventure keeps its own army untouche
 | `WOTM_SHADOWANYCS=1` | projected shadow on objects of any `_cs` (without the `psObjectCull` rule) |
 | `WOTM_SHADOWLOG=1` | per shadow blocker: objects that cast (node, bits, LOD, position) and that receive, and the silhouette in `shadow_<n>.png` in the current directory |
 | `WOTM_SHADOWPULL=<f>` | fraction of the distance to the eye by which the shadow vertex is pulled so it does not fight with the receiver (default 0.002, ceiling 1000 × f = 2) |
-| `WOTM_FXLIST=1`, `WOTM_FXDUMP=<prefixo>` | lists particle systems / writes their textures (`tools/fx.py` gives names); the list shows each system's `fireColor` (`cor`, 000000 = none) |
-| `WOTM_FXCREATELOG=1` | logs every `particleCreateFx`: `fx[i]`, preset, caller (`$ra`) and the monster the effect is credited to for `fireColor` (`wotm_custom.inc`) |
+| `WOTM_FXLIST=1`, `WOTM_FXDUMP=<prefixo>` | lists particle systems / writes their textures (`tools/fx.py` gives names); the list shows each system's `fireColor` or `shotColor` (`cor`, 000000 = none) |
+| `WOTM_FXCREATELOG=1` | logs every `particleCreateFx`: `fx[i]`, preset, caller (`$ra`) and the monster the effect is credited to for `fireColor` and `shotColor` (`wotm_custom.inc`) |
 | `WOTM_GSFRAME=1` | with no native scene (loading, screen change), shows the GS frame; the default with `PS2X_NO_GS` is a black screen (the GS does not draw, and the displayed area only had texture uploads: raw VRAM showed between the intro skip and the menu and between fights) |
 | `WOTM_SHOTS=<s>[,<s>...]` | writes the native frame to `shot_<s>.png` (current folder, the `discroot`) when the window clock passes each `<s>` seconds: check screens live with a pad script (`PS2X_PAD`), without a key |
 | `WOTM_WINSHOTS=<s>[,<s>...]` | like `WOTM_SHOTS`, but writes the whole window to `win_<s>.png` (with the icon and what goes on top) and also works when the native scene is not redrawn (dialogs after the fight, "no scene" black screen; `wotm_scene.inc`) |

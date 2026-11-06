@@ -73,7 +73,7 @@ inline const char *specialNeeds(int type) {
     }
 }
 
-constexpr uint32_t kFireSet = 0x01000000u;   // bit de "fireColor" presente (a cor #000000 tambem vale)
+constexpr uint32_t kFireSet = 0x01000000u;   // bit de "fireColor"/"shotColor" presente (a cor #000000 tambem vale)
 
 // Monstro custom (mods/<mod>/monsters/<pasta>/monster.json; MODS.md, "Monstros custom"): um monstro novo na selecao (casa
 // CUSTOM), que usa o codigo de um tipo do jogo (`base`) e o modelo e os arquivos dele, ou os proprios ("files": uma subpasta com
@@ -106,6 +106,9 @@ struct Custom {
     // particula do Togera (bafo, bola de fogo, explosao, crowd control) criados por este monstro trocam o verde por ela
     // (wotm_custom.inc marca, wotm_fx.hpp pinta)
     uint32_t fireColor = 0;
+    // "shotColor": cor do tiro padrao (o projetil do tipo, Monster +0x6878) do traje proprio e das skins sem a sua: as particulas
+    // da explosao dele e a luz que ele carrega (wotm_custom.inc)
+    uint32_t shotColor = 0;
     bool ai = false;           // uma CPU pode usar (quadro de CPU da selecao)
     std::filesystem::path portrait;   // PNG do retrato do HUD (vazio = o do .RTX)
     int portraitTex = -1;       // texId do retrato no <PREFIXO><traje>.RTX
@@ -126,6 +129,7 @@ struct Skin {
     bool ai = false;            // as IAs sorteadas podem usar
     std::string narrator;       // narrator/<nome>.mp3 ao confirmar a skin (vazio = o do custom ou o do tipo)
     uint32_t fireColor = 0;     // "fireColor": cor do fogo (kFireSet | 0xRRGGBB; 0 = a do custom ou a do jogo)
+    uint32_t shotColor = 0;     // "shotColor": cor do tiro padrao (kFireSet | 0xRRGGBB; 0 = a do custom ou a do jogo)
     int index = 0;             // traje no jogo (4..99), so nesta execucao
     bool own = false;           // os arquivos proprios de um custom ("files"): e o traje padrao dele, nao uma skin da lista
     std::string mod;
@@ -333,14 +337,14 @@ private:
         for (char &c : s) c = char(std::tolower(static_cast<unsigned char>(c)));
         return s;
     }
-    // "fireColor": "#RRGGBB" -> kFireSet | 0xRRGGBB (0 = sem cor propria)
-    static uint32_t fireColor(const json::Value &v, const std::string &where) {
-        const json::Value *fc = v.get("fireColor");
+    // "fireColor"/"shotColor": "#RRGGBB" -> kFireSet | 0xRRGGBB (0 = sem cor propria)
+    static uint32_t color(const json::Value &v, const char *key, const std::string &where) {
+        const json::Value *fc = v.get(key);
         if (!fc) return 0;
         const std::string s = fc->type == json::Value::Str ? fc->s : std::string();
         if (s.size() == 7 && s[0] == '#' && s.find_first_not_of("0123456789abcdefABCDEF", 1) == std::string::npos)
             return kFireSet | uint32_t(std::stoul(s.substr(1), nullptr, 16));
-        std::fprintf(stderr, "[mods] %s: \"fireColor\" tem de ser \"#RRGGBB\"; ignorado\n", where.c_str());
+        std::fprintf(stderr, "[mods] %s: \"%s\" tem de ser \"#RRGGBB\"; ignorado\n", where.c_str(), key);
         return 0;
     }
     // Filho de `dir` com esse nome, sem olhar maiusculas
@@ -414,7 +418,8 @@ private:
                 const json::Value *ai = v.get("ai");
                 k.ai = ai && ai->asBool(false);
                 if (const json::Value *na = v.get("narrator"); na && na->type == json::Value::Str) k.narrator = lower(na->s);
-                k.fireColor = fireColor(v, "skin " + where);
+                k.fireColor = color(v, "fireColor", "skin " + where);
+                k.shotColor = color(v, "shotColor", "skin " + where);
                 k.mod = m.filename().string();
                 k.dir = s;
                 Skin &slot = byKey[k.monsterName + "/" + k.id];
@@ -608,7 +613,8 @@ private:
                 }
                 if (const json::Value *na = v.get("narrator"); na && na->type == json::Value::Str) c.narrator = lower(na->s);
                 if (const json::Value *cn = v.get("costumeName"); cn && cn->type == json::Value::Str) c.costumeName = cn->s;
-                c.fireColor = fireColor(v, "monstro " + where);
+                c.fireColor = color(v, "fireColor", "monstro " + where);
+                c.shotColor = color(v, "shotColor", "monstro " + where);
                 if (const json::Value *ki = v.get("kind"); ki && ki->type == json::Value::Str) c.kind = lower(ki->s);
                 if (const json::Value *sr = v.get("specialRoar")) c.specialRoar = sr->asBool(false);
                 if (const json::Value *sp = v.get("special"); sp && sp->type == json::Value::Str) {
