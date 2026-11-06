@@ -85,6 +85,12 @@ if ($LASTEXITCODE) { Fail 'tools\build_modkit.ps1 falhou' }
 $kitDist = Join-Path $Runtime 'modkit_build\dist'
 Copy-Item (Join-Path $kitDist 'WotM_ModKit.exe') $stage
 
+# editor de fase: WotM_LevelEditor.exe (tools/build_level_editor.ps1, montado de novo a cada release)
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'build_level_editor.ps1') -Runtime $Runtime
+if ($LASTEXITCODE) { Fail 'tools\build_level_editor.ps1 falhou' }
+$editorDist = Join-Path $Runtime 'level_editor_build\dist'
+Copy-Item (Join-Path $editorDist 'WotM_LevelEditor.exe') $stage
+
 # mods: os arquivos que o git rastreia em mods\ e os quatro do Mecha gerados do disco (tools/mechamon.py; no .gitignore)
 $mecha = 'mods/Mecha/monsters/mecha/files'
 $mechaFiles = 'MECHA.NGP', 'MECHA.PTR', 'MECHA.TEX', 'MECHA.RTX' | ForEach-Object { "$mecha/$_" }
@@ -104,6 +110,7 @@ $lic = Join-Path $stage 'licenses'
 New-Item -ItemType Directory -Force $lic | Out-Null
 Copy-Item (Join-Path $PSScriptRoot 'release\licenses\*') $lic
 Copy-Item (Join-Path $kitDist 'licenses\*') $lic
+Copy-Item (Join-Path $editorDist 'licenses\*') $lic -Force   # Python e PyInstaller repetem as do kit (mesmas versoes fixas)
 Copy-Item (Join-Path $repo 'LICENSE') (Join-Path $lic 'WotM-GPL-3.0.txt')
 $fromBuild = @{
     'PS2Recomp-LICENSE.md' = Join-Path $Runtime 'PS2Recomp\LICENSE'
@@ -118,6 +125,7 @@ foreach ($k in $fromBuild.Keys) {
 $cited = [regex]::Matches((Get-Content (Join-Path $stage 'THIRD_PARTY.txt') -Raw), 'licenses\\([\w.\-]+)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
 foreach ($c in $cited) { if (-not (Test-Path (Join-Path $lic $c))) { Fail "THIRD_PARTY.txt cita licenses\$c, que nao esta no pacote" } }
 if ((Get-Content (Join-Path $stage 'THIRD_PARTY.txt') -Raw) -notmatch 'WotM_ModKit\.exe') { Fail 'o WotM_ModKit.exe nao esta no THIRD_PARTY.txt' }
+if ((Get-Content (Join-Path $stage 'THIRD_PARTY.txt') -Raw) -notmatch 'WotM_LevelEditor\.exe') { Fail 'o WotM_LevelEditor.exe nao esta no THIRD_PARTY.txt' }
 foreach ($d in $dlls.Keys) { if((Get-Content (Join-Path $stage 'THIRD_PARTY.txt') -Raw) -notmatch [regex]::Escape($d)) { Fail "a DLL $d nao esta listada no THIRD_PARTY.txt" } }
 
 # --- nada do disco nem do PC de quem empacota ---------------------------------------------------------------------------------------

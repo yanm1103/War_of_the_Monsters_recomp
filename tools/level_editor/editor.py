@@ -5,7 +5,7 @@ patch (docs/guides/MODS.md, "Level patches") into a mod; "Test" opens the game i
   python tools/level_editor/editor.py [--window | --serve] [--port N]
 
 It opens in the default browser; --window opens its own window instead (pywebview when installed, otherwise Edge/Chrome
-app mode); --serve only serves (open the printed address yourself). The address is
+app mode); --serve only serves (open the printed address yourself); without it the program quits 10 s after its page closes. The address is
 http://127.0.0.1:47197/ (--port changes it); when that port is taken by an editor already running, its window opens again,
 when by something else, a free port is used.
 
@@ -42,6 +42,8 @@ import lvl      # noqa: E402
 import lvlglb   # noqa: E402
 import lvlnames  # noqa: E402
 import modkit   # noqa: E402 - the disc as a folder or a .iso (disc_iso, disc_cache, disc_listdir), as the mod kit reads it
+import hudapi   # noqa: E402 - the HUD panel (web/hud.js)
+import pedsapi  # noqa: E402 - the pedestrians (web/peds.js)
 
 WEB = os.path.join(HERE, "web")
 CONFIG = os.path.join(os.path.expanduser("~"), ".wotm_level_editor.json")
@@ -91,7 +93,10 @@ def default_disc():
 
 
 def load_config():
-    cfg = {"disc": default_disc(), "mods": os.path.join(REPO, "mods"), "theme": "dark", "mod": ""}
+    disc = default_disc()
+    # the release exe: the mods folder the game reads (the mod kit's rule); a clone: the repo's mods/
+    mods = modkit.default_mods(disc) if getattr(sys, "frozen", False) else os.path.join(REPO, "mods")
+    cfg = {"disc": disc, "mods": mods, "theme": "dark", "mod": ""}
     cfg.update(default_game())
     try:
         with open(CONFIG, encoding="utf-8") as f:
@@ -131,14 +136,14 @@ def is_iso(disc):
     return bool(disc) and os.path.isfile(disc) and disc_error(disc) is None
 
 
-def stage_root(disc, name):
+def stage_root(disc, name, files=STAGE_FILES):
     """The folder to read the stage from: the disc folder itself, or the cache with the stage's files copied from the .iso."""
     iso = modkit.disc_iso(disc)
     if not iso:
         return disc
     root = modkit.disc_cache(disc)
     with iso.lock:
-        for d, exts in STAGE_FILES:
+        for d, exts in files:
             for e in exts:
                 rel = "%s/%s.%s" % (d, name.upper(), e)
                 f = iso.find(rel)
@@ -235,6 +240,9 @@ def disc_key(disc):
 
 
 STAGES = Stages()
+# the HUD of every stage is read for "every stage with this picture": from a .iso, only the files lvlhud.py reads
+HUD = hudapi.HudApi(CACHE, lambda disc, name: stage_root(disc, name, (("LVL", ("NGP", "TEX", "RTX")),)),
+                    lambda disc: [s["name"] for s in STAGES.list(disc)], disc_key)
 
 
 def load_names():
@@ -313,16 +321,22 @@ def check_patch(disc, name, patch):
         st = lvl.Stage(name, root)
         lp = lvl.LevelPatch(st)
         lp.apply(patch)
+        pts = lvl.stage_points(root, name)
+        nets = {"fodder": lvl.net_from_points(pts.get("FOP", [])), "ped": lvl.net_from_points(pts.get("PED", []))}
+        lp.apply_peds(patch, nets)      # the game hook's order: objects, pedestrians, then the path cuts
         for line in lp.log:
             print(line)
         print("%s: %s" % (name, ", ".join("%s %d" % kv for kv in sorted(lp.stats.items())) or "nothing changed"))
-        pts = lvl.stage_points(root, name)
-        nets = {"fodder": lvl.net_from_points(pts.get("FOP", [])), "ped": lvl.net_from_points(pts.get("PED", []))}
-        for line in lvl.cut_nets(lp.footprints, nets):
+        for line in lvl.cut_nets(lp.footprints, nets) + (lp.ped_report(nets) if patch.get("peds") else []):
             print(line)
         st.grid = lvl.Grid(st.img, st.grid.addr)
         ok = lvl.check_collision(st)
     return {"ok": bool(ok) and not lp.stats.get("skipped"), "lines": buf.getvalue().splitlines()}
+
+
+def bad_mod(mod):
+    """A mod name the editor refuses: empty, a path, or one the game skips (leading _ or .)."""
+    return not mod or any(c in mod for c in "\\/:*?\"<>|") or mod.startswith(("_", "."))
 
 
 def patch_path(cfg, mod, name):
@@ -355,7 +369,7 @@ def game_stage_lines(cfg):
 def save_patch(cfg, mod, name, patch):
     """Writes (or, empty, removes) mods/<mod>/levels/<STAGE>.json; through a .tmp, since a running game may read it at any time."""
     path = patch_path(cfg, mod, name)
-    if patch.get("objects") or patch.get("names"):
+    if patch.get("objects") or patch.get("names") or patch.get("peds"):
         patch = dict(patch, objects=patch.get("objects") or [])   # the game logs "sem a lista objects" without it
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path + ".tmp", "w", encoding="utf-8") as f:
@@ -377,7 +391,7 @@ def patch_winner(cfg, mod, name):
 
 
 # The game the editor opened, and the file it watches for "reload the stage" (WOTM_LEVELRELOAD: "<STAGE> <counter>")
-GAME = {"proc": None, "count": 0}
+GAME = {"proc": None, "count": int(time.time())}    # from the clock: a new editor never repeats an old counter
 RELOAD_FILE = os.path.join(CACHE, "reload.txt")
 
 
@@ -449,6 +463,7 @@ class Handler(BaseHTTPRequestHandler):
         return json.loads(self.rfile.read(n) or b"{}")
 
     def do_GET(self):
+        LIFE["seen"] = time.monotonic()
         u = urllib.parse.urlparse(self.path)
         q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
         cfg = self.cfg
@@ -466,7 +481,18 @@ class Handler(BaseHTTPRequestHandler):
                         pass
                 facts = STAGES.facts(cfg["disc"], q["name"])
                 return self.send(200, {"objects": describe(q["name"], objs, on, facts, load_names()), "patch": patch,
-                                       "env": stage_env(cfg, cfg["disc"], q["name"], q.get("mod", ""))})
+                                       "env": stage_env(cfg, cfg["disc"], q["name"], q.get("mod", "")),
+                                       "peds": pedsapi.stage_peds(st, stage_root(cfg["disc"], q["name"]))})
+            if u.path == "/api/hud":
+                mod = q.get("mod", "").strip()
+                return self.send(200, HUD.panel(cfg["disc"], cfg["mods"], mod if mod and not bad_mod(mod) else "", q["stage"]))
+            if u.path == "/api/hudimg":
+                mod = q.get("mod", "").strip()
+                path = HUD.image(cfg["disc"], cfg["mods"], "" if bad_mod(mod) else mod, q["stage"], q.get("src"), q.get("png"))
+                if not path or not os.path.isfile(path):
+                    return self.send(404, {"error": "not found"})
+                with open(path, "rb") as f:
+                    return self.send(200, f.read(), "image/png")
             if u.path == "/api/gamelog":
                 return self.send(200, {"lines": game_stage_lines(cfg), "running": game_running()})
             if u.path == "/api/glb":
@@ -488,6 +514,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, f.read(), ctype + ("; charset=utf-8" if ctype.startswith("text") else ""))
 
     def do_POST(self):
+        LIFE["seen"] = time.monotonic()
         cfg = self.cfg
         try:
             b = self.body()
@@ -503,10 +530,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {"ok": True, "file": USER_NAMES})
             if self.path == "/api/check":
                 return self.send(200, check_patch(cfg["disc"], b["name"], b["patch"]))
-            if self.path in ("/api/save", "/api/test", "/api/reload"):
-                mod, name = b["mod"].strip(), b["name"]
-                if not mod or any(c in mod for c in "\\/:*?\"<>|") or mod.startswith(("_", ".")):
+            if self.path == "/api/bye":         # the page closed: see main()
+                LIFE["bye"] = time.monotonic()
+                return self.send(200, {"ok": True})
+            if self.path in ("/api/save", "/api/test", "/api/reload", "/api/hud/replace", "/api/hud/remove"):
+                mod = (b.get("mod") or "").strip()
+                if bad_mod(mod):
                     return self.send(400, {"error": "pick a mod name (letters, digits, no leading _)"})
+                if self.path == "/api/hud/replace":
+                    return self.send(200, {"lines": HUD.replace(cfg["disc"], cfg["mods"], mod, b["stage"], b["role"], b["png"],
+                                                                b["data"], bool(b.get("every")))})
+                if self.path == "/api/hud/remove":
+                    return self.send(200, {"lines": HUD.remove(cfg["disc"], cfg["mods"], mod, b["stage"], b["role"], b["png"],
+                                                               bool(b.get("every")))})
+                name = b["name"]
                 if self.path == "/api/reload" and not game_running():
                     return self.send(400, {"error": "no game opened by the editor is running: use Test in game"})
                 if self.path == "/api/test" and not b.get("save", True):
@@ -555,6 +592,8 @@ def open_window(url, window):
 
 
 DEFAULT_PORT = 47197     # from SCUS_971.97
+LIFE = {"seen": 0.0, "bye": 0.0}   # last request, last /api/bye (time.monotonic)
+BYE_WAIT = 10            # seconds after the page closed with no request: the editor quits (not with --serve)
 
 
 class Server(ThreadingHTTPServer):
@@ -594,7 +633,12 @@ def main(argv):
         return 0            # pywebview window closed
     try:
         while True:
-            time.sleep(3600)
+            time.sleep(1)
+            # the page said it closed (/api/bye) and nothing asked since: a reload asks again within a second
+            bye = LIFE["bye"]
+            if "--serve" not in argv and bye and LIFE["seen"] <= bye and time.monotonic() - bye > BYE_WAIT:
+                print("the editor's page closed: bye")
+                return 0
     except KeyboardInterrupt:
         return 0
 

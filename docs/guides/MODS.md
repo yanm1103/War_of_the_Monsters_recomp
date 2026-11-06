@@ -608,12 +608,17 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
 `python tools/level_editor/editor.py` opens the stage in 3D and writes the patch above. It is a local page (three.js, in
 `tools/level_editor/web/`) served by the script at `http://127.0.0.1:47197/` (`--port N` changes it; with the port taken by an
 editor already running, that one's page opens again; by something else, a free port), in the default browser. `--window` opens
-it in its own window instead (`pywebview` when installed, otherwise Edge/Chrome app mode); `--serve` only serves; `?stage=METRO` in the address opens that stage first. The page is in English, with a dark and a light theme (in the settings, the cog at the top right).
+it in its own window instead (`pywebview` when installed, otherwise Edge/Chrome app mode); `--serve` only serves; `?stage=METRO` in the address opens that stage first. Except with `--serve`, the program quits 10 s
+after its page closes (a reload of the page keeps it). The release zip carries it as `WotM_LevelEditor.exe`, next to `wotm.exe`
+(`tools/build_level_editor.ps1`), whose mods folder is the one the game reads. The page is in English, with a dark and a light
+theme (in the settings, the cog at the top right).
 - **Top bar:** the stage, the mod (its `levels/<STAGE>.json` loads with the stage), **Undo** (Ctrl+Z), **Check** (`lvl.py patch` on the
   disc's stage: what changed, the cut vehicle and pedestrian paths, the collision check), **Save** (Ctrl+S; an empty patch removes the
   file) and **Test in game** (opens the game in the stage in training mode with Togera: `WOTM_MATCH=3,<stage>`,
   `WOTM_TRAINING=1`, `WOTM_MODS=<mods folder>`, windowed; with unsaved changes it asks to save first, since the game loads the
   file). The game's `[fase]` lines (what the patch did in the game, `ignorado` when it could not apply) come back to the log.
+  **Reload in game** (on while a game opened by Test runs) saves and has that game load the stage again, as **F10** does there.
+  **HUD** opens the HUD panel (below).
 - **View:** two cameras, **V** switches (the last one is remembered). Fly (the default): **W/S** move where the camera looks, **A/D**
   sideways, **E** up, **Q** down, **Shift** faster, right drag looks around, the wheel moves forward. Orbit: left
   drag orbits, right drag pans, the wheel zooms. In both, a click selects the object under it (buildings, pickups, props), **G** move
@@ -629,6 +634,20 @@ it in its own window instead (`pywebview` when installed, otherwise Edge/Chrome 
   **PgUp/PgDn** up and down (Shift: ten steps).
 - **Carry the objects on top** (on by default): moving, turning, copying, deleting or resetting a building does the same to the pickups
   that rest on it (`lvl.py objects`, `on <handle>`).
+- **Pedestrians** (top right of the view, or **P**): the stage's pedestrian groups as orange cones, a dashed line from each to the
+  sidewalk it walks, and the sidewalks (`PTS/<STAGE>.PED`) as blue lanes as wide as the walking lane, with a ball at each end. A
+  click picks a cone, a lane or an end; the gizmo, the arrows, **End** and the position fields only move them. The right panel
+  shows what a group walks, its **People** (1 to 255) or a sidewalk's **Lane** (times 10 units to each side), **Duplicate**
+  (groups) and **Delete**. **Add group** and **Add sidewalk** put a new one where the view looks; a new sidewalk is a straight
+  piece to drag by its ends. A red cone has nothing to walk (its nearest node has no link, or the stage has no sidewalks: add one).
+  Limits: 20 groups, 127 sidewalks. The changes go in the patch's `peds` ("Level patches"), and Check lists where each group walks.
+- **HUD panel:** the fight HUD pictures this stage carries (`tools/lvlhud.py`: bar frame and bars, special icon, BOSS label,
+  player numbers, font, pickup ring, hint box, cinema bars, buttons), the disc's beside the mod's. **Replace…** takes an image (a
+  PNG as it is; another format the browser reads becomes a PNG; a shape other than the game's asks first) and writes it into the
+  mod as `LVL/<stage>_tNNNN.png` or `LVL/<stage>_rtx_tNNNN.png` ("Textures as PNG"); **every stage with this picture** writes it
+  for every stage that has the same one (the bar atlas is shared by 17). **Export** downloads the disc's picture, **Remove**
+  takes the mod's out. CANYON1 and TOKYODM carry the other HUD version (B), drawn differently: the panel says so. The game reads
+  the pictures when it loads the stage.
 - **List:** every object by name (its handle beside it), with a filter (name, rule name, handle, kind, id), the kinds, and
   **Changed** (only the edited ones; a dot marks them).
 - **Names** (`tools/lvlnames.py`): the disc has no object names. An object shows, in order, its own **Name** (right panel; kept in

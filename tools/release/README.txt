@@ -69,6 +69,10 @@ textures as PNG and sounds as WAV, and builds what you edited into a mod. It als
 custom monsters. Guide:
 https://github.com/yanm1103/War_of_the_Monsters_recomp/blob/master/docs/guides/MODS.md
 
+WotM_LevelEditor.exe opens a stage of your ISO in 3D: move, turn, copy and delete buildings, cars
+and props, change the pedestrians, and save it into a mod. "Test in game" starts the fight on that
+stage, and the reload button applies what you saved without closing the game.
+
 
 Reporting a bug
 ---------------

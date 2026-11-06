@@ -21,6 +21,8 @@
   <button id="save" title="Save mods/&lt;mod&gt;/levels/&lt;STAGE&gt;.json (Ctrl+S)"><i class="ic" style="--ic:url(vendor/mdi/content-save.svg)"></i>Save</button>
   <button id="test" class="primary" title="Open the game in this stage (training mode)"><i class="ic" style="--ic:url(vendor/mdi/play.svg)"></i>Test in game</button>
   <button id="reload" disabled><i class="ic" style="--ic:url(vendor/mdi/refresh.svg)"></i>Reload in game</button>
+  <span class="sep"></span>
+  <button id="hud" title="The fight HUD this stage carries: replace its pictures with PNGs in the mod"><i class="ic" style="--ic:url(vendor/mdi/view-dashboard-outline.svg)"></i>HUD</button>
   <span class="grow"></span>
   <button id="settings" class="icon" title="Settings"><i class="ic" style="--ic:url(vendor/mdi/cog.svg)"></i></button>
 </header>
@@ -42,6 +44,12 @@
     <div id="overlay">
       <label title="The stage's fog, background and sky, as in the game (L)"><input type="checkbox" id="look"> Game look</label>
       <label title="A 100-unit grid at the base of the selection"><input type="checkbox" id="grid"> Grid</label>
+      <label title="Pedestrian groups (cones) and the sidewalks they walk (blue lanes), to move, add and delete (P)"><input type="checkbox" id="pedsOn"> Pedestrians</label>
+    </div>
+    <div id="pedBar" hidden>
+      <button id="pedAddGroup" title="A new group of people where the view looks (it walks the sidewalk with the nearest end)"><i class="ic" style="--ic:url(vendor/mdi/account-multiple-plus.svg)"></i>Add group</button>
+      <button id="pedAddSeg" title="A new sidewalk segment where the view looks; drag its ends into place"><i class="ic" style="--ic:url(vendor/mdi/vector-polyline-plus.svg)"></i>Add sidewalk</button>
+      <span id="pedCounts" class="muted small"></span>
     </div>
     <div id="hint" class="muted"></div>
     <div id="busy" hidden>Loading…</div>
@@ -75,6 +83,19 @@
       </div>
       <label class="row"><input type="checkbox" id="carry" checked> Carry the objects on top (<span id="onCount">0</span>)</label>
       <div id="pWarn" class="warn"></div>
+    </div>
+    <div id="pedProps" hidden>
+      <h2 id="pdTitle"></h2>
+      <div class="muted" id="pdInfo"></div>
+      <div class="row" id="pdCountRow"><span>People</span><input id="pdCount" type="number" min="1" max="255" step="1" title="How many people the group puts on its sidewalk (1 to 255)"></div>
+      <div class="row" id="pdWidthRow"><span>Lane</span><input id="pdWidth" type="number" min="1" max="255" step="1" title="How far to each side of the line people walk (times 10 units)"><span class="muted">× 10 to each side</span></div>
+      <div class="row"><span>Position</span>
+        <input id="pdx" type="number" step="1"><input id="pdy" type="number" step="1"><input id="pdz" type="number" step="1"></div>
+      <div class="row tools">
+        <button id="pdDrop" title="Put on the surface below (End)">Drop</button>
+        <button id="pdDup" title="Ctrl+D">Duplicate</button>
+        <button id="pdDel" class="danger" title="Delete">Delete</button>
+      </div>
     </div>
   </aside>
 </main>

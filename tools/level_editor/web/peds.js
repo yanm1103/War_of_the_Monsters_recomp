@@ -29,6 +29,7 @@ export function createPeds({ THREE, scene, toThree, toGame }) {
     groupBad: new THREE.MeshBasicMaterial({ color: 0xe5534b }),
     bind: new THREE.LineDashedMaterial({ color: 0xff8a3f, dashSize: 12, gapSize: 8 }),
   };
+  for (const m of Object.values(mats)) m.fog = false;   // markers stay clear in the Game look's fog
   const geo = { end: new THREE.SphereGeometry(7, 12, 8), group: new THREE.ConeGeometry(14, 40, 16) };
   geo.group.translate(0, 20, 0);
 
@@ -253,11 +254,21 @@ export function createPeds({ THREE, scene, toThree, toGame }) {
   function items() {
     return [...groups.filter((g) => !g.deleted).map((g) => g.item), ...segs.flatMap((s) => [s.item, ...s.ends])];
   }
+  // End: onto the ground; groundAt(v) gives the scene height under a scene point (or null). A sidewalk drops both ends.
+  function drop(item, groundAt) {
+    const put = (p) => { const y = groundAt(toThree(p)); return y === null ? p : toGame(toThree(p).setY(y)); };
+    if (item.kind === 'group') { item.group.pos = put(item.group.pos); placeGroup(item.group); return; }
+    const s = item.seg;
+    if (item.kind !== 'end' || item.end === 0) s.a = put(s.a);
+    if (item.kind !== 'end' || item.end === 1) s.b = put(s.b);
+    placeSeg(s);
+    placeAll();
+  }
   function setVisible(on) { visible = on; root.visible = on; placeAll(); }
   function highlight(item) {
     for (const s of segs) s.item.lane.material = item && item.seg === s ? mats.laneSel : mats.lane;
   }
 
-  return { load, patch, items, moved, addGroup, addSegment, remove, setCount, setWidth, info, counts, setVisible, highlight,
+  return { load, patch, items, moved, addGroup, addSegment, remove, setCount, setWidth, info, counts, setVisible, highlight, drop,
            root, defaultNet: DEFAULT_NET };
 }

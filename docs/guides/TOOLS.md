@@ -29,7 +29,9 @@
     does the GS's modulation itself. Each material carries the GS state inherited from the nodes' ctx (`ngp.gs_apply`): extras
     `gs` (`blend`: ALPHA_1 when the mesh has ABE, else null; `aref`: alpha test ref or -1), `zmsk`, `fog` (the OBJECT's
     `fogBurnThru` below 255), `ot` (`alphaSort`) and, on the OBJECTs with `dirLight`, `dirLight`; meshes with ABE are `BLEND`. The editor itself is `tools/level_editor/`
-    (`MODS.md`, "Level editor"; three.js r160 vendored in `web/vendor/`, MIT).
+    (`MODS.md`, "Level editor"; three.js r160 vendored in `web/vendor/`, MIT); its HUD panel is `hudapi.py` + `web/hud.js` and its
+    pedestrians `pedsapi.py` + `web/peds.js`. `tools/build_level_editor.ps1` packs it as `WotM_LevelEditor.exe` (PyInstaller in its
+    own venv in `<runtime>\level_editor_build`, no numpy; `web/_*` test pages left out); `tools/release.ps1` runs it.
   - `lvlhud.py <STAGE>|--all`: the fight HUD a stage carries (level editor, HUD panel). The HUD nodes (ids 0x1C20..0x2133) and the
     fight font (id 18) are found by id, and each texture gets a role (bar atlas, special icon, BOSS label, player number, font,
     pickup ring, hint box, cinema bars, buttons), its file (`.TEX` or `.RTX`), its texId and the mod PNG name. `--all` prints the

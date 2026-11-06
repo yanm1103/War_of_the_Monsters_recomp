@@ -5,6 +5,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { createPeds } from './peds.js';
+import { openHud } from './hud.js';
 
 // The GS modulates and blends the bytes as they are: no color management (texture, vertex and interface colors stay raw).
 THREE.ColorManagement.enabled = false;
@@ -66,6 +68,9 @@ grid.material.fog = false;
 grid.visible = false;
 scene.add(grid);
 let stageRoot = null, skyRoot = null, env = null;   // env: the stage's fog, background and lights (/api/stage, RST/<STAGE>.MRS)
+// pedestrians (web/peds.js): a layer shown with P; pedSel is the marker the gizmo holds (never together with an object)
+const peds = createPeds({ THREE, scene, toThree, toGame });
+let discPeds = null, pedSel = null;
 const store = {
   get(k, d) { try { const v = localStorage.getItem('wotmLevelEditor.' + k); return v === null ? d : v; } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem('wotmLevelEditor.' + k, v); } catch (e) { /* no storage */ } },
@@ -247,7 +252,7 @@ function setView(on) {
   orbit.enabled = !on && !gizmo.dragging;
   fly.keys.clear();
   try { localStorage.setItem('wotmLevelEditor.view', on ? 'fly' : 'orbit'); } catch (e) { /* ignore */ }
-  const common = 'Click: select · Shift+click: add · Shift+drag: box · Ctrl+A: all listed · G move · R turn · Arrows/PgUp/PgDn nudge · End drop · F focus · Ctrl+D copy · Del delete · L game look';
+  const common = 'Click: select · Shift+click: add · Shift+drag: box · Ctrl+A: all listed · G move · R turn · Arrows/PgUp/PgDn nudge · End drop · F focus · Ctrl+D copy · Del delete · L game look · P pedestrians';
   $('hint').textContent = (on
     ? 'Fly view (V: orbit) · WASD move · E up · Q down · Shift fast · Right drag: look · Wheel: forward · '
     : 'Orbit view (V: fly) · Left drag: orbit · Right drag: pan · Wheel: zoom · ') + common;
@@ -356,7 +361,10 @@ function buildPatch() {
   // instance names: a key the game ignores (docs/guides/MODS.md, "Level patches")
   const names = {};
   for (const rec of recs) if (rec.item.iname) names[rec.info.handle] = rec.item.iname;
-  return Object.keys(names).length ? { objects, names } : { objects };
+  const out = Object.keys(names).length ? { objects, names } : { objects };
+  const pp = discPeds ? peds.patch() : null;
+  if (pp) out.peds = pp;
+  return out;
 }
 
 function resetAll() {
@@ -381,6 +389,10 @@ function applyPatch(patch) {
     const rec = byHandle.get(normHandle(h));
     if (rec) rec.item.iname = String(n);
   }
+  pedSel = null;     // the markers are made again
+  peds.load(discPeds, (patch && patch.peds) || null);
+  peds.setVisible(pedsOn);
+  showPedCounts();
 }
 
 function snapshot() {
@@ -409,6 +421,7 @@ async function loadStage(name) {
     const info = await api(`/api/stage?name=${encodeURIComponent(name)}&mod=${encodeURIComponent(mod)}`);
     const gltf = await new GLTFLoader().loadAsync(`/api/glb?name=${encodeURIComponent(name)}`);
     env = info.env || null;
+    discPeds = info.peds || null;
     setLights(env && env.lights);
     skyRoot = setupDrawing(gltf);
     stageRoot = gltf.scene;
@@ -441,7 +454,10 @@ async function loadStage(name) {
     frameAll();
     refreshList();
     if (new URLSearchParams(location.search).has('debug')) console.log('patch ' + JSON.stringify(buildPatch()));
-    log(`${name}: ${recs.length} objects` + ((info.patch.objects || []).length ? `, patch of mod "${mod}" with ${info.patch.objects.length} entries` : ''));
+    const pc = peds.counts();
+    log(`${name}: ${recs.length} objects, ${pc.groups} pedestrian groups` +
+        ((info.patch.objects || []).length ? `, patch of mod "${mod}" with ${info.patch.objects.length} entries` : '') +
+        (info.patch.peds ? ' and pedestrian changes' : ''));
   } catch (e) {
     log(`loading ${name}: ${e.message}`, 'err');
   } finally {
@@ -524,6 +540,7 @@ function refreshList() {
 // mode: 'set' (only this one), 'toggle' (Shift/Ctrl click), 'add'
 function select(item, mode = 'set') {
   if (item && !item.node.visible) item = null;
+  if (mode === 'set' || item) pedSel = null;
   if (mode === 'set') group = item ? [item] : [];
   else if (item) {
     const i = group.indexOf(item);
@@ -535,14 +552,23 @@ function select(item, mode = 'set') {
 }
 function selectMany(list, add = false) {
   const vis = list.filter((it) => it.node.visible);
+  pedSel = null;
   group = add ? [...group, ...vis.filter((it) => !group.includes(it))] : vis;
   sel = group[group.length - 1] || null;
   showSel();
 }
 function showSel() {
   gizmo.detach();
+  if (sel) pedSel = null;
+  peds.highlight(pedSel);
   $('props').hidden = !sel;
-  $('noSel').hidden = !!sel;
+  $('pedProps').hidden = !pedSel;
+  $('noSel').hidden = !!sel || !!pedSel;
+  if (pedSel) {
+    if (gizmo.getMode() !== 'translate') setTool('translate');
+    gizmo.attach(pedSel.node);
+    showPed();
+  }
   if (sel) {
     gizmo.attach(sel.node);
     const i = sel.rec.info;
@@ -590,6 +616,96 @@ function showProps() {
   $('px').value = r1(p[0]); $('py').value = r1(p[1]); $('pz').value = r1(p[2]); $('ph').value = r1(h);
 }
 
+// ------------------------------------------------------------------ pedestrians (P): groups and the sidewalks they walk
+let pedsOn = store.get('peds', '0') === '1';
+function setPeds(on) {
+  pedsOn = on;
+  store.set('peds', on ? '1' : '0');
+  peds.setVisible(on);
+  $('pedsOn').checked = on;
+  $('pedBar').hidden = !on;
+  if (!on && pedSel) { pedSel = null; showSel(); }
+  showPedCounts();
+}
+function showPedCounts() {
+  const c = peds.counts();
+  $('pedCounts').textContent = discPeds
+    ? `${c.groups}/${c.maxGroups} groups · ${c.people} people · ${c.segments}/${c.maxSegments} sidewalks` : '';
+}
+function selectPed(it) {
+  group = []; sel = null; pedSel = it;
+  showSel();
+}
+const pedTitle = (it) => (it.kind === 'group' ? `Pedestrian group ${it.group.handle || '(new)'}`
+  : it.kind === 'seg' ? 'Sidewalk' : `Sidewalk end ${it.end ? 'B' : 'A'}`);
+function pedPos(it) { return it.kind === 'group' ? it.group.pos : it.kind === 'seg' ? toGame(it.node.position) : it.end ? it.seg.b : it.seg.a; }
+function showPed() {
+  if (!pedSel) return;
+  const it = pedSel, p = pedPos(it);
+  $('pdTitle').textContent = pedTitle(it);
+  $('pdInfo').textContent = peds.info(it);
+  $('pdCountRow').hidden = it.kind !== 'group';
+  $('pdWidthRow').hidden = it.kind === 'group';
+  $('pdDup').hidden = it.kind !== 'group';
+  if (it.kind === 'group') $('pdCount').value = it.group.count;
+  else $('pdWidth').value = it.seg.width;
+  $('pdx').value = r1(p[0]); $('pdy').value = r1(p[1]); $('pdz').value = r1(p[2]);
+  showPedCounts();
+}
+const DOWN = new THREE.Vector3(0, -1, 0);
+function groundAt(v) {   // the scene height of the first visible surface under v (from a little above it), or null
+  if (!stageRoot) return null;
+  const ray = new THREE.Raycaster(new THREE.Vector3(v.x, v.y + 400, v.z), DOWN);
+  const hit = ray.intersectObject(stageRoot, true).find((h) => visibleChain(h.object));
+  return hit ? hit.point.y : null;
+}
+function viewPoint() {   // where a new marker goes: the surface in the middle of the view, else a point ahead
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(new THREE.Vector2(0, 0), camera);
+  const hit = stageRoot ? ray.intersectObject(stageRoot, true).find((h) => visibleChain(h.object)) : null;
+  return toGame(hit ? hit.point : camera.position.clone().addScaledVector(camera.getWorldDirection(new THREE.Vector3()), 600));
+}
+function pedEdit(fn) {   // one undo step, then the edit; a refused edit (limits) goes to the log
+  try {
+    const before = history.length;
+    snapshot();
+    const r = fn();
+    if (r === false) history.length = before;
+    showPed();
+    showPedCounts();
+    refreshList();
+    return r;
+  } catch (e) {
+    history.pop();
+    log(`pedestrians: ${e.message}`, 'err');
+    return false;
+  }
+}
+function addPed(kind) {
+  if (!discPeds) return;
+  if (!pedsOn) setPeds(true);
+  const it = pedEdit(() => (kind === 'group' ? peds.addGroup(viewPoint()) : peds.addSegment(viewPoint())));
+  if (it) selectPed(it);
+}
+function pedFromInputs() {
+  if (!pedSel) return;
+  const it = pedSel;
+  pedEdit(() => {
+    if (it.kind === 'group') peds.setCount(it, +$('pdCount').value);
+    else peds.setWidth(it, +$('pdWidth').value);
+    const want = [+$('pdx').value, +$('pdy').value, +$('pdz').value], now = pedPos(it);
+    if (Math.hypot(want[0] - now[0], want[1] - now[1], want[2] - now[2]) > 0.05) {
+      it.node.position.add(toThree(want).sub(toThree(now)));
+      peds.moved(it);
+    }
+  });
+}
+function nudgePed(v) {
+  pedSel.node.position.add(v);
+  peds.moved(pedSel);
+  showPed();
+}
+
 // ------------------------------------------------------------------ editing
 // Every change moves sel; the rest of the group and what they carry follow it by the same world delta.
 function movers() {
@@ -607,7 +723,8 @@ function carry(start) {
 let dragStart = null;
 gizmo.addEventListener('dragging-changed', (e) => {
   orbit.enabled = !e.value && !fly.on;
-  if (e.value && sel) {
+  if (e.value && pedSel) snapshot();
+  else if (e.value && sel) {
     snapshot();
     dragStart = startMove();
   } else {
@@ -616,6 +733,7 @@ gizmo.addEventListener('dragging-changed', (e) => {
   }
 });
 gizmo.addEventListener('objectChange', () => {
+  if (pedSel) { peds.moved(pedSel); showPed(); return; }
   if (!sel) return;
   if (gizmo.getMode() === 'rotate') setWorld(sel.node, posOf(sel), headingOf(sel), sel.rec);   // only about the game's Z
   if (dragStart) carry(dragStart);
@@ -623,6 +741,7 @@ gizmo.addEventListener('objectChange', () => {
 });
 
 function setTool(mode) {
+  if (pedSel && mode === 'rotate') return;   // pedestrian markers only move
   gizmo.setMode(mode);
   gizmo.showX = gizmo.showZ = mode !== 'rotate';
   gizmo.showY = true;
@@ -650,7 +769,7 @@ function editFromInputs() {
 // arrows: along the world axis nearest to where the camera looks (Shift ×10); PageUp/PageDown: up and down
 let lastNudge = -Infinity;
 function nudge(fwd, side, up, big) {
-  if (!sel) return;
+  if (!sel && !pedSel) return;
   const now = performance.now();
   if (now - lastNudge > 700) snapshot();   // one undo step per burst of key repeats
   lastNudge = now;
@@ -659,6 +778,7 @@ function nudge(fwd, side, up, big) {
   const right = new THREE.Vector3(-f.z, 0, f.x);
   const step = ($('snap').checked ? snapMove() : 10) * (big ? 10 : 1);
   const v = f.multiplyScalar(fwd).addScaledVector(right, side).add(new THREE.Vector3(0, up, 0)).multiplyScalar(step);
+  if (pedSel) { nudgePed(v); return; }
   const start = startMove();
   setWorldMatrix(sel.node, new THREE.Matrix4().makeTranslation(v.x, v.y, v.z).multiply(sel.node.matrixWorld));
   carry(start);
@@ -670,6 +790,7 @@ function visibleChain(o) { for (; o; o = o.parent) if (!o.visible) return false;
 
 // End: each selected item down (or up) onto the first surface under its middle, its own meshes and what it carries aside
 function dropToGround() {
+  if (pedSel) { const it = pedSel; pedEdit(() => peds.drop(it, groundAt)); return; }
   if (!group.length || !stageRoot) return;
   snapshot();
   const ray = new THREE.Raycaster(), down = new THREE.Vector3(0, -1, 0);
@@ -695,6 +816,11 @@ function dropToGround() {
 }
 
 function duplicate() {
+  if (pedSel && pedSel.kind === 'group') {
+    const g = pedSel.group, it = pedEdit(() => peds.addGroup([g.pos[0] + 60, g.pos[1], g.pos[2]], g.count));
+    if (it) selectPed(it);
+    return;
+  }
   if (!sel) return;
   snapshot();
   const box = new THREE.Box3();
@@ -721,6 +847,13 @@ function hideRec(it) {
   else { it.rec.deleted = true; it.node.visible = false; }
 }
 function remove() {
+  if (pedSel) {
+    const it = pedSel;
+    pedSel = null;
+    pedEdit(() => peds.remove(it));
+    showSel();
+    return;
+  }
   if (!group.length) return;
   snapshot();
   for (const it of [...group]) {
@@ -792,7 +925,12 @@ canvas.addEventListener('pointerup', (e) => {
   const ray = new THREE.Raycaster();
   ray.setFromCamera(ndc(e), camera);
   const add = e.shiftKey || e.ctrlKey;
-  for (const hit of ray.intersectObject(stageRoot || scene, true)) {
+  const hits = ray.intersectObject(stageRoot || scene, true).filter((h) => visibleChain(h.object));
+  if (pedsOn && !add) {   // a marker in front of the stage's first surface (lanes lie just above the sidewalk)
+    const ph = ray.intersectObjects(peds.items().map((it) => it.pick), false)[0];
+    if (ph && (!hits.length || ph.distance <= hits[0].distance + 2)) { selectPed(ph.object.userData.pedItem); return; }
+  }
+  for (const hit of hits) {
     if (!visibleChain(hit.object)) continue;
     for (let o = hit.object; o; o = o.parent) {
       if (itemOf.has(o)) { select(itemOf.get(o), add ? 'toggle' : 'set'); return; }
@@ -875,6 +1013,17 @@ $('grid').checked = store.get('grid', '0') === '1';
 grid.visible = $('grid').checked;
 $('grid').onchange = (e) => { grid.visible = e.target.checked; store.set('grid', e.target.checked ? '1' : '0'); };
 $('look').onchange = (e) => setLook(e.target.checked);
+$('pedsOn').onchange = (e) => setPeds(e.target.checked);
+$('pedAddGroup').onclick = () => addPed('group');
+$('pedAddSeg').onclick = () => addPed('seg');
+for (const id of ['pdCount', 'pdWidth', 'pdx', 'pdy', 'pdz']) $(id).onchange = pedFromInputs;
+$('pdDrop').onclick = dropToGround;
+$('pdDup').onclick = duplicate;
+$('pdDel').onclick = remove;
+$('hud').onclick = () => {
+  if (!stageName) return;
+  openHud({ stage: stageName, mod: $('mod').value.trim(), api, log });
+};
 $('drop').onclick = dropToGround;
 $('dup').onclick = duplicate;
 $('del').onclick = remove;
@@ -923,11 +1072,11 @@ window.addEventListener('keydown', (e) => {
   else if (e.ctrlKey && k === 'a') { e.preventDefault(); selectMany(listed()); }
   else if (k === 'delete') remove();
   else if (e.ctrlKey || e.altKey || e.metaKey) return;
-  else if (k.startsWith('arrow') && sel) {
+  else if (k.startsWith('arrow') && (sel || pedSel)) {
     e.preventDefault();
     nudge(k === 'arrowup' ? 1 : k === 'arrowdown' ? -1 : 0, k === 'arrowright' ? 1 : k === 'arrowleft' ? -1 : 0, 0, e.shiftKey);
   }
-  else if ((k === 'pageup' || k === 'pagedown') && sel) { e.preventDefault(); nudge(0, 0, k === 'pageup' ? 1 : -1, e.shiftKey); }
+  else if ((k === 'pageup' || k === 'pagedown') && (sel || pedSel)) { e.preventDefault(); nudge(0, 0, k === 'pageup' ? 1 : -1, e.shiftKey); }
   else if (k === 'end') { e.preventDefault(); dropToGround(); }
   else if (fly.on && 'wasdqe'.includes(k) && k.length === 1) { e.preventDefault(); fly.keys.add(k); }
   else if (fly.on && k === 'shift') fly.keys.add(k);
@@ -935,7 +1084,9 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'g') setTool('translate');
   else if (k === 'r') setTool('rotate');
   else if (k === 'f' && sel) focus(sel);
+  else if (k === 'f' && pedSel) focus({ node: pedSel.kind === 'seg' ? pedSel.lane : pedSel.node });
   else if (k === 'l') setLook(!gameLook);
+  else if (k === 'p') setPeds(!pedsOn);
   else if (k === 'escape') select(null);
 });
 window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
@@ -957,9 +1108,13 @@ function init(r) {
 setTool('translate');
 orbit.enabled = false;
 setView(fly.on);
+setPeds(pedsOn);
+// the editor program quits a few seconds after its page closes (a reload asks again at once and keeps it)
+window.addEventListener('pagehide', () => { try { navigator.sendBeacon('/api/bye', '{}'); } catch (e) { /* ignore */ } });
 if (new URLSearchParams(location.search).has('debug')) {
   window.wotmDebug = { camera, fly, flyStep, setView, select, selectMany, items, listed, dropToGround, nudge, duplicate, remove,
-                       undo, buildPatch, posOf, setLook, scene, renderer, gsLights, get group() { return group; }, get sel() { return sel; },
+                       undo, buildPatch, posOf, setLook, scene, renderer, gsLights, peds, selectPed, setPeds, addPed, pedFromInputs,
+                       get pedSel() { return pedSel; }, get group() { return group; }, get sel() { return sel; },
                        get env() { return env; }, get skyRoot() { return skyRoot; }, get stageRoot() { return stageRoot; } };
 }
 loop();
