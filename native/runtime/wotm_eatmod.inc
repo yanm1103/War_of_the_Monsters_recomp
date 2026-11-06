@@ -46,6 +46,7 @@ struct Config
 struct Hold
 {
     bool active = false, prevCircle = false;
+    uint32_t logged = 0;   // the monster whose animation handles were last logged
     uint32_t pos = 0;   // guest address of the held civilian's 16-byte position
     std::chrono::steady_clock::time_point since;
 } g_hold[4];
@@ -154,6 +155,15 @@ void tick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, in
     Hold &h = g_hold[player];
     const bool circle = (wotm_modes4::call(rdram, ctx, runtime, kPadButtons, {uint32_t(player)}) & kBtnCircle) != 0;
     const bool tap = circle && !h.prevCircle;
+    if (tap && h.logged != m)
+    {
+        // Which model this is and which animation handles it has: the grab/eat clips only play if 298/299 are there
+        h.logged = m;
+        std::fprintf(stderr, "[eatmod] jogador %d: tipo %u traje %u; m_anims[90]=%08x [96]=%08x [298]=%08x [299]=%08x\n", player + 1,
+                     rd32(rdram, m + kTypeBits) >> 5, rd32(rdram, m + kTypeBits) & 0x1F, rd32(rdram, m + kAnims + kAnimStride * 90),
+                     rd32(rdram, m + kAnims + kAnimStride * 96), rd32(rdram, m + kAnims + kAnimStride * kAnimEat),
+                     rd32(rdram, m + kAnims + kAnimStride * kAnimGrab));
+    }
     h.prevCircle = circle;
 
     const uint32_t cs = rd32(rdram, m + kCs) & 0x1FFFFFFFu;
