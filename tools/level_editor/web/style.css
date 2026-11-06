@@ -9,6 +9,7 @@
   color-scheme: light;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body { display: grid; grid-template-rows: auto 1fr 140px; background: var(--bg); color: var(--fg);
        font: 13px/1.4 "Segoe UI", system-ui, sans-serif; overflow: hidden; }
@@ -58,6 +59,16 @@ aside { background: var(--panel); padding: 8px; overflow: auto; min-height: 0; }
 #band { position: absolute; border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); pointer-events: none; }
 #overlay { position: absolute; top: 6px; right: 8px; background: color-mix(in srgb, var(--panel) 80%, transparent);
            border: 1px solid var(--line); border-radius: 4px; padding: 2px 8px; display: flex; gap: 12px; }
+#overlay { align-items: center; }
+#overlay button.icon { padding: 1px 4px; }
+button.ghost { background: transparent; border-color: transparent; }
+.callout { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 6px; margin: 8px 0; }
+.callout > .ic { margin-top: 1px; }
+.callout > span { flex: 1; }
+.callout.warn { background: color-mix(in srgb, var(--warn) 12%, var(--panel)); border-left: 3px solid var(--warn); }
+.callout.warn > .ic { color: var(--warn); }
+.callout button.icon { padding: 0 2px; margin: -2px -4px 0 0; }
+#keepNote { position: absolute; top: 6px; left: 8px; max-width: min(520px, 55%); margin: 0; }
 #pedBar { position: absolute; top: 40px; right: 8px; display: flex; align-items: center; gap: 6px;
           background: color-mix(in srgb, var(--panel) 80%, transparent); border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; }
 #pedBar[hidden], #pedProps[hidden] { display: none; }

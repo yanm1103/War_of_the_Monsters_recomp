@@ -16,11 +16,13 @@
   <label>Stage <select id="stage"></select></label>
   <label>Mod <input id="mod" list="mods" placeholder="my_mod" spellcheck="false"><datalist id="mods"></datalist></label>
   <span class="sep"></span>
-  <button id="undo" title="Undo (Ctrl+Z)"><i class="ic" style="--ic:url(vendor/mdi/undo.svg)"></i>Undo</button>
+  <button id="undo" title="Undo (Ctrl+Z)" disabled><i class="ic" style="--ic:url(vendor/mdi/undo.svg)"></i>Undo</button>
+  <button id="redo" class="icon" title="Redo (Ctrl+Y)" aria-label="Redo" disabled><i class="ic" style="--ic:url(vendor/mdi/redo.svg)"></i></button>
   <button id="check" title="Apply the patch to the disc's stage and check the collision"><i class="ic" style="--ic:url(vendor/mdi/check-circle-outline.svg)"></i>Check</button>
   <button id="save" title="Save mods/&lt;mod&gt;/levels/&lt;STAGE&gt;.json (Ctrl+S)"><i class="ic" style="--ic:url(vendor/mdi/content-save.svg)"></i>Save</button>
-  <button id="test" class="primary" title="Open the game in this stage (training mode)"><i class="ic" style="--ic:url(vendor/mdi/play.svg)"></i>Test in game</button>
+  <button id="test" class="primary" title="Open the game on this stage in training mode, as Togera"><i class="ic" style="--ic:url(vendor/mdi/play.svg)"></i>Test in game</button>
   <button id="reload" disabled><i class="ic" style="--ic:url(vendor/mdi/refresh.svg)"></i>Reload in game</button>
+  <button id="stop" class="icon" title="Close the game the editor opened" aria-label="Stop game" hidden><i class="ic" style="--ic:url(vendor/mdi/stop.svg)"></i></button>
   <span class="sep"></span>
   <button id="hud" title="The fight HUD this stage carries: replace its pictures with PNGs in the mod"><i class="ic" style="--ic:url(vendor/mdi/view-dashboard-outline.svg)"></i>HUD</button>
   <span class="grow"></span>
@@ -45,7 +47,10 @@
       <label title="The stage's fog, background and sky, as in the game (L)"><input type="checkbox" id="look"> Game look</label>
       <label title="A 100-unit grid at the base of the selection"><input type="checkbox" id="grid"> Grid</label>
       <label title="Pedestrian groups (cones) and the sidewalks they walk (blue lanes), to move, add and delete (P)"><input type="checkbox" id="pedsOn"> Pedestrians</label>
+      <button id="frame" class="icon" title="Frame the whole stage (Home)" aria-label="Frame all"><i class="ic" style="--ic:url(vendor/mdi/fit-to-screen-outline.svg)"></i></button>
     </div>
+    <div id="keepNote" class="callout warn" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span id="keepText"></span>
+      <button id="keepClose" class="icon ghost" title="Hide this note" aria-label="Hide"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
     <div id="pedBar" hidden>
       <button id="pedAddGroup" title="A new group of people where the view looks (it walks the sidewalk with the nearest end)"><i class="ic" style="--ic:url(vendor/mdi/account-multiple-plus.svg)"></i>Add group</button>
       <button id="pedAddSeg" title="A new sidewalk segment where the view looks; drag its ends into place"><i class="ic" style="--ic:url(vendor/mdi/vector-polyline-plus.svg)"></i>Add sidewalk</button>
@@ -56,6 +61,12 @@
   </section>
   <aside id="right">
     <div id="noSel" class="muted">Select an object in the view or in the list.</div>
+    <div id="delProps" hidden>
+      <h2 id="dTitle"></h2>
+      <div class="muted" id="dSub"></div>
+      <div class="callout warn"><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span>Deleted from this stage in your mod.</span></div>
+      <div class="row tools"><button id="restore" title="Put it back where the disc has it (with Carry, also the objects that were on top)"><i class="ic" style="--ic:url(vendor/mdi/restore.svg)"></i>Restore</button></div>
+    </div>
     <div id="props" hidden>
       <h2 id="pTitle"></h2>
       <div class="muted" id="pSub"></div>
@@ -118,6 +129,13 @@
     <h2>Test in game</h2>
     <p>This stage has unsaved changes. The game loads the saved file.</p>
     <div class="row end"><button value="cancel">Cancel</button><button value="nosave">Test the saved file</button><button value="save" class="primary">Save and test</button></div>
+  </form>
+</dialog>
+<dialog id="askDlg">
+  <form method="dialog">
+    <h2 id="askTitle"></h2>
+    <p id="askText"></p>
+    <div class="row end" id="askBtns"></div>
   </form>
 </dialog>
 <script type="module" src="app.js"></script>

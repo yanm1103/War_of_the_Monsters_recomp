@@ -612,21 +612,29 @@ it in its own window instead (`pywebview` when installed, otherwise Edge/Chrome 
 after its page closes (a reload of the page keeps it). The release zip carries it as `WotM_LevelEditor.exe`, next to `wotm.exe`
 (`tools/build_level_editor.ps1`), whose mods folder is the one the game reads. The page is in English, with a dark and a light
 theme (in the settings, the cog at the top right).
-- **Top bar:** the stage, the mod (its `levels/<STAGE>.json` loads with the stage), **Undo** (Ctrl+Z), **Check** (`lvl.py patch` on the
-  disc's stage: what changed, the cut vehicle and pedestrian paths, the collision check), **Save** (Ctrl+S; an empty patch removes the
-  file) and **Test in game** (opens the game in the stage in training mode with Togera: `WOTM_MATCH=3,<stage>`,
+- **Top bar:** the stage, the mod (its `levels/<STAGE>.json` loads with the stage; picking another one asks before dropping unsaved
+  changes, and the editor remembers it), **Undo** (Ctrl+Z) and **Redo** (Ctrl+Y or Ctrl+Shift+Z; their tooltips name the change),
+  **Check** (`lvl.py patch` on the disc's stage: what changed, the cut vehicle and pedestrian paths, the pedestrian groups, the
+  collision check), **Save** (Ctrl+S, also from a field; an empty patch removes the file; keys, entries and names the editor does not
+  edit, such as entries for handles the stage does not have, stay in the file as they are, and a note over the view says so when the
+  file loads) and **Test in game** (opens the game in the stage in training mode with Togera: `WOTM_MATCH=3,<stage>`,
   `WOTM_TRAINING=1`, `WOTM_MODS=<mods folder>`, windowed; with unsaved changes it asks to save first, since the game loads the
-  file). The game's `[fase]` lines (what the patch did in the game, `ignorado` when it could not apply) come back to the log.
-  **Reload in game** (on while a game opened by Test runs) saves and has that game load the stage again, as **F10** does there.
-  **HUD** opens the HUD panel (below).
+  file; with the game already open it asks to reload the stage in it or to restart it). The game's `[fase]` lines come back to the
+  log in words (patch applied, file rejected, another mod's file used, reload skipped or dropped); the load's details stay as the
+  game writes them. **Reload in game** (on while a game opened by Test runs) saves and has that game load the stage again, as
+  **F10** does there; with the game on another stage it offers a restart on this one. **Stop** (the square, while the game runs)
+  closes the game the editor opened. **HUD** opens the HUD panel (below).
 - **View:** two cameras, **V** switches (the last one is remembered). Fly (the default): **W/S** move where the camera looks, **A/D**
   sideways, **E** up, **Q** down, **Shift** faster, right drag looks around, the wheel moves forward. Orbit: left
   drag orbits, right drag pans, the wheel zooms. In both, a click selects the object under it (buildings, pickups, props), **G** move
-  gizmo, **R** turn gizmo (about the vertical only), **F** frames the selection, **Ctrl+D** copies it, **Del** deletes it, **Esc**
-  deselects. The right panel takes position and heading by number, **Snap** (steps set beside it, 10 units and 15 degrees by
-  default; they also set the arrow keys' step), **Drop** (**End**: down or up onto the first surface under the object's middle,
-  another object's roof included) and **Reset** (back to the disc's place, copies removed). **Grid** (top right of the view) draws
-  a 100-unit grid at the base of the selection.
+  gizmo, **R** turn gizmo (about the vertical only), **F** frames the selection, **Home** (or the frame button, top right of the
+  view) frames the whole stage, **Ctrl+D** copies it, **Del** deletes it, **Esc** deselects. W/A/S/D/Q/E go by their place on the
+  keyboard (the same keys on AZERTY); the other shortcuts by their letter. The shortcuts work after a click on a checkbox or a
+  button; a text field, the stage picker and an open dialog keep the keys. The right panel takes position and heading by number,
+  **Snap** (steps set beside it, 10 units and 15 degrees by default; they also set the arrow keys' step), **Drop** (**End**: down
+  or up onto the first surface under the object's middle, another object's roof included) and **Reset** (back to the disc's place,
+  copies removed). A deleted object stays in the list, struck through: picking it shows **Restore**, which puts it back (with
+  Carry, the objects that were on top too). **Grid** (top right of the view) draws a 100-unit grid at the base of the selection.
 - **Several objects:** Shift+click (or Ctrl+click, also in the list) adds or takes out one, Shift+left drag selects the ones whose
   middle falls in the box (only the kinds ticked in the list), **Ctrl+A** selects everything the list shows. The gizmo and the fields
   act on the last one picked (yellow outline); the others (orange) follow it by the same move or turn, and Drop, Duplicate, Delete

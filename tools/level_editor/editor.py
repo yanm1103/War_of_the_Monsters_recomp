@@ -339,6 +339,12 @@ def bad_mod(mod):
     return not mod or any(c in mod for c in "\\/:*?\"<>|") or mod.startswith(("_", "."))
 
 
+def bad_mod_reason(mod):
+    if not mod:
+        return "Choose a mod to save into (Mod, at the top)."
+    return "A mod name can't contain \\ / : * ? \" < > | or start with _ or ."
+
+
 def patch_path(cfg, mod, name):
     return os.path.join(cfg["mods"], mod, "levels", name + ".json")
 
@@ -358,8 +364,12 @@ def game_log(cfg):
 
 
 def game_stage_lines(cfg):
-    """The [fase] lines of the game's log (what the patch did in the game)."""
+    """The [fase] lines of the game's log (what the patch did in the game); none from a log older than the game the editor
+    opened (the release exe moves the old wotm.log aside only once it runs)."""
     try:
+        # (file times move in clock ticks of ~16 ms: a small margin)
+        if GAME["proc"] and os.path.getmtime(game_log(cfg)) < GAME["started"] - 0.05:
+            return []
         with open(game_log(cfg), encoding="utf-8", errors="replace") as f:
             return [l.rstrip() for l in f if l.startswith("[fase]")]
     except OSError:
@@ -369,7 +379,8 @@ def game_stage_lines(cfg):
 def save_patch(cfg, mod, name, patch):
     """Writes (or, empty, removes) mods/<mod>/levels/<STAGE>.json; through a .tmp, since a running game may read it at any time."""
     path = patch_path(cfg, mod, name)
-    if patch.get("objects") or patch.get("names") or patch.get("peds"):
+    # any key besides an empty objects list keeps the file: names, peds, and keys of a newer editor or written by hand
+    if patch.get("objects") or any(k != "objects" for k in patch):
         patch = dict(patch, objects=patch.get("objects") or [])   # the game logs "sem a lista objects" without it
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path + ".tmp", "w", encoding="utf-8") as f:
@@ -390,14 +401,31 @@ def patch_winner(cfg, mod, name):
     return sorted(have, key=str.lower)[-1]
 
 
-# The game the editor opened, and the file it watches for "reload the stage" (WOTM_LEVELRELOAD: "<STAGE> <counter>")
-GAME = {"proc": None, "count": int(time.time())}    # from the clock: a new editor never repeats an old counter
+# The game the editor opened (its process, the stage it opened on, its log file), and the file it watches for "reload the
+# stage" (WOTM_LEVELRELOAD: "<STAGE> <counter>")
+GAME = {"proc": None, "stage": "", "logf": None, "started": 0.0,
+        "count": int(time.time())}      # count from the clock: a new editor never repeats an old counter
 RELOAD_FILE = os.path.join(CACHE, "reload.txt")
 
 
 def game_running():
     p = GAME["proc"]
     return p is not None and p.poll() is None
+
+
+def stop_game():
+    """Closes the game the editor opened (only that process). True when one was running."""
+    p, was = GAME["proc"], game_running()
+    if was:
+        p.terminate()
+        try:
+            p.wait(5)
+        except subprocess.TimeoutExpired:
+            pass
+    if GAME["logf"]:
+        GAME["logf"].close()
+        GAME["logf"] = None
+    return was
 
 
 def reload_game(name):
@@ -429,14 +457,18 @@ def launch_game(cfg, name, training):
     cwd = cfg.get("cwd") or os.path.dirname(cfg["game"])
     # with the ELF (the clone's runtime) stderr is the log; with no argument wotm.exe writes wotm.log itself
     os.makedirs(CACHE, exist_ok=True)
+    stop_game()     # closes the log file of a game that has exited
+    GAME["started"] = time.time()
     log = open(game_log(cfg), "w") if cfg.get("elf") else subprocess.DEVNULL
     GAME["proc"] = subprocess.Popen(args, cwd=cwd, env=env, stdout=subprocess.DEVNULL, stderr=log)
+    GAME["stage"] = name
+    GAME["logf"] = log if cfg.get("elf") else None
     return " ".join(args)
 
 
 def init_reply(cfg):
     return {"config": cfg, "stages": STAGES.list(cfg["disc"]), "mods": list_mods(cfg), "discError": disc_error(cfg["disc"]),
-            "gameRunning": game_running()}
+            "gameRunning": game_running(), "gameStage": GAME["stage"] if game_running() else ""}
 
 
 # ------------------------------------------------------------------------------------------------------------- server
@@ -494,7 +526,8 @@ class Handler(BaseHTTPRequestHandler):
                 with open(path, "rb") as f:
                     return self.send(200, f.read(), "image/png")
             if u.path == "/api/gamelog":
-                return self.send(200, {"lines": game_stage_lines(cfg), "running": game_running()})
+                run = game_running()
+                return self.send(200, {"lines": game_stage_lines(cfg), "running": run, "stage": GAME["stage"] if run else ""})
             if u.path == "/api/glb":
                 with open(STAGES.glb(cfg["disc"], q["name"]), "rb") as f:
                     return self.send(200, f.read(), "model/gltf-binary")
@@ -533,10 +566,12 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/api/bye":         # the page closed: see main()
                 LIFE["bye"] = time.monotonic()
                 return self.send(200, {"ok": True})
+            if self.path == "/api/stop":        # only the game this editor opened
+                return self.send(200, {"ok": True, "stopped": stop_game(), "running": False})
             if self.path in ("/api/save", "/api/test", "/api/reload", "/api/hud/replace", "/api/hud/remove"):
                 mod = (b.get("mod") or "").strip()
                 if bad_mod(mod):
-                    return self.send(400, {"error": "pick a mod name (letters, digits, no leading _)"})
+                    return self.send(400, {"error": bad_mod_reason(mod), "code": "mod"})
                 if self.path == "/api/hud/replace":
                     return self.send(200, {"lines": HUD.replace(cfg["disc"], cfg["mods"], mod, b["stage"], b["role"], b["png"],
                                                                 b["data"], bool(b.get("every")))})
@@ -546,6 +581,9 @@ class Handler(BaseHTTPRequestHandler):
                 name = b["name"]
                 if self.path == "/api/reload" and not game_running():
                     return self.send(400, {"error": "no game opened by the editor is running: use Test in game"})
+                # a second Test would open another game and lose the first one: the page asks (reload or restart)
+                if self.path == "/api/test" and game_running() and not b.get("restart"):
+                    return self.send(409, {"error": "the game is already open", "code": "running", "stage": GAME["stage"]})
                 if self.path == "/api/test" and not b.get("save", True):
                     return self.send(200, {"ok": True, "lines": [], "launched": launch_game(cfg, name, b.get("training", True))})
                 res = check_patch(cfg["disc"], name, b["patch"])

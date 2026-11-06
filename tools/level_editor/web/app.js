@@ -31,9 +31,10 @@ const normHandle = (h) => '0x' + parseInt(String(h), 16).toString(16).toUpperCas
 async function api(path, body) {
   const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
   const j = await r.json();
-  if (!r.ok) throw new Error(j.error || r.statusText);
+  if (!r.ok) throw Object.assign(new Error(j.error || r.statusText), { status: r.status, code: j.code, data: j });
   return j;
 }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function log(lines, cls) {
   const el = $('log');
@@ -252,7 +253,7 @@ function setView(on) {
   orbit.enabled = !on && !gizmo.dragging;
   fly.keys.clear();
   try { localStorage.setItem('wotmLevelEditor.view', on ? 'fly' : 'orbit'); } catch (e) { /* ignore */ }
-  const common = 'Click: select · Shift+click: add · Shift+drag: box · Ctrl+A: all listed · G move · R turn · Arrows/PgUp/PgDn nudge · End drop · F focus · Ctrl+D copy · Del delete · L game look · P pedestrians';
+  const common = 'Click: select · Shift+click: add · Shift+drag: box · Ctrl+A: all listed · G move · R turn · Arrows/PgUp/PgDn nudge · End drop · F focus · Home all · Ctrl+D copy · Del delete · L game look · P pedestrians';
   $('hint').textContent = (on
     ? 'Fly view (V: orbit) · WASD move · E up · Q down · Shift fast · Right drag: look · Wheel: forward · '
     : 'Orbit view (V: fly) · Left drag: orbit · Right drag: pan · Wheel: zoom · ') + common;
@@ -307,7 +308,15 @@ function loop() {
 // ------------------------------------------------------------------ model
 // rec: one object of the stage (handle). item: what can be selected, the object itself or one of its copies.
 // group: every selected item; sel: the one the gizmo and the fields act on (the last picked), the others follow it.
-let cfg = {}, stageName = '', recs = [], byHandle = new Map(), itemOf = new Map(), sel = null, group = [], history = [], dirty = false;
+let cfg = {}, stageName = '', recs = [], byHandle = new Map(), itemOf = new Map(), sel = null, group = [], dirty = false;
+// undo and redo: {p: the patch as JSON before the change, label}; savedJson: the patch the mod's file holds
+let history = [], future = [], savedJson = '';
+let modNow = '', stageTitles = {};   // modNow: the mod the scene was loaded with (Save, Test and Reload write into it)
+// what the file holds that the editor does not edit, given back as it is by buildPatch: top-level keys, entries and names for
+// handles this stage does not have, pedestrian keys peds.js does not know (or the whole "peds" when the stage has no pedestrian data)
+const ENTRY_KEYS = new Set(['handle', 'from', 'pos', 'heading', 'delete', 'copies']);
+const PEDS_KEYS = new Set(['off', 'segments', 'groups']);
+let keep = { top: {}, objects: [], names: {}, peds: {}, pedsRaw: null };
 
 function setWorld(node, posGame, heading, rec) {
   const qWorld = new THREE.Quaternion().setFromAxisAngle(Y, THREE.MathUtils.degToRad(heading - rec.h0)).multiply(rec.q0);
@@ -356,15 +365,17 @@ function buildPatch() {
     if (rec.copies.length) {
       e.copies = rec.copies.map((c) => Object.assign({ pos: posOf(c).map(r1), heading: r1(headingOf(c)) }, c.iname ? { name: c.iname } : {}));
     }
+    if (rec.extra) Object.assign(e, rec.extra);
     if (Object.keys(e).length > 2) objects.push(e);
   }
+  objects.push(...keep.objects);
   // instance names: a key the game ignores (docs/guides/MODS.md, "Level patches")
-  const names = {};
+  const names = Object.assign({}, keep.names);
   for (const rec of recs) if (rec.item.iname) names[rec.info.handle] = rec.item.iname;
   const out = Object.keys(names).length ? { objects, names } : { objects };
-  const pp = discPeds ? peds.patch() : null;
-  if (pp) out.peds = pp;
-  return out;
+  const pp = keep.pedsRaw || (discPeds ? peds.patch() : null);
+  if (pp || Object.keys(keep.peds).length) out.peds = Object.assign({}, pp, keep.peds);
+  return Object.assign(out, keep.top);
 }
 
 function resetAll() {
@@ -377,36 +388,82 @@ function resetAll() {
   }
 }
 
+// patch: the mod's file (or an undo step). The parts the editor does not edit go to `keep`; returns how many of them there are.
 function applyPatch(patch) {
-  for (const e of (patch && patch.objects) || []) {
-    const rec = byHandle.get(normHandle(e.handle));
-    if (!rec) { log(`patch: ${e.handle} is not an object of ${stageName}; kept out`, 'err'); continue; }
+  patch = patch && typeof patch === 'object' ? patch : {};
+  keep = { top: {}, objects: [], names: {}, peds: {}, pedsRaw: null };
+  for (const [k, v] of Object.entries(patch)) if (k !== 'objects' && k !== 'names' && k !== 'peds') keep.top[k] = v;
+  for (const rec of recs) rec.extra = null;
+  for (const e of Array.isArray(patch.objects) ? patch.objects : []) {
+    const rec = e && typeof e === 'object' ? byHandle.get(normHandle(e.handle)) : null;
+    if (!rec) { keep.objects.push(e); continue; }
+    const extra = Object.fromEntries(Object.entries(e).filter(([k]) => !ENTRY_KEYS.has(k)));
+    rec.extra = Object.keys(extra).length ? extra : null;
     for (const c of e.copies || []) makeCopy(rec, c.pos, c.heading ?? rec.h0, c.name || '');
     if (e.delete) { rec.deleted = true; rec.node.visible = false; }
     else if (e.pos || e.heading !== undefined) setWorld(rec.node, e.pos || rec.pw, e.heading ?? rec.h0, rec);
   }
-  for (const [h, n] of Object.entries((patch && patch.names) || {})) {
+  for (const [h, n] of Object.entries(patch.names || {})) {
     const rec = byHandle.get(normHandle(h));
     if (rec) rec.item.iname = String(n);
+    else keep.names[h] = n;
   }
+  const pp = patch.peds && typeof patch.peds === 'object' ? patch.peds : null;
+  if (pp && !discPeds) keep.pedsRaw = pp;
+  else if (pp) for (const [k, v] of Object.entries(pp)) if (!PEDS_KEYS.has(k)) keep.peds[k] = v;
   pedSel = null;     // the markers are made again
-  peds.load(discPeds, (patch && patch.peds) || null);
+  peds.load(discPeds, keep.pedsRaw ? null : pp);
   peds.setVisible(pedsOn);
   showPedCounts();
+  return { entries: keep.objects.length + Object.keys(keep.names).length, keys: Object.keys(keep.top).concat(Object.keys(keep.peds).map((k) => 'peds.' + k)) };
+}
+// the note over the view about what the file keeps that the editor does not show
+function showKeep(k) {
+  const title = stageTitles[stageName] || stageName, parts = [];
+  if (k.entries) parts.push(`${k.entries} ${k.entries === 1 ? 'change' : 'changes'} in this file ${k.entries === 1 ? 'is' : 'are'} for objects ${title} doesn't have.`);
+  if (k.keys.length) parts.push(`The file also has ${k.keys.map((x) => `"${x}"`).join(', ')}, which the editor doesn't edit.`);
+  $('keepNote').hidden = !parts.length;
+  if (!parts.length) return;
+  $('keepText').textContent = parts.join(' ') + ' Saving keeps ' + (k.entries + k.keys.length === 1 ? 'it' : 'them') + ' in the file as ' +
+    (k.entries + k.keys.length === 1 ? 'it is.' : 'they are.');
+  log($('keepText').textContent, 'warn');
 }
 
-function snapshot() {
-  history.push(JSON.stringify(buildPatch()));
+// label: what the change does, for the Undo and Redo tooltips ("move Hotel", "delete 3 objects")
+function snapshot(label = 'change') {
+  history.push({ p: JSON.stringify(buildPatch()), label });
   if (history.length > 200) history.shift();
+  future = [];
   dirty = true;
+  showUndo();
+}
+const whatSel = () => (group.length > 1 ? `${group.length} objects` : sel ? nameOf(sel) : pedSel ? pedTitle(pedSel).toLowerCase() : 'objects');
+function restoreTo(p) {
+  const again = group.filter((it) => !it.copy).map((it) => it.rec.item);
+  resetAll();
+  applyPatch(JSON.parse(p));
+  dirty = JSON.stringify(buildPatch()) !== savedJson;
+  selectMany(again);
+  showUndo();
 }
 function undo() {
   if (!history.length) return;
-  const p = JSON.parse(history.pop());
-  const keep = group.filter((it) => !it.copy).map((it) => it.rec.item);
-  resetAll();
-  applyPatch(p);
-  selectMany(keep);
+  const h = history.pop();
+  future.push({ p: JSON.stringify(buildPatch()), label: h.label });
+  restoreTo(h.p);
+}
+function redo() {
+  if (!future.length) return;
+  const f = future.pop();
+  history.push({ p: JSON.stringify(buildPatch()), label: f.label });
+  restoreTo(f.p);
+}
+function showUndo() {
+  const u = history[history.length - 1], r = future[future.length - 1];
+  $('undo').disabled = !u;
+  $('undo').title = u ? `Undo: ${u.label} (Ctrl+Z)` : 'Nothing to undo (Ctrl+Z)';
+  $('redo').disabled = !r;
+  $('redo').title = r ? `Redo: ${r.label} (Ctrl+Y)` : 'Nothing to redo (Ctrl+Y)';
 }
 
 // ------------------------------------------------------------------ loading
@@ -417,7 +474,8 @@ async function loadStage(name) {
     for (const r of [stageRoot, skyRoot]) if (r) { scene.remove(r); r.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); }
     stageRoot = skyRoot = null;
     stageName = name;
-    const mod = $('mod').value.trim();
+    $('keepNote').hidden = true;
+    const mod = modNow;
     const info = await api(`/api/stage?name=${encodeURIComponent(name)}&mod=${encodeURIComponent(mod)}`);
     const gltf = await new GLTFLoader().loadAsync(`/api/glb?name=${encodeURIComponent(name)}`);
     env = info.env || null;
@@ -427,7 +485,7 @@ async function loadStage(name) {
     stageRoot = gltf.scene;
     scene.add(stageRoot);
     applyLook();
-    recs = []; byHandle = new Map(); itemOf = new Map(); history = [];
+    recs = []; byHandle = new Map(); itemOf = new Map(); history = []; future = [];
     const infoOf = new Map(info.objects.map((o) => [o.handle, o]));
     stageRoot.updateMatrixWorld(true);
     stageRoot.traverse((o) => {
@@ -449,9 +507,12 @@ async function loadStage(name) {
     for (const rec of recs) {
       if (rec.info.on) { const b = byHandle.get(normHandle(rec.info.on)); if (b) b.item.attached.push(rec.item); }
     }
-    applyPatch(info.patch);
+    const kept = applyPatch(info.patch);
+    savedJson = JSON.stringify(buildPatch());
     dirty = false;
+    showUndo();
     frameAll();
+    showKeep(kept);
     refreshList();
     if (new URLSearchParams(location.search).has('debug')) console.log('patch ' + JSON.stringify(buildPatch()));
     const pc = peds.counts();
@@ -538,8 +599,10 @@ function refreshList() {
 }
 
 // mode: 'set' (only this one), 'toggle' (Shift/Ctrl click), 'add'
+const isDeleted = (it) => !!it && !it.copy && it.rec.deleted;
 function select(item, mode = 'set') {
-  if (item && !item.node.visible) item = null;
+  if (item && !item.node.visible && !isDeleted(item)) item = null;
+  if (isDeleted(item) || isDeleted(sel)) mode = 'set';   // a deleted original is selected alone (its panel offers Restore)
   if (mode === 'set' || item) pedSel = null;
   if (mode === 'set') group = item ? [item] : [];
   else if (item) {
@@ -561,7 +624,9 @@ function showSel() {
   gizmo.detach();
   if (sel) pedSel = null;
   peds.highlight(pedSel);
-  $('props').hidden = !sel;
+  const gone = isDeleted(sel);
+  $('props').hidden = !sel || gone;
+  $('delProps').hidden = !gone;
   $('pedProps').hidden = !pedSel;
   $('noSel').hidden = !!sel || !!pedSel;
   if (pedSel) {
@@ -569,7 +634,11 @@ function showSel() {
     gizmo.attach(pedSel.node);
     showPed();
   }
-  if (sel) {
+  if (gone) {
+    const i = sel.rec.info;
+    $('dTitle').textContent = label(sel);
+    $('dSub').textContent = `${i.handle} · ${i.kind}`;
+  } else if (sel) {
     gizmo.attach(sel.node);
     const i = sel.rec.info;
     $('pTitle').textContent = label(sel);
@@ -611,7 +680,7 @@ function syncBoxes() {
   }
 }
 function showProps() {
-  if (!sel) return;
+  if (!sel || isDeleted(sel)) return;
   const p = posOf(sel), h = headingOf(sel);
   $('px').value = r1(p[0]); $('py').value = r1(p[1]); $('pz').value = r1(p[2]); $('ph').value = r1(h);
 }
@@ -665,18 +734,19 @@ function viewPoint() {   // where a new marker goes: the surface in the middle o
   const hit = stageRoot ? ray.intersectObject(stageRoot, true).find((h) => visibleChain(h.object)) : null;
   return toGame(hit ? hit.point : camera.position.clone().addScaledVector(camera.getWorldDirection(new THREE.Vector3()), 600));
 }
-function pedEdit(fn) {   // one undo step, then the edit; a refused edit (limits) goes to the log
+function pedEdit(fn, label = 'pedestrians') {   // one undo step, then the edit; a refused edit (limits) goes to the log
+  const before = history.length, fut = future, wasDirty = dirty;
+  const back = () => { history.length = before; future = fut; dirty = wasDirty; showUndo(); };
   try {
-    const before = history.length;
-    snapshot();
+    snapshot(label);
     const r = fn();
-    if (r === false) history.length = before;
+    if (r === false) back();
     showPed();
     showPedCounts();
     refreshList();
     return r;
   } catch (e) {
-    history.pop();
+    back();
     log(`pedestrians: ${e.message}`, 'err');
     return false;
   }
@@ -684,7 +754,8 @@ function pedEdit(fn) {   // one undo step, then the edit; a refused edit (limits
 function addPed(kind) {
   if (!discPeds) return;
   if (!pedsOn) setPeds(true);
-  const it = pedEdit(() => (kind === 'group' ? peds.addGroup(viewPoint()) : peds.addSegment(viewPoint())));
+  const it = pedEdit(() => (kind === 'group' ? peds.addGroup(viewPoint()) : peds.addSegment(viewPoint())),
+                     kind === 'group' ? 'add a pedestrian group' : 'add a sidewalk');
   if (it) selectPed(it);
 }
 function pedFromInputs() {
@@ -698,7 +769,7 @@ function pedFromInputs() {
       it.node.position.add(toThree(want).sub(toThree(now)));
       peds.moved(it);
     }
-  });
+  }, 'edit ' + pedTitle(it).toLowerCase());
 }
 function nudgePed(v) {
   pedSel.node.position.add(v);
@@ -723,9 +794,9 @@ function carry(start) {
 let dragStart = null;
 gizmo.addEventListener('dragging-changed', (e) => {
   orbit.enabled = !e.value && !fly.on;
-  if (e.value && pedSel) snapshot();
+  if (e.value && pedSel) snapshot('move ' + pedTitle(pedSel).toLowerCase());
   else if (e.value && sel) {
-    snapshot();
+    snapshot((gizmo.getMode() === 'rotate' ? 'turn ' : 'move ') + whatSel());
     dragStart = startMove();
   } else {
     dragStart = null;
@@ -758,8 +829,8 @@ function setSnap() {
 }
 
 function editFromInputs() {
-  if (!sel) return;
-  snapshot();
+  if (!sel || isDeleted(sel)) return;
+  snapshot('edit ' + whatSel());
   const start = startMove();
   setWorld(sel.node, [+$('px').value, +$('py').value, +$('pz').value], +$('ph').value, sel.rec);
   carry(start);
@@ -769,9 +840,9 @@ function editFromInputs() {
 // arrows: along the world axis nearest to where the camera looks (Shift ×10); PageUp/PageDown: up and down
 let lastNudge = -Infinity;
 function nudge(fwd, side, up, big) {
-  if (!sel && !pedSel) return;
+  if (!pedSel && (!sel || isDeleted(sel))) return;
   const now = performance.now();
-  if (now - lastNudge > 700) snapshot();   // one undo step per burst of key repeats
+  if (now - lastNudge > 700) snapshot('nudge ' + whatSel());   // one undo step per burst of key repeats
   lastNudge = now;
   const d = camera.getWorldDirection(new THREE.Vector3());
   const f = Math.abs(d.x) > Math.abs(d.z) ? new THREE.Vector3(Math.sign(d.x), 0, 0) : new THREE.Vector3(0, 0, Math.sign(d.z) || -1);
@@ -790,9 +861,9 @@ function visibleChain(o) { for (; o; o = o.parent) if (!o.visible) return false;
 
 // End: each selected item down (or up) onto the first surface under its middle, its own meshes and what it carries aside
 function dropToGround() {
-  if (pedSel) { const it = pedSel; pedEdit(() => peds.drop(it, groundAt)); return; }
-  if (!group.length || !stageRoot) return;
-  snapshot();
+  if (pedSel) { const it = pedSel; pedEdit(() => peds.drop(it, groundAt), 'drop ' + pedTitle(it).toLowerCase()); return; }
+  if (!group.length || !stageRoot || isDeleted(sel)) return;
+  snapshot('drop ' + whatSel());
   const ray = new THREE.Raycaster(), down = new THREE.Vector3(0, -1, 0);
   let n = 0;
   for (const it of group) {
@@ -817,12 +888,12 @@ function dropToGround() {
 
 function duplicate() {
   if (pedSel && pedSel.kind === 'group') {
-    const g = pedSel.group, it = pedEdit(() => peds.addGroup([g.pos[0] + 60, g.pos[1], g.pos[2]], g.count));
+    const g = pedSel.group, it = pedEdit(() => peds.addGroup([g.pos[0] + 60, g.pos[1], g.pos[2]], g.count), 'copy a pedestrian group');
     if (it) selectPed(it);
     return;
   }
-  if (!sel) return;
-  snapshot();
+  if (!sel || isDeleted(sel)) return;
+  snapshot('copy ' + whatSel());
   const box = new THREE.Box3();
   for (const it of group) box.expandByObject(it.node);
   const step = Math.max(40, box.getSize(new THREE.Vector3()).x + 20);
@@ -850,12 +921,12 @@ function remove() {
   if (pedSel) {
     const it = pedSel;
     pedSel = null;
-    pedEdit(() => peds.remove(it));
+    pedEdit(() => peds.remove(it), 'delete ' + pedTitle(it).toLowerCase());
     showSel();
     return;
   }
-  if (!group.length) return;
-  snapshot();
+  if (!group.length || isDeleted(sel)) return;
+  snapshot('delete ' + whatSel());
   for (const it of [...group]) {
     hideRec(it);
     if ($('carry').checked) for (const a of it.attached) hideRec(a);
@@ -863,9 +934,10 @@ function remove() {
   select(null);
 }
 
+// Reset, and Restore on a deleted original: back to the disc's place, without copies (with Carry, what rests on it too)
 function resetSel() {
   if (!group.length) return;
-  snapshot();
+  snapshot('restore ' + whatSel());
   const rs = new Set();
   for (const it of group) {
     rs.add(it.rec);
@@ -941,55 +1013,195 @@ canvas.addEventListener('pointerup', (e) => {
 });
 
 // ------------------------------------------------------------------ saving and testing
+// the game the editor opened: running, the stage it was opened on (server) and the one its [fase] lines name last
+const game = { running: false, stage: '', seen: '' };
+const title = (s) => stageTitles[s] || s;
+const gameStage = () => game.seen || game.stage;
 async function gameLog() {
-  try { return await fetch('/api/gamelog').then((r) => r.json()); } catch (e) { return { lines: [], running: false }; }
+  try { return await fetch('/api/gamelog').then((r) => r.json()); } catch (e) { return { lines: [], running: false, stage: '' }; }
 }
-async function post(kind, save = true) {
-  const mod = $('mod').value.trim();
-  const body = { name: stageName, mod, patch: buildPatch(), training: true, save };
+async function post(kind, save = true, extra = {}) {
+  const mod = modNow;
+  const body = Object.assign({ name: stageName, mod, patch: buildPatch(), training: true, save }, extra);
   try {
     log(`${kind}…`);
     const before = kind === 'reload' ? (await gameLog()).lines.length : 0;   // the log keeps every load of this run
     const res = await api(kind === 'check' ? '/api/check' : `/api/${kind}`, body);
     log(res.lines, res.ok ? '' : 'err');
-    if (res.saved) { log(`saved ${res.saved}`, 'ok'); dirty = false; }
-    if (res.launched) { log(`game: ${res.launched}`, 'ok'); setRunning(true); watchGame(0); }
-    if (res.reloading) { log('game: reloading the stage (it loads the saved file)', 'ok'); watchGame(before); }
-    if (kind !== 'check' && mod !== cfg.mod) { cfg.mod = mod; api('/api/config', { mod }); }
+    if (res.saved) {
+      log(`saved ${res.saved}`, 'ok');
+      savedJson = JSON.stringify(body.patch);
+      dirty = JSON.stringify(buildPatch()) !== savedJson;   // an edit made while saving stays unsaved
+    }
+    if (res.launched) { log(`game: ${res.launched}`, 'ok'); game.seen = ''; game.stage = stageName; setRunning(true); watchGame(0, true); }
+    if (res.reloading) { log(`Reloading ${title(stageName)} in the game (it loads the saved file)`, 'ok'); watchGame(before); }
     refreshList();
   } catch (e) {
+    if (kind === 'test' && e.code === 'running') { game.stage = e.data.stage || game.stage; askRunning(save); return; }
     log(`${kind}: ${e.message}`, 'err');
   }
 }
-// what the stage patch did in the game: its [fase] lines after `seen`, until the load's last line or ~30 s
-async function watchGame(seen) {
-  for (let i = 0; i < 20; i++) {
-    await new Promise((r) => setTimeout(r, 1500));
-    const { lines = [], running } = await gameLog();
-    setRunning(running);
-    const fresh = lines.slice(seen);
-    for (const l of fresh) log(`game ${l}`, /ignorad|invalid|falh/i.test(l) ? 'err' : '');
-    seen = Math.max(seen, lines.length);
-    if (fresh.some((l) => /depois:|ignorad|desligad|sem patch/i.test(l)) || !running) return;
+
+// a small dialog with a title, a text and buttons [value, label, primary]; then(value) when it closes (Esc: 'cancel')
+function ask(head, text, buttons, then) {
+  const dlg = $('askDlg');
+  $('askTitle').textContent = head;
+  $('askText').textContent = text;
+  $('askBtns').textContent = '';
+  for (const [value, label, primary] of buttons) {
+    const b = document.createElement('button');
+    b.value = value; b.textContent = label;
+    if (primary) b.className = 'primary';
+    $('askBtns').appendChild(b);
   }
-  log('game: no stage load seen yet (is a fight running? the reload waits for one)', 'err');
+  dlg.returnValue = '';
+  dlg.addEventListener('close', () => then(dlg.returnValue || 'cancel'), { once: true });
+  dlg.showModal();
+}
+// Test with the game open: reload this stage in it, or close it and open it again
+function askRunning(save) {
+  const on = gameStage(), same = !on || on === stageName;
+  ask('The game is already open',
+      same ? `It is on ${title(stageName)}. Reload this stage in it, or restart the game?`
+           : `It is on ${title(on)}. Restart it on ${title(stageName)}?`,
+      [['cancel', 'Cancel'], ['restart', 'Restart game', !same]].concat(same ? [['reload', 'Reload in game', true]] : []),
+      (v) => { if (v === 'restart') post('test', save, { restart: true }); else if (v === 'reload') post('reload'); });
+}
+function reloadGame() {
+  const on = gameStage();
+  if (!on || on === stageName) { post('reload'); return; }
+  ask(`The game is on ${title(on)}`, 'Reload only works on the stage the game is showing.',
+      [['cancel', 'Cancel'], ['restart', `Restart on ${title(stageName)}`, true]],
+      (v) => { if (v === 'restart') post('test', true, { restart: true }); });
+}
+async function stopGame() {
+  try {
+    const r = await api('/api/stop', {});
+    log(r.stopped ? 'The game is closed.' : 'The game was not running.', 'ok');
+  } catch (e) { log(`stop: ${e.message}`, 'err'); }
+  noteGame(await gameLog());
+}
+
+// One [fase] line of the game's log (native/runtime/wotm_levelpatch.inc and wotm_levelreload.inc) in words:
+// {text, cls, stage, end, more, last}; end: the line settles what the editor waits for (applied, ignored or dropped), more: the
+// load's own lines follow it (up to "depois:", last). null: a line shown as it is.
+const STAT_WORDS = { moved: 'moved', copies: 'copies', deleted: 'deleted', skipped: 'not applied', 'ped segments': 'sidewalks',
+                     'ped groups changed': 'pedestrian groups changed', 'ped groups added': 'pedestrian groups added',
+                     'ped groups deleted': 'pedestrian groups deleted', 'ped groups off': 'pedestrian groups off' };
+function statsText(s) {
+  const out = [];
+  for (const part of s.split(', ')) {
+    const m = /^(.+) (\d+)$/.exec(part);
+    if (m && STAT_WORDS[m[1]]) out.push(`${m[2]} ${STAT_WORDS[m[1]]}`);
+  }
+  return out.join(', ') || 'no object changes';
+}
+function gameLine(line) {
+  const s = line.replace(/^\[fase\] ?/, '');
+  const ok = (text, x) => Object.assign({ text, cls: 'ok', end: true }, x);
+  const bad = (text, x) => Object.assign({ text, cls: 'err', end: true }, x);
+  let m;
+  if (/^\s+depois:/.test(s)) return { raw: true, last: true };
+  if (/^\s/.test(s)) return null;      // the load's details (entries, path cuts, antes:)
+  if ((m = /^(\S+) <- (.+) \((.+?)\): (.*)$/.exec(s))) {
+    if (modNow && m[2].toLowerCase() !== modNow.toLowerCase())
+      return bad(`The game uses mod "${m[2]}"'s file for this stage, not yours`, { stage: m[1], more: true });
+    return ok(m[4] === 'nada mudou' ? 'Patch loaded in game: nothing changed' : `Patch applied in game (${statsText(m[4])})`,
+              { stage: m[1], more: true });
+  }
+  if ((m = /^\S+ \((.*)\): JSON invalido, patch ignorado: (.*)$/.exec(s))) return bad(`The game rejected the file: it isn't valid JSON (${m[2]})`);
+  if ((m = /^(\S+): imagem da fase sem grade de colisao/.exec(s))) return bad("The game couldn't apply the patch to this stage", { stage: m[1] });
+  if ((m = /^LEVELS\/(\S+)\.JSON: (.+) vence (.+)$/.exec(s)))
+    return { text: `Mod "${m[2]}" also changes this stage and loads after "${m[3]}": the last mod by name wins`, cls: 'warn' };
+  if ((m = /^(\S+): sem patch/.exec(s))) return ok('Game: no patch for this stage', { stage: m[1] });
+  if ((m = /^recarga pedida \(arquivo\) para (\S+), mas a fase e (\S+): ignorada/.exec(s)))
+    return bad(`The game is on ${title(m[2])}: reload skipped`, { stage: m[2] });
+  if (/^recarga pedida .* sem quadro de luta em 10 s: descartada/.test(s)) return ok('Reload dropped: no fight was running for 10 s', { cls: 'warn' });
+  if (/^recarga pedida .* ja atendida/.test(s)) return ok('Already up to date');
+  if ((m = /^recarga pedida \((?:arquivo|F10)\): (\S+)$/.exec(s))) return { text: `Reloading ${title(m[1])}…`, cls: '', stage: m[1] };
+  if (/^patches de fase desligados/.test(s)) return bad('Level patches are off in this game (WOTM_LEVELPATCH=0)');
+  if (/^recarga: o rtMain voltou/.test(s)) return ok('Reload dropped: the game left the fight another way', { cls: 'warn' });
+  if (/^recarga: .*nao foi feita/.test(s)) return bad("The game couldn't reload the stage");
+  return null;
+}
+// what the stage patch did in the game: its [fase] lines after `seen`, until one settles it (5.5 of the plan) or the wait ends
+async function watchGame(seen, launch = false) {
+  let done = false, extra = false;
+  for (let i = 0; i < (launch ? 60 : 20); i++) {
+    await sleep(1500);
+    const r = await gameLog(), lines = r.lines || [];
+    noteGame(r);
+    if (lines.length < seen) seen = 0;     // a new log (the game was opened again)
+    for (const l of lines.slice(seen)) {
+      const t = gameLine(l);
+      if (!t || t.raw) log(`game ${l}`, 'muted');
+      else log(t.text, t.cls);
+      if (t && t.end) { done = true; extra = !!t.more; }
+      if (t && t.last) extra = false;
+    }
+    seen = Math.max(seen, lines.length);
+    if (!r.running) { log('The game closed.', 'muted'); return; }
+    if (done && !extra) return;
+    if (done) extra = false;               // one more look for the rest of the load's lines
+  }
+  if (!done) {
+    log(launch ? 'The game is open. It reports the stage patch when a fight on this stage starts.'
+               : "The game hasn't reloaded yet. It does when a fight on this stage is running.", 'warn');
+  }
+}
+function noteGame(r) {
+  game.stage = r.stage || '';
+  if (!r.running) game.seen = '';
+  else for (const l of r.lines || []) { const t = gameLine(l); if (t && t.stage) game.seen = t.stage; }
+  setRunning(!!r.running);
 }
 function setRunning(on) {
+  game.running = on;
   $('reload').disabled = !on;
   $('reload').title = on ? 'Save and reload this stage in the open game (F10 in the game does the same)'
-                         : 'Reload the stage in a game opened with Test in game';
+                         : 'Start the game with Test in game first';
+  $('reload').classList.toggle('primary', on);
+  $('test').classList.toggle('primary', !on);
+  $('stop').hidden = !on;
 }
-setInterval(async () => setRunning((await gameLog()).running), 4000);
+setInterval(async () => noteGame(await gameLog()), 4000);
 
 // ------------------------------------------------------------------ wiring
+// the stage and mod pickers let go of the focus once picked: arrows and letters are the scene's again
 $('stage').onchange = (e) => {
+  e.target.blur();
   if (dirty && !confirm('Unsaved changes on this stage. Load another one anyway?')) { e.target.value = stageName; return; }
   loadStage(e.target.value);
 };
-$('mod').onchange = () => { if (!dirty || confirm('Reload the stage with this mod\'s patch? Unsaved changes are lost.')) loadStage(stageName); };
+// the game skips a mod folder whose name starts with _ or . (and Windows refuses these characters)
+const badModName = (m) => /[\\/:*?"<>|]/.test(m) || /^[_.]/.test(m);
+$('mod').onchange = (e) => {
+  const v = e.target.value.trim();
+  e.target.blur();
+  e.target.value = v;
+  if (v === modNow) return;
+  if (badModName(v)) {
+    log('A mod name can\'t contain \\ / : * ? " < > | or start with _ or .', 'err');
+    e.target.value = modNow;
+    return;
+  }
+  if (dirty && !confirm(`Load mod "${v || '(none)'}"'s version of this stage? Your unsaved changes are lost.`)) {
+    e.target.value = modNow;       // the scene stays the old mod's: Save keeps writing there
+    return;
+  }
+  modNow = v;
+  cfg.mod = v;
+  api('/api/config', { mod: v }).catch((err) => log(`mod: ${err.message}`, 'err'));
+  loadStage(stageName);
+};
 $('filter').oninput = refreshList;
 document.querySelectorAll('.kinds input').forEach((x) => (x.onchange = refreshList));
 $('undo').onclick = undo;
+$('redo').onclick = redo;
+$('frame').onclick = frameAll;
+$('stop').onclick = stopGame;
+$('restore').onclick = resetSel;
+$('keepClose').onclick = () => { $('keepNote').hidden = true; };
 $('check').onclick = () => post('check');
 $('save').onclick = () => post('save');
 $('test').onclick = () => {
@@ -1001,7 +1213,7 @@ $('testDlg').addEventListener('close', () => {
   const v = $('testDlg').returnValue;
   if (v === 'save' || v === 'nosave') post('test', v === 'save');
 });
-$('reload').onclick = () => post('reload');
+$('reload').onclick = reloadGame;
 $('tMove').onclick = () => setTool('translate');
 $('tTurn').onclick = () => setTool('rotate');
 for (const id of ['snap', 'snapMove', 'snapTurn']) $(id).onchange = setSnap;
@@ -1022,7 +1234,7 @@ $('pdDup').onclick = duplicate;
 $('pdDel').onclick = remove;
 $('hud').onclick = () => {
   if (!stageName) return;
-  openHud({ stage: stageName, mod: $('mod').value.trim(), api, log });
+  openHud({ stage: stageName, mod: modNow, api, log });
 };
 $('drop').onclick = dropToGround;
 $('dup').onclick = duplicate;
@@ -1031,7 +1243,7 @@ $('reset').onclick = resetSel;
 for (const id of ['px', 'py', 'pz', 'ph']) $(id).onchange = editFromInputs;
 $('pName').onchange = () => {
   if (!sel) return;
-  snapshot();
+  snapshot('rename ' + whatSel());
   sel.iname = $('pName').value.trim();
   showSel();
 };
@@ -1063,12 +1275,34 @@ $('dlg').addEventListener('close', async () => {
                                        cwd: $('sCwd').value, iso: $('sIso').value, theme: $('sTheme').value });
   init(r);
 });
+// a control that takes the keys itself: text and number fields and the pickers (not checkboxes, radios or sliders)
+const typing = (t) => !!t?.matches?.('input:not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select');
+// fly keys by their place on the keyboard (e.code), so WASD works on AZERTY too; the other letters by what they say
+const FLY_CODES = { KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd', KeyQ: 'q', KeyE: 'e' };
+window.addEventListener('keyup', (e) => { if (FLY_CODES[e.code]) fly.keys.delete(FLY_CODES[e.code]); });
 window.addEventListener('keydown', (e) => {
-  if (e.target.matches?.('input, select, textarea')) return;
-  const k = e.key.toLowerCase();
-  if (e.ctrlKey && k === 'z') { e.preventDefault(); undo(); }
-  else if (e.ctrlKey && k === 's') { e.preventDefault(); post('save'); }
-  else if (e.ctrlKey && k === 'd') { e.preventDefault(); duplicate(); }
+  const k = (e.key || '').toLowerCase(), ctrl = e.ctrlKey || e.metaKey, field = typing(e.target);
+  if (document.querySelector('dialog[open]')) {   // a dialog has the keys (Esc closes it, the selection stays)
+    if (ctrl && k === 's') e.preventDefault();
+    return;
+  }
+  const text = field && !e.target.matches('select');
+  // Save, Undo and Redo before the focus test: Ctrl+S never opens the browser's "save page"; in a text field Undo is the field's
+  if (ctrl && !e.altKey && k === 's') {
+    e.preventDefault();
+    const t = e.target;
+    if (field) t.blur();               // the field's change first (it may be an edit)
+    if (t.id !== 'mod') post('save');  // a new mod name loads that mod: no save into it before
+    return;
+  }
+  if (ctrl && !e.altKey && (k === 'z' || k === 'y')) {
+    if (text) return;
+    e.preventDefault();
+    if (k === 'y' || e.shiftKey) redo(); else undo();
+    return;
+  }
+  if (field) return;
+  if (ctrl && k === 'd') { e.preventDefault(); duplicate(); }
   else if (e.ctrlKey && k === 'a') { e.preventDefault(); selectMany(listed()); }
   else if (k === 'delete') remove();
   else if (e.ctrlKey || e.altKey || e.metaKey) return;
@@ -1078,7 +1312,8 @@ window.addEventListener('keydown', (e) => {
   }
   else if ((k === 'pageup' || k === 'pagedown') && (sel || pedSel)) { e.preventDefault(); nudge(0, 0, k === 'pageup' ? 1 : -1, e.shiftKey); }
   else if (k === 'end') { e.preventDefault(); dropToGround(); }
-  else if (fly.on && 'wasdqe'.includes(k) && k.length === 1) { e.preventDefault(); fly.keys.add(k); }
+  else if (k === 'home') { e.preventDefault(); frameAll(); }
+  else if (fly.on && FLY_CODES[e.code]) { e.preventDefault(); fly.keys.add(FLY_CODES[e.code]); }
   else if (fly.on && k === 'shift') fly.keys.add(k);
   else if (k === 'v') setView(!fly.on);
   else if (k === 'g') setTool('translate');
@@ -1095,10 +1330,13 @@ function init(r) {
   cfg = r.config;
   applyTheme(cfg.theme || 'dark');
   $('mods').innerHTML = r.mods.map((m) => `<option value="${m}">`).join('');
-  if (!$('mod').value) $('mod').value = cfg.mod || '';
+  if (!stageName) modNow = (cfg.mod || '').trim();   // the first init; Settings keeps the mod in use
+  $('mod').value = modNow;
   const s = $('stage');
   const prev = stageName || (new URLSearchParams(location.search).get('stage') || 'CENTRAL').toUpperCase();   // ?stage=METRO
   s.innerHTML = r.stages.map((x) => `<option value="${x.name}">${x.title} (${x.name})</option>`).join('');
+  stageTitles = Object.fromEntries(r.stages.map((x) => [x.name, x.title]));
+  game.stage = r.gameStage || '';
   setRunning(!!r.gameRunning);
   if (r.discError || !r.stages.length) { log(r.discError || `no stages in ${cfg.disc}: set the game disc in Settings`, 'err'); return; }
   s.value = r.stages.some((x) => x.name === prev) ? prev : r.stages[0].name;
@@ -1114,6 +1352,10 @@ window.addEventListener('pagehide', () => { try { navigator.sendBeacon('/api/bye
 if (new URLSearchParams(location.search).has('debug')) {
   window.wotmDebug = { camera, fly, flyStep, setView, select, selectMany, items, listed, dropToGround, nudge, duplicate, remove,
                        undo, buildPatch, posOf, setLook, scene, renderer, gsLights, peds, selectPed, setPeds, addPed, pedFromInputs,
+                       redo, resetAll, applyPatch, frameAll, resetSel, gameLine, post, setRunning,
+                       get history() { return history; }, get future() { return future; }, get dirty() { return dirty; },
+                       get modNow() { return modNow; }, get keep() { return keep; }, get game() { return game; },
+                       get gizmoObject() { return gizmo.object || null; }, get gizmoMode() { return gizmo.getMode(); },
                        get pedSel() { return pedSel; }, get group() { return group; }, get sel() { return sel; },
                        get env() { return env; }, get skyRoot() { return skyRoot; }, get stageRoot() { return stageRoot; } };
 }
