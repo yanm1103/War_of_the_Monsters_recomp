@@ -20,6 +20,10 @@
     inside the XY hull of one of its solid boxes, within 25 of the box's top; rooftop tanks and vents, and sidewalk items on a
     building's base). `patch <STAGE> <json>` applies a level patch (`MODS.md`, "Level patches") to the image the way the game hook
     does, cuts the vehicle and pedestrian paths (`cut_nets`) and checks the collision of the result.
+  - `lvlglb.py <STAGE> <out.glb>`: the stage as a binary glTF for the level editor, one top-level node per `lvl.py` object (named by
+    its handle, extras with kind, from, heading, states and `on`), its broken states as hidden `stateN` children, the rest under
+    `rootN` (extras `ident`: 1 the world, 2 the sky). Meshes are shared between instances. The editor itself is
+    `tools/level_editor/` (`MODS.md`, "Level editor"; three.js r160 vendored in `web/vendor/`, MIT).
   - `ngp.decode_mesh`: port of the native `decodeObject` (texture per section, ADC like the GS, sprites), used by `gltf.py`.
 - `.sh` scripts must be created by heredoc in bash; writing with Python on Windows leaves CRLF and the WSL `sh` breaks (`sed -i 's/\r$//'` fixes it).
 - The per-function state lives in `config/status.csv` (`python3 tools/progress.py`, ~12 s via WSL, needs `disc/`); the README has no progress block.

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WotM Level Editor</title>
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{"imports": {"three": "./vendor/three.module.min.js", "three/addons/": "./vendor/addons/"}}
+</script>
+</head>
+<body>
+<header id="bar">
+  <span class="brand">WotM Level Editor</span>
+  <label>Stage <select id="stage"></select></label>
+  <label>Mod <input id="mod" list="mods" placeholder="my_mod" spellcheck="false"><datalist id="mods"></datalist></label>
+  <span class="sep"></span>
+  <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
+  <button id="check" title="Apply the patch to the disc's stage and check the collision">Check</button>
+  <button id="save" title="Save mods/&lt;mod&gt;/levels/&lt;STAGE&gt;.json (Ctrl+S)">Save</button>
+  <button id="test" class="primary" title="Save and open the game in this stage (training mode)">Test in game</button>
+  <span class="grow"></span>
+  <button id="settings" title="Disc, mods folder and game">Settings</button>
+  <button id="theme" title="Light / dark theme">Light</button>
+</header>
+<main>
+  <aside id="left">
+    <input id="filter" placeholder="Filter (handle, kind, id)" spellcheck="false">
+    <div class="kinds">
+      <label><input type="checkbox" data-kind="destr" checked> Buildings</label>
+      <label><input type="checkbox" data-kind="pickup" checked> Pickups</label>
+      <label><input type="checkbox" data-kind="prop" checked> Props</label>
+      <label><input type="checkbox" id="changedOnly"> Changed</label>
+    </div>
+    <ul id="list"></ul>
+    <div id="count" class="muted"></div>
+  </aside>
+  <section id="view">
+    <canvas id="canvas"></canvas>
+    <div id="hint" class="muted">Left drag: orbit · Right drag: pan · Wheel: zoom · Click: select · W move · E turn · F focus · Ctrl+D copy · Del delete</div>
+    <div id="busy" hidden>Loading…</div>
+  </section>
+  <aside id="right">
+    <div id="noSel" class="muted">Select an object in the view or in the list.</div>
+    <div id="props" hidden>
+      <h2 id="pTitle"></h2>
+      <div class="muted" id="pSub"></div>
+      <div class="row"><span>Position</span>
+        <input id="px" type="number" step="1"><input id="py" type="number" step="1"><input id="pz" type="number" step="1"></div>
+      <div class="row"><span>Heading</span><input id="ph" type="number" step="5"><span class="muted">deg</span></div>
+      <div class="row tools">
+        <button id="tMove" class="toggle on" title="W">Move</button>
+        <button id="tTurn" class="toggle" title="E">Turn</button>
+        <label title="Snap the gizmo"><input type="checkbox" id="snap"> Snap</label>
+      </div>
+      <div class="row tools">
+        <button id="dup" title="Ctrl+D">Duplicate</button>
+        <button id="del" class="danger" title="Delete">Delete</button>
+        <button id="reset" title="Back to the disc's place (the object and its copies)">Reset</button>
+      </div>
+      <label class="row"><input type="checkbox" id="carry" checked> Carry the objects on top (<span id="onCount">0</span>)</label>
+      <div id="pWarn" class="warn"></div>
+    </div>
+  </aside>
+</main>
+<footer id="log"></footer>
+<dialog id="dlg">
+  <form method="dialog">
+    <h2>Settings</h2>
+    <label>Disc folder (extracted ISO, with LVL/ and PTS/)<input id="sDisc" spellcheck="false"></label>
+    <label>Mods folder<input id="sMods" spellcheck="false"></label>
+    <label>Game (wotm.exe)<input id="sGame" spellcheck="false"></label>
+    <label>ELF to pass to the game (empty for the release wotm.exe)<input id="sElf" spellcheck="false"></label>
+    <label>Game working folder<input id="sCwd" spellcheck="false"></label>
+    <div class="row end"><button value="cancel">Cancel</button><button id="sOk" value="ok" class="primary">Save</button></div>
+  </form>
+</dialog>
+<script type="module" src="app.js"></script>
+</body>
+</html>
