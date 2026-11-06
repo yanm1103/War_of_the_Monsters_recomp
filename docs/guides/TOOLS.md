@@ -25,6 +25,11 @@
     its handle, extras with kind, from, heading, states and `on`), its broken states as hidden `stateN` children, the rest under
     `rootN` (extras `ident`: 1 the world, 2 the sky). Meshes are shared between instances. The editor itself is
     `tools/level_editor/` (`MODS.md`, "Level editor"; three.js r160 vendored in `web/vendor/`, MIT).
+  - `lvlhud.py <STAGE>|--all`: the fight HUD a stage carries (level editor, HUD panel). The HUD nodes (ids 0x1C20..0x2133) and the
+    fight font (id 18) are found by id, and each texture gets a role (bar atlas, special icon, BOSS label, player number, font,
+    pickup ring, hint box, cinema bars, buttons), its file (`.TEX` or `.RTX`), its texId and the mod PNG name. `--all` prints the
+    texId of each role in every stage and the version: A in 17 stages, B in CANYON1 and TOKYODM (other atlas, icons, font and
+    meshes; no BOSS label).
   - `lvlnames.py <STAGE>`: names for the `lvl.py` objects (level editor): a content signature per object (vertices in the handle's
     frame and the decoded pixels of its textures, the same for the same model in any stage) and the rule names (special ids, pickup
     type, hit point class, size); model names by signature in `tools/level_editor/names.json`.
