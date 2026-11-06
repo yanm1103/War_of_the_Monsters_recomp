@@ -322,7 +322,8 @@ def open_window(url, force_browser):
                                                       r"%ProgramFiles%\Google\Chrome\Application\chrome.exe")]
         for path in candidates:
             if path and os.path.exists(path):
-                subprocess.Popen([path, "--app=" + url, "--window-size=1600,950",
+                # no "translate this page?" (the page is English, the system may not be)
+                subprocess.Popen([path, "--app=" + url, "--window-size=1600,950", "--disable-features=Translate",
                                   "--user-data-dir=" + os.path.join(CACHE, "browser")])
                 return False
     webbrowser.open(url)
