@@ -64,6 +64,9 @@ def main():
         vmask = 0x1FFF << 16
         assert img.u32(new[0] + 0xC) & ~vmask == tpl[0xC] & ~vmask and img.u32(new[0] + 0xC) & vmask, hex(img.u32(new[0] + 0xC))
         assert lp.stats["sky domes replaced"] == 1 and lp.stats["props"] == 0
+        # the editor's check: the summary counts it
+        chk = editor.check_patch(cfg["disc"], "CENTRAL", patch, mod)
+        assert chk["ok"] and "1 sky dome replaced" in chk["summary"], chk
         # the clouds stay where they were
         cl = [c for n in lp.st.root_of if lp.st.op(n) == 25 for c in lvl.children(img, n)]
         assert cl, "clouds branch lost"
@@ -93,6 +96,8 @@ def main():
         lp.apply_props(patch, mod)
         assert any("sky skipped" in x and "no dome" in x for x in lp.log), lp.log
         assert lp.arena_top() == top and not lp.stats["sky domes replaced"]
+        chk = editor.check_patch(cfg["disc"], "CANYON1", patch, mod)
+        assert not chk["ok"] and any(p["kind"] == "sky" for p in chk["problems"]), chk["problems"]
     print("ok")
 
 
