@@ -414,9 +414,15 @@ def read_glb(path, units, scale=None, height=None, warn=print):
         sm = re.match(r"state(\d+)_", (nd.get("name") or "").lower())
         if sm:
             declared.add(int(sm.group(1)))
+    smoke_raw = []                 # (state, node name, world matrix, extras) of each empty named state<N>_smoke...
     for i, m in sorted(world.items()):
         nd = nodes[i]
         if "mesh" not in nd:
+            sm = re.match(r"state(\d+)_smoke", (nd.get("name") or "").lower())
+            if sm:
+                if int(sm.group(1)) < 1:
+                    raise PropError("%s: smoke belongs to a broken state (name it state1_smoke...)" % nd.get("name"))
+                smoke_raw.append((int(sm.group(1)), nd.get("name"), m, nd.get("extras") or {}))
             continue
         mesh = j["meshes"][nd["mesh"]]
         name = nd.get("name") or mesh.get("name") or "node%d" % i
@@ -484,6 +490,7 @@ def read_glb(path, units, scale=None, height=None, warn=print):
     if not any((raw.get(0) or {}).values()):
         raise PropError("%s: no triangles to draw%s" % (path, " in state 0 (the meshes with no state prefix)" if len(declared) > 1 else ""))
     declared |= {b if isinstance(b, int) else b[1] for b in raw} | {x[0] for x in hull_raw} | {x[0] for x in coll_raw}
+    declared |= {x[0] for x in smoke_raw}
     if sorted(declared) != list(range(len(declared))):
         raise PropError("%s: the states are %s; they must be 0, 1, 2... with none missing" % (path, sorted(declared)))
     if len(declared) > MAX_STATES:
@@ -571,6 +578,10 @@ def read_glb(path, units, scale=None, height=None, warn=print):
         moved = {k: [tuple((tuple(_f32(c[0][i] - o[i]) for i in range(3)),) + tuple(c[1:]) for c in t) for t in tris]
                  for k, tris in bk.items()}
         stats["debris"].setdefault(b[1], []).append({"name": b[2], "by_key": moved, "origin": o})
+    stats["smoke"] = {}             # state -> [{"name", "node" (the 0x60 bytes of the emitter), "pos"}]
+    for si, sname, m, extras in smoke_raw:
+        pos = place((m[0][3], m[1][3], m[2][3]))
+        stats["smoke"].setdefault(si, []).append({"name": sname, "pos": pos, "node": emitter_bytes(pos, extras, sname)})
     stats["more"] = {si: per[si] for si in per if isinstance(si, int) and si}
     stats["hulls"], stats["colls"] = per[0]["hulls"], per[0]["colls"]
     return per[0]["by_key"], s, stats
@@ -737,6 +748,38 @@ def level_object(mb, header, batches, slot, light, ctx=None):
     mb.u32(a + 0x64, 0)
     mb.u32(a + 0x68, 0xFFFFFFFF)
     return a, nverts, len(blob)
+
+
+EMITTER_SIZE = 0x60             # the part of a HierParticleEmitter (op 22, 0xB0 bytes) a prop stores; the rest is the game's cache
+MAX_EMITTERS = 8                # per state (the game has 100 effects for everything on the screen)
+# name -> (offset, f32 or u32, default): the stages' dust and smoke (preset 1, CENTRAL's buildings) with a longer emission
+EMITTER_FIELDS = {"preset": (0x04, "I", 1), "size": (0x08, "f", 30.0), "velocity": (0x0C, "f", 1.0), "spread": (0x20, "f", 0.0),
+                  "heading": (0x24, "f", 0.0), "pitch": (0x28, "f", 0.0), "rate": (0x2C, "f", 2.0), "duration": (0x30, "I", 45),
+                  "onset": (0x34, "I", 0), "stretch": (0x38, "f", 0.0), "lifetime": (0x3C, "I", 300), "gravity": (0x40, "f", 10.0),
+                  "airResistance": (0x44, "f", 0.001), "airResistanceTransition": (0x48, "I", 15),
+                  "initialExpansionRate": (0x4C, "f", 0.0), "expansionRate": (0x50, "f", 0.0),
+                  "expansionRateTransition": (0x54, "I", 0), "alphaFade": (0x58, "f", 0.0)}
+
+
+def emitter_bytes(pos, extras, name="smoke"):
+    """The first 0x60 bytes of a PART_EMITTER at `pos` (the prop's own axes): the stages' smoke, with any of EMITTER_FIELDS
+    overridden by the empty's custom properties (extras). Not moving and not auto-start: the effect starts the first time the
+    state is drawn, which is when the prop breaks."""
+    for k in extras:
+        if k not in EMITTER_FIELDS:
+            raise PropError("%s: custom property %r is not one of %s" % (name, k, ", ".join(sorted(EMITTER_FIELDS))))
+    d = bytearray(EMITTER_SIZE)
+    struct.pack_into("<I", d, 0, 22)
+    for k, (off, fmt, default) in EMITTER_FIELDS.items():
+        v = extras.get(k, default)
+        try:
+            struct.pack_into("<" + fmt, d, off, int(v) if fmt == "I" else float(v))
+        except (TypeError, ValueError, struct.error):
+            raise PropError("%s: custom property %s = %r is not a number" % (name, k, v))
+    if struct.unpack_from("<I", d, 0x04)[0] > 150:
+        raise PropError("%s: preset %d is not a particle type (0 to 150)" % (name, struct.unpack_from("<I", d, 0x04)[0]))
+    struct.pack_into("<3f", d, 0x10, *pos)
+    return bytes(d)
 
 
 DEBRIS_MASS = 15000.0           # Debris::Activate raises any lighter chunk to this
@@ -1062,6 +1105,12 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
             nkids += len(kids)
             hiers.append(kids[0] if len(kids) == 1 else _group(mb, ROOT_FLAGS, kids, cpts))
         actions[si], debris_meta[si] = debris_action(mb, chunks, hiers, lo, hi, log)
+    smoke_meta = {}
+    for si, lst in sorted(gstats["smoke"].items()):
+        if len(lst) > MAX_EMITTERS:
+            raise PropError("state%d: %d smoke emitters, at most %d" % (si, len(lst), MAX_EMITTERS))
+        smoke_meta[str(si)] = [{"name": e["name"], "pos": [round(x, 4) for x in e["pos"]], "node": e["node"].hex()} for e in lst]
+        log("state%d: %d smoke emitters (%s)" % (si, len(lst), ", ".join(e["name"] for e in lst)))
     mb.u32(BASE, 1)
     mb.u32(BASE + 4, root)
     mb.d += bytes((-len(mb.d)) % 16)
@@ -1095,6 +1144,8 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
         if debris_meta:
             meta["destructible"]["actions"] = ["0x%X" % a if a else None for a in actions]
             meta["destructible"]["debris"] = {str(k): v for k, v in debris_meta.items()}
+        if smoke_meta:
+            meta["destructible"]["smoke"] = smoke_meta
     with open(os.path.join(out_dir, "prop.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=1)
         f.write("\n")
@@ -1127,6 +1178,7 @@ class Prop:
         self.states = [self.root]
         self.actions = [None]                                # per state, the offset of its ActDebris (or None)
         self.chunks = {}                                     # state -> the offsets of its debris chunks' nodes
+        self.smoke = {}                                      # state -> the 0x60 bytes of each of its emitters
         if self.destructible:
             try:
                 self.states = [int(x, 16) - BASE for x in self.destructible["states"]]
@@ -1141,8 +1193,12 @@ class Prop:
                 acts = self.destructible.get("actions") or [None] * len(self.states)
                 self.actions = [int(x, 16) - BASE if x else None for x in acts]
                 self.chunks = {int(k): [int(c["node"], 16) - BASE for c in v] for k, v in (self.destructible.get("debris") or {}).items()}
+                self.smoke = {int(k): [bytes.fromhex(e["node"]) for e in v] for k, v in (self.destructible.get("smoke") or {}).items()}
             except (KeyError, TypeError, ValueError):
-                raise PropError("%s: prop.json \"destructible\": \"actions\" and \"debris\" are not as build writes them" % folder)
+                raise PropError("%s: prop.json \"destructible\": \"actions\", \"debris\" and \"smoke\" are not as build writes them" % folder)
+            if any(not 1 <= k < len(self.states) or not 1 <= len(v) <= MAX_EMITTERS or any(len(b) != EMITTER_SIZE or b[0] != 22 for b in v)
+                   for k, v in self.smoke.items()):
+                raise PropError("%s: prop.json \"destructible\": \"smoke\" holds a state out of range, no emitter or too many, or a node that is not an emitter" % folder)
             if len(self.actions) != len(self.states) or any(a is not None and not 0 <= a < len(ngp_bytes) for a in self.actions) or                     any(not 0 <= x < len(ngp_bytes) for v in self.chunks.values() for x in v):
                 raise PropError("%s: prop.json \"destructible\": an action or a chunk outside the image" % folder)
 

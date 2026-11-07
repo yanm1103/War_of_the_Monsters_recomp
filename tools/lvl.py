@@ -1844,6 +1844,26 @@ class LevelPatch:
                     turn = abs(math.remainder(hd, 360.0)) > 1e-6
                     t = self.alloc(0x54 if turn else 0x20, 16)
                     ist = destr = 0
+                    inst_roots, inst_chains = sroots, chains
+                    if dstr and prop.smoke:
+                        # an emitter starts its effect once, the first time it is drawn, and remembers that in its own node: every
+                        # copy of the prop needs emitters of its own, in a copy of the state's group (the meshes stay shared)
+                        inst_roots = list(sroots)
+                        for si, nodes in sorted(prop.smoke.items()):
+                            kids = children(img, sroots[si])
+                            emit = []
+                            for raw in nodes:
+                                en = self.alloc(0xB0, 16)
+                                img.d[en - img.base:en - img.base + len(raw)] = raw
+                                emit.append(en)
+                            gr = self.alloc(0x20 + 4 * (len(kids) + len(emit)), 16)
+                            img.d[gr - img.base:gr - img.base + 0x20] = img.d[sroots[si] - img.base:sroots[si] - img.base + 0x20]
+                            self.w16(gr + 8, len(kids) + len(emit))
+                            for j, c in enumerate(kids + emit):
+                                self.w32(gr + 0x20 + 4 * j, c)
+                            inst_roots[si] = gr
+                            self.stats["smoke emitters"] += len(emit)
+                        inst_chains = [ch for r in inst_roots for ch in self._prop_chains(r)]
                     if dstr:        # T|R -> INTERACTIVE_STATE -> DESTRUCTIBLE -> one state root each (docs/FORMATS.md)
                         ist = self.alloc(0x10, 16)
                         destr = self.alloc(0xC + 12 * n_st, 16)
@@ -1852,7 +1872,7 @@ class LevelPatch:
                         self.w32(destr, 0x1F)
                         self.w16(destr + 4, prop.strength)
                         self.w16(destr + 0xA, n_st)
-                        for i, r in enumerate(sroots):
+                        for i, r in enumerate(inst_roots):
                             self.w32(destr + 0xC + 12 * i, r)
                             self.w16(destr + 0xC + 12 * i + 8, thr[i] if i < n_st - 1 else 0)
                             if prop.actions[i] is not None:                  # the state's ActDebris, in the prop's image
@@ -1875,9 +1895,11 @@ class LevelPatch:
                     cost, bad = 4, None
                     if dstr:
                         cost += 0x10 + 15 + 0xC + 12 * n_st + 15
+                        for si, nodes in prop.smoke.items():
+                            cost += 0x20 + 4 * (len(children(img, sroots[si])) + len(nodes)) + 15 + len(nodes) * (0xB0 + 15)
                         if self.interactives_used + 1 > INTERACTIVES:
                             bad = "the stage has no Interactives slot left (%d of %d taken)" % (self.interactives_used, INTERACTIVES)
-                    full = [[ist, destr] + ch for ch in chains] if dstr else chains
+                    full = [[ist, destr] + ch for ch in inst_chains] if dstr else chains
                     for ch in full if not bad else []:
                         lb = aabb(leaf_points(img, ch[-1]))
                         if not lb:
@@ -1896,7 +1918,7 @@ class LevelPatch:
                         self.log.append("prop %d (%s) skipped: %s" % (k, e.get("id") or name, bad))
                         self.stats["skipped"] += 1
                         continue
-                    mine.append((t, root, full, (ist, destr, sroots) if dstr else None))
+                    mine.append((t, root, full, (ist, destr, inst_roots) if dstr else None))
                     need += cost
                     if dstr:
                         self.interactives_used += 1
@@ -1914,6 +1936,9 @@ class LevelPatch:
                 if dstr:
                     self.log.append("props: %s is destructible: %d states, hit point class %d (%d hit points)" % (
                         name, len(sroots), prop.strength, lvlprop.STRENGTH[prop.strength]))
+                    if prop.smoke:
+                        self.log.append("props: %s has smoke: %s" % (name, ", ".join(
+                            "%d emitters in state %d" % (len(v), k) for k, v in sorted(prop.smoke.items()))))
                 self.stats["prop models"] += 1
                 for t in prop.textures:
                     if "texId" in t:
