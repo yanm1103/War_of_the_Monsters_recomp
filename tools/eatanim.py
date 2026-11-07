@@ -377,21 +377,30 @@ def key_poses(g, rig, R, off=None):
     lean(q, 0)
     hand_to(q, fwd_f * 0.8, 0.1, side_f)
     P["toss"] = q
-    q = {i: rest[i].copy() for i in rest}   # pegando no ar: cabeca para tras, queixo aberto, peito para fora, braco de volta ao lado
-    lean(q, -7)
-    pitch(q, head, -2.2 * R["head_back"])
-    if jaw is not None:
-        pitch(q, jaw, 1.4 * R["jaw_open"])
-    P["open"] = q
-    q = {i: rest[i].copy() for i in rest}   # queixo fecha, cabeca vem para a frente
-    lean(q, -2)
-    pitch(q, head, 8)
-    P["catch"] = q
-    for name, hd, ln in (("gulp1", -7, -6), ("gulp2", 5, -1), ("gulp3", -4, -4)):   # engolir: o pescoco sobe e desce, o peito acompanha
+    # Cabeca para tras de verdade e queixo bem aberto (como o Lizzie do Rampage: Total Destruction), segura aberta ate o civil cair, depois
+    # duas mordidas, a engolida (cabeca para tras de novo, depois para a frente) e o peito estufado ao assentar.
+    hb, jo = R["head_back"], R["jaw_open"]
+
+    def mk(head_deg, lean_deg, jaw_deg=0.0):
         q = {i: rest[i].copy() for i in rest}
-        lean(q, ln)
-        pitch(q, head, hd)
-        P[name] = q
+        lean(q, lean_deg)
+        pitch(q, head, head_deg)
+        if jaw is not None and jaw_deg:
+            pitch(q, jaw, jaw_deg)
+        return q
+
+    q = mk(-1.4 * hb, -4, 0.5 * jo)   # antecipacao: o braco lanca (abaixo, a mao) e a cabeca comeca a subir
+    to_hand = {i: P["toss"][i].copy() for i in arm}
+    for n in arm:
+        q[n] = to_hand[n]
+    P["toss"] = q
+    P["open"] = mk(-4.0 * hb, -14, 1.8 * jo)
+    P["chomp1"] = mk(-2.7 * hb, -10)
+    P["reopen"] = mk(-3.1 * hb, -12, 0.9 * jo)
+    P["chomp2"] = mk(-2.4 * hb, -8)
+    P["gulpback"] = mk(-3.6 * hb, -12)
+    P["gulpdown"] = mk(0.6 * hb, 2)
+    P["puff"] = mk(-0.4 * hb, -8)
     P["mouth_of"] = mouth_of
     P["ground"] = ground
     P["off"] = off
@@ -475,14 +484,14 @@ def fit_offset(g, rig, R):
 
 
 # quadros da animacao de comer que o native/runtime/wotm_eatmod.inc usa (kTossFrame, kArriveFrame, kEatFrame, kEatFrames)
-TOSS_FRAME, ARRIVE_FRAME, EAT_FRAME = 14, 28, 31
+TOSS_FRAME, ARRIVE_FRAME, EAT_FRAME = 20, 34, 50
 
 
 def timeline(P):
     """Lista de (quadro, pose) de cada animacao; entre as chaves, slerp suave."""
     grab = [(0, "rest"), (22, "reach"), (32, "reach"), (70, "dangle"), (80, "dangle")]
-    eat = [(0, "dangle"), (8, "wind"), (TOSS_FRAME, "toss"), (ARRIVE_FRAME, "open"), (EAT_FRAME - 1, "catch"), (39, "gulp1"), (47, "gulp2"),
-           (55, "gulp3"), (72, "rest")]
+    eat = [(0, "dangle"), (10, "wind"), (TOSS_FRAME, "toss"), (ARRIVE_FRAME, "open"), (42, "open"), (EAT_FRAME, "chomp1"), (57, "reopen"),
+           (63, "chomp2"), (76, "gulpback"), (92, "gulpdown"), (106, "puff"), (120, "rest")]
     return {"grab": [(f, P[n]) for f, n in grab], "eat": [(f, P[n]) for f, n in eat]}
 
 
@@ -571,7 +580,7 @@ def cmd_check(argv):
     P = key_poses(g, rig, R, off)
     hand, ok = P["end"], True
     for anim, frame, what, target in (("a299", 79, "mao segurando ao fim do pegar", P["dangle_t"]), ("a299", 22, "mao no chao no meio do pegar", P["ground"]),
-                                      ("a298", 0, "mao segurando ao comecar a comer", P["dangle_t"]), ("a298", 72, "de volta ao repouso", rig.pos(hand))):
+                                      ("a298", 0, "mao segurando ao comecar a comer", P["dangle_t"]), ("a298", 120, "de volta ao repouso", rig.pos(hand))):
         pose, n = eval_pose(g, anim, frame)
         full = dict(pose)
         tgt = target

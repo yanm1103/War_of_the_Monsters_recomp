@@ -117,9 +117,9 @@ constexpr uint32_t kAnims = 0x1CF0, kAnimStride = 0x10, kAnimGrab = 299, kAnimEa
 constexpr float kAnimBlend = 20.f;
 
 constexpr uint32_t kState = 0x34, kIdleState = 0x7984;   // Monster::m_state; the StateIdle embedded in Monster
-constexpr double kGrabSeconds = 82.0 / 60.0, kEatSeconds = 74.0 / 60.0;   // clip lengths (tools/eatanim.py: 81 and 73 frames at 60 fps)
-// Frames of the eat clip (tools/eatanim.py TOSS_FRAME, ARRIVE_FRAME, EAT_FRAME): the hand lets go, the civilian reaches the open mouth, the jaw closes
-constexpr double kTossT = 14.0 / 60.0, kArriveT = 28.0 / 60.0, kEatT = 31.0 / 60.0;
+constexpr double kGrabSeconds = 82.0 / 60.0, kEatSeconds = 122.0 / 60.0;   // clip lengths (tools/eatanim.py: 81 and 121 frames at 60 fps)
+// Frames of the eat clip (tools/eatanim.py TOSS_FRAME, ARRIVE_FRAME, EAT_FRAME): the hand lets go, the civilian reaches the open mouth, the jaw closes on it
+constexpr double kTossT = 20.0 / 60.0, kArriveT = 34.0 / 60.0, kEatT = 50.0 / 60.0;
 constexpr uint32_t kMouth = 0x3E50;   // locator 0x80B: monster + id * 16 - 0x4260
 constexpr float kTossArc = 40.f;   // extra height of the toss at its top, in game units
 
@@ -335,6 +335,27 @@ void tick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, in
     std::fprintf(stderr, "[eatmod] jogador %d pegou um civil a %.0f (%.1f %.1f)\n", player + 1, d, rdF(rdram, p), rdF(rdram, p + 4));
 }
 
+// Monster::updateLookAt turns the head toward a target (the nearest enemy, the locked or reticle target, a vehicle that can be picked up)
+// with two animation layers (m_anims[154] in the AnimBlend at +0x2FE0 and [155] at +0x3048; 50% is the neutral pose). Over the grab and
+// eat clips that tilts the head awkwardly, so while a clip is on the layers are put back to neutral right after the game's update
+constexpr uint32_t kUpdateLookAt = fn::updateLookAt__7Monster, kLookBlendA = 0x2FE0, kLookBlendB = 0x3048;
+PS2Runtime::RecompiledFunction g_origLookAt = nullptr;
+
+void lookAtUpdate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    const uint32_t m = ctx->pc == kUpdateLookAt ? GPR_U32(ctx, 4) : 0;
+    g_origLookAt(rdram, ctx, runtime);
+    if (!m)
+        return;
+    for (uint32_t i = 0; i < 4; ++i)
+        if (g_hold[i].clip && rd32(rdram, kGame + kMonsters + 4 * i) == m)
+        {
+            wotm_coop::callF(rdram, ctx, runtime, fn::setPercent__9AnimBlendf, {m + kLookBlendA}, {0.5f});
+            wotm_coop::callF(rdram, ctx, runtime, fn::setPercent__9AnimBlendf, {m + kLookBlendB}, {0.5f});
+            break;
+        }
+}
+
 PS2Runtime::RecompiledFunction g_origUpdate = nullptr;
 
 void monsterUpdate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -371,6 +392,8 @@ void install(PS2Runtime &runtime)
     if (!(g_origUpdate = runtime.lookupFunction(kMonsterUpdate)))
         return;
     runtime.registerFunction(kMonsterUpdate, &monsterUpdate);
+    if ((g_origLookAt = runtime.lookupFunction(kUpdateLookAt)))
+        runtime.registerFunction(kUpdateLookAt, &lookAtUpdate);
     std::fprintf(stderr, "[eatmod] comer civis ligado (%s; plano %s; vida %.0f%%, %d pontos, alcance %.0f)\n", g_cfg.all ? "todos os monstros" : "Togera",
                  g_cfg.planeXZ ? "xz" : "xy", g_cfg.healPct, g_cfg.points, g_cfg.reach);
 }
