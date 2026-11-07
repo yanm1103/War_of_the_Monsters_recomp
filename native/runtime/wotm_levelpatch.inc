@@ -1395,7 +1395,7 @@ struct Stage
         const double wc = std::floor((hi2[0] - lo[0]) / cell) + 1, wr = std::floor((hi2[1] - lo[1]) / cell) + 1;
         if (wc * wr > 65536.0) throw PatchError(fmt("\"grid\" de %.0f x %.0f celulas: no maximo 65536 celulas", wc, wr));
         const int nc = int(wc), nr = int(wr);
-        const uint32_t need = 0x20 + 4 * uint32_t(nc * nr) + 15;
+        const uint32_t need = 0x20 + 8 * uint32_t(nc * nr) + 31;    // as celulas e as listas de objetos moveis (csListArr: um ponteiro por celula)
         if (need > arenaFree()) throw PatchError(fmt("\"grid\" de %d x %d celulas leva %u bytes, a arena tem %u livres", nc, nr, need, arenaFree()));
         const uint32_t old = grid;
         const int oc = cols, orow = rows;
@@ -1406,7 +1406,9 @@ struct Stage
             for (int guard = 0; ln && ok(ln, 8) && guard < 100000; ++guard) nodes.push_back(ln), ln = u32(ln) & kMask;
         }
         const uint32_t nu = alloc(0x20 + 4 * uint32_t(nc * nr), 16);
+        const uint32_t csLists = alloc(4 * uint32_t(nc * nr), 4);   // vazia: o jogo indexa por celula, a do disco tem uma entrada por celula velha
         copyBytes(nu, old, 0x20);
+        setPtr(nu + 0x1C, csLists);
         w16(nu + 4, uint16_t(nc)), w16(nu + 6, uint16_t(nr));
         wf32(nu + 8, cell), wf32(nu + 0xC, lo[0]), wf32(nu + 0x10, lo[1]), wf32(nu + 0x14, hi2[0]), wf32(nu + 0x18, hi2[1]);
         const uint32_t nroots = u32(kBase);

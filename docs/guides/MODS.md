@@ -633,7 +633,8 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
 - `grid` (at the top beside `objects`): a bigger collision grid, `{"min": [x, y], "max": [x, y]}`. The disc's grid is a fixed rectangle
   of 200-unit cells (`python tools/lvl.py collision <FASE>` prints it; 7 x 7 to 102 x 40 cells): the game collides, shoots and sees only
   inside it, and a box outside is refused. The new rectangle must hold the disc's one (it can only grow) and have at most 65536 cells
-  (cols = floor(width / 200) + 1). The patch builds the grid in the arena (4 bytes a cell, 1 MB for the whole patch), lists every path
+  (cols = floor(width / 200) + 1). The patch builds the grid in the arena (8 bytes a cell: the cell and its list of moving objects,
+  `csListArr`, which the game indexes by cell, so the disc's one is too short; 1 MB for the whole patch), lists every path
   again in the cells its box covers and points the image's root to it; it runs before the entries, so props and copies see it. A bad
   rectangle is skipped with a line (`[fase]   grid pulada: ...`) and the stage keeps the disc's grid. Log: `grid: 36 x 36 celulas (eram 18 x 16)...`.
 - `props` (at the top beside `objects`): new static objects made in Blender, placed in the stage.
