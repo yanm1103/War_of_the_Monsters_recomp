@@ -7,10 +7,17 @@ O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado s
 - **Fora do caminho crítico:** oracle para funções com chamadas; cobertura com gameplay para realimentar o `boot_coverage_asm.csv` (`57d4afd:docs/investigacoes/2026-10-19/pendencias_oracle_cobertura.md`, seções 2 e 3).
 
 ## Editor de fase
-Rearranjar fases existentes (mover, girar, apagar, duplicar prédios e objetos, inclusive de outra fase) com um editor dentro do jogo (câmera F5), que grava um patch JSON por fase em `mods/<mod>/levels/` aplicado na carga. Fase nova do zero fica para depois.
-1. **Mod de prova sem editor:** mover, apagar e duplicar um prédio de Midtown (CENTRAL) pelo patch, aplicado na entrada do `dbInitDb` chamado pelo `Shell::LoadLevelFiles` (imagem inflada e TEX0 relocado, nada registrado); colisão refeita pelas regras de `docs/FORMATS.md` ("Stage collision"), conferidas antes offline com `tools/lvl.py`. No jogo, conferir colisão (`hdHatTest` no lugar novo e no antigo), quebra e desvio da IA e dos veículos. Pontos (`PTS/*`) pelo `cdRead` de `wotm_mods.inc`. Contexto e riscos: `docs/investigacoes/2026-11-06/`.
-2. **Editor no jogo:** escolher o objeto na mira (`DrawItem` com o dono anotado em `Scene::walk`), mover, girar, duplicar e apagar, gravar o patch.
-3. **Depois:** objetos novos vindos do Blender (malha e cascos de colisão).
+Rearranjar fases existentes (mover, girar, apagar, duplicar prédios e objetos, inclusive de outra fase) com um editor que grava o patch JSON por fase em `mods/<mod>/levels/` (`docs/guides/MODS.md`, "Level patches"; aplicado pelo `wotm_levelpatch.inc`). Fase nova do zero fica para depois.
+3. **Fases custom** (`MODS.md`, "Custom stages"; plano em `docs/investigacoes/2026-11-06/fases_custom_plano.md`): o jogo já carrega pelo `WOTM_MATCH=3,1,@<id>`. Falta:
+   - Editor 7b: `PTS` próprios da custom nos painéis de pontos e pedestres (hoje mostram os da base); o painel HUD de uma custom usa o da base.
+   - Decisão do dono sobre a trava: hoje a custom herda a da base (alternativa: não listar a custom de base trancada).
+4. **Objetos novos vindos do Blender** (plano em `docs/investigacoes/2026-11-06/objetos_blender_plano.md`; conversor `tools/lvlprop.py`, diário `props_passo0_1.md`; a carga na fase, o editor e a imagem própria do material já existem, `MODS.md`, "props" e "New props"): faltam os passos 3, 5, 6 e 8 (o 4 e o 7 saíram com o pacote CT32 na arena e o texId dado na carga, sem `.TEX` no mod). Textura própria: UV fora de 0..1 é preso na borda (sem repetir). Pivô na base para o glb do `lvlglb` (`--units game`: o CAR em z 0 fica meio enterrado).
+5. **Céu:** trocar o skybox da fase pelo editor (o céu é um nó próprio da fase, `lvlglb` já o separa).
+6. **Tamanho da fase:** ver se há limite (grade de colisão, retângulo do `hdLosTest`, rede dos carros, câmera) e deixar definir ou mudar pelo editor.
+7. **Paleta de props estilo Ctrl+P:** barra de busca que abre por atalho, com prévia, para achar e criar props (os da fase, os de outras fases e os importados do Blender).
+8. **Capa da fase na seleção:** editor da foto da tela de seleção (`levelpics/<id>.png`), por exemplo uma captura da vista do editor recortada em 2:1.
+9. **Depois:** fase do zero como "base + geometria trocada" (mesmo relatório, seção 6).
+   - Patch de fase acima de 1 MB: segunda arena na memória alta (`WOTM_HIGHRAM`). Contexto: `docs/investigacoes/2026-11-06/copia_profunda.md`.
 
 ## Fora da ordem (até o dono escolher)
 - **4 jogadores sempre a 60:** com 4 vistas, ~80% dos quadros saem a 60 e o resto a 30; quem segura é o EE (mediana ~14 ms, p90 ~17,5 ms). Candidatos, pelo perfil das amostras do EE (`PS2X_HOSTPROF=2` + `_RAW=1`, resolvido pelo `wotm.map` do mesmo build): o envoltório do VU0 traduzido (`executeVU0Microprogram` copia ~1 KB de estado em cada sentido, ~3%) e o `checkpointDue` fora de linha (~3%), ambos costura do PS2Recomp; a montagem do pacote do VU1 que o `wotm.exe` descarta (`pktAddVu1ObjAsm`, ~4%, arriscado: item G3 de `723b110:docs/investigacoes/2026-10-23/performance_vistas.md`). Na janela, as partículas ainda no modo imediato do rlgl (~0,6 ms por vista). Comparar alternando na mesma corrida (a luta IA x IA não se repete).

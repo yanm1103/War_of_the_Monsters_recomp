@@ -329,6 +329,7 @@ static void wotmBootPresent(uint32_t eePc, uint64_t vsync)
 #include <filesystem>
 #include "wotm_freecam.inc"   // camera livre de debug (F5)
 extern std::atomic<float> g_wotmMechaReticle;   // wotm_overrides.cpp: peso da camera da torre do Mecha (0 = sem retícula)
+extern std::atomic<bool> g_wotmLevelReloadKey;   // wotm_levelreload.inc: F10 pede a recarga da fase
 extern std::atomic<uint32_t> g_wotmFxTint[100];   // wotm_overrides.cpp: cor do fogo por fx[i] (wotm_custom.inc grava)
 static const bool g_wotmFxTintLinked = (wotm::Particles::tintTags = g_wotmFxTint, true);
 #include "wotm_prompts.inc"   // icones de botao 2D (Kenney) no lugar dos 3D do jogo
@@ -360,6 +361,8 @@ extern "C" __declspec(dllimport) void *__stdcall GetModuleHandleA(const char *);
 inline const char *g_stage = "idle";   // current native-layer stage, for crash diagnostics
 } // namespace wotm_live
 void wotmCrashTrace(void *exceptionContext);   // wotm_standalone.cpp
+unsigned wotmLevelPatchLoads();                // wotm_levelpatch.inc: cargas da fase com o patch ja aplicado
+bool wotmPropTexture(uint32_t texId, std::string &host, std::string &mod, std::string &rel);   // wotm_levelpatch.inc: PNG de textura de prop
 namespace wotm_live
 {
 #ifdef _WIN32
@@ -418,7 +421,8 @@ struct State
 // invalidava a cena inteira por quadro: tela a ~16/s).
 inline uint32_t levelSignature(const wotm::Ram &ram)
 {
-    uint32_t h = ram.u32(wotm::addr::tempVramTexAddr) * 2654435761u;
+    // mais as cargas da fase com patch aplicado: a recarga (F10) da mesma fase traz a mesma imagem e os props nos mesmos enderecos
+    uint32_t h = (ram.u32(wotm::addr::tempVramTexAddr) ^ wotmLevelPatchLoads()) * 2654435761u;
     const uint32_t n = std::min<uint32_t>(ram.u32(0xA00000), 255u);
     for (uint32_t k = 0; k <= n; ++k)
         h = (h ^ ram.u32(0xA00000 + 4 * k)) * 16777619u;
@@ -1535,6 +1539,7 @@ static void drawDamagePopups(wotm::Scene &scene, const Camera3D &cam, int rw, in
 
 #include "wotm_narrator.inc"   // nome do monstro escolhido na selecao (antes do wotm_padsel.inc, que o chama)
 namespace wotm_levelsel { bool resolveRandom(uint8_t *rdram); }   // wotm_levelsel.inc: RANDOM da selecao de fase (o padsel a chama)
+#include "wotm_stages.h"   // fases custom: vaga -> base na confirmacao da selecao de fase (o padsel o chama)
 // Escolha de lados do 2 jogadores no telao do menu (ganchos do menu + desenho; wotmPadSelInstall, chamado do wotm_overrides.cpp)
 #include "wotm_padsel.inc"
 #include "wotm_levelsel.inc"   // selecao de fase com as fases escondidas e a RANDOM (depois do wotm_padsel.inc: plano do telao)
@@ -1570,6 +1575,7 @@ static bool wotmDrawNative(const uint8_t *rdram)
         new (&S) wotm_live::State();
     }
     wotm_live::g_state = &S;
+    S.scene.propTexture = wotmPropTexture;
     S.scene.movieTexture = []() -> unsigned {   // objeto do menu com texId 999
 #ifdef WOTM_HAVE_FMV
         if (const unsigned id = wotm::fmv::Player::get().screenTexture()) return id;
@@ -2314,6 +2320,8 @@ static bool wotmDrawNative(const uint8_t *rdram)
         static float gameFps = 0.f, screenFps = 0.f;
         if (IsKeyPressed(KEY_F3))
             show = !show;
+        if (IsKeyPressed(KEY_F10))   // recarrega a fase (wotm_levelreload.inc): o patch dela e relido
+            g_wotmLevelReloadKey.store(true, std::memory_order_relaxed);
         ++drawn;
         const double now = GetTime();
         static const bool camLog = std::getenv("WOTM_CAMLOG") != nullptr;   // diagnostico: serie temporal da camera lida (um [cam] por desenho)

@@ -122,7 +122,7 @@ Id = high 14 bits of the node's first word. Nodes with opcode 0x1F and 0x27 are 
 | 2 | sky (`viewSetSkyEntry` x4) |
 | 18 | font texture |
 | 0x20..0x400 | monsters (`TheGame::MonsterParse`) |
-| 0xBB8 | pedestrian group (`PedGroup`, 0x190 bytes on the memory stack; byte `(head>>7)&0xFF` = size) |
+| 0xBB8 | pedestrian group (`PedGroup`, 0x190 bytes on the memory stack; byte `(head>>7)&0xFF` = size, 1..255): a root `TRANSLATE` (head `0xBB8<<18 \| size<<7 \| 3`, one child, a `NULL`) whose translation places the group; it walks link 0 of the `PathNet::ped` node nearest to it (3D distance, the first of equals). At most 20 groups (the game does not check) |
 | 0x7D0..0x897 | ignored here |
 | 0xFA0..0x11F7 | weapons (`Weapons::AddWeaponEpNode`) |
 | 0x11F8..0x12BF | effects: 0x11F8/0x1203 `HomingBug`, 0x11FC `OgreMace` ball, 0x11F9..0x11FA/0x11FD/0x11FE/0x11FF/0x1201 `SpecFxAnim` |
@@ -148,7 +148,11 @@ Reader: `python tools/lvl.py objects <STAGE>` (kind, handle, position, heading, 
   two parents: each building is its own copy, while meshes, `LOD`s, `CONTROL`s, debris meshes and GS context blocks inside them are
   shared between buildings.
 - **Pickup** (cars, trees, posts): a root `GROUP` of their own holds `T|R` → `GROUP` (id 0x12C0..0x13EB) → `SWITCH` → `GROUP` →
-  shared `CONTROL`; the game draws each through the `Pickup`'s `_cs`.
+  shared `CONTROL`; the game draws each through the `Pickup`'s `_cs`. The type is `id1 - 0x1388` (`LevelPickups::createPickup`;
+  the disc uses 1..27): 9 `MissileTruckPickup`, 10 `TankPickup`, 11 and 12 `HeliPickup` (12 military), 24 `TurretPickup`, 25
+  `UfoPickup`, 27 `SubwayPickup`, 13 and 21 two-handed `RigidPickup`, 7 the one that impales, 14 the generator (shock), 3 the tanker
+  (shock wave); in types 2, 3, 15 and 26, `id2` bit 0 makes it a `CarPickup` that drives in the traffic. Type 5 is not built.
+- No object stores a name: the files hold numbers only (`texId`s, ids), and the ELF names classes, not objects.
 - **Prop:** the topmost transform under a world `GROUP` with an `OBJECT` below and no destructible or pickup inside.
 - **What the load keeps** (`dbInitDb` walks every root but `ANIM_MGR` with `dbsTraverse`, which visits every destructible state and
   both `CONTROL` children and passes each node's world position and matrix to `dbProcInteractive`):
@@ -193,8 +197,10 @@ Reader: `python tools/lvl.py collision <STAGE> [--check]` (`--check` redoes ever
   the box and the cells (new list nodes from new memory when it covers more cells; a box outside the grid rectangle is invisible to
   `hdLosTest`). Turning an object whose handle is a `TRANSLATE` needs a new `ROTATE` in its place, in the parent and in each path's
   chain. Turning the handle into `NULL` (9) before `dbInitDb` removes drawing, collision and registration. A copy needs new paths
-  (the old chain with copies of the handle, `INTERACTIVE_STATE` and `DESTRUCTIBLE`; state groups and leaves can be shared) and their
-  list nodes.
+  and their list nodes: each path of the original with every node the copy cloned replaced by its clone (leaves and the unchanged
+  nodes between can be shared), so that `path[i+1]` stays a child of `path[i]`, as `hdTraversePath` requires of `DESTRUCTIBLE` and
+  `SWITCH`. A destructible inside the object must be cloned with its `INTERACTIVE_STATE` and every node above it up to the handle,
+  otherwise the copy's path goes through the original's state and collides by the original's damage.
 
 ## Meshes (`HierObject::polyPkt`)
 Reference readers: `tools/ngp.py` (Python, offline, straight from the disc) and `native/wotm_native.hpp` (`decodeObject`, C++, reads EE RAM). Writer: `tools/vifpkt.py` (packet to geometry and back; byte-exact on every packet of the 44 monster `.NGP`).

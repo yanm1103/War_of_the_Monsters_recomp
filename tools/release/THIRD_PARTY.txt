@@ -13,8 +13,18 @@ Mod kit (WotM_ModKit.exe)
   - Python, PSF License (licenses\Python-LICENSE.txt), https://www.python.org
   - Tcl/Tk, BSD-style license (licenses\TclTk-license.terms.txt), https://www.tcl-lang.org
   - Pillow, MIT-CMU license (licenses\Pillow-LICENSE.txt), https://python-pillow.org
+  - numpy, BSD 3-clause with the licenses of the libraries it ships (licenses\numpy-LICENSE.txt),
+    https://numpy.org
   - the PyInstaller bootloader, GPL 2.0 with the bootloader exception
     (licenses\PyInstaller-COPYING.txt), https://pyinstaller.org
+
+Level editor (WotM_LevelEditor.exe)
+  License: GNU General Public License 3.0 (licenses\WotM-GPL-3.0.txt); source in tools/level_editor/
+  and tools/ of the same repository. Built with PyInstaller and contains Python and the
+  PyInstaller bootloader (licenses above) and, in its page:
+  - three.js r160, MIT (licenses\threejs-LICENSE.txt), https://threejs.org
+  - Material Design Icons, Pictogrammers Free License, icons under Apache 2.0
+    (licenses\MDI-LICENSE.txt), https://pictogrammers.com/library/mdi/
 
 PS2Recomp (the recompiler runtime inside wotm.exe)
   https://github.com/ran-j/PS2Recomp

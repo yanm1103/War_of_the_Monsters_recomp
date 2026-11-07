@@ -1,8 +1,10 @@
 // JSON minimo (objeto, array, string, numero inteiro, booleano, null) para os arquivos que o port deixa legiveis: o save
-// (wotm_save.inc) e, depois, o que os mods precisarem. Guarda a ordem das chaves e as chaves que o codigo nao conhece, para que
-// reescrever um arquivo nao apague o que um mod pos nele. Numeros com fracao sao lidos e truncados (o save so tem inteiros).
+// (wotm_save.inc) e os mods (monster.json, skin.json, levels/<FASE>.json). Guarda a ordem das chaves e as chaves que o codigo nao
+// conhece, para que reescrever um arquivo nao apague o que um mod pos nele. Numero com fracao ou expoente: `d` guarda o valor e `i` o
+// truncado (o save so tem inteiros e grava `i`).
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -16,13 +18,14 @@ namespace wotm::json
         enum Type { Null, Bool, Int, Str, Arr, Obj } type = Null;
         bool b = false;
         int64_t i = 0;
+        double d = 0.0;   // o numero inteiro, com fracao e expoente (asNum)
         std::string s;
         std::vector<Value> arr;
         std::vector<std::pair<std::string, Value>> obj;
 
         Value() = default;
         static Value boolean(bool v) { Value r; r.type = Bool; r.b = v; return r; }
-        static Value integer(int64_t v) { Value r; r.type = Int; r.i = v; return r; }
+        static Value integer(int64_t v) { Value r; r.type = Int; r.i = v; r.d = double(v); return r; }
         static Value string(std::string v) { Value r; r.type = Str; r.s = std::move(v); return r; }
         static Value array() { Value r; r.type = Arr; return r; }
         static Value object() { Value r; r.type = Obj; return r; }
@@ -49,6 +52,7 @@ namespace wotm::json
         }
         bool isInt() const { return type == Int || type == Bool; }
         int64_t asInt(int64_t def = 0) const { return type == Int ? i : type == Bool ? (b ? 1 : 0) : def; }
+        double asNum(double def = 0.0) const { return type == Int ? d : type == Bool ? (b ? 1.0 : 0.0) : def; }
         bool asBool(bool def = false) const { return type == Bool ? b : type == Int ? i != 0 : def; }
     };
 
@@ -214,16 +218,33 @@ namespace wotm::json
                     if (neg)
                         ++p;
                     int64_t n = 0;
+                    double d = 0.0;
                     bool any = false;
                     while (p < end && *p >= '0' && *p <= '9')
-                        n = n * 10 + (*p++ - '0'), any = true;
+                        d = d * 10.0 + (*p - '0'), n = n * 10 + (*p++ - '0'), any = true;
                     if (!any)
                         return fail("numero invalido");
-                    if (p < end && *p == '.')   // fracao: lida e descartada
-                        for (++p; p < end && *p >= '0' && *p <= '9'; ++p) {}
+                    if (p < end && *p == '.')
+                        for (double f = 0.1; ++p < end && *p >= '0' && *p <= '9'; f *= 0.1)
+                            d += (*p - '0') * f;
                     if (p < end && (*p == 'e' || *p == 'E'))
-                        return fail("expoente nao suportado");
+                    {
+                        ++p;
+                        const bool eneg = p < end && *p == '-';
+                        if (p < end && (*p == '-' || *p == '+'))
+                            ++p;
+                        int e = 0;
+                        bool edig = false;
+                        while (p < end && *p >= '0' && *p <= '9')
+                            e = std::min(e * 10 + (*p++ - '0'), 400), edig = true;
+                        if (!edig)
+                            return fail("expoente invalido");
+                        for (; e > 0; --e)
+                            d = eneg ? d / 10.0 : d * 10.0;
+                        n = int64_t(std::min(d, 9.0e18));
+                    }
                     v = Value::integer(neg ? -n : n);
+                    v.d = neg ? -d : d;
                     return true;
                 }
                 return fail("caractere inesperado");

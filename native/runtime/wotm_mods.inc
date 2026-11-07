@@ -25,6 +25,9 @@ inline void wr32(uint8_t *rdram, uint32_t a, uint32_t v) { std::memcpy(rdram + (
 
 constexpr uint32_t kLowCeiling = 0x1F10000u;   // fim da regiao do NGP da fase e do menu (checkLoad)
 constexpr uint32_t kPtsMagic = 0x12282000u, kPtsCap = 0x4000u;
+// Topo da RAM de 64 MB: o ultimo MB e dos ganchos (textos, ViewDef, mechas, _fvector: PS2_RAM_SIZE - 0x1440 em diante) e o MB abaixo
+// dele e a arena dos patches de fase (wotm_levelpatch.inc). As cargas acima de 32 MB (monstros, texturas, .PTR grandes) param antes.
+constexpr uint32_t kLevelArenaSize = 0x100000u, kLevelArena = PS2_RAM_SIZE - 0x100000u - kLevelArenaSize, kHighCeiling = kLevelArena;
 
 // Arquivos de formato de tamanho fixo, lidos num buffer do tamanho exato: os do resetcom (RST/*.CHR, .MRS, .GBL, .MDR e os .AIC das
 // pastas das fases) em resetcom::m_data[0xC000], e os pontos (PTS/*) num buffer de 0x4000 do topo da MemoryStack, copiados para
@@ -44,27 +47,34 @@ void searchFile(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
     const char *p = reinterpret_cast<const char *>(rdram + (pAddr & PS2_RAM_MASK));
     const std::string rel = Registry::keyFromGame(std::string(p, strnlen(p, 256)));
     const std::string target = Registry::get().aliasOf(rel);
-    const wotm::mods::File *m = Registry::get().find(target);
+    const bool stage = Registry::get().discAlias(rel);   // fase custom: o arquivo da base, sempre o do disco
+    const wotm::mods::File *m = Registry::get().served(rel);
     if (target != rel)
     {
-        // Traje de mod sem esse arquivo na pasta da skin: busca o do traje base ("LIZARD4" -> "LIZARD1"), trocando o nome no
-        // proprio texto do jogo durante a chamada (o nome do base nunca e mais longo: o numero do traje base tem um digito)
+        // Traje de mod sem esse arquivo na pasta da skin: busca o do traje base ("LIZARD4" -> "LIZARD1"); fase custom: o da base
+        // ("MYCITY.NGP" -> "CENTRAL.NGP"). Troca o nome no proprio texto do jogo durante a chamada. O do traje base nunca e mais
+        // longo (o numero tem um digito); o da base pode ser, ate 8 letras: todo buffer de caminho de fase cabe o TRAINING.*
         char *s = reinterpret_cast<char *>(rdram + (pAddr & PS2_RAM_MASK));
         const size_t len = strnlen(s, 256);
-        const std::string saved(s, len + 1);
+        const std::string orig(s, len + 1);
         const std::string from = rel.substr(rel.find_last_of('/') + 1), to = target.substr(target.find_last_of('/') + 1);
-        std::string up(saved);
+        std::string up(orig);
         for (char &c : up) c = char(std::toupper(static_cast<unsigned char>(c)));
-        if (const size_t at = up.find(from); at != std::string::npos && to.size() <= from.size())
+        std::string saved = orig;
+        const size_t toStem = std::min(to.find('.'), to.size());
+        if (const size_t at = up.find(from); at != std::string::npos && (to.size() <= from.size() || (stage && toStem <= 8)))
         {
-            std::string repl = saved.substr(0, at) + to + saved.substr(at + from.size());
+            const std::string repl = orig.substr(0, at) + to + orig.substr(at + from.size());
+            if (repl.size() > len)   // a restauracao devolve tambem o que o nome mais longo cobriu depois do NUL
+                saved.assign(s, repl.size() + 1);
             std::memcpy(s, repl.c_str(), repl.size() + 1);
         }
         g_origSearch(rdram, ctx, rt);
         std::memcpy(s, saved.data(), saved.size());
         static std::set<std::string> logged;
         if (logged.insert(rel).second)
-            std::fprintf(stderr, "[mods] %s = %s (skin: arquivo do traje base)%s\n", rel.c_str(), target.c_str(), getRegU32(ctx, 2) ? "" : " NAO ACHADO");
+            std::fprintf(stderr, "[mods] %s = %s (%s)%s\n", rel.c_str(), target.c_str(), stage ? "fase custom: arquivo da base" : "skin: arquivo do traje base",
+                         getRegU32(ctx, 2) ? "" : " NAO ACHADO");
     }
     else
         g_origSearch(rdram, ctx, rt);
@@ -112,11 +122,11 @@ void searchFile(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
 // Carga de arquivo de mod pelo zipInflateAll (fase e menu, compactados) e pelo fileReadf: confere o fim do arquivo ja descompactado
 // contra o teto da regiao. Embaixo de 32 MB o NGP da fase e o menu (NGP, RTX, TEX e .PTR do SHELL) moram em sequencia a partir de
 // 0xA00000 ate 0x1F10000, onde comecam dados vivos (o buffer do zip fica em 0x1F7F840). A copia do SHELL.RTX/LOAD.RTX que o
-// BootInitUserint descompacta em 0x1B7FFF0 nao e lida por ninguem depois. Acima de 32 MB vale o fim da RAM menos 1 MB (Mecha,
-// kQuadDefs). Os .PTR dos monstros saem no ptrRelocate; RST, AIC e PTS tem tamanho fixo (fixedCap).
+// BootInitUserint descompacta em 0x1B7FFF0 nao e lida por ninguem depois. Acima de 32 MB vale o kHighCeiling (fim da RAM menos 2 MB:
+// a arena dos patches de fase e o MB dos ganchos). Os .PTR dos monstros saem no ptrRelocate; RST, AIC e PTS tem tamanho fixo (fixedCap).
 void checkLoad(uint8_t *rdram, const char *what, const std::string &gameName, uint32_t dst, int32_t size)
 {
-    const wotm::mods::File *m = Registry::get().find(Registry::get().aliasOf(Registry::keyFromGame(gameName)));
+    const wotm::mods::File *m = Registry::get().served(Registry::keyFromGame(gameName));
     if (!m || size <= 0 || fixedCap(m->rel) || (m->rel.rfind("MON/", 0) == 0 && m->rel.size() > 4 && m->rel.substr(m->rel.size() - 4) == ".PTR"))
         return;
     const uint32_t d = dst & 0x1FFFFFFFu, end = d + uint32_t(size);
@@ -124,7 +134,7 @@ void checkLoad(uint8_t *rdram, const char *what, const std::string &gameName, ui
     if (d >= 0xA00000u && d < kLowCeiling)
         ceiling = kLowCeiling;
     else if (d >= PS2_GUEST_RAM_SIZE)
-        ceiling = PS2_RAM_SIZE - 0x100000u;
+        ceiling = kHighCeiling;
     else
         return;
     static std::set<std::string> logged;   // o menu recarrega o SHELL a cada volta: uma linha por arquivo e endereco
@@ -241,7 +251,7 @@ void ptrRelocate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
     if (texN <= 13) end = std::max(end, rd32(rdram, kFs + 4 * texN));
     if (resN <= 13) end = std::max(end, rd32(rdram, kFs + 0x78 + 4 * resN));
     const uint32_t scratch = (std::max<uint32_t>(end & 0x1FFFFFFFu, PS2_GUEST_RAM_SIZE) + 0xFFFF) & ~0xFFFFu;
-    if (uint64_t(scratch) + need + 0x20 > uint64_t(PS2_RAM_SIZE) - 0x100000u)
+    if (uint64_t(scratch) + need + 0x20 > kHighCeiling)
     {
         std::fprintf(stderr, "[mods] %s (%s): %llu bytes, AVISO: nao cabe na pilha do jogo (%llu KB livres) nem acima da carga (0x%07X); "
                      "a leitura vai sobrescrever o que vem depois\n", rel.c_str(), m->mod.c_str(), (unsigned long long)m->size,

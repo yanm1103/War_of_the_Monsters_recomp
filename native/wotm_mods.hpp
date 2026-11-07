@@ -17,6 +17,7 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -208,6 +209,47 @@ struct Skin {
 // PNG de uma skin: vale so para o arquivo do traje dela (stem "LIZARD4"), nunca para o traje base
 struct SkinPng { std::string stem; std::filesystem::path host; std::string mod, rel; };
 
+// Fases que uma fase custom pode usar de base (indice de GameLevelNames, nome dos arquivos) e os arquivos de PTS/ que cada uma tem no
+// disco (todas tem os 4 de LVL/ e o RST/<NOME>.MRS). Fora: as 6 com script em todo modo (AIRPORT, 3-MILE, SANFRAN, ISLAND, TOKYO,
+// VOLCANO) e a TRAINING (a fase do modo treino do port, sem .FOP/.PED).
+struct StageBase { int level; const char *name; const char *pts; };
+inline constexpr StageBase kStageBases[] = {
+    {1, "CENTRAL", "SPT PUP FOP PED AIP"}, {2, "VEGAS", "SPT PUP FOP PED AIP"},  {3, "CANYON2", "SPT PUP FOP PED AIP"},
+    {4, "METRO", "SPT PUP FOP PED"},       {10, "UFO", "SPT PUP FOP PED AIP"},   {11, "CAPITOL", "SPT PUP FOP PED AIP"},
+    {13, "CANYON1", "SPT PUP AIP"},        {14, "MINISF", "SPT PUP FOP PED AIP"}, {16, "TOKYODM", "SPT PUP FOP PED AIP"},
+};
+inline const StageBase *stageBase(const std::string &s) {
+    std::string u;
+    for (char c : s) u += char(std::toupper(static_cast<unsigned char>(c)));
+    for (const StageBase &b : kStageBases)
+        if (u == b.name || u == std::to_string(b.level)) return &b;
+    return nullptr;
+}
+// Os 28 nomes de GameLevelNames: o id de uma fase custom nao pode repetir nenhum
+inline constexpr const char *kLevelFiles[28] = {
+    "DEFAULT", "CENTRAL", "VEGAS", "CANYON2", "METRO", "AIRPORT", "3-MILE", "SANFRAN", "ISLAND", "TOKYO", "UFO", "CAPITOL", "TRAINING", "CANYON1",
+    "MINISF", "VOLCANO", "TOKYODM", "DYLAN", "DAVID", "LARS", "JENN", "YEON", "JACOB", "STEVE", "PIERRE", "DBALL", "BIGSHOT", "CRUSH"};
+constexpr int kFirstStageSlot = 18, kStageSlots = 6;   // vagas 18..23 do indice de fases (fases de teste da equipe, sem arquivos)
+
+// Fase custom (MODS.md, "Custom stages"): mods/<mod>/stages/<pasta>/stage.json. Carrega os arquivos pelo id (alias para os da base,
+// so do disco) e roda o codigo por fase da base (m_levelNum = base na confirmacao: runtime/wotm_stages.h).
+struct Stage {
+    std::string id;         // "mycity" (minusculas; ate 8: o fileStatus guarda 8)
+    std::string name;       // "MY CITY" (ate 17: GameLevelLongNames, 18 bytes)
+    const StageBase *base = nullptr;
+    int slot = 0;           // vaga 18..23
+    std::string narrator;   // narrator/<nome>.mp3 na confirmacao (vazio = calado)
+    bool random = true;     // a RANDOM pode sortear
+    bool ownAip = false;    // traz PTS/<ID>.AIP (a base METRO nao tem: fora da lista com CPUs sem ele)
+    std::string mod;
+    std::filesystem::path dir;
+    std::string upperId() const {
+        std::string u;
+        for (char c : id) u += char(std::toupper(static_cast<unsigned char>(c)));
+        return u;
+    }
+};
+
 struct File {
     std::string rel;              // "MON/CONGAR1.TEX" (maiusculas, '/')
     std::filesystem::path host;   // arquivo no PC
@@ -270,6 +312,7 @@ public:
                 if (rel.empty() || ec) continue;
                 if (rel.rfind("SKINS/", 0) == 0) continue;   // skins/<id>/: trajes novos (scanSkins), nao sobrepoem o disco
                 if (rel.rfind("MONSTERS/", 0) == 0) continue;   // monsters/<id>/: monstros custom (scanCustoms)
+                if (rel.rfind("STAGES/", 0) == 0) continue;   // stages/<pasta>/: fases custom (scanStages)
                 if (size > kMaxSize) { std::fprintf(stderr, "[mods] %s/%s ignorado: maior que 256 MB\n", m_mods.back().c_str(), rel.c_str()); continue; }
                 File &f = m_files[rel];
                 if (!f.mod.empty()) std::fprintf(stderr, "[mods] %s: %s vence %s\n", rel.c_str(), m_mods.back().c_str(), f.mod.c_str());
@@ -292,6 +335,7 @@ public:
             c.costume = k->index;
             scanResetFiles(c);
         }
+        scanStages(mods);   // depois dos customs e das skins: o id de uma fase nao pode repetir o deles
         assignLsns();
         return m_files.size() + m_alias.size();
     }
@@ -326,10 +370,29 @@ public:
         const auto it = m_alias.find(key(rel));
         return it == m_alias.end() ? key(rel) : it->second;
     }
+    // Alias de fase custom ("LVL/MYCITY.NGP" -> "LVL/CENTRAL.NGP"): o arquivo e sempre o do disco, nunca o de outro mod
+    bool discAlias(const std::string &rel) const { return m_ready && !m_discAlias.empty() && m_discAlias.count(key(rel)) != 0; }
+    // Arquivo de mod que atende `rel` (o do alias, menos nos de fase custom); nullptr = o do disco
+    const File *served(const std::string &rel) const { return discAlias(rel) ? nullptr : find(aliasOf(rel)); }
     std::string hostPath(const std::string &rel) const {
-        const File *f = find(aliasOf(rel));
+        const File *f = served(rel);
         return f ? f->host.string() : std::string{};
     }
+
+    // ---- fases custom ----
+    const std::vector<Stage> &stages() const { return m_stages; }
+    const Stage *stage(const std::string &id) const {
+        for (const Stage &s : m_stages)
+            if (s.id == lower(id)) return &s;
+        return nullptr;
+    }
+    const Stage *stageBySlot(int slot) const {
+        for (const Stage &s : m_stages)
+            if (s.slot == slot) return &s;
+        return nullptr;
+    }
+    // PNGs da pasta de uma fase custom (stem = o id em maiusculas)
+    const std::vector<SkinPng> &stagePngs() const { return m_stagePngs; }
 
     // ---- skins de mod (trajes 4 em diante) ----
     const std::vector<Skin> &skins() const { return m_skins; }
@@ -398,6 +461,9 @@ private:
     std::map<std::string, File> m_files;
     std::vector<const File *> m_byLsn;   // em ordem de LSN (o map ja vem em ordem de nome, e os LSN seguem essa ordem)
     std::map<std::string, std::string> m_alias;   // "MON/LIZARD4.NGP" -> "MON/LIZARD1.NGP"
+    std::set<std::string> m_discAlias;   // aliases de fase custom: so do disco
+    std::vector<Stage> m_stages;
+    std::vector<SkinPng> m_stagePngs;
     std::vector<Skin> m_skins;
     std::vector<SkinPng> m_skinPngs;
     std::vector<Custom> m_customs;
@@ -565,6 +631,146 @@ private:
             kept.push_back(k);
         }
         m_skins = std::move(kept);
+    }
+
+    // mods/<mod>/stages/<pasta>/stage.json (MODS.md, "Custom stages"): {"id", "name", "base", "narrator", "random"}. Cada fase ganha
+    // uma vaga 18..23 do indice de fases, na ordem mod/id. Os arquivos sao os da base pelo id (LVL/<ID>.*, PTS/<ID>.*, RST/<ID>.MRS ->
+    // os da base, so do disco: m_discAlias), menos os PTS e o .MRS que a pasta traz. .NGP/.PTR/.TEX/.RTX proprios ainda nao entram (o
+    // .PTR reloca o .NGP e o .TEX/.RTX levam os texIds dele: geometria propria e um grupo de tudo ou nada, fora desta versao).
+    void scanStages(const std::vector<std::filesystem::path> &mods) {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        const auto reserved = [&](const std::string &up) -> const char * {
+            for (const char *n : kLevelFiles)
+                if (up == n) return "nome de uma fase do jogo";
+            for (const char *n : {"MONSTER", "SHELL", "SHELL2", "PRESHELL", "LOAD", "UI", "ARMY", "CRATER", "QUAKE", "MONSTERS", "OGRE", "SPIDER"})
+                if (up == n) return "nome de arquivo do jogo";
+            const auto prefixed = [&](const char *p) {   // MON/<PREFIXO><n>, RST/<PREFIXO>.CHR: monstros e trajes (de mod tambem)
+                const size_t n = std::strlen(p);
+                return up.compare(0, n, p) == 0 && up.find_first_not_of("0123456789", n) == std::string::npos;
+            };
+            for (const MonsterInfo &m : kMonsters)
+                if (prefixed(m.prefix)) return "nome de arquivo de monstro";
+            for (const MonsterInfo &m : kCustomBases)
+                if (prefixed(m.prefix)) return "nome de arquivo de monstro";
+            for (const Custom &c : m_customs)
+                if (key(c.id) == up) return "id de um monstro custom";
+            return nullptr;
+        };
+        std::vector<Stage> found;
+        for (const fs::path &m : mods) {
+            const fs::path dir = child(m, "stages");
+            if (dir.empty() || !fs::is_directory(dir, ec)) continue;
+            std::vector<fs::path> subs;
+            for (const auto &e : fs::directory_iterator(dir, ec))
+                if (e.is_directory(ec)) subs.push_back(e.path());
+            std::sort(subs.begin(), subs.end());
+            for (const fs::path &s : subs) {
+                const std::string where = m.filename().string() + "/stages/" + s.filename().string();
+                const fs::path js = child(s, "stage.json");
+                std::string text;
+                if (!js.empty()) {
+                    std::ifstream in(js, std::ios::binary);
+                    text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+                }
+                json::Value v;
+                std::string err;
+                if (js.empty() || !json::parse(text, v, &err) || v.type != json::Value::Obj) {
+                    std::fprintf(stderr, "[mods] fase %s ignorada: %s\n", where.c_str(), js.empty() ? "sem stage.json" : ("stage.json invalido: " + err).c_str());
+                    continue;
+                }
+                Stage st;
+                const json::Value *id = v.get("id");
+                st.id = lower(id && id->type == json::Value::Str ? id->s : s.filename().string());
+                if (st.id.empty() || st.id.size() > 8 || !std::isalpha(static_cast<unsigned char>(st.id[0])) ||
+                    st.id.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789") != std::string::npos) {
+                    std::fprintf(stderr, "[mods] fase %s ignorada: \"id\" \"%s\" tem de ter de 1 a 8 letras e digitos, comecando por letra\n", where.c_str(), st.id.c_str());
+                    continue;
+                }
+                if (const char *why = reserved(st.upperId())) {
+                    std::fprintf(stderr, "[mods] fase %s ignorada: o id \"%s\" e %s\n", where.c_str(), st.id.c_str(), why);
+                    continue;
+                }
+                const json::Value *base = v.get("base");
+                st.base = base ? stageBase(base->type == json::Value::Str ? base->s : std::to_string(base->asInt(0))) : nullptr;
+                if (!st.base) {
+                    std::fprintf(stderr, "[mods] fase %s ignorada: \"base\" tem de ser CENTRAL, VEGAS, CANYON2, METRO, UFO, CAPITOL, CANYON1, MINISF ou TOKYODM\n", where.c_str());
+                    continue;
+                }
+                const json::Value *nm = v.get("name");
+                const std::string raw = nm && nm->type == json::Value::Str && !nm->s.empty() ? nm->s : st.upperId();
+                for (unsigned char c : raw)   // a fonte do menu so tem ASCII
+                    if (c >= 0x20 && c < 0x7F && st.name.size() < 17) st.name += char(c);
+                if (st.name != raw)
+                    std::fprintf(stderr, "[mods] fase %s: \"name\" vira \"%s\" (ate 17 caracteres ASCII)\n", where.c_str(), st.name.c_str());
+                if (const json::Value *na = v.get("narrator"); na && na->type == json::Value::Str) st.narrator = lower(na->s);
+                if (const json::Value *r = v.get("random")) st.random = r->asBool(true);
+                st.mod = m.filename().string();
+                st.dir = s;
+                const auto dup = std::find_if(found.begin(), found.end(), [&](const Stage &o) { return o.id == st.id; });
+                if (dup != found.end()) {
+                    std::fprintf(stderr, "[mods] fase %s: o id \"%s\" ja e de %s/stages; %s vence\n", where.c_str(), st.id.c_str(), dup->mod.c_str(), st.mod.c_str());
+                    *dup = st;
+                } else
+                    found.push_back(st);
+            }
+        }
+        std::stable_sort(found.begin(), found.end(), [](const Stage &a, const Stage &b) { return key(a.mod) != key(b.mod) ? key(a.mod) < key(b.mod) : a.id < b.id; });
+        int slot = kFirstStageSlot;
+        for (Stage &st : found) {
+            if (slot >= kFirstStageSlot + kStageSlots) {
+                std::fprintf(stderr, "[mods] fase %s (%s) ignorada: o jogo tem lugar para %d fases custom\n", st.id.c_str(), st.mod.c_str(), kStageSlots);
+                continue;
+            }
+            const std::string up = st.upperId(), bn = st.base->name;
+            std::map<std::string, fs::path> own;   // "PTS/MYCITY.SPT" -> arquivo da pasta
+            std::vector<fs::path> pngs;
+            std::string refused;
+            for (auto it = fs::recursive_directory_iterator(st.dir, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
+                if (ec) break;
+                if (!it->is_regular_file(ec)) continue;
+                const std::string ext = key(it->path().extension().string());
+                std::string rel;
+                if (ext == ".SPT" || ext == ".PUP" || ext == ".FOP" || ext == ".PED" || ext == ".AIP") rel = "PTS/" + up + ext;
+                else if (ext == ".MRS") rel = "RST/" + up + ext;
+                else if (ext == ".PNG") pngs.push_back(it->path());
+                else if (ext == ".NGP" || ext == ".PTR" || ext == ".TEX" || ext == ".RTX") refused += (refused.empty() ? "" : " ") + ext.substr(1);
+                if (rel.empty()) continue;
+                fs::path &o = own[rel];
+                if (!o.empty()) std::fprintf(stderr, "[mods] fase %s: dois %s, usando %s\n", st.id.c_str(), ext.c_str(), o.filename().string().c_str());
+                else o = it->path();
+            }
+            if (!refused.empty())
+                std::fprintf(stderr, "[mods] fase %s: %s proprio(s) ignorado(s): a geometria e as texturas sao as da base %s (PNGs valem)\n", st.id.c_str(), refused.c_str(), bn.c_str());
+            st.slot = slot++;
+            std::string brought, disc, none;
+            const auto alias = [&](const std::string &rel, const std::string &target) {
+                m_alias[rel] = target;
+                m_discAlias.insert(rel);
+                disc += (disc.empty() ? "" : " ") + rel.substr(rel.size() - 3);
+            };
+            for (const char *ext : {"NGP", "PTR", "TEX", "RTX"}) alias("LVL/" + up + "." + ext, "LVL/" + bn + "." + ext);
+            for (const char *ext : {"SPT", "PUP", "FOP", "PED", "AIP", "MRS"}) {
+                const std::string rel = (std::strcmp(ext, "MRS") == 0 ? "RST/" : "PTS/") + up + "." + ext;
+                if (const auto o = own.find(rel); o != own.end()) {
+                    File &f = m_files[rel];
+                    f.rel = rel;
+                    f.host = o->second;
+                    f.mod = st.mod;
+                    f.size = fs::file_size(o->second, ec);
+                    brought += (brought.empty() ? "" : " ") + std::string(ext);
+                    if (std::strcmp(ext, "AIP") == 0) st.ownAip = true;
+                } else if (std::strcmp(ext, "MRS") == 0 || std::strstr(st.base->pts, ext))
+                    alias(rel, (std::strcmp(ext, "MRS") == 0 ? "RST/" : "PTS/") + bn + "." + ext);
+                else
+                    none += (none.empty() ? "" : " ") + std::string(ext);
+            }
+            for (const fs::path &p : pngs) m_stagePngs.push_back(SkinPng{up, p, st.mod, "stages/" + st.dir.filename().string() + "/" + p.filename().string()});
+            std::fprintf(stderr, "[mods] fase %s (\"%s\", %s) = vaga %d, base %s (%d); proprios: %s; do disco: %s%s%s; %zu png\n", st.id.c_str(),
+                         st.name.c_str(), st.mod.c_str(), st.slot, bn.c_str(), st.base->level, brought.empty() ? "nenhum" : brought.c_str(),
+                         disc.c_str(), none.empty() ? "" : "; a base nao tem: ", none.c_str(), pngs.size());
+            m_stages.push_back(st);
+        }
     }
 
     // .CHR e .AIC da pasta "files" de um custom (numeros da luta e IA proprios): entram como RST/C_<ID>.CHR e RST/C_<ID><d>.AIC

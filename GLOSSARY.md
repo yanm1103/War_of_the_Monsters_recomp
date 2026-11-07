@@ -85,7 +85,7 @@ The **index** is the game's (`GameLevelNames`, 0x6EF748: 28 names of 10 bytes) a
 | 14 | Mini Baytown | `minisf` | `MINISF` | |
 | 15 | Volcano | `volcano` | `VOLCANO` | |
 | 16 | Tokyo Deathmatch | `tokyodm` | `TOKYODM` | |
-| 17–24 | Dylan, David, Lars, Jenn, Yeon, Jacob, Steve, Pierre | `dylan`, `david`, `lars`, `jenn`, `yeon`, `jacob`, `steve`, `pierre` | none | people's names: probably the team's test stages, with no files |
+| 17–24 | Dylan, David, Lars, Jenn, Yeon, Jacob, Steve, Pierre | `dylan`, `david`, `lars`, `jenn`, `yeon`, `jacob`, `steve`, `pierre` | none | people's names: probably the team's test stages, with no files; 18 to 23 hold the mods' custom stages (`MODS.md`, "Custom stages") |
 | 25 | Dodge Ball | `dball` | `DBALL` | dodgeball minigame (`m_mode` 7) |
 | 26 | Big Shot | `bigshot` | `BIGSHOT` | bigshot minigame (`m_mode` 8) |
 | 27 | Crush | `crush` | `CRUSH` | crush minigame (`m_mode` 9; the game's text also says "Crush-o-Rama") |

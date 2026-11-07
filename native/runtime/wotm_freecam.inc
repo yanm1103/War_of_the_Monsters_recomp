@@ -33,14 +33,21 @@ static View update(const wotm::GameCamera &gc)
 {
     View v;
     bool on = g_wotmFreeCam.load(std::memory_order_relaxed);
-    // Teste sem teclado (WOTM_FREECAM=<s>): liga s segundos depois da primeira fase na tela, sobe e gira sozinha por 10 s e desliga
+    // Teste sem teclado (WOTM_FREECAM=<s>): liga s segundos depois da primeira fase na tela, sobe e gira sozinha por 10 s e desliga.
+    // Com pose (WOTM_FREECAM=<s>@x,y,z,rumo,inclinacao; graus, rumo 0 olha para +Y e cresce para +X): liga ali, fica parada e nao desliga
     static const double autoAt = std::getenv("WOTM_FREECAM") ? std::atof(std::getenv("WOTM_FREECAM")) : -1.0;
+    static float fixedPose[5];
+    static const bool fixed = [] {
+        const char *e = std::getenv("WOTM_FREECAM");
+        const char *at = e ? std::strchr(e, '@') : nullptr;
+        return at && std::sscanf(at + 1, "%f,%f,%f,%f,%f", &fixedPose[0], &fixedPose[1], &fixedPose[2], &fixedPose[3], &fixedPose[4]) == 5;
+    }();
     static double firstT = -1.0;
     if (firstT < 0.0) firstT = GetTime();
     const double autoT = autoAt >= 0.0 ? GetTime() - firstT - autoAt : -1.0;
     static int autoStage = 0;   // 0 esperando, 1 andando, 2 terminado
     bool toggle = IsKeyPressed(KEY_F5) && !wotmPhotoActive();
-    if (autoAt >= 0.0 && ((autoStage == 0 && autoT >= 0.0) || (autoStage == 1 && autoT >= 10.0)))
+    if (autoAt >= 0.0 && ((autoStage == 0 && autoT >= 0.0) || (autoStage == 1 && autoT >= 10.0 && !fixed)))
     {
         toggle = on == (autoStage == 1);
         std::fprintf(stderr, "[freecam] teste automatico: %s (t=%.1f s)\n", autoStage == 0 ? "liga" : "desliga", GetTime() - firstT);
@@ -56,6 +63,12 @@ static View update(const wotm::GameCamera &gc)
             for (int i = 0; i < 3; ++i) p.pos[i] = gc.pos[i];
             p.heading = std::atan2(gc.fwd[0], gc.fwd[1]);   // mathfRotationFromVector
             p.pitch = std::atan2(gc.fwd[2], std::sqrt(gc.fwd[0] * gc.fwd[0] + gc.fwd[1] * gc.fwd[1]));
+            if (fixed && autoStage == 1)
+            {
+                for (int i = 0; i < 3; ++i) p.pos[i] = fixedPose[i];
+                p.heading = fixedPose[3] * 3.14159265f / 180.f;
+                p.pitch = fixedPose[4] * 3.14159265f / 180.f;
+            }
             g_wotmFreeCamPad = false;
         }
         g_wotmFreeCam = on;
@@ -106,7 +119,7 @@ static View update(const wotm::GameCamera &gc)
             p.pos[i] += k * (mf * f[i] + mr * r[i]);
         p.pos[2] += k * mu;   // Z do mundo
     }
-    if (autoStage == 1)
+    if (autoStage == 1 && !fixed)
     {
         p.pos[2] += 30.f * dt;
         p.heading += 0.25f * dt;

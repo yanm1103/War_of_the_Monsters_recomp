@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en" translate="no">
+<head>
+<meta charset="utf-8">
+<meta name="google" content="notranslate">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WotM Level Editor</title>
+<script>
+// the first frame in the last theme (Settings keeps the real one; this copy only avoids opening dark and then turning light)
+try { const t = localStorage.getItem('wotmLevelEditor.theme');
+      if (t === 'dark' || t === 'light' || t === 'system') document.documentElement.dataset.theme = t; } catch (e) { /* no storage */ }
+</script>
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{"imports": {"three": "./vendor/three.module.min.js", "three/addons/": "./vendor/addons/"}}
+</script>
+</head>
+<body>
+<header id="bar">
+  <span class="brand" title="WotM Level Editor"><i class="ic" style="--ic:url(vendor/mdi/city-variant-outline.svg)"></i>Level Editor</span>
+  <span class="sep"></span>
+  <label class="field stage" title="The stage to edit"><i class="pre ic" style="--ic:url(vendor/mdi/map-outline.svg)"></i><select id="stage" aria-label="Stage"></select></label>
+  <button id="newStage" class="icon ghost" title="New stage: a copy of a game stage with its own level patch, as another entry on the stage select" aria-label="New stage"><i class="ic" style="--ic:url(vendor/mdi/plus.svg)"></i></button>
+  <label class="field mod" title="The mod your changes are saved into (mods/&lt;mod&gt;/levels/)"><i class="pre ic" style="--ic:url(vendor/mdi/puzzle-outline.svg)"></i><select id="mod" aria-label="Mod"></select></label>
+  <span class="sep"></span>
+  <button id="undo" class="icon ghost" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><i class="ic" style="--ic:url(vendor/mdi/undo.svg)"></i></button>
+  <button id="redo" class="icon ghost" title="Redo (Ctrl+Y)" aria-label="Redo" disabled><i class="ic" style="--ic:url(vendor/mdi/redo.svg)"></i></button>
+  <span class="grow"></span>
+  <button id="check" title="Apply your changes to the disc's stage and check the collision" aria-label="Check"><i class="ic" style="--ic:url(vendor/mdi/shield-check-outline.svg)"></i><span class="lbl">Check</span></button>
+  <button id="save" title="Save mods/&lt;mod&gt;/levels/&lt;STAGE&gt;.json (Ctrl+S)" aria-label="Save"><i class="ic" style="--ic:url(vendor/mdi/content-save-outline.svg)"></i><span class="lbl">Save</span></button>
+  <span class="sep"></span>
+  <span id="gameInd" class="game-ind" hidden><span class="dot"></span><span id="gameIndText"></span></span>
+  <button id="test" class="primary" title="Open the game on this stage in training mode, as Togera" aria-label="Test in game"><i class="ic" style="--ic:url(vendor/mdi/play.svg)"></i><span class="lbl">Test in game</span></button>
+  <button id="reload" disabled aria-label="Reload in game"><i class="ic" style="--ic:url(vendor/mdi/refresh.svg)"></i><span class="lbl">Reload in game</span></button>
+  <button id="stop" class="icon" title="Close the game the editor opened" aria-label="Stop game" hidden><i class="ic" style="--ic:url(vendor/mdi/stop.svg)"></i></button>
+  <span class="sep"></span>
+  <button id="help" class="icon ghost" title="Keyboard shortcuts (? or F1)" aria-label="Keyboard shortcuts"><i class="ic" style="--ic:url(vendor/mdi/help-circle-outline.svg)"></i></button>
+  <button id="settings" class="icon ghost" title="Settings" aria-label="Settings"><i class="ic" style="--ic:url(vendor/mdi/cog-outline.svg)"></i></button>
+</header>
+<main>
+  <nav id="rail" aria-label="Modes">
+    <button id="modeObjects" class="mode on" title="Objects: move, turn, copy and delete the stage's buildings, pickups and props (1)" aria-label="Objects"><i class="ic" style="--ic:url(vendor/mdi/cube-outline.svg)"></i></button>
+    <button id="modePeds" class="mode" title="Pedestrians: the groups of people and the sidewalks they walk (2)" aria-label="Pedestrians"><i class="ic" style="--ic:url(vendor/mdi/walk.svg)"></i></button>
+    <span class="rsep"></span>
+    <button id="hud" title="Fight HUD: replace the pictures of this stage's fight HUD with PNGs in your mod" aria-label="Fight HUD"><i class="ic" style="--ic:url(vendor/mdi/monitor-dashboard.svg)"></i></button>
+  </nav>
+  <aside id="left">
+    <!-- the Objects mode's search, chips and list (class obj); the Pedestrians mode's panel (#pedPanel) -->
+    <div class="field search obj">
+      <i class="pre ic" style="--ic:url(vendor/mdi/magnify.svg)"></i>
+      <input id="filter" placeholder="Search by name or handle" spellcheck="false" aria-label="Search objects"
+             title="Search by name, handle, kind or model id">
+      <button id="filterClear" class="icon ghost" title="Clear the search" aria-label="Clear the search" hidden><i class="ic" style="--ic:url(vendor/mdi/close-circle.svg)"></i></button>
+    </div>
+    <div class="kinds obj">
+      <label class="chip" title="Show in the list (also limits box select and Ctrl+A)"><input type="checkbox" data-kind="destr" checked>Buildings<span class="n" data-n="destr"></span></label>
+      <label class="chip" title="Show in the list (also limits box select and Ctrl+A)"><input type="checkbox" data-kind="pickup" checked>Pickups<span class="n" data-n="pickup"></span></label>
+      <label class="chip" title="Show in the list (also limits box select and Ctrl+A)"><input type="checkbox" data-kind="prop" checked>Props<span class="n" data-n="prop"></span></label>
+      <span class="vsep"></span>
+      <label class="chip changed" title="Only the objects your mod changes (moved, turned, copied or deleted)"><input type="checkbox" id="changedOnly"><span class="dot"></span>Changed<span class="n" data-n="changed"></span></label>
+    </div>
+    <ul id="list" class="obj" aria-label="Objects"></ul>
+    <div id="listEmpty" class="list-empty obj" hidden>
+      <i class="ic" style="--ic:url(vendor/mdi/magnify-close.svg)"></i>
+      <div>No objects match</div>
+      <button id="clearFilters" type="button">Clear filters</button>
+    </div>
+    <div id="count" class="muted num obj"></div>
+    <div id="pedPanel">
+      <div class="meters">
+        <div class="meter" id="mGroups" title="A stage holds 20 pedestrian groups at most">
+          <div class="m-top"><span>Groups</span><span class="m-v num"></span></div><div class="m-bar"><i></i></div></div>
+        <div class="meter" id="mSegs" title="A stage holds 127 sidewalks at most (255 points)">
+          <div class="m-top"><span>Sidewalks</span><span class="m-v num"></span></div><div class="m-bar"><i></i></div></div>
+        <div class="m-people" title="People on the stage's sidewalks: every group's People added up"><span>People</span><span id="mPeople" class="num"></span></div>
+      </div>
+      <label class="switch live" title="Off takes every pedestrian group out of the stage (the patch's &quot;off&quot;); on brings the disc's groups back">
+        <input type="checkbox" id="pedLive"><span class="track"></span><span class="tx">Pedestrians in this stage</span></label>
+      <ul id="pedList" aria-label="Pedestrian groups and sidewalks"></ul>
+      <div id="pedNone" class="list-empty" hidden>
+        <i class="ic" style="--ic:url(vendor/mdi/walk.svg)"></i>
+        <div>This stage has no pedestrian data</div>
+      </div>
+      <div id="pedCounts" class="muted num"></div>
+    </div>
+  </aside>
+  <section id="view">
+    <canvas id="canvas"></canvas>
+    <div id="band" hidden></div>
+    <!-- the tool: Move or Turn, and the snap (it holds for the gizmo and the arrow keys) -->
+    <div id="toolBar" class="float" role="toolbar" aria-label="Tool">
+      <div class="seg" role="group" aria-label="Gizmo">
+        <button id="tMove" class="toggle on" title="Move tool (G)"><i class="ic" style="--ic:url(vendor/mdi/cursor-move.svg)"></i><span class="lbl">Move</span></button>
+        <button id="tTurn" class="toggle" title="Turn tool (R)"><i class="ic" style="--ic:url(vendor/mdi/rotate-3d-variant.svg)"></i><span class="lbl">Turn</span></button>
+      </div>
+      <span class="fsep"></span>
+      <label class="tgl" title="Snap the gizmo and the arrow keys to these steps"><input type="checkbox" id="snap"><i class="ic" style="--ic:url(vendor/mdi/magnet.svg)"></i><span class="lbl">Snap</span></label>
+      <label class="field suf small-num" title="Move step (units)"><input id="snapMove" type="number" min="0.1" step="5" aria-label="Move step"><i class="post">u</i></label>
+      <label class="field suf small-num" title="Turn step (degrees)"><input id="snapTurn" type="number" min="0.1" step="5" aria-label="Turn step"><i class="post">°</i></label>
+      <!-- the Pedestrians mode: a new group or sidewalk where the view looks -->
+      <span id="pedBar" hidden><span class="fsep"></span>
+        <button id="pedAddGroup" class="ghost"><i class="ic" style="--ic:url(vendor/mdi/account-multiple-plus.svg)"></i><span class="lbl">Add group</span></button>
+        <button id="pedAddSeg" class="ghost"><i class="ic" style="--ic:url(vendor/mdi/vector-polyline-plus.svg)"></i><span class="lbl">Add sidewalk</span></button></span>
+      <!-- the Objects mode: a new prop (a model of the mod's props/ folder, or a .glb from Blender) -->
+      <span id="propBar"><span class="fsep"></span>
+        <button id="addProp" class="ghost" aria-haspopup="true" aria-expanded="false" title="Add a new prop where the view looks: a model of your mod, or a .glb from Blender"><i class="ic" style="--ic:url(vendor/mdi/shape-plus-outline.svg)"></i><span class="lbl">Add prop</span></button></span>
+    </div>
+    <div id="propMenu" class="float menu" hidden role="menu" aria-label="Add prop">
+      <div class="sec-title">Props of <span id="pmMod"></span></div>
+      <div id="pmList"></div>
+      <div id="pmNone" class="pm-none"></div>
+      <button id="pmImport" type="button" class="ghost wide"><i class="ic" style="--ic:url(vendor/mdi/tray-arrow-up.svg)"></i><span class="lbl">Import .glb…</span></button>
+    </div>
+    <!-- the view: game look, grid, layers; fly or orbit; focus, frame all; the shortcuts -->
+    <div id="overlay" class="float" role="toolbar" aria-label="View">
+      <label class="tgl icon" title="Game look: the stage's fog, background and sky, as in the game (L)"><input type="checkbox" id="look" aria-label="Game look"><i class="ic" style="--ic:url(vendor/mdi/weather-fog.svg)"></i></label>
+      <label class="tgl icon" title="Grid: 100-unit lines (the snap step when it is smaller) and 1000-unit lines, at the base of the selection"><input type="checkbox" id="grid" aria-label="Grid"><i class="ic" style="--ic:url(vendor/mdi/grid.svg)"></i></label>
+      <button id="layersBtn" class="icon ghost" title="Layers" aria-label="Layers" aria-haspopup="true" aria-expanded="false"><i class="ic" style="--ic:url(vendor/mdi/layers-outline.svg)"></i></button>
+      <span class="fsep"></span>
+      <div class="seg" role="group" aria-label="Camera">
+        <button id="vFly" class="toggle" title="Fly: WASD to move, right-drag to look (V switches)"><i class="ic" style="--ic:url(vendor/mdi/airplane.svg)"></i><span class="lbl">Fly</span></button>
+        <button id="vOrbit" class="toggle" title="Orbit: drag to orbit, right-drag to pan, wheel to zoom (V switches)"><i class="ic" style="--ic:url(vendor/mdi/rotate-orbit.svg)"></i><span class="lbl">Orbit</span></button>
+      </div>
+      <span class="fsep"></span>
+      <button id="focusSel" class="icon ghost" title="Focus the selection (F)" aria-label="Focus the selection" disabled><i class="ic" style="--ic:url(vendor/mdi/crosshairs-gps.svg)"></i></button>
+      <button id="frame" class="icon ghost" title="Frame the whole stage (Home)" aria-label="Frame all"><i class="ic" style="--ic:url(vendor/mdi/fit-to-screen-outline.svg)"></i></button>
+      <button id="keysBtn" class="icon ghost" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><i class="ic" style="--ic:url(vendor/mdi/keyboard-outline.svg)"></i></button>
+    </div>
+    <div id="layersMenu" class="float menu" hidden role="menu" aria-label="Layers">
+      <div class="sec-title">Layers</div>
+      <label class="switch" title="Pedestrian groups (violet cones) and their sidewalks (cyan lanes), faint, while you edit objects (P). The Pedestrians mode edits them."><input type="checkbox" id="pedsOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/walk.svg)"></i><span class="tx">Pedestrians</span><kbd>P</kbd></label>
+    </div>
+    <div id="notes">
+      <div id="winNote" class="callout warn" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span id="winText"></span>
+        <button id="winClose" class="icon ghost" title="Hide this note" aria-label="Hide"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+      <div id="keepNote" class="callout warn" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span id="keepText"></span>
+        <button id="keepClose" class="icon ghost" title="Hide this note" aria-label="Hide"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+    </div>
+    <div id="hint" class="muted" aria-live="polite"></div>
+    <div id="busy" hidden><div class="busy-card" role="status"><span class="spin"></span>
+      <div><div id="busyText">Loading…</div><div class="busy-sub">The first time a stage opens takes a few seconds.</div></div></div></div>
+  </section>
+  <aside id="right">
+    <div id="noSel">
+      <div class="empty-head"><i class="ic big" style="--ic:url(vendor/mdi/cursor-default-click-outline.svg)"></i><div class="t">Nothing selected</div></div>
+      <dl class="keys">
+        <dt><kbd>Click</kbd></dt><dd>Select</dd>
+        <dt><kbd>Shift</kbd>+<kbd>Click</kbd></dt><dd>Add or remove</dd>
+        <dt><kbd>Shift</kbd>+<kbd>Drag</kbd></dt><dd>Box select</dd>
+        <dt><kbd>Ctrl</kbd>+<kbd>A</kbd></dt><dd>Select everything listed</dd>
+        <dt><kbd>Esc</kbd></dt><dd>Deselect</dd>
+      </dl>
+      <div class="sum">
+        <div id="sumStage" class="sum-title"></div>
+        <div id="sumCounts" class="muted num"></div>
+        <div id="sumMod" class="sum-mod"></div>
+        <div class="sec-title">Saves to</div>
+        <div id="sumPath" class="path"></div>
+      </div>
+      <div class="sec-title">Getting started</div>
+      <ol class="steps">
+        <li>Click a building, in the view or in the list.</li>
+        <li>Press <kbd>G</kbd> and drag the arrows, or type the position.</li>
+        <li><b>Save</b>, then <b>Test in game</b>.</li>
+      </ol>
+    </div>
+    <div id="delProps" hidden>
+      <div class="p-head">
+        <span id="dIcon" class="kind-ic"><i class="ic"></i></span>
+        <div class="p-names"><div class="p-title-row"><h2 id="dTitle"></h2><span class="badge del">Deleted</span></div>
+          <div class="p-sub" id="dSub"></div></div>
+      </div>
+      <div class="callout warn"><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span>Deleted from this stage in your mod.</span></div>
+      <button id="restore" class="wide" title="Put it back where the disc has it (with Move objects on top, also the objects that were on it)"><i class="ic" style="--ic:url(vendor/mdi/restore.svg)"></i>Restore</button>
+    </div>
+    <div id="props" hidden>
+      <div class="p-head">
+        <span id="pIcon" class="kind-ic"><i class="ic"></i></span>
+        <div class="p-names">
+          <div class="p-title-row"><h2 id="pTitle"></h2><span id="pBadge" class="badge" hidden></span></div>
+          <div class="p-sub" id="pSub"><button id="pHandle" type="button" class="handle" title="Copy the handle"><span class="tx"></span><i class="ic" style="--ic:url(vendor/mdi/content-copy.svg)"></i></button><span id="pKind"></span></div>
+        </div>
+      </div>
+      <div class="callout info" id="pGroup" hidden><i class="ic" style="--ic:url(vendor/mdi/information-outline.svg)"></i>
+        <span><i class="sw sel"></i>The amber one is the one you edit; the <i class="sw sel2"></i>orange ones follow it, keeping their distance.</span></div>
+      <section class="psec">
+        <div class="sec-title">Transform<span id="tLead" class="lead"></span></div>
+        <div class="xyz">
+          <label class="field" title="X (drag the letter to change it; Shift: ten steps)"><i class="pre x scrub">X</i><input id="px" type="number" step="1" aria-label="X"></label>
+          <label class="field" title="Y. The blue arrow of the gizmo points to -Y (drag the letter to change it; Shift: ten steps)"><i class="pre y scrub">Y</i><input id="py" type="number" step="1" aria-label="Y"></label>
+          <label class="field" title="Z: the height, up (drag the letter to change it; Shift: ten steps)"><i class="pre z scrub">Z</i><input id="pz" type="number" step="1" aria-label="Z (height)"></label>
+        </div>
+        <div class="heading-row">
+          <span class="lbl">Heading</span>
+          <label class="field suf" title="The heading, in degrees, about the vertical"><input id="ph" type="number" step="5" aria-label="Heading"><i class="post">°</i></label>
+          <button id="rotL" class="icon" title="Turn 90° counterclockwise, seen from above" aria-label="Turn 90° counterclockwise"><i class="ic" style="--ic:url(vendor/mdi/rotate-left.svg)"></i></button>
+          <button id="rotR" class="icon" title="Turn 90° clockwise, seen from above" aria-label="Turn 90° clockwise"><i class="ic" style="--ic:url(vendor/mdi/rotate-right.svg)"></i></button>
+        </div>
+      </section>
+      <section class="psec">
+        <div class="sec-title">Actions</div>
+        <div class="actions">
+          <button id="drop" title="Put on the surface below (End)"><i class="ic" style="--ic:url(vendor/mdi/arrow-collapse-down.svg)"></i><span class="lbl">Drop</span><kbd>End</kbd></button>
+          <button id="dup" title="Duplicate (Ctrl+D)"><i class="ic" style="--ic:url(vendor/mdi/content-duplicate.svg)"></i><span class="lbl">Duplicate</span><kbd>Ctrl+D</kbd></button>
+          <button id="reset" title="Back to the disc's place, copies removed (with Move objects on top, also the objects on it)"><i class="ic" style="--ic:url(vendor/mdi/restore.svg)"></i><span class="lbl">Restore original</span></button>
+          <button id="del" class="danger" title="Delete (Del)"><i class="ic" style="--ic:url(vendor/mdi/delete-outline.svg)"></i><span class="lbl">Delete</span><kbd>Del</kbd></button>
+        </div>
+        <label class="switch carry" title="Moving, turning, copying or deleting this also does it to the pickups resting on it">
+          <input type="checkbox" id="carry" checked><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/package-up.svg)"></i><span class="tx">Move objects on top</span><span id="onCount" class="cnt">0</span></label>
+      </section>
+      <div id="pWarn" class="callout info" hidden><i class="ic" style="--ic:url(vendor/mdi/information-outline.svg)"></i><span>This object has no collision of its own.</span></div>
+      <details class="psec fold" id="secName">
+        <summary class="sec-title"><i class="ic chev"></i>Name</summary>
+        <label class="fl">Name<input id="pName" spellcheck="false" title="This object's name"></label>
+        <div class="help">Only this object. Saved in your mod; the game ignores it.</div>
+        <label class="fl">Model name<input id="pModel" spellcheck="false" title="The name of every object with this model, in every stage (your names file)"></label>
+        <div class="help" id="pModelNote"></div>
+      </details>
+      <details class="psec fold" id="secDetails">
+        <summary class="sec-title"><i class="ic chev"></i>Details</summary>
+        <dl class="facts" id="pFacts"></dl>
+      </details>
+    </div>
+    <div id="pedNoSel" hidden>
+      <div class="empty-head"><i class="ic big" style="--ic:url(vendor/mdi/walk.svg)"></i><div class="t">Nothing selected</div></div>
+      <p class="pn-text">Click a group or a sidewalk, in the view or in the list. <b>Add group</b> and <b>Add sidewalk</b>, on the bar at the
+        top of the view, put a new one where the view looks.</p>
+      <div class="sec-title">In the view</div>
+      <ul class="legend">
+        <li><i class="sw lane"></i>A sidewalk, as wide as the lane people walk</li>
+        <li><i class="sw end"></i>An end of a sidewalk: drag it to stretch the sidewalk</li>
+        <li><i class="sw grp"></i>A group of people, with a dashed line to the sidewalk it walks</li>
+        <li><i class="sw bad"></i>A group with no sidewalk near it: nobody walks</li>
+      </ul>
+      <p class="help">Each group walks the sidewalk whose end is nearest to it, so moving a group can move it to another sidewalk.
+        A stage holds 20 groups and 127 sidewalks.</p>
+    </div>
+    <div id="pedProps" hidden>
+      <div class="p-head">
+        <span id="pdIcon" class="kind-ic"><i class="ic" style="--ic:url(vendor/mdi/account-group-outline.svg)"></i></span>
+        <div class="p-names">
+          <div class="p-title-row"><h2 id="pdTitle"></h2><span id="pdBadge" class="badge" hidden></span></div>
+          <div class="p-sub" id="pdKind"></div>
+        </div>
+      </div>
+      <div id="pdNote" class="callout info"><i class="ic" style="--ic:url(vendor/mdi/information-outline.svg)"></i><span id="pdInfo"></span>
+        <button id="pdGo" type="button" class="ghost small-btn" title="Select the sidewalk" hidden>Show</button></div>
+      <section class="psec" id="pdCountRow">
+        <div class="sec-title">People</div>
+        <div class="slide-row"><input id="pdCountR" type="range" min="1" max="255" step="1" aria-label="People"
+          title="How many people the group puts on its sidewalk (1 to 255)"><input id="pdCount" type="number" min="1" max="255" step="1"
+          aria-label="People" title="How many people the group puts on its sidewalk (1 to 255)"></div>
+      </section>
+      <section class="psec" id="pdWidthRow">
+        <div class="sec-title">Sidewalk</div>
+        <dl class="facts"><dt>Length</dt><dd id="pdLen"></dd></dl>
+        <div class="slide-row"><span class="lbl">Width</span><input id="pdWidthR" type="range" min="10" max="2550" step="10" aria-label="Width"
+          title="How far people walk to each side of the line, in units (steps of 10)"><label class="field suf"
+          title="How far people walk to each side of the line, in units (steps of 10)"><input id="pdWidth" type="number" min="10" max="2550"
+          step="10" aria-label="Width (units each side)"><i class="post">u</i></label></div>
+        <div class="help">Each side of the line. Drag an end to stretch the sidewalk, the middle to move it.</div>
+      </section>
+      <section class="psec">
+        <div class="sec-title">Position</div>
+        <div class="xyz">
+          <label class="field" title="X"><i class="pre x">X</i><input id="pdx" type="number" step="1" aria-label="X"></label>
+          <label class="field" title="Y. The blue arrow of the gizmo points to -Y"><i class="pre y">Y</i><input id="pdy" type="number" step="1" aria-label="Y"></label>
+          <label class="field" title="Z: the height, up"><i class="pre z">Z</i><input id="pdz" type="number" step="1" aria-label="Z (height)"></label>
+        </div>
+      </section>
+      <section class="psec">
+        <div class="sec-title">Actions</div>
+        <div class="actions">
+          <button id="pdDrop" title="Put on the surface below (End)"><i class="ic" style="--ic:url(vendor/mdi/arrow-collapse-down.svg)"></i><span class="lbl">Drop</span><kbd>End</kbd></button>
+          <button id="pdDup" title="Duplicate (Ctrl+D)"><i class="ic" style="--ic:url(vendor/mdi/content-duplicate.svg)"></i><span class="lbl">Duplicate</span><kbd>Ctrl+D</kbd></button>
+          <button id="pdDel" class="danger" title="Delete (Del)"><i class="ic" style="--ic:url(vendor/mdi/delete-outline.svg)"></i><span class="lbl">Delete</span><kbd>Del</kbd></button>
+        </div>
+      </section>
+    </div>
+  </aside>
+</main>
+<section id="output" hidden aria-label="Output">
+  <div id="outGrip" title="Drag to resize"></div>
+  <div class="out-head">
+    <div class="tabs" role="tablist">
+      <button class="tab on" data-tab="messages" role="tab">Messages</button>
+      <button class="tab" data-tab="check" role="tab">Check</button>
+      <button class="tab" data-tab="game" role="tab">Game</button>
+    </div>
+    <span class="grow"></span>
+    <button id="outCopy" class="ghost" title="Copy this tab's text"><i class="ic" style="--ic:url(vendor/mdi/content-copy.svg)"></i>Copy</button>
+    <button id="outClear" class="ghost" title="Clear this tab"><i class="ic" style="--ic:url(vendor/mdi/delete-sweep-outline.svg)"></i>Clear</button>
+    <button id="outClose" class="icon ghost" title="Hide the output" aria-label="Hide the output"><i class="ic" style="--ic:url(vendor/mdi/chevron-down.svg)"></i></button>
+  </div>
+  <div id="log" class="pane" data-tab="messages"></div>
+  <div id="checkOut" class="pane" data-tab="check" hidden><div class="empty muted">No check yet. Check, Save, Test in game and Reload in game check your changes.</div></div>
+  <div id="gameOut" class="pane" data-tab="game" hidden></div>
+</section>
+<footer id="status">
+  <button id="outToggle" class="icon ghost" title="Show the output: messages, check and game" aria-label="Output"><i class="ic" style="--ic:url(vendor/mdi/chevron-up.svg)"></i></button>
+  <button class="st msg" data-tab="messages" title="The last message (opens Messages)"><i class="ic" style="--ic:url(vendor/mdi/information-outline.svg)"></i><span class="tx">Ready</span></button>
+  <span class="grow"></span>
+  <button class="st save" data-tab="messages"><span class="dot"></span><span class="tx"></span></button>
+  <button class="st check" data-tab="check" title="Opens the Check tab"><i class="ic" style="--ic:url(vendor/mdi/shield-check-outline.svg)"></i><span class="tx"></span></button>
+  <button class="st game" data-tab="game" title="Opens the Game tab"><i class="ic" style="--ic:url(vendor/mdi/gamepad-variant-outline.svg)"></i><span class="tx"></span></button>
+  <button class="st count" data-tab="messages" title="Objects your mod changes, and the selection"><span class="tx"></span></button>
+</footer>
+<div id="toasts" aria-live="polite"></div>
+<!-- the dialogs: a head (title, close), a body, a foot with the buttons on the right. A Cancel or close button is type="button"
+     (data-close), so that Enter in a field takes the dialog's main button -->
+<dialog id="dlg" class="dlg settings" aria-labelledby="sTitle" tabindex="-1">
+  <form method="dialog">
+    <div class="dlg-head"><h2 id="sTitle">Settings</h2>
+      <button type="button" data-close class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+    <div class="dlg-body">
+      <div class="sec-title">Appearance</div>
+      <div class="set-row"><span class="set-l" id="sThemeL">Theme</span>
+        <div class="seg" id="sTheme" role="radiogroup" aria-labelledby="sThemeL">
+          <label title="Dark theme"><input type="radio" name="sTheme" value="dark"><i class="ic" style="--ic:url(vendor/mdi/weather-night.svg)"></i>Dark</label>
+          <label title="Light theme"><input type="radio" name="sTheme" value="light"><i class="ic" style="--ic:url(vendor/mdi/white-balance-sunny.svg)"></i>Light</label>
+          <label title="The system's light or dark"><input type="radio" name="sTheme" value="system"><i class="ic" style="--ic:url(vendor/mdi/theme-light-dark.svg)"></i>System</label>
+        </div></div>
+      <div class="sec-title">Game files</div>
+      <div class="pf" data-key="disc">
+        <div class="pf-top"><label for="sDisc">Game disc</label><span class="pstate" data-for="disc"></span></div>
+        <div class="pf-row"><input id="sDisc" spellcheck="false" autocomplete="off" placeholder="C:\Games\War of the Monsters.iso">
+          <button type="button" class="icon browse" data-browse="disc" title="Choose the .iso (a folder: type its path)" aria-label="Browse" hidden><i class="ic" style="--ic:url(vendor/mdi/folder-open-outline.svg)"></i></button></div>
+        <div class="help">The .iso, or a folder extracted from it with LVL and PTS inside.</div>
+        <div class="perr" data-for="disc" hidden></div>
+      </div>
+      <div class="pf" data-key="mods">
+        <div class="pf-top"><label for="sMods">Mods folder</label><span class="pstate" data-for="mods"></span></div>
+        <div class="pf-row"><input id="sMods" spellcheck="false" autocomplete="off">
+          <button type="button" class="icon browse" data-browse="mods" title="Choose the folder" aria-label="Browse" hidden><i class="ic" style="--ic:url(vendor/mdi/folder-open-outline.svg)"></i></button></div>
+        <div class="help">The folder the game reads mods from. Each mod is a folder in it.</div>
+        <div class="perr" data-for="mods" hidden></div>
+      </div>
+      <div class="pf" data-key="game">
+        <div class="pf-top"><label for="sGame">Game (wotm.exe)</label><span class="pstate" data-for="game"></span></div>
+        <div class="pf-row"><input id="sGame" spellcheck="false" autocomplete="off">
+          <button type="button" class="icon browse" data-browse="game" title="Choose the program" aria-label="Browse" hidden><i class="ic" style="--ic:url(vendor/mdi/folder-open-outline.svg)"></i></button></div>
+        <div class="help">Test in game opens it on the stage.</div>
+        <div class="perr" data-for="game" hidden></div>
+      </div>
+      <details id="sAdv" class="fold adv" hidden>
+        <summary class="sec-title"><i class="ic chev"></i>Advanced (for developers)</summary>
+        <div class="pf" data-key="elf">
+          <div class="pf-top"><label for="sElf">ELF to pass to the game</label><span class="pstate" data-for="elf"></span></div>
+          <div class="pf-row"><input id="sElf" spellcheck="false" autocomplete="off">
+            <button type="button" class="icon browse" data-browse="elf" title="Choose the ELF" aria-label="Browse" hidden><i class="ic" style="--ic:url(vendor/mdi/folder-open-outline.svg)"></i></button></div>
+          <div class="help">For the clone's runtime. Empty for the release wotm.exe.</div>
+          <div class="perr" data-for="elf" hidden></div>
+        </div>
+        <div class="pf" data-key="cwd">
+          <div class="pf-top"><label for="sCwd">Game working folder</label><span class="pstate" data-for="cwd"></span></div>
+          <div class="pf-row"><input id="sCwd" spellcheck="false" autocomplete="off">
+            <button type="button" class="icon browse" data-browse="cwd" title="Choose the folder" aria-label="Browse" hidden><i class="ic" style="--ic:url(vendor/mdi/folder-open-outline.svg)"></i></button></div>
+          <div class="help">Empty: the game's own folder.</div>
+          <div class="perr" data-for="cwd" hidden></div>
+        </div>
+        <div class="pf" data-key="iso">
+          <div class="pf-top"><label for="sIso">Disc image for the dev runtime</label><span class="pstate" data-for="iso"></span></div>
+          <div class="pf-row"><input id="sIso" spellcheck="false" autocomplete="off">
+            <button type="button" class="icon browse" data-browse="iso" title="Choose the .iso" aria-label="Browse" hidden><i class="ic" style="--ic:url(vendor/mdi/folder-open-outline.svg)"></i></button></div>
+          <div class="help">Only with an ELF. Empty: the game disc above, when it is an .iso.</div>
+          <div class="perr" data-for="iso" hidden></div>
+        </div>
+      </details>
+    </div>
+    <div class="dlg-foot"><button type="button" data-close>Cancel</button><button id="sOk" value="ok" class="primary">Save</button></div>
+  </form>
+</dialog>
+<!-- New mod, and "Save into which mod?" when Save, Test or Reload need one -->
+<dialog id="modDlg" class="dlg" aria-labelledby="mdTitle">
+  <form method="dialog">
+    <div class="dlg-head"><h2 id="mdTitle">New mod</h2>
+      <button type="button" data-close class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+    <div class="dlg-body">
+      <p id="mdText" class="muted"></p>
+      <label class="fl" id="mdPickRow">Mod<select id="mdPick"></select></label>
+      <label class="fl" id="mdNameRow">Mod name<input id="mdName" spellcheck="false" autocomplete="off" placeholder="MyStage"></label>
+      <div class="help" id="mdHelp"></div>
+      <div class="callout err" id="mdErr" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-circle-outline.svg)"></i><span>A mod name can't contain \ / : * ? " &lt; &gt; | or start with _ or .</span></div>
+      <div class="callout warn" id="mdWarn" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span id="mdWarnText"></span></div>
+    </div>
+    <div class="dlg-foot"><button type="button" data-close>Cancel</button><button id="mdOk" value="ok" class="primary">Create</button></div>
+  </form>
+</dialog>
+<dialog id="keysDlg" aria-labelledby="keysTitle" autofocus>
+  <form method="dialog">
+    <div class="dlg-head"><h2 id="keysTitle">Keyboard shortcuts</h2>
+      <button value="close" class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+    <div class="keys-cols">
+      <div>
+        <h3>Camera</h3>
+        <dl class="kl">
+          <dt><kbd>V</kbd></dt><dd>Switch Fly / Orbit</dd>
+          <dt><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd></dt><dd>Fly: move</dd>
+          <dt><kbd>E</kbd> / <kbd>Q</kbd></dt><dd>Fly: up / down</dd>
+          <dt><kbd>Shift</kbd></dt><dd>Fly: faster</dd>
+          <dt>Right-drag</dt><dd>Fly: look around</dd>
+          <dt>Wheel</dt><dd>Fly: move forward / Orbit: zoom</dd>
+          <dt>Left-drag</dt><dd>Orbit: orbit</dd>
+          <dt>Right-drag</dt><dd>Orbit: pan</dd>
+          <dt><kbd>F</kbd></dt><dd>Focus the selection</dd>
+          <dt><kbd>Home</kbd></dt><dd>Frame the whole stage</dd>
+        </dl>
+        <h3>Select</h3>
+        <dl class="kl">
+          <dt>Click</dt><dd>Select</dd>
+          <dt><kbd>Shift</kbd>+Click / <kbd>Ctrl</kbd>+Click</dt><dd>Add or remove</dd>
+          <dt><kbd>Shift</kbd>+Drag</dt><dd>Box select (the kinds shown in the list)</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>A</kbd></dt><dd>Select everything in the list</dd>
+          <dt><kbd>Esc</kbd></dt><dd>Deselect</dd>
+        </dl>
+      </div>
+      <div>
+        <h3>Edit</h3>
+        <dl class="kl">
+          <dt><kbd>G</kbd> / <kbd>R</kbd></dt><dd>Move / Turn tool</dd>
+          <dt>Arrows</dt><dd>Nudge along the axis nearest to the view</dd>
+          <dt><kbd>PgUp</kbd> / <kbd>PgDn</kbd></dt><dd>Nudge up / down</dd>
+          <dt><kbd>Shift</kbd> + nudge</dt><dd>Ten steps</dd>
+          <dt><kbd>End</kbd></dt><dd>Drop to the surface below</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>D</kbd></dt><dd>Duplicate</dd>
+          <dt><kbd>Del</kbd></dt><dd>Delete</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>Y</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></dt><dd>Redo</dd>
+        </dl>
+        <h3>View</h3>
+        <dl class="kl">
+          <dt><kbd>L</kbd></dt><dd>Game look</dd>
+          <dt><kbd>1</kbd> / <kbd>2</kbd></dt><dd>Objects / Pedestrians</dd>
+        </dl>
+        <h3>File</h3>
+        <dl class="kl">
+          <dt><kbd>Ctrl</kbd>+<kbd>S</kbd></dt><dd>Save</dd>
+          <dt><kbd>?</kbd> / <kbd>F1</kbd></dt><dd>This list</dd>
+        </dl>
+      </div>
+    </div>
+    <p class="keys-note">The letter keys are where W, A, S, D, Q and E sit on a QWERTY keyboard, on any layout.</p>
+  </form>
+</dialog>
+<dialog id="stageDlg" class="dlg" aria-labelledby="nsTitle">
+  <form method="dialog">
+    <div class="dlg-head"><h2 id="nsTitle">New stage</h2>
+      <button type="button" data-close class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+    <div class="dlg-body">
+      <p class="muted">Another entry on the stage select, built on a game stage, with its own level patch.</p>
+      <label class="fl">Id<input id="nsId" maxlength="8" spellcheck="false" autocomplete="off" placeholder="MYCITY"
+        title="1 to 8 letters and digits, starting with a letter; it names the stage's patch"></label>
+      <label class="fl">Name<input id="nsName" maxlength="17" spellcheck="false" autocomplete="off" placeholder="MY CITY"
+        title="What the stage select shows, up to 17 ASCII characters"></label>
+      <label class="fl">Based on<select id="nsBase"></select></label>
+      <label class="fl chk"><input id="nsCopy" type="checkbox" checked>Start with the changes I have now</label>
+      <div class="help">Saved in <span id="nsWhere" class="mono"></span>. The game reads its stages at start-up: Test in game restarts it.</div>
+      <div class="callout err" id="nsErr" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-circle-outline.svg)"></i><span></span></div>
+    </div>
+    <div class="dlg-foot"><button type="button" data-close>Cancel</button><button id="nsOk" type="button" class="primary">Create</button></div>
+  </form>
+</dialog>
+<dialog id="propDlg" class="dlg" aria-labelledby="ipTitle">
+  <form method="dialog">
+    <div class="dlg-head"><h2 id="ipTitle">Import a prop</h2>
+      <button type="button" data-close class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+    <div class="dlg-body">
+      <p id="ipText" class="muted"></p>
+      <div class="ip-file"><button type="button" id="ipPick"><i class="ic" style="--ic:url(vendor/mdi/tray-arrow-up.svg)"></i>Choose .glb…</button>
+        <span id="ipFile" class="muted">No file chosen</span></div>
+      <label class="fl">Name<input id="ipName" maxlength="8" spellcheck="false" autocomplete="off" placeholder="TOWER"
+        title="The prop's folder in the mod: 1 to 8 letters, digits or _"></label>
+      <div class="help">1 to 8 letters, digits or _. The prop goes to <span id="ipWhere" class="mono"></span>.</div>
+      <div class="fl">Units
+        <div class="seg" id="ipUnits" role="radiogroup" aria-label="Units">
+          <label title="A Blender scene: Z up, meters; 18 game units per meter"><input type="radio" name="ipUnits" value="blender" checked>Blender (meters)</label>
+          <label title="A piece of the game's own scene (tools/lvlglb.py), in game units"><input type="radio" name="ipUnits" value="game">Game units</label>
+        </div></div>
+      <label class="fl">Height<input id="ipHeight" type="number" min="1" step="1" placeholder="From the file"
+        title="Scale the model to this height, in game units (a car is about 40, a small building 300); empty keeps the file's size"></label>
+      <div class="fl">Light
+        <div class="seg" id="ipLight" role="radiogroup" aria-label="Light">
+          <label title="A mesh without vertex colors takes the stage's sun; one with vertex colors keeps them"><input type="radio" name="ipLight" value="auto" checked>Auto</label>
+          <label title="The vertex colors are the light (bake it in Blender)"><input type="radio" name="ipLight" value="vertex">Vertex colors</label>
+          <label title="The stage's three parallel lights, as the cars take them"><input type="radio" name="ipLight" value="dir">Stage sun</label>
+        </div></div>
+      <div class="help">A material with an image draws with it (PNG or JPEG). Materials named
+        <span class="mono">tex&lt;id&gt;</span> draw with that texture of the stage; a material with no picture is vertex color only.</div>
+      <div class="callout err" id="ipErr" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-circle-outline.svg)"></i><span></span></div>
+    </div>
+    <div class="dlg-foot"><button type="button" data-close>Cancel</button><button id="ipOk" type="button" class="primary">Import</button></div>
+  </form>
+</dialog>
+<dialog id="askDlg" class="dlg" aria-labelledby="askTitle" aria-describedby="askText">
+  <form method="dialog">
+    <div class="dlg-head"><h2 id="askTitle"></h2>
+      <button type="button" data-close class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+    <div class="dlg-body ask-body"><i id="askIcon" class="ic ask-ic" hidden></i>
+      <div class="ask-tx"><p id="askText"></p><div id="askNote" class="callout warn" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span></span></div></div></div>
+    <div class="dlg-foot" id="askBtns"></div>
+  </form>
+</dialog>
+<script type="module" src="app.js"></script>
+</body>
+</html>

@@ -14,8 +14,9 @@
 //  - Com o modo treino ligado (wotm_training.h), TRAINING OPTIONS e MOVE LIST antes do QUIT (itens logicos 5 e 6, que o retail
 //    ignora), desenhados aqui na saida do overlay com as funcoes de fonte do jogo. O X neles abre o painel do treino
 //    (wotm_mainmenu.inc, kTrainDefs) ou a lista de golpes. O RESTART vira RESET POSITIONS e confirma sozinho o ARE YOU SURE (o "sim"
-//    do areYouSure, refeito aqui): o rtMain sai, o TheGame::ResetLevel e o rtMain(0) poem monstros e fase como no comeco, sem
-//    recarregar.
+//    do areYouSure, refeito aqui): como o RESTART do retail, o item 1 do overlay deixa m_inSession 0 e m_inMenus 1, e o main
+//    recarrega a fase inteira (LoadLevelFiles; o patch da fase, wotm_levelpatch.inc, e relido). A recarga do F10
+//    (wotm_levelreload.inc) faz as mesmas escritas sem abrir a pausa.
 //  - Mouse (etapa 9 da camera): passar por cima de um item escolhe, clique esquerdo confirma (X), direito e rodinha pelo wotm_pad.inc.
 //    O mesmo nos dialogos do displayDialog (ARE YOU SURE?, fins de luta, minigames), pelos itens que o setMenuFont marca.
 // O texto da pausa e do jogo (fontSpritePrintCenteredXY, unidades da tela do PS2: 640 x 224, x 0x140 no centro).

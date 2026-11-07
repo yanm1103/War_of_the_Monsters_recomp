@@ -535,10 +535,302 @@ all four are in `.gitignore`).
   `WOTM_AIVSAI=1` for AI vs AI. Log: `[custom] Mecha (dup 0): escudo, laser e torre achados`,
   `[custom] Mecha: escudo baixou (...); rajada: 180 quadros no monstro (-72.0 de vida), 0 em objetos`.
 
+## Custom stages (a new entry on the stage select, built on a game stage)
+`mods/<mod>/stages/<pasta>/stage.json` adds a stage to the stage select, before RANDOM. It is a game stage (the base) under a new name,
+with its own level patch:
+```json
+{ "id": "mycity", "name": "MY CITY", "base": "CENTRAL", "narrator": "mycity", "random": true }
+```
+- **`id`:** 1 to 8 letters and digits, starting with a letter. It names the stage's files and its patch. It cannot repeat a game stage
+  (`CENTRAL`, `DYLAN`...), a game file (`SHELL`, `ARMY`...), a monster file (`LIZARD1`, `ROBOT7`...) or the id of a custom monster.
+- **`name`:** what the stage select shows, up to 17 ASCII characters (default: the id in capitals).
+- **`base`:** `CENTRAL`, `VEGAS`, `CANYON2`, `METRO`, `UFO`, `CAPITOL`, `CANYON1`, `MINISF` or `TOKYODM` (or the index, `GLOSSARY.md`). The
+  other stages run scripts in every mode, and `TRAINING` belongs to training mode.
+- **`narrator`:** `narrator/<name>.mp3`, played when the stage is confirmed, looked up like the skins' (without it, silence).
+- **`random`:** `false` keeps the stage out of RANDOM.
+- **Patch:** `mods/<mod>/levels/<ID>.json` (`levels/MYCITY.json`), in the format of "Level patches" below, with the base's handles. A
+  `levels/CENTRAL.json` does not apply to a CENTRAL-based custom stage, and the other way round.
+- **What comes from the base:** the geometry, `.TEX`/`.RTX`, the stage code (water, scripted events, sounds, music, load card, pause
+  menu) and the lock: a stage based on UFO stays locked until UFO is unlocked. The files are always the disc's: a mod that replaces
+  `LVL/CENTRAL.NGP` does not change a CENTRAL-based custom stage.
+- **What the folder can bring:** points (`.SPT`, `.PUP`, `.FOP`, `.PED`, `.AIP`, any name; they enter as `PTS/<ID>.*`), the `.MRS` (as
+  `RST/<ID>.MRS`) and PNG textures (`t0004.png` or `central_t0004.png`; the texIds are the base's). A PNG of the base from any mod
+  (`CENTRAL_t0004.png`) also applies, unless the folder brings its own. `.NGP`, `.PTR`, `.TEX` and `.RTX` are ignored, with a line in the
+  log: the `.PTR` relocates the `.NGP` and the `.TEX` the texIds it uses, so the geometry is a single group, outside custom stages.
+- **Picture:** `levelpics/<id>.png` (see the next section); without it, the base's picture. The stage select marks the entry with a
+  blue "CUSTOM" label.
+- **Slots:** up to 6 custom stages, in the stage index slots 18 to 23 (dev team test stages with no files), in mod/id order. A
+  METRO-based stage without its own `.AIP` leaves the list when the screen opens with CPUs, as METRO does.
+- **Without the menu:** `WOTM_MATCH=3,1,@mycity` (`NATIVE.md`, "Runtime: direct match, AI vs AI and batch").
+- The log lists each stage and each refusal (`[mods] fase mycity ("MY CITY", meu_mod) = vaga 18, base CENTRAL (1); ...`) and the
+  confirmation (`[fases] custom mycity ...: vaga 18 -> base CENTRAL (1)`). The registry is read at boot: a new stage enters after
+  restarting the game.
+
 ## Stage select pictures
-`mods/<mod>/levelpics/<nome>.png` replaces the picture of the stages `SHELL.TEX` does not have (`training`, `lakepowell`, `tokyodeathmatch`) and
-the one of the RANDOM entry (`random`; without it, a mosaic of the game's pictures). Aspect ratio 2:1, any resolution. It wins over the repo's
-`levelpics/` folder (`NATIVE.md`, "Stage select").
+`mods/<mod>/levelpics/<nome>.png` replaces the picture of the stages `SHELL.TEX` does not have (`training`, `lakepowell`, `tokyodeathmatch`),
+the one of the RANDOM entry (`random`; without it, a mosaic of the game's pictures) and that of a custom stage (`<id>`). Aspect ratio 2:1, any
+resolution. It wins over the repo's `levelpics/` folder (`NATIVE.md`, "Stage select").
+
+## Level patches (move, turn, delete and copy stage objects)
+`mods/<mod>/levels/<FASE>.json` (the stage's file name: `CENTRAL`, `VEGAS`, `TOKYO`...) changes the stage when it loads. Each entry names
+an object by its handle, the `TRANSLATE`/`ROTATE` that `python tools/lvl.py objects <FASE>` prints in the `handle` column, and repeats its
+position (`from`, the `pos` column), so a patch made for another `.NGP` does nothing:
+```json
+{
+  "objects": [
+    {"handle": "0xB18310", "from": [697.7, 972.2, 0.5], "pos": [1098.2, 664.1, 0.5],
+     "copies": [{"pos": [845.9, 1003.2, 0.5], "heading": 90.0}]},
+    {"handle": "0xB31DC0", "from": [663.0, 742.6, 0.5], "heading": 45.0},
+    {"handle": "0xB8A410", "from": [1044.6, 448.2, -0.8], "delete": true}
+  ]
+}
+```
+- `pos`: the new world position of the handle (not of the building's center: the handle is often off to a side; `lvl.py patch`
+  prints each collision box, which shows where the building ends up). `heading`: the world heading in degrees (the `heading` column;
+  turning is about the handle). `delete`: the object leaves the stage (drawing, collision, registration). `copies`: new copies, each with
+  `pos` and an optional `heading`; each copy has its own copy of every part that changes when the object breaks (destructibles,
+  switches, smoke emitters) and shares the meshes with the original, so it breaks and smokes on its own and gets its own collision.
+- `names` (`{"<handle>": "Hotel"}`, at the top beside `objects`) and `name` in a copy: labels for the level editor; the game and
+  `lvl.py` ignore them. A patch with names only still carries `"objects": []`.
+- Works on destructibles (buildings), pickups (cars, trees, rooftop objects) and props. Copies: buildings (with the destructibles
+  inside them), props and pickups (a pickup copy has its own handle, id `GROUP` and `SWITCH`, so it breaks and is picked up on its
+  own). A copy has its own animated parts too: a building that collapses with an animation when it breaks (CENTRAL, ISLAND, METRO,
+  TOKYO) collapses on its own, and a destructible inside an animated part (a crane, a turning sign) is copied with it. Only a
+  destructible inside a skeleton is refused (`lvl.py patch` and the log say which part; no stage has one). A domino of the original
+  (breaking it knocks a neighbour down) stays in the copy only when the neighbour is in the copy too; one aimed outside it is dropped,
+  so breaking the copy never breaks the original's neighbours. The copy also leaves out the actions that work on a set part of the
+  stage rather than on the object: an animation of an animated part outside the copy, a script, and a game event (in CENTRAL,
+  breaking some buildings cuts traffic links; in other stages it moves pickups), so those happen only when the original breaks. An
+  animated part the game itself drives by its id (a level script, a boss) only moves in the original. Deleting an object cuts the
+  dominoes of its neighbours aimed at it.
+- Copies cost room: each one takes arena bytes (1 MB for the whole patch) and slots in the game's table of breakable objects (1024).
+  An entry whose copies do not fit is skipped before anything is written. `lvl.py patch` and the log print the table's use:
+  `interactives: 348 of 1024 before the patch, 355 after (...)`.
+- Objects that sit on a building (water tanks and vents on the roof, items on its sidewalk base) are pickups of their own and do not
+  follow it: move or delete them in the same patch. `lvl.py objects` marks them with `on <handle>`.
+- Traffic and pedestrians follow their own paths (`PTS/<FASE>.FOP` and `.PED`, `FORMATS.md`, "Path nets") and never look at the
+  collision, so the patch cuts those paths around each collision box in its new place (moved, turned and copied objects). A vehicle
+  link whose lane (`width · 10` to each side of the line) crosses a box is removed both ways, and vehicles turn back at the node before
+  it. Pedestrians are cut only by walls (boxes rising 40 units above the sidewalk; curbs and low bases are walked over) and stop 15
+  units from them: each segment keeps its free parts of 30 units or more, on both sides of the building. Flying paths (helicopter,
+  saucer) stay. A deleted building leaves an empty lot with no path through it.
+- `peds` (at the top beside `objects`): the stage's pedestrians.
+  ```json
+  "peds": {
+    "segments": [{"a": [-300, 0, 0], "b": [300, 0, 0], "width": 5}],
+    "groups": [{"handle": "0xA00640", "from": [487.0, -50.0, 0.0], "pos": [480, 100, 0], "count": 30},
+               {"handle": "0xA00670", "from": [-29.6, -350.0, 0.0], "delete": true},
+               {"pos": [470, -200, 0], "count": 40}]
+  }
+  ```
+  `segments` replaces the stage's pedestrian net (`.PED`) with these sidewalks, at most 128 (`a` and `b` are the ends, `width` 1..255,
+  the lane is `width · 10` to each side). A group with `handle` and `from` (`python tools/lvl.py peds <FASE>`) is one of the disc's:
+  `pos` moves it, `count` (1..255) changes how many walk, `delete` takes it out. A group with no `handle` is new. `"off": true` takes out
+  every group of the disc. A stage holds at most 20 groups; one with no pedestrian net is refused. Each group walks the segment of the
+  node nearest to it, so moving a group can move it to another sidewalk: `lvl.py patch` prints the segment each group walks
+  (`walks 2-3 (725 long)`) and the segments nobody walks; the game logs the same report (`[fase]   pedestres: grupo ... anda em
+  2-3`; also without `peds` with `WOTM_LEVELPATCH=2`).
+- `props` (at the top beside `objects`): new static objects made in Blender, placed in the stage.
+  ```json
+  "props": [{"id": "tower1", "model": "TOWER", "pos": [845.9, 1003.2, 0.5], "heading": 90, "name": "Water tower"}]
+  ```
+  `model` is a folder `mods/<mod>/props/<MODEL>/` of the same mod as the JSON (any case), written by `python tools/lvlprop.py build
+  <in.glb> mods/<mod>/props/<MODEL> --stage <FASE>` (`TOOLS.md`): `<MODEL>.NGP`, `<MODEL>.PTR`, `<MODEL>.preview.glb` (what the game
+  draws, for the editor) and `prop.json` (`stage`, `textures` as `{"slot", "texId"}` or, for an image of its own, `{"slot", "png",
+  "packet", "game"}`, `bounds`, `light`, counts). A prop belongs to one stage. A material `tex<texId>` in Blender draws with that
+  texture of the stage; a material with an image (PNG, or JPEG with Pillow, which the editor's exe carries) draws with that image: the PC draws the PNG
+  (`<MODEL>_T<slot>.png` in the folder) at its own size, and the game keeps a copy of at most 128 x 128 (CT32) in the arena, with a
+  texId past the loaded textures and the smallest texture bin of the stage it fits in (log `[fase]   props: KRAB KRAB_T0.png:
+  textura propria 128x128, tex335, caixa de 65536 bytes` and `[mods] prop tex335 <- <mod>/props/KRAB/KRAB_T0.png`). The UVs are
+  clamped to the image (no tiling). A mesh with no vertex colors takes the stage's sun
+  (its three parallel lights, as the cars do); a mesh with vertex colors keeps them as its light (bake the light in Blender), and
+  `--light vertex|dir` forces one way for the whole prop. `pos` is where the model's origin goes; `heading` (degrees,
+  default 0) turns it about Z. Each entry collides as the box of the model's bounds (monsters stand on it and bump into it; vehicles
+  and pedestrians are cut around it like around a moved building) and is drawn with no view culling. Each model takes its file size
+  of the arena once, and each entry 100 to 200 bytes more. Skipped with a line: a model missing or made for another stage, a texture
+  the stage's `.TEX` does not have, an image larger than every texture bin of the stage, an entry whose box leaves the collision grid. The props are read from the folder at every load,
+  so a prop rebuilt during a fight shows after a reload (F10). Log: `[fase]   props: TOWER x3 (1216 bytes); 1660 bytes da arena`,
+  the same numbers as `lvl.py patch`.
+- Check before playing: `python tools/lvl.py patch CENTRAL mods/<mod>/levels/CENTRAL.json` applies the patch to the disc's image, prints
+  what changed, each redone collision box, and checks the collision of the result (box rule and cell rule, `FORMATS.md`, "Stage
+  collision"). An entry that does not match is skipped with a line saying why.
+- Log in the game: `[fase] CENTRAL <- <mod> (LEVELS/CENTRAL.JSON): ...` with the same counts as `lvl.py patch`, a line per skipped entry,
+  and the collision check before and after; `[fase] CENTRAL: sem patch` when no mod has the stage's file. `WOTM_LEVELPATCH=2` also
+  prints each redone box; `=0` turns patches off.
+- **The patch is read at every load of the stage**, not only at boot: the mods folder is searched again (a mod or a file created or
+  deleted after boot counts; with the file in two mods, the last mod in alphabetical order wins, `[fase] LEVELS/CENTRAL.JSON: B vence
+  A`). A file that does not parse is read once more 200 ms later (the editor may be writing it). So editing during a fight and
+  reloading the stage applies the new patch, without restarting the game. Three ways to reload it: the pause's **RESTART** (YES) or, in
+  training, **RESET POSITIONS**; **F10** in the fight (no pause menu); and the file named by `WOTM_LEVELRELOAD=<arquivo>`, where
+  writing `<STAGE> <counter>` (new content each time) asks for the reload if that stage is loaded. The reload is the retail RESTART: the
+  whole stage loads again (the `LOAD` screen), the fight starts over and the continues are restored. A request waits for a frame where
+  the game could pause (in the pause, until the fight resumes; during a movie or a dialog, until it ends; time in the pause does not
+  count) and is dropped after 10 s of running game without one, or if a stage load came after it, since that load already read the
+  file. Log: `[fase] recarga pedida (F10)` or `(arquivo)`, then the load's `[fase]` lines.
+
+### Level editor (`tools/level_editor/editor.py`)
+`python tools/level_editor/editor.py` opens the stage in 3D and writes the patch above. It is a local page (three.js, in
+`tools/level_editor/web/`) served by the script at `http://127.0.0.1:47197/` (`--port N` changes it; with the port taken by an
+editor already running, that one's page opens again; by something else, a free port), in the default browser. `--window` opens
+it in its own window instead (`pywebview` when installed, otherwise Edge/Chrome app mode); `--serve` only serves; `?stage=METRO` in the address opens that stage first. Except with `--serve`, the program quits 10 s
+after its page closes (a reload of the page keeps it). The release zip carries it as `WotM_LevelEditor.exe`, next to `wotm.exe`
+(`tools/build_level_editor.ps1`), whose mods folder is the one the game reads. The page is in English, with a dark, a light and a
+System theme (the one the OS uses), in the settings (the cog at the top right).
+- **Top bar:** the stage (switching with unsaved changes asks: Cancel, Discard, or Save and switch), the mod (a list of the mods
+  folder's mods and **New mod…**, which asks for a name; its `levels/<STAGE>.json`
+  loads with the stage, and the editor remembers it; switching with unsaved changes offers **Discard and load X** or **Move my
+  changes to X**, and says when X already has a file for this stage; Save with no mod chosen asks **Save into which mod?**),
+  **Undo** (Ctrl+Z) and **Redo** (Ctrl+Y or Ctrl+Shift+Z; their tooltips name the change), **Check** (`lvl.py patch` on the disc's
+  stage: a one-line summary, "Check passed: …" or how many problems, and a list of the problems, each naming its object, where a
+  click selects it: an entry skipped, a pedestrian group with no sidewalk, a collision box or cell that does not match; the cut
+  vehicle and pedestrian paths and the full output go with it), **Save** (Ctrl+S, also from a field; an empty patch removes the
+  file; a failing check still saves and an amber note says so; keys, entries and names the editor does not edit, such as entries
+  for handles the stage does not have, stay in the file as they are, and a note over the view says so when the file loads) and
+  **Test in game** (opens the game in the stage in training mode with Togera: `WOTM_MATCH=3,<stage>`, `WOTM_TRAINING=1`,
+  `WOTM_MODS=<mods folder>`, windowed; with unsaved changes it asks **Save before testing?**, since the game loads the file, and
+  offers to test without them; with the game already open it asks to reload the stage in it or to restart it). Next to these
+  buttons, the game's state:
+  starting, then "Game running" and its stage. **Reload in game** (on while a game opened by Test runs; "Save & reload" with
+  unsaved changes) saves and has that game load the stage again, as **F10** does there; with the game on another stage it offers a
+  restart on this one. **Stop** (the square, while the game runs) closes the game the editor opened. In a window narrower than
+  1440 px, Check, Save, Test and Reload show only their icon. The **?** button (or **?**, or **F1**) lists every shortcut.
+- **Custom stages:** the stage list also shows the valid custom stages of every mod (`stages/<folder>/stage.json`, "Custom stages")
+  as "MY CITY (custom, on CENTRAL)". One opens with its base's objects, scene and handles and saves its patch as
+  `levels/<ID>.json`; Test in game opens it with `WOTM_MATCH=3,1,@<id>`. The **+** button next to the stage list (**New stage…**)
+  asks for an id, a name and a base among the nine the game allows, and writes `stages/<id>/stage.json`; "Start with the changes I
+  have now" also writes them as the new stage's patch when the open stage has that base. A stage with points of its own
+  (`.SPT`, `.PED`...) in its folder still shows the base's in the pedestrian and path panels. `python
+  tools/level_editor/test_custom_stages.py` is the integration test (needs the disc set in the editor).
+- **Winning mod:** the game loads, for each stage, the `levels/<STAGE>.json` of the last mod in name order that has one. When
+  another mod than the chosen one wins for this stage, a note under the top bar names it when the stage loads (and after a save),
+  since the game does not use the chosen mod's file; its X hides it until the next stage or mod.
+- **Mode rail** (the narrow column on the left): **Objects** (the cube, or **1**) and **Pedestrians** (the walking figure, or
+  **2**) switch what the editor works on: the left list, the right panel and what a click in the view picks; the editor remembers
+  the mode. **Fight HUD** (the screen icon) opens the HUD dialog (below).
+- **Status bar and Output:** the bar at the bottom shows the last message, whether the stage has unsaved changes (or when it was
+  saved), the last check (passed, how many problems, or not checked since the last change), the game (closed, starting, running,
+  patch applied or ignored) and how many objects the mod changes. A click on a field opens the **Output** drawer on its tab:
+  **Messages** (everything the editor says), **Check** (the last check's summary and problems, where a click selects the object,
+  and the full `lvl.py patch` output under Details) and **Game** (the game's `[fase]` lines in words: patch applied, file
+  rejected, another mod's file used, reload skipped or dropped; the load's details as the game writes them). The drawer opens by
+  itself on an error, and its top edge resizes it. Short notes (saved, deleted with Undo, copied, dropped, the game's answer) show
+  for a few seconds over the view's lower right corner, and above an open dialog.
+- **View:** two cameras, **V** (or **Fly** / **Orbit** on the view's top right bar) switches; the last one is remembered. Fly (the
+  default): **W/S** move where the camera looks, **A/D** sideways, **E** up, **Q** down, **Shift** faster, right drag looks around,
+  the wheel moves forward. Orbit: left drag orbits, right drag pans, the wheel zooms. In both, a click selects the object under it
+  (buildings, pickups, props; the pointer turns into a hand and a white outline shows what a click picks), **F** (or the crosshair
+  button) frames the selection, **Home** (or the frame button) frames the whole stage, **Ctrl+D** copies it, **Del** deletes it,
+  **Esc** deselects. W/A/S/D/Q/E go by their place on the keyboard (the same keys on AZERTY); the other shortcuts by their letter.
+  The shortcuts work after a click on a checkbox or a button; a text field, the stage picker and an open dialog keep the keys. A
+  chip at the view's lower left says what the mouse and the keys do at that moment (it fades after a few seconds and comes back
+  when that changes).
+- **View bars:** on the top left, the tool: **Move** (**G**) and **Turn** (**R**, about the vertical only) for the gizmo, and
+  **Snap** with its steps (10 units and 15 degrees by default; they also set the arrow keys' step). On the top right: **Game
+  look** (**L**), **Grid** (a line every 100 units, or every snap step when it is smaller, and a stronger one every 1000, at the
+  base of the selection), **Layers** (the Pedestrians layer), the cameras, Focus, Frame all and the shortcuts. The gizmo's arrows
+  have the colors of the X, Y and Z fields; the selected object's amber outline shows through what stands in front of it, the
+  others of a selection (orange) only where they are in view. A deleted object shows as a red dashed box where it was while it is
+  selected; with **Changed** on, every deleted one does (a click on the box selects it), and a green box marks each changed object.
+- **Right panel:** with nothing selected, what a click does, the stage, how many objects the mod changes and the file **Save**
+  writes (`mods/<mod>/levels/<STAGE>.json`). With an object: its kind, name and state (Moved, Turned, Copy), its handle (a click
+  copies it) and these sections. Every number field changes when dragged sideways (one step per 3 pixels; Shift: ten; within the
+  field's limits); a click without dragging types in it. The object, the pedestrian marker or the People and Width of a group
+  follow the drag, which is one undo step; the new prop's Height builds once, on release. **Transform**: **X**, **Y** and **Z**
+  (the height) in the gizmo's colors, also dragged by their letter (a snap step, or 1 unit, per step), and the gizmo's blue arrow
+  points to -Y.
+  **Heading**, with buttons that turn 90° either way. **Actions**: **Drop** (**End**: down or up onto the first surface
+  under the object's middle, another object's roof included), **Duplicate**, **Restore original** (back to the disc's place,
+  copies removed; off when there is nothing to restore) and **Delete**, which says how many objects go. **Name** (closed at first)
+  holds the object's name and the model's; **Details** (closed at first) the size, the model id, the damage states, the collision
+  boxes, the place on the disc and what it rests on (a click selects it). A deleted object stays in the list, struck through:
+  picking it shows **Restore**, which puts it back (with Move objects on top, the objects that were on it too).
+- **Several objects:** Shift+click (or Ctrl+click, also in the list) adds or takes out one, Shift+left drag selects the ones whose
+  middle falls in the box (only the kinds on in the list), **Ctrl+A** selects everything the list shows. The gizmo and the fields
+  act on the last one picked (amber outline and row); the others (orange) follow it by the same move or turn, and Drop, Duplicate,
+  Delete and Restore original act on all of them. The panel says how many of each kind are selected. **Arrows** move the selection
+  along the world axis nearest to where the camera looks, **PgUp/PgDn** up and down (Shift: ten steps).
+- **Move objects on top** (a switch in Actions, on by default, with the count beside it): moving, turning, copying, deleting or
+  restoring a building does the same to the pickups that rest on it (`lvl.py objects`, `on <handle>`); Delete counts them
+  ("Delete 5 (+3 on top)").
+- **Pedestrians mode:** the stage's pedestrian groups as violet cones, a dashed line from each to the sidewalk it walks, and the
+  sidewalks (`PTS/<STAGE>.PED`) as cyan lanes as wide as the walking lane, with a white ball at each end; the selection is amber.
+  The left panel has two meters (groups out of 20, sidewalks out of 127, amber past 90 % and red at the limit), the people of all
+  groups added up, the **Pedestrians in this stage** switch (off takes every group out, the patch's `"off"`; on brings the disc's
+  back) and a list of **Groups** (people per group; a red mark when it walks nothing) and **Sidewalks** (length), numbered by their
+  place in the list. A click, in the view or the list, picks a cone, a lane or an end (the stage's objects are scenery here); the
+  gizmo, the arrows, **End** and the position fields only move them, Turn is off. The right panel says what a group walks
+  ("Walks on sidewalk 2 (492 units long)", with **Show** to select that sidewalk) or a sidewalk's length and lane, and has
+  **People** (1 to 255) or **Width** (units to each side, steps of 10) as a slider and a number (one drag is one Undo step),
+  **Position**, **Drop**, **Duplicate** (groups) and **Delete**. With nothing selected it explains the colors. **Add group** and
+  **Add sidewalk**, on the tool bar, put a new one where the view looks (off at the limit, or with no sidewalk to walk, with the
+  reason in the tooltip); a new sidewalk is a straight piece to drag by its ends. A red cone has nothing to walk (its nearest node
+  has no link, or the stage has no sidewalks: add one). Each group walks the sidewalk with the nearest end, so moving a group can
+  move it to another sidewalk. The changes go in the patch's `peds` ("Level patches"); Check lists where each group walks, and a
+  group the game would skip is a problem that selects it. In the Objects mode the **Pedestrians** layer (the view's **Layers**
+  menu, or **P**) shows the markers faint, not clickable.
+- **Fight HUD dialog:** the fight HUD pictures this stage carries (`tools/lvlhud.py`: bar frame and bars, special icon, BOSS
+  label, player numbers, font, pickup ring, hint box, cinema bars, buttons), each row with the disc's picture (**Original**), the
+  mod's (**In your mod**, or "Not replaced"), the size, format and file. **Replace…** (or a picture dropped on the row) takes an
+  image (a PNG as it is; another format the browser reads becomes a PNG; a shape other than the game's asks first) and writes it
+  into the mod as `LVL/<stage>_tNNNN.png` or `LVL/<stage>_rtx_tNNNN.png` ("Textures as PNG"); **Apply to all N stages with this
+  picture** writes it for every stage that has the same one (the bar atlas is shared by 17). **Save original as PNG** downloads
+  the disc's picture, **Remove** takes the mod's out. The dialog writes into the mod at once, outside Undo, and says so; with no
+  mod chosen, Replace is off and a mod picker sits at the top. Canyon 1 and Tokyo DM carry the other HUD layout (B), drawn
+  differently: the dialog says so on those stages. The game reads the pictures when it loads the stage; with the game open,
+  **Reload in game** sits at the bottom of the dialog.
+- **New props** (the patch's `props`, above): **Add prop** on the tool bar lists the props of the chosen mod made for this stage
+  (`mods/<mod>/props/*/prop.json`, with size and triangles; one whose files do not read is greyed, with the reason) and puts the
+  picked one where the view looks, drawn from its `<MODEL>.preview.glb` with the stage's textures. **Import .glb…** (in that menu;
+  a file can also be dropped on the dialog) takes a Blender export (glTF Binary) and runs `lvlprop.py build` in the mod:
+  **Name** is the folder (1 to 8 letters, digits or `_`; the file's name by default), **Units** Blender meters or game units,
+  **Height** scales the model to that many game units (empty keeps the file's size), **Light** as `--light` (`TOOLS.md`). The
+  `.glb` is kept as `props/<NAME>/source.glb`; a name the mod already has asks before replacing it, and the new model then shows
+  wherever it is placed. A new prop moves, turns, copies (a copy is one more entry with the same model), drops and deletes like
+  any object; it has no disc place, so Restore is off and its badge says **New**. In its panel, **Model name** is the model's
+  name in the list (`prop.json` `name`; empty goes back to the folder's name) and **Height** (Details) builds the model again
+  from its `.glb` (`source.glb`, or the `source` of `prop.json`) at that many game units, scaled about its origin with the same
+  units and light; both change the model, so every entry of it takes them, and neither is undoable. It sits in the list's **New props** section,
+  and Check names the one the game would skip. Switching to a mod without its model keeps the entry in the file (the editor says
+  how many), where the game skips it.
+- **List:** every object by name, its handle beside it, in sections (**Buildings**, **Pickups**, **Props**, **Terrain** and **New props**, the
+  props over 500 units; a click on a header closes or opens it, Terrain starts closed, and the editor remembers them). A copy
+  sits under its original, indented. Small marks after the name: a green dot (moved or turned), the copy icon (it has copies),
+  the bin (deleted: the row is struck through) and the link (it rests on another object; the tooltip names it). Above: the
+  search (name, rule name, handle, kind, model id) and chips with counts that show or hide a kind (they also limit Shift+drag
+  and Ctrl+A) and **Changed** (only the edited ones). A search that finds nothing offers **Clear filters**.
+- **Names** (`tools/lvlnames.py`): the disc has no object names. An object shows, in order, its own **Name** (right panel; kept in
+  the patch's `names`), its **Model** name (every object with the same mesh and textures, in every stage; kept in
+  `~/.wotm_level_editor_names.json`, over the repo's `tools/level_editor/names.json`), or a rule's name in grey: a stage's
+  special objects (reactor stacks, quake buildings, pillars), the pickup type (with "traffic" or "parked" for the cars that can
+  drive), the destructible's hit point class (`Building`, `Small object`, `Tower`), `Prop` or `Terrain piece` (over 500 units).
+  The Name section says how many objects of the stage share the model.
+- **Settings:** the theme (Dark, Light, System; it previews as it is picked), the game disc (the `.iso` itself, or an extracted
+  folder with `LVL/` and `PTS/`), the mods folder and the game. Each path shows **Found** or what is wrong with it (not found, not
+  a disc, an image the editor cannot read) as it is typed (`POST /api/paths`); **Browse** next to it opens the system's picker in
+  the editor's own window (`--window` with `pywebview`). The **Advanced** section (the ELF, the game's working folder and the
+  image the dev runtime boots) shows only in a clone of the repo or when an ELF is set. Closing the dialog reloads the stage only
+  when the disc or the mods folder changed, asking first with unsaved changes. With a `.iso`, a stage's files (`LVL/<STAGE>.NGP/.PTR/.TEX/.RTX`, its `PTS/` files and `RST/<STAGE>.MRS`) are copied
+  once into the mod kit's cache of that image (`%LOCALAPPDATA%\WotM\modkit_disc\<key>`) and read from there; a `.bin`/`.cue`
+  image is not read. In a clone they default to `disc/` (else the first `ISO/*.iso`), `mods/` and the runtime next to the repo
+  (`wotm-recomp-win/build_dev/ps2xRuntime/wotm.exe` with the ELF in `discroot` and the first `ISO/*.iso` as `PS2X_CD_IMAGE`, the
+  way `run_live` starts it; with the disc set to a `.iso`, that one); otherwise `wotm.exe` next to the editor and the `iso=` of
+  its `wotm.ini`. They are kept in `~/.wotm_level_editor.json`.
+- **Drawing:** the colors are the GS's: the vertex color and alpha times the texture's (`C = Ct·Cv >> 7`, `As = At·Av >> 7`, so a
+  vertex above 0x80 brightens the texture), with no color management, and each mesh takes the blend mode, alpha test and Z write of
+  the GS state its nodes set (ALPHA_1 0x44 is the normal blend, 0x48 the additive glows). Blended meshes with `alphaSort` are drawn
+  last, far to near; the other blended ones after the opaque ones, in the stage's order. The objects with `dirLight` (cars, towers,
+  statues) take the three parallel lights of `RST/<STAGE>.MRS` on their vertex color, so turning one changes its light as in the
+  game; the rest of the stage has its light painted in the vertex colors.
+- **Game look** (top right of the view, or **L**; remembered, off by default) adds what `RST/<STAGE>.MRS` sets: the fog (the GS's,
+  per vertex and hyperbolic in the depth, so it is half there not far past its start distance: 2259 units in CENTRAL, 1393 in
+  METRO), the background in the fog's color, and the sky, drawn first around the camera and never picked by a click or Drop. The
+  objects the game never fogs (the sky, some glows) stay clear, and so do the selection outlines, the gizmo and the grid. Off, the
+  whole stage shows with no fog over the theme's background, which is the way to edit from afar. With a mod that has its own
+  `RST/<STAGE>.MRS`, that file gives the fog, background and lights.
+- The 3D scene is `python tools/lvlglb.py <STAGE> <out.glb>` (`TOOLS.md`), cached per user (`%LOCALAPPDATA%\WotM\level_editor`); the
+  first open of a stage takes a few seconds. What it does not show like the game: particles and sprites, animated parts (rest pose),
+  the specular highlight of the lit objects, the far clip, and alpha above 1 in the normal blend (the view keeps the brighter
+  source but drops the GS's darkening of what is behind, so it comes out brighter there). Icons: Material Design Icons (`web/vendor/mdi/`, Pictogrammers Free License).
 
 ## Under the hood (for those who touch the code)
 
@@ -550,10 +842,73 @@ the one of the RANDOM entry (`random`; without it, a mosaic of the game's pictur
   `.RTX` palettes (`Scene::loadResources`, which reads the file directly and not from RAM), movies (`wotm_fmv.hpp`), icon, pictures and monster
   of the save list (`wotm::disc::readFile`). With no file in the registry (no mod and no generated file) no hook is installed. A file that does not exist on the disc
   is served too ("new file").
+- **Custom stages** (`scanStages` in `native/wotm_mods.hpp`, `native/runtime/wotm_stages.h`): the registry gives each stage a slot 18..23
+  and aliases `LVL/<ID>.*`, `PTS/<ID>.*` and `RST/<ID>.MRS` to the base's files, marked as disc only. The search hook swaps the name in
+  the game's own text during the call (up to 8 letters: every stage path buffer fits `TRAINING.*`) and restores it, including what a longer
+  name covered. At the stage select confirmation (`changeScreen(8, 99)`) and in `WOTM_MATCH`, `activate` sets `Shell::m_levelNum` to the
+  base and writes the id into `GameLevelNames[base]`: the game builds the file names from the name table and copies `m_levelNum` into
+  `m_levelId`, so the files are the custom stage's and the code is the base's. `restore` puts the table back at the next confirmation
+  and at the entry of `userintMain` (every return to the menus); RESTART, F10 and "play again" do not pass there and stay on the stage.
 - **Generated files:** the army's vehicles for every stage, `MON/ARMY.NGP/.PTR/.TEX/.RTX`, are built from the disc's `LVL/VEGAS.*` into
   `cache/army/` and enter the registry as the mod "army (gerado)" (`Registry::addGenerated`, before the scan), with or without the
   mods folder (`WOTM_MODS=0` included). A mod with its own
   `MON/ARMY.*` wins (`NATIVE.md`, "Army in versus fights").
+- **Level patches** (`native/runtime/wotm_levelpatch.inc`): hook at the entry of `dbInitDb` when `Shell::LoadLevelFiles` calls it (the
+  stage image is inflated at 0xA00000 with TEX0 relocated, and nothing has been registered yet); installed whenever `WOTM_LEVELPATCH`
+  is not 0, and the JSON is looked up in the mods folder at that moment, not in the boot registry. A handle that turns becomes a new
+  `ROTATE` in its parent and in its collision paths; a deleted handle becomes `NULL` (op 9) and its paths leave the grid cells; a copy is
+  held with the original by a new `GROUP` (noFOV) in the parent's slot, plus copies of the original's paths. A copy clones the handle's
+  spine: every node that changes at run time (`DESTRUCTIBLE`, `INTERACTIVE_STATE`, `SWITCH`, `PART_EMITTER`, and nodes with an id that
+  `dbProcInteractive` registers) and every node between them and the handle, once each (the image is a DAG); the rest (meshes,
+  collision, GS contexts, animated parts with nothing of that below them) stays shared, and nothing is cloned below a `SKEL_BONE`. A
+  `CHAR_INSTANCE` is cloned when an `ACT_ANIM` of a destructible of the copy animates it (`animationGetHandle`'s rule: the first
+  instance of the stage's `ANIM_MGR` with that id1/id2 and an animation with that id) or something that changes hangs below it; its
+  `ANIM_XFORM`s and `ANIM_SCALE`s go with it (they keep the instance's visible flag, angles and dirty bits; the matrices are in the
+  instance's `animOutput.atMat[matrixIdx]`). The clone gets its own animation state, copied from the disc: the output block
+  (`val`, `dirty`, `atMat`), the control nodes and each one's key cache (`prevKey`), `animPktPtr` pointed at its own `val` (it is
+  `val` on every stage), `activeTree` 0 and an id2 no instance with the same id1 uses, from 0x7FF down (monsters look theirs up with
+  a small `dupId`). Each copy entry writes a new `ANIM_MGR` in the arena with the old list plus its clones and puts it in the
+  image's root list, so `animationSetGlobal`, which runs after the hook, makes each clone's `AnimPlayer` (0x18 bytes of
+  `MemoryStack::global`) and starts its control nodes (`anim instances cloned` in the log). On the clones: the
+  `INTERACTIVE_STATE` id1 is cleared, the `DESTRUCTIBLE` id1 too (except 0x1A90..0x1B57, the "never loses health" range that
+  `Destructible::takeHit` reads), the emitter's `isActivated` (bit 4 of +0x5C) is cleared, single-piece ids go to 0 and pickup ids
+  stay. "Single-piece" is any id outside 0x7D0..0x897 on an op `dbsTraverse` hands to `dbProcInteractive`, which also clears a few
+  that `dbProcInteractive` does not act on (the `GROUP` id 0xC of the 3-MILE stacks); `hdTraversePath` gives a hit the last nonzero
+  id1 of its path, so the copy of such a piece is hit with another id. The state actions stay shared, except the `ActGroup`/
+  `ActTransform` blocks above an action the copy changes, which are cloned (a `TRANSFORM` left with nothing gets an empty `GROUP`:
+  `doTransform` does not test for null): an `ActDomino` aimed at a node of the copy is pointed at its clone, one aimed outside is
+  dropped; an `ACT_ANIM` whose instance the copy cloned gets the clone's id2 in `ids.anim` (`anim actions redirected`), any other
+  one is dropped (it plays an animation outside the copy, or a monster's), and so are `ACT_RUNSCRIPT` (a script node with its own
+  place) and
+  `ACT_GENERICEVENT` (`TheGame`'s handler: `PathNode::removePath` on fixed `PathNet::fodder` links, pickup heights). An emitter with
+  `isAutoStart` (bit 3 of +0x5C) takes a lasting `fx[100]` effect and an `autoEmitters[128]` slot from the load on; the game checks
+  both, so many copies of such a building leave later explosions without an effect (`auto-start emitters cloned` in the log). After
+  the deletes, an `ActDomino` anywhere in the image whose target `dbsTraverse` no longer reaches gets type 6, which
+  `DelayAction::doIt` skips (the target is never registered, its id2 stays 0, and `doDomino` would call `ChangeState` on
+  `Interactives` slot 0, NULL). Before writing, the entry's worst case is
+  checked: arena bytes, and the `Interactives::s_dbInteractive[1024]` slots (unchecked in the retail), counted as the registrations
+  `dbsTraverse` makes at load, plus the debris pieces that carry a pickup, plus 32 spare. `WOTM_LEVELPATCH_SHALLOW=1` (`lvl.py patch
+  --shallow`) clones only the handle, its `INTERACTIVE_STATE` and its `DESTRUCTIBLE`, and `WOTM_LEVELPATCH_BREAK` breaks the copies or the
+  originals at a set time (`NATIVE.md`, variables). Every path through a changed handle gets its box redone (by the disc's rule, or the old box
+  carried by the handle's change for animated chains and camera triggers) and its cell lists redone, and the `GROUP`s above the handle
+  get their spheres grown to cover the object (the drawing culls a `GROUP` by its sphere). New nodes go to a 1 MB arena below the hooks'
+  last MB (`wotm_mods_hooks::kLevelArena`; loads above 32 MB stop at `kHighCeiling`). Then `peds` (`wotm_levelpeds.inc`): `segments`
+  rewrites `PathNet::ped` in RAM, a deleted group loses its id (a plain `TRANSLATE`), a moved or recounted one is rewritten in
+  place, and new groups (`TRANSLATE` 0xBB8 with a `NULL`) hang from a new `GROUP` in the world `GROUP`'s first slot, which holds
+  the old child too. Then `PathNet::fodder` and `PathNet::ped`, already
+  built by `InitBeforeDbLoad` and not yet held by any vehicle or `PedGroup`, are cut in RAM against the XY convex hull of each new
+  solid box (`cutNets`): vehicle links leave both nodes, as in `PathNode::removePath`, and pedestrian nodes left with no link leave the
+  list with the links renumbered (`PedGroup` reads `paths[0]` of the nearest node without looking at the count). `tools/lvl.py`
+  (`LevelPatch`, `cut_nets`) does the same in the same order, on the disc's `PTS` files. A reload starts from a clean image: the
+  stage `.NGP` is inflated again, the arena is rebuilt and `InitBeforeDbLoad` reads the `PTS` again before each load.
+- **Stage reload** (`native/runtime/wotm_levelreload.inc`): F10 (read by the window, `wotm_live.inc`) or the `WOTM_LEVELRELOAD` file
+  sets a request; the hook at the entry of `rtTimeToReturnToShell` (end of each `rtMain` frame) serves it under the conditions with
+  which `rtPauseRT` accepts START (`m_inSession` 1, `gRtReturn` free, not paused, no movie, `game+0x120454`/`+0x120458` clear), and
+  with `StreamingSoundManager+0x109C` at 0 (at 1 the retail `displayDialog` restores the master volume on its way out, which the hook
+  skips), the way START does: `shell+0x2BA4 = 1`, `rtReturnToShell(2, 0)`. The `displayDialog(0)` that `EvaluateGameStatus(2)` calls next does not
+  open the pause: the hook writes what the pause's RESTART item and the YES of `areYouSure` write (continues restored, `m_restart` 1,
+  `m_inMenus` 1, `m_inSession` 0, pause flag cleared, `snd_StopAllSounds` when `StreamingSoundManager+0x109C` is 0) and returns. `main` then runs
+  the session again from `LoadLevelFiles`.
 - **Log:** `[mods] N arquivo(s) de <mods> em <pasta>` at boot and, on the first search of each file, `[mods] MON/LIZARD0.TEX <-
   teste_togera (110080 bytes; disco 110080)`.
 - **Mod files bigger than the disc's:** what limits them is where each loader puts the file, not the disc size (stage and menu files

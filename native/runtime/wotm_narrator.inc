@@ -147,10 +147,11 @@ static void announceCostume(int monster, int costume, const wotm::mods::Custom *
     play(names);
 }
 
-// Nome da fase (m_levelNum), na confirmacao da selecao de fase
+// Nome da fase (m_levelNum), na confirmacao da selecao de fase. Vaga de fase custom: o "narrator" do stage.json (sem ele, calado).
 static void announceLevel(int level)
 {
-    const char *const names[] = {levelName(level), nullptr};
+    const wotm::mods::Stage *st = wotm::mods::Registry::get().stageBySlot(level);
+    const char *const names[] = {st ? (st->narrator.empty() ? nullptr : st->narrator.c_str()) : levelName(level), nullptr};
     if (names[0])
         play(names);
 }

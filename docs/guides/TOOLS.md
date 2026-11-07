@@ -13,10 +13,53 @@
   - `tex.py list|export|inject`: `.TEX`/`.RTX` textures to PNG with `manifest.json` (palette found through the `.NGP` objects) and PNG/TGA back, at the same size (current palette or `--new-palette`).
   - `snd989.py wav|vpk|vag|bnk-replace`: sound to WAV and WAV back to `.VPK`, `.VAG` and sounds inside a `.BNK` (ADPCM encoder that simulates the game's decoder).
   - `gltf.py <arquivo.NGP> <saida.glb>`: static geometry with textures in binary glTF (Blender, three.js, web viewer). Posed monsters not yet: the skeleton and the animation curves still need evaluating (see the docstring).
-  - `lvl.py summary|objects|collision|points|mrs`: a stage as the level editor sees it: placeable objects (handle, position,
+  - `lvl.py summary|objects|collision|points|mrs|peds|patch`: a stage as the level editor sees it: placeable objects (handle, position,
     states), the collision grid and paths (`--check` redoes every box and cell list by the disc's rules), the `PTS/*` points and the
     `.MRS` settings (`FORMATS.md`, "Stage objects", "Stage collision", "Stage points"). `Stage.footprint` gives the image ranges a
-    deep copy of an object takes.
+    deep copy of an object takes. `objects` ends a pickup's line with `on <handle>` when it rests on that object (`Stage.on_top`:
+    inside the XY hull of one of its solid boxes, within 25 of the box's top; rooftop tanks and vents, and sidewalk items on a
+    building's base). `patch <STAGE> <json>` applies a level patch (`MODS.md`, "Level patches") to the image the way the game hook
+    does (objects, props, pedestrians, in that order), cuts the vehicle and pedestrian paths (`cut_nets`) and checks the collision of
+    the result; `--mod <dir>` is the mod whose `props/` the `props` models come from (default: the folder above the JSON's `levels/`).
+    The arena starts 0x80-aligned, as the hook's, so `arena bytes` is the same number on both sides. `peds <STAGE>` lists the
+    pedestrian groups (handle, position, size) and the segment each one walks (`ped_groups`, `ped_bind`, `ped_report`).
+  - `lvlglb.py <STAGE> <out.glb>`: the stage as a binary glTF for the level editor, one top-level node per `lvl.py` object (named by
+    its handle, extras with kind, from, heading, states and `on`), its broken states as hidden `stateN` children, the rest under
+    `rootN` (extras `ident`: 1 the world). The sky, the subtree of the node with id 2 at any depth, hangs under `sky` (extras
+    `sky`) without the transforms above it. Meshes are shared between instances. Colors are the GS's raw bytes (asset extras
+    `gsRaw`): `COLOR_0` is the vertex RGBA / 255 and the textures keep the GS alpha (0x80 = 1.0, up to 0xFF), for a viewer that
+    does the GS's modulation itself. Each material carries the GS state inherited from the nodes' ctx (`ngp.gs_apply`): extras
+    `gs` (`blend`: ALPHA_1 when the mesh has ABE, else null; `aref`: alpha test ref or -1), `zmsk`, `fog` (the OBJECT's
+    `fogBurnThru` below 255), `ot` (`alphaSort`) and, on the OBJECTs with `dirLight`, `dirLight`; meshes with ABE are `BLEND`. The editor itself is `tools/level_editor/`
+    (`MODS.md`, "Level editor"; three.js r160 vendored in `web/vendor/`, MIT); its HUD panel is `hudapi.py` + `web/hud.js` and its
+    pedestrians `pedsapi.py` + `web/peds.js`. `tools/build_level_editor.ps1` packs it as `WotM_LevelEditor.exe` (PyInstaller in its
+    own venv in `<runtime>\level_editor_build`, no numpy; `web/_*` test pages left out); `tools/release.ps1` runs it.
+  - `lvlhud.py <STAGE>|--all`: the fight HUD a stage carries (level editor, HUD panel). The HUD nodes (ids 0x1C20..0x2133) and the
+    fight font (id 18) are found by id, and each texture gets a role (bar atlas, special icon, BOSS label, player number, font,
+    pickup ring, hint box, cinema bars, buttons), its file (`.TEX` or `.RTX`), its texId and the mod PNG name. `--all` prints the
+    texId of each role in every stage and the version: A in 17 stages, B in CANYON1 and TOKYODM (other atlas, icons, font and
+    meshes; no BOSS label).
+  - `lvlnames.py <STAGE>`: names for the `lvl.py` objects (level editor): a content signature per object (vertices in the handle's
+    frame and the decoded pixels of its textures, the same for the same model in any stage) and the rule names (special ids, pickup
+    type, hit point class, size); model names by signature in `tools/level_editor/names.json`.
+  - `lvlprop.py build <in.glb> <prop dir> --stage <STAGE> [--units blender|game] [--scale S | --height H] [--name NAME]`: a static
+    prop of one stage from a `.glb`, as a mini image prelinked at 0xA00000 (`<NAME>.NGP`, word 0 = 1, word 1 = the root) with a
+    `<NAME>.PTR` in the monster layout (pointers; texIds and OBJECT GS contexts that hold the prop's texture slot until the loader
+    writes the stage texId and a live context), a `<NAME>.preview.glb` decoded back from the packets it wrote (`lvlglb`'s
+    conventions; materials name `tex<texId>`, images only with `--preview-tex`; an image of the prop's own is embedded as material
+    `own<slot>`) and a `prop.json` (stage, slot -> texId or the prop's own image: `<NAME>_T<slot>.png`, packet offset, game size; template,
+    bounds, collision). Tree: GROUP (0x0003) -> one OBJECT per texture and per "has COLOR_0" (split at the 13-bit `numVerts`) +
+    GROUP 0x0102 -> a
+    6-plane `COLL_VOL` box from the bounds. The OBJECT header and GIF tags come from the stage's first OBJECT that round-trips in
+    `vifpkt` with fog, one texture and the asked ABE (rule `first-object-roundtrip`); strips keep each triangle's winding (a strip
+    that would start at an odd place of its section repeats its first vertex). `blender` units: Z up, meters, 18 game units per
+    meter by default, COLOR_0 linear to sRGB x 128; `game` units: a piece of `lvlglb`'s export, raw colors. Materials `tex<texId>`
+    reuse the stage's textures; other images, `state<N>_*` meshes and skins are refused, `coll_*`/`hull_*` skipped. `--light auto`
+    (default) turns on dirLight (0x100, the stage's three parallel lights) on the OBJECTs without COLOR_0 and leaves it off on the
+    ones with it (light baked in Blender); `vertex` and `dir` force it off or on. `info <prop
+    dir> [--at ADDR]` relocates a prop (default the level arena, 0x3E00000) and reads every node, packet and fixup back;
+    `load_prop(folder)` returns the `Prop` (`ngp`, `ptr`, `root`, `textures`, `bounds`, `relocate(at)`, `resolve(at, ctx_of)`) the
+    level patch uses, and `stage_ctx` the context a texId takes. Standard library only.
   - `ngp.decode_mesh`: port of the native `decodeObject` (texture per section, ADC like the GS, sprites), used by `gltf.py`.
 - `.sh` scripts must be created by heredoc in bash; writing with Python on Windows leaves CRLF and the WSL `sh` breaks (`sed -i 's/\r$//'` fixes it).
 - The per-function state lives in `config/status.csv` (`python3 tools/progress.py`, ~12 s via WSL, needs `disc/`); the README has no progress block.

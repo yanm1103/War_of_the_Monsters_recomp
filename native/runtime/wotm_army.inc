@@ -183,7 +183,7 @@ bool appendArmy(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, const ch
     std::vector<uint8_t> d;
     if (!readArmy(name, d)) return false;
     const uint32_t k = rd8(rdram, countAddr), dst = phys(rd32(rdram, table + 4 * k));
-    const uint32_t ceiling = dst >= PS2_GUEST_RAM_SIZE ? uint32_t(PS2_RAM_SIZE) - 0x100000u : 0x1F10000u;
+    const uint32_t ceiling = dst >= PS2_GUEST_RAM_SIZE ? wotm_mods_hooks::kHighCeiling : 0x1F10000u;
     if (k > 12 || dst < 0xA00000u || dst + d.size() > ceiling)
     {
         std::fprintf(stderr, "[exercito] %s fora: sem espaco (arquivo %u em %#x, %zu bytes)\n", name, k, dst, d.size());
@@ -197,7 +197,8 @@ bool armyLoadWanted(uint8_t *rdram)
 {
     char lvl[9] = {};
     for (int c = 0; c < 8; ++c) lvl[c] = char(std::toupper(rd8(rdram, kFsNames + c)));
-    return poolWanted(rd32(rdram, kGameMode)) && std::strcmp(lvl, "VEGAS") != 0 && lvl[0];
+    const bool vegas = std::strcmp(lvl, "VEGAS") == 0 || (wotm_stages::g_active && wotm_stages::g_active->base->level == 2);   // custom de base VEGAS: o NGP e o dela
+    return poolWanted(rd32(rdram, kGameMode)) && !vegas && lvl[0];
 }
 void loadResHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
