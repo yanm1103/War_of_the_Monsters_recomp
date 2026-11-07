@@ -18,7 +18,8 @@
 // Pedestrian coordinates: x and y are the street, the third is the height (0 on the ground), the same axes as a monster's locators
 // (z up). Grab and eat are confirmed in a fight; the carry (the height follows the hand) and the animations are not yet.
 //
-//   WOTM_EAT=1|all        off when unset. 1: Togera only. all: every monster
+//   WOTM_EAT=1|all|list   off when unset. 1: Togera only. all: every monster. A list of monsters by name or type number, e.g.
+//                         togera,preytor,robo-47 (each needs the clips 298/299 in its own model, tools/eatanim.py)
 //   WOTM_EATPLANE=xy|xz   which monster coordinates line up with a civilian's (x, y): xy (default; z is up) or xz
 //   WOTM_EATLIFT=0        the carried civilian stays on the ground; by default its height (third coordinate) follows the hand
 //   WOTM_EATHEAL=<n>      health restored per civilian, percent of the monster's maximum (default 5)
@@ -48,6 +49,7 @@ constexpr uint32_t kTogera = 3;   // monster index (type bits >> 5): lizard
 struct Config
 {
     bool on = false, all = false, planeXZ = false, lift = true;
+    uint32_t mask = 0;   // monster types (type bits >> 5) that can eat, one bit each
     float healPct = 5.f, reach = 300.f;
     int points = 25;
 } g_cfg;
@@ -166,7 +168,7 @@ void endClip(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, Hold &hold,
 
 bool canEat(uint32_t m)
 {
-    return g_cfg.all || ((m >> 5) == kTogera);
+    return g_cfg.all || (((g_cfg.mask >> (m >> 5)) & 1u) != 0 && (m >> 5) < 32);
 }
 
 void wrF(uint8_t *rdram, uint32_t a, float v)
@@ -387,7 +389,10 @@ void tick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, in
     h.eating = h.queued = h.tossed = false;
     h.pos = p;
     h.since = now;
-    std::fprintf(stderr, "[eatmod] jogador %d pegou um civil a %.0f (%.1f %.1f)\n", player + 1, d, rdF(rdram, p), rdF(rdram, p + 4));
+    std::fprintf(stderr, "[eatmod] jogador %d pegou um civil a %.0f (%.1f %.1f); mao %.0f %.0f %.0f boca %.0f %.0f %.0f (do monstro)\n", player + 1, d,
+                 rdF(rdram, p), rdF(rdram, p + 4), rdF(rdram, m + kHandR) - rdF(rdram, cs + kCsTrans), rdF(rdram, m + kHandR + 4) - rdF(rdram, cs + kCsTrans + 4),
+                 rdF(rdram, m + kHandR + 8) - rdF(rdram, cs + kCsTrans + 8), rdF(rdram, m + kMouth) - rdF(rdram, cs + kCsTrans),
+                 rdF(rdram, m + kMouth + 4) - rdF(rdram, cs + kCsTrans + 4), rdF(rdram, m + kMouth + 8) - rdF(rdram, cs + kCsTrans + 8));
 }
 
 // Monster::updateLookAt turns the head toward a target (the nearest enemy, the locked or reticle target, a vehicle that can be picked up)
@@ -434,6 +439,31 @@ void install(PS2Runtime &runtime)
         return;
     g_cfg.on = true;
     g_cfg.all = std::strcmp(e, "all") == 0;
+    // A list of monsters: names (togera, preytor, robo-47 ...) or type numbers, separated by commas; "1" alone is Togera
+    static const struct { const char *name; uint32_t type; } kNames[] = {{"congar", 1}, {"robo-47", 2}, {"robo47", 2}, {"robo", 2}, {"togera", 3},
+                                                                          {"ultra-v", 4}, {"ultrav", 4}, {"preytor", 5}, {"spider", 6},
+                                                                          {"kineticlops", 7}, {"magmo", 8}};
+    std::string list = e;
+    for (char &c : list)
+        c = char(std::tolower((unsigned char)c));
+    for (size_t at = 0; at < list.size();)
+    {
+        size_t end = list.find_first_of(", ;", at);
+        const std::string tok = list.substr(at, end == std::string::npos ? std::string::npos : end - at);
+        at = end == std::string::npos ? list.size() : end + 1;
+        if (tok.empty())
+            continue;
+        if (tok == "1")
+            g_cfg.mask |= 1u << kTogera;
+        else if (std::isdigit((unsigned char)tok[0]) && std::atoi(tok.c_str()) < 32)
+            g_cfg.mask |= 1u << std::atoi(tok.c_str());
+        else
+            for (const auto &n : kNames)
+                if (tok == n.name)
+                    g_cfg.mask |= 1u << n.type;
+    }
+    if (!g_cfg.all && !g_cfg.mask)
+        g_cfg.mask = 1u << kTogera;
     if (const char *s = std::getenv("WOTM_EATPLANE"))
         g_cfg.planeXZ = std::strcmp(s, "xz") == 0;
     if (const char *s = std::getenv("WOTM_EATLIFT"))
@@ -449,7 +479,7 @@ void install(PS2Runtime &runtime)
     runtime.registerFunction(kMonsterUpdate, &monsterUpdate);
     if ((g_origLookAt = runtime.lookupFunction(kUpdateLookAt)))
         runtime.registerFunction(kUpdateLookAt, &lookAtUpdate);
-    std::fprintf(stderr, "[eatmod] comer civis ligado (%s; plano %s; vida %.0f%%, %d pontos, alcance %.0f)\n", g_cfg.all ? "todos os monstros" : "Togera",
-                 g_cfg.planeXZ ? "xz" : "xy", g_cfg.healPct, g_cfg.points, g_cfg.reach);
+    std::fprintf(stderr, "[eatmod] comer civis ligado (%s; mascara de tipos 0x%x; plano %s; vida %.0f%%, %d pontos, alcance %.0f)\n",
+                 g_cfg.all ? "todos os monstros" : "so os da lista", g_cfg.mask, g_cfg.planeXZ ? "xz" : "xy", g_cfg.healPct, g_cfg.points, g_cfg.reach);
 }
 } // namespace wotm_eatmod
