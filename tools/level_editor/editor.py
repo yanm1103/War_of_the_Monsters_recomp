@@ -345,7 +345,7 @@ def hex_handle(h):
         return str(h)
 
 
-def check_patch(disc, name, patch, mod_dir=None):
+def check_patch(disc, name, patch, mod_dir=None, pts_root=None):
     """lvl.py patch on a fresh copy of the stage: the log lines, the path cuts and the collision check, and from them a summary,
     the problems ({level: err or warn, text, kind, handle and reason for an entry the game skips}) and notes. mod_dir: the mod
     whose props/ the "props" models come from (None: no mod chosen, so a patch with props says so)."""
@@ -363,7 +363,7 @@ def check_patch(disc, name, patch, mod_dir=None):
                 lp.apply_props(patch, mod_dir)      # the game hook's order: objects, props, pedestrians, then the path cuts
             except lvl.PatchError as err:        # only a full arena gets here (as lvl.py patch)
                 lp.log.append("props: stopped halfway: %s" % err)
-        pts = lvl.stage_points(root, name)
+        pts = lvl.stage_points(pts_root or root, name)
         nets = {"fodder": lvl.net_from_points(pts.get("FOP", [])), "ped": lvl.net_from_points(pts.get("PED", []))}
         try:
             lp.apply_peds(patch, nets)      # the game hook's order: objects, pedestrians, then the path cuts
@@ -500,6 +500,33 @@ def base_of(cfg, name):
     """The game stage whose files a stage name reads: a custom stage's base, else the name itself."""
     c = custom_stages(cfg).get((name or "").upper())
     return c["base"] if c else name
+
+
+def points_root(cfg, name):
+    """A folder with PTS/<BASE>.<ext> for the stage: the base's points, except for the kinds the custom stage's own folder has
+    (any file name with that extension, as the game takes them). None when the stage has no points of its own: use the disc's."""
+    c = custom_stages(cfg).get((name or "").upper())
+    if not c:
+        return None
+    own = {}
+    folder = os.path.join(cfg["mods"], c["mod"], "stages", c["folder"])
+    for f in sorted(os.listdir(folder)):
+        ext = f.rsplit(".", 1)[-1].upper()
+        if ext in lvl.POINT_EXTS and ext not in own and f.upper() != "STAGE.JSON":
+            own[ext] = os.path.join(folder, f)
+    if not own:
+        return None
+    base_root = stage_root(cfg["disc"], c["base"])
+    root = os.path.join(CACHE, "pts-%s-%s" % (disc_key(cfg["disc"]), c["id"].upper()))
+    os.makedirs(os.path.join(root, "PTS"), exist_ok=True)
+    for ext in lvl.POINT_EXTS:
+        src = own.get(ext) or os.path.join(base_root, "PTS", "%s.%s" % (c["base"], ext))
+        dst = os.path.join(root, "PTS", "%s.%s" % (c["base"], ext))
+        if os.path.isfile(src):
+            shutil.copyfile(src, dst)
+        elif os.path.exists(dst):
+            os.remove(dst)
+    return root
 
 
 def new_stage(cfg, b):
@@ -969,7 +996,7 @@ class Handler(BaseHTTPRequestHandler):
                     (sorted(have, key=str.lower)[-1] if have else "")
                 return self.send(200, {"objects": describe(q["name"], objs, on, facts, load_names()), "patch": patch,
                                        "env": stage_env(cfg, cfg["disc"], base, mod),
-                                       "peds": pedsapi.stage_peds(st, stage_root(cfg["disc"], base)),
+                                       "peds": pedsapi.stage_peds(st, points_root(cfg, q["name"]) or stage_root(cfg["disc"], base)),
                                        "have": have, "winner": winner, "others": [m for m in have if m != mod]})
             if u.path == "/api/props":          # the mod's props (props/*/prop.json)
                 return self.send(200, {"props": props_list(cfg, q.get("mod", ""))})
@@ -1031,7 +1058,8 @@ class Handler(BaseHTTPRequestHandler):
                                {"kind": b.get("kind"), "type": b.get("ptype"), "dims": b.get("dims")})
                 return self.send(200, {"ok": True, "file": USER_NAMES})
             if self.path == "/api/check":
-                return self.send(200, check_patch(cfg["disc"], base_of(cfg, b["name"]), b["patch"], mod_folder(cfg, b.get("mod"))))
+                return self.send(200, check_patch(cfg["disc"], base_of(cfg, b["name"]), b["patch"], mod_folder(cfg, b.get("mod")),
+                                                  points_root(cfg, b["name"])))
             if self.path == "/api/paths":       # Settings' badges for what is typed (nothing is saved)
                 return self.send(200, path_states(b))
             if self.path == "/api/props/import":   # Import .glb: a new prop in the mod, built for the open stage
@@ -1072,7 +1100,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(409, {"error": "the game is already open", "code": "running", "stage": GAME["stage"]})
                 if self.path == "/api/test" and not b.get("save", True):
                     return self.send(200, {"ok": True, "lines": [], "launched": launch_game(cfg, name, b.get("training", True))})
-                res = check_patch(cfg["disc"], base_of(cfg, name), b["patch"], mod_folder(cfg, mod))
+                res = check_patch(cfg["disc"], base_of(cfg, name), b["patch"], mod_folder(cfg, mod), points_root(cfg, name))
                 res["saved"] = save_patch(cfg, mod, name, b["patch"])
                 # another mod with this stage's file that loads later wins in the game: the page says so (not a check problem)
                 res["winner"] = patch_winner(cfg, mod, name)

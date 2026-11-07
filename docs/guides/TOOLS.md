@@ -50,11 +50,12 @@
     `own<slot>`) and a `prop.json` (stage, slot -> texId or the prop's own image: `<NAME>_T<slot>.png`, packet offset, game size; template,
     bounds, collision). Tree: GROUP (0x0003) -> one OBJECT per texture and per "has COLOR_0" (split at the 13-bit `numVerts`) +
     GROUP 0x0102 -> a
-    6-plane `COLL_VOL` box from the bounds. The OBJECT header and GIF tags come from the stage's first OBJECT that round-trips in
+    6-plane `COLL_VOL` box from the bounds (or the `hull_*` planes). The OBJECT header and GIF tags come from the stage's first OBJECT that round-trips in
     `vifpkt` with fog, one texture and the asked ABE (rule `first-object-roundtrip`); strips keep each triangle's winding (a strip
     that would start at an odd place of its section repeats its first vertex). `blender` units: Z up, meters, 18 game units per
     meter by default, COLOR_0 linear to sRGB x 128; `game` units: a piece of `lvlglb`'s export, raw colors. Materials `tex<texId>`
-    reuse the stage's textures; other images, `state<N>_*` meshes and skins are refused, `coll_*`/`hull_*` skipped. `--light auto`
+    reuse the stage's textures; other images, `state<N>_*` meshes and skins are refused, `coll_*` skipped. A `hull_*` mesh is the prop's collision: the convex hull of its vertices (at most 64 distinct, at most 40
+    faces) becomes a `COLL_VOL` of its planes, one leaf per `hull_*` mesh; without one, the 6-plane box of the visual stands in. `--light auto`
     (default) turns on dirLight (0x100, the stage's three parallel lights) on the OBJECTs without COLOR_0 and leaves it off on the
     ones with it (light baked in Blender); `vertex` and `dir` force it off or on. `info <prop
     dir> [--at ADDR]` relocates a prop (default the level arena, 0x3E00000) and reads every node, packet and fixup back;
