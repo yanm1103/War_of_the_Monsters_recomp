@@ -18,7 +18,7 @@ import lvl      # noqa: E402
 import lvlprop  # noqa: E402
 
 
-def make_glb(path, hull_pts, hull_tris, yoff=0.0, coll=None):
+def make_glb(path, hull_pts, hull_tris, yoff=0.0, coll=None, extra=()):
     """Two meshes: `vis` (a 2 m cube, vertex color only) and `hull_pyr` (the given points and triangles); Blender meters, Y up."""
     cube = [(-1, 0, -1), (1, 0, -1), (1, 2, -1), (-1, 2, -1), (-1, 0, 1), (1, 0, 1), (1, 2, 1), (-1, 2, 1)]
     cube = [(x, y + yoff, z) for x, y, z in cube]
@@ -51,6 +51,12 @@ def make_glb(path, hull_pts, hull_tris, yoff=0.0, coll=None):
     if coll:
         meshes.append(mesh(*coll))
         nodes.append({"mesh": len(meshes) - 1, "name": "coll_wall"})
+    for name, epts, eidx in extra:      # more meshes by name (state1_..., state1_coll_...); no mesh when epts is None
+        if epts is None:
+            nodes.append({"name": name})
+            continue
+        meshes.append(mesh(epts, eidx))
+        nodes.append({"mesh": len(meshes) - 1, "name": name})
     j = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": list(range(len(nodes)))}],
          "nodes": nodes, "meshes": meshes, "accessors": accs,
          "bufferViews": views, "buffers": [{"byteLength": len(blobs)}]}

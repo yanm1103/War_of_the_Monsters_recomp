@@ -56,6 +56,10 @@ MAX_NUMVERTS = 0x1FFF          # _hierobject.bits.numVerts, 13 bits
 ARENA = 0x3E00000              # the level patch arena (PS2_RAM_SIZE - 2 MB), info's default address
 ROOT_FLAGS = 0x0003            # visual + collision, no option byte (hdTraversePath stops at flags & (option << 8))
 COLL_FLAGS = 0x0102            # the GROUP the stages' building collision leaves hang from
+MAX_STATES = 4                 # states of a destructible prop (the .glb's state0_, state1_...)
+# hit point classes (docs/FORMATS.md, "Destructibles"): health 10, 50, 100, 150, 250; class 1 takes any damage, the rest over 5
+STRENGTH = {1: 10, 2: 50, 3: 100, 4: 150, 5: 250}
+DEFAULT_STRENGTH = 2
 COLL_MATID = 1                 # matId of the monsters' and 3-MILE's box hulls
 OP_OBJECT, OP_GROUP, OP_COLL_VOL, OP_POLY_COLL = 0, 1, 10, 42
 POLY_MATID = 0x010A            # matId of the stages' building faces (the same on every triangle of a coll_ mesh)
@@ -388,7 +392,9 @@ def own_ctx(tw, th, tex1):
 
 def read_glb(path, units, scale=None, height=None, warn=print):
     """Triangles of the .glb in the game's axes and units: ({key: [((x, y, z), n8, uv16, rgba) x 3]}, scale, stats).
-    key = ("tex", texId, vc) or ("color", vc); vc: the triangles came with COLOR_0."""
+    key = ("tex", texId, vc) or ("color", vc); vc: the triangles came with COLOR_0. The result is state 0's (the meshes with no
+    prefix); a mesh named state<N>_... belongs to state N of a destructible prop (stats["more"][N] = {"by_key", "hulls",
+    "colls"}), and stats["declared"] lists every state a node names, a node without a mesh included (an empty state)."""
     glb = ngpmesh.Glb(path)
     j = glb.j
     nodes = glb.nodes
@@ -401,8 +407,13 @@ def read_glb(path, units, scale=None, height=None, warn=print):
             continue
         world[i] = _mat_mul(pm, _node_local(nodes[i]))
         stack.extend((k, world[i]) for k in nodes[i].get("children", []))
-    raw = {}           # key -> [[corner, corner, corner]] with corners (pos glTF world, normal, uv, color linear/raw)
+    raw = {}           # state -> key -> [[corner, corner, corner]] with corners (pos glTF world, normal, uv, color linear/raw)
     skipped, hull_raw, coll_raw = [], [], []
+    declared = {0}
+    for nd in nodes:
+        sm = re.match(r"state(\d+)_", (nd.get("name") or "").lower())
+        if sm:
+            declared.add(int(sm.group(1)))
     for i, m in sorted(world.items()):
         nd = nodes[i]
         if "mesh" not in nd:
@@ -410,12 +421,16 @@ def read_glb(path, units, scale=None, height=None, warn=print):
         mesh = j["meshes"][nd["mesh"]]
         name = nd.get("name") or mesh.get("name") or "node%d" % i
         low = name.lower()
+        sm = re.match(r"state(\d+)_(.*)", low)
+        sidx = int(sm.group(1)) if sm else 0
+        if sm:
+            low = sm.group(2)
         if low.startswith("hull_"):          # a convex hull: its vertices, the planes come later (convex_planes)
             pts = []
             for prim in mesh.get("primitives", []):
                 for q in glb.accessor(prim["attributes"]["POSITION"]):
                     pts.append(tuple(m[r][0] * q[0] + m[r][1] * q[1] + m[r][2] * q[2] + m[r][3] for r in range(3)))
-            hull_raw.append((name, pts))
+            hull_raw.append((sidx, name, pts))
             continue
         if low.startswith("coll_"):          # collision by triangles: the mesh's own vertices and faces, no tree
             cv, ct = [], []
@@ -426,10 +441,8 @@ def read_glb(path, units, scale=None, height=None, warn=print):
                 cv += [tuple(m[r][0] * q[0] + m[r][1] * q[1] + m[r][2] * q[2] + m[r][3] for r in range(3)) for q in pos]
                 tr = [tuple(base + i for i in idx[k:k + 3]) for k in range(0, len(idx) - 2, 3)]
                 ct += [(b, a, c) if _det3(m) < 0 else (a, b, c) for a, b, c in tr]
-            coll_raw.append((name, cv, ct))
+            coll_raw.append((sidx, name, cv, ct))
             continue
-        if re.match(r"state\d+_", low):
-            raise PropError("mesh %s: destructible states are not supported yet (a static prop only)" % name)
         if "skin" in nd:
             raise PropError("mesh %s has a skin: a prop is static (apply the armature in Blender first)" % name)
         nm = _normal_matrix(m)
@@ -457,18 +470,23 @@ def read_glb(path, units, scale=None, height=None, warn=print):
                 t = uv[v] if uv is not None else None
                 c = tuple(col[v]) + ((1.0,) if len(col[v]) == 3 else ()) if col is not None else None
                 return wp, n, t, c, factor
-            lst = raw.setdefault(key, [])
+            lst = raw.setdefault(sidx, {}).setdefault(key, [])
             for k in range(0, len(idx) - 2, 3):
                 tri = [corner(idx[k]), corner(idx[k + 1]), corner(idx[k + 2])]
                 if flip:
                     tri = [tri[0], tri[2], tri[1]]
                 lst.append(tri)
-    if not any(raw.values()):
-        raise PropError("%s: no triangles to draw" % path)
+    if not any((raw.get(0) or {}).values()):
+        raise PropError("%s: no triangles to draw%s" % (path, " in state 0 (the meshes with no state prefix)" if len(declared) > 1 else ""))
+    declared |= set(raw) | {x[0] for x in hull_raw} | {x[0] for x in coll_raw}
+    if sorted(declared) != list(range(len(declared))):
+        raise PropError("%s: the states are %s; they must be 0, 1, 2... with none missing" % (path, sorted(declared)))
+    if len(declared) > MAX_STATES:
+        raise PropError("%s: %d states, at most %d" % (path, len(declared), MAX_STATES))
 
     def game(p):                    # glTF Y up -> game Z up
         return (p[0], -p[2], p[1])
-    zs = [game(c[0])[2] for tris in raw.values() for t in tris for c in t]
+    zs = [game(c[0])[2] for sd in raw.values() for tris in sd.values() for t in tris for c in t]
     if scale:
         s = scale
     elif height:
@@ -485,53 +503,60 @@ def read_glb(path, units, scale=None, height=None, warn=print):
     def place(q):
         x, y, z = (x * s for x in game(q))
         return (_f32(x), _f32(y), _f32(z + zlift))
-    out, stats = {}, {"degenerate": 0, "triangles": 0, "hulls": [], "colls": [], "lift": zlift}
-    for cname, cverts, ctris in coll_raw:
-        stats["colls"].append((cname, [place(q) for q in cverts], ctris))
-    for hname, hpts in hull_raw:
-        stats["hulls"].append((hname, [place(q) for q in hpts]))
-    for key, tris in raw.items():
-        for t in tris:
-            lst = out.setdefault(key + (t[0][3] is not None,), [])   # the triangles with COLOR_0 apart (the `auto` light)
-            cs = []
-            for wp, n, uvv, c, factor in t:
-                p = place(wp)
-                if n is None:
-                    n8 = None
-                else:
-                    g = game(n)
-                    ln = math.sqrt(sum(x * x for x in g))
-                    n8 = tuple(max(-127, min(127, int(round(x / ln * 127)))) for x in g) if ln > 1e-12 else None
-                if key[0] in ("tex", "img"):
-                    uvv = uvv if uvv is not None else (0.0, 0.0)
-                    uv16 = tuple(max(-32768, min(32767, int(round(x * 4096)))) for x in uvv)
-                else:
-                    uv16 = (4096, 4096)      # untextured: PRIM.TME 0; the stages' files have 1.0 there
-                if units == "blender":
-                    lin = c if c is not None else (1.0, 1.0, 1.0, 1.0)
-                    lin = tuple(a * b for a, b in zip(lin, factor))
-                    rgba = tuple(min(255, int(round(_srgb(x) * 128))) for x in lin[:3]) + (
-                        min(255, max(0, int(round(lin[3] * 128)))),)
-                else:
-                    if c is None:
-                        rgba = tuple(min(255, int(round(0x80 * f))) for f in factor)
+    stats = {"degenerate": 0, "triangles": 0, "hulls": [], "colls": [], "lift": zlift, "declared": sorted(declared), "more": {}}
+    per = {si: {"by_key": {}, "hulls": [], "colls": []} for si in sorted(declared)}
+    for si, cname, cverts, ctris in coll_raw:
+        per[si]["colls"].append((cname, [place(q) for q in cverts], ctris))
+    for si, hname, hpts in hull_raw:
+        per[si]["hulls"].append((hname, [place(q) for q in hpts]))
+    for si, sd in sorted(raw.items()):
+        out = per[si]["by_key"]
+        for key, tris in sd.items():
+            for t in tris:
+                lst = out.setdefault(key + (t[0][3] is not None,), [])   # the triangles with COLOR_0 apart (the `auto` light)
+                cs = []
+                for wp, n, uvv, c, factor in t:
+                    p = place(wp)
+                    if n is None:
+                        n8 = None
                     else:
-                        rgba = tuple(min(255, max(0, int(round(x * 255 * f)))) for x, f in zip(c, factor))
-                cs.append([p, n8, uv16, rgba])
-            if cs[0][0] == cs[1][0] or cs[1][0] == cs[2][0] or cs[0][0] == cs[2][0]:
-                stats["degenerate"] += 1
-                continue
-            for c in cs:            # a corner without a normal takes the face's
-                if c[1] is None:
-                    a, b, d = (cs[0][0], cs[1][0], cs[2][0])
-                    u = [b[k] - a[k] for k in range(3)]
-                    v = [d[k] - a[k] for k in range(3)]
-                    fn = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
-                    ln = math.sqrt(sum(x * x for x in fn)) or 1.0
-                    c[1] = tuple(max(-127, min(127, int(round(x / ln * 127)))) for x in fn)
-            lst.append(tuple(tuple(c) for c in cs))
-            stats["triangles"] += 1
-    return {k: v for k, v in out.items() if v}, s, stats
+                        g = game(n)
+                        ln = math.sqrt(sum(x * x for x in g))
+                        n8 = tuple(max(-127, min(127, int(round(x / ln * 127)))) for x in g) if ln > 1e-12 else None
+                    if key[0] in ("tex", "img"):
+                        uvv = uvv if uvv is not None else (0.0, 0.0)
+                        uv16 = tuple(max(-32768, min(32767, int(round(x * 4096)))) for x in uvv)
+                    else:
+                        uv16 = (4096, 4096)      # untextured: PRIM.TME 0; the stages' files have 1.0 there
+                    if units == "blender":
+                        lin = c if c is not None else (1.0, 1.0, 1.0, 1.0)
+                        lin = tuple(a * b for a, b in zip(lin, factor))
+                        rgba = tuple(min(255, int(round(_srgb(x) * 128))) for x in lin[:3]) + (
+                            min(255, max(0, int(round(lin[3] * 128)))),)
+                    else:
+                        if c is None:
+                            rgba = tuple(min(255, int(round(0x80 * f))) for f in factor)
+                        else:
+                            rgba = tuple(min(255, max(0, int(round(x * 255 * f)))) for x, f in zip(c, factor))
+                    cs.append([p, n8, uv16, rgba])
+                if cs[0][0] == cs[1][0] or cs[1][0] == cs[2][0] or cs[0][0] == cs[2][0]:
+                    stats["degenerate"] += 1
+                    continue
+                for c in cs:            # a corner without a normal takes the face's
+                    if c[1] is None:
+                        a, b, d = (cs[0][0], cs[1][0], cs[2][0])
+                        u = [b[k] - a[k] for k in range(3)]
+                        v = [d[k] - a[k] for k in range(3)]
+                        fn = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+                        ln = math.sqrt(sum(x * x for x in fn)) or 1.0
+                        c[1] = tuple(max(-127, min(127, int(round(x / ln * 127)))) for x in fn)
+                lst.append(tuple(tuple(c) for c in cs))
+                stats["triangles"] += 1
+    for si in per:
+        per[si]["by_key"] = {k: v for k, v in per[si]["by_key"].items() if v}
+    stats["more"] = {si: per[si] for si in per if si}
+    stats["hulls"], stats["colls"] = per[0]["hulls"], per[0]["colls"]
+    return per[0]["by_key"], s, stats
 
 
 # ---------------------------------------------------------------- packets and OBJECTs
@@ -644,6 +669,7 @@ class Mini:
 
 
 def _sphere(pts):
+    pts = pts or [(0.0, 0.0, 0.0)]          # an empty state: a point at the origin
     lo = [min(p[c] for p in pts) for c in range(3)]
     hi = [max(p[c] for p in pts) for c in range(3)]
     ctr = [0.5 * (a + b) for a, b in zip(lo, hi)]
@@ -825,8 +851,9 @@ def box_hull(mb, lo, hi, matid=COLL_MATID):
 # ---------------------------------------------------------------- build
 
 def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, name=None, title=None, light="auto",
-          disc=None, abe=1, preview_tex=False, log=print):
-    """Writes the prop into out_dir; returns the prop.json dict."""
+          disc=None, abe=1, preview_tex=False, strength=DEFAULT_STRENGTH, log=print):
+    """Writes the prop into out_dir; returns the prop.json dict. A .glb with meshes named state1_..., state2_... makes a
+    destructible prop (strength: its hit point class, 1..5, STRENGTH)."""
     import lvl
     if units not in ("blender", "game"):
         raise PropError("--units is blender or game")
@@ -838,7 +865,15 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
     disc = disc or os.path.join(lvl.REPO, "disc")
     stage = stage.upper()
     st = lvl.Stage(stage, disc)
-    by_key, s, gstats = read_glb(glb_path, units, scale, height, log)
+    by_key0, s, gstats = read_glb(glb_path, units, scale, height, log)
+    states = [(0, by_key0, gstats["hulls"], gstats["colls"])] + [
+        (si, d["by_key"], d["hulls"], d["colls"]) for si, d in sorted(gstats["more"].items())]
+    by_key = {}                         # every state's triangles: the textures and images are shared
+    for _si, bk, _h, _c in states:
+        for k, v in bk.items():
+            by_key.setdefault(k, []).extend(v)
+    if len(states) > 1 and strength not in STRENGTH:
+        raise PropError("strength %r: the hit point class is one of %s" % (strength, sorted(STRENGTH)))
 
     tmpl, abe = find_template(st, abe)
     header, gif0, gifn = template_parts(st, tmpl)
@@ -899,40 +934,54 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
                 log("warning: image %s has UVs outside 0..1 and the stage clamps (CLAMP_1 %s): the edge texels stretch" % (
                     iname, clamp))
 
-    kids, stats_obj, all_pts = [], [], []
     ntris = nverts = pbytes = 0
-    for key in sorted(by_key, key=lambda k: (korder[k[0]], k[1:])):
-        tris = [tuple((tuple(_fbits(x) for x in c[0]), c[1], c[2], c[3]) for c in t) for t in by_key[key]]
-        textured = key[0] in ("tex", "img")
-        lt = light if light != "auto" else ("vertex" if key[-1] else "dir")
-        for grp in split_objects(level_batches(tris, gif0, gifn, textured)):
-            slot = slot_of[key[:2]] if textured else None
-            a, nv, nb = level_object(mb, header, grp, slot, lt, own_ctx_of.get(slot))
-            kids.append(a)
-            stats_obj.append({"object": "0x%X" % a, "texId": key[1] if key[0] == "tex" else None,
-                              "image": key[1] if key[0] == "img" else None, "vertices": nv, "light": lt})
-            nverts += nv
-            pbytes += nb
-            all_pts += _batch_points(grp)
-        ntris += len(tris)
-    _ctr, _rad, lo, hi = _sphere(all_pts)
-    hulls = []
-    for hname, hpts in gstats["hulls"]:
-        planes = convex_planes(hpts)
-        cv, hlo, hhi = hull_volume(mb, planes, hpts)
-        hulls.append({"mesh": hname, "node": "0x%X" % cv, "planes": len(planes),
-                      "min": [round(x, 4) for x in hlo], "max": [round(x, 4) for x in hhi]})
-        log("collision hull %s: %d planes" % (hname, len(planes)))
-    polys = []
-    for cname, cverts, ctris in gstats["colls"]:
-        leaf, plo, phi = poly_coll(mb, cverts, ctris)
-        polys.append({"mesh": cname, "node": "0x%X" % leaf, "triangles": len(ctris),
-                      "min": [round(x, 4) for x in plo], "max": [round(x, 4) for x in phi]})
-        log("collision triangles %s: %d" % (cname, len(ctris)))
-    cvs = [int(h["node"], 16) for h in hulls + polys] or [box_hull(mb, lo, hi)]
-    shape = [tuple(h[k]) for h in hulls + polys for k in ("min", "max")]       # a collision shape may leave the visual's box
-    cg = _group(mb, COLL_FLAGS, cvs, [lo, hi] + shape)
-    root = _group(mb, ROOT_FLAGS, kids + [cg], all_pts + shape)
+    roots, stats_obj, nkids = [], [], 0
+    hulls, polys = [], []               # state 0's, as prop.json lists them
+    all_pts, lo, hi = [], None, None
+    for si, bk, hl, cl in states:
+        kids, spts = [], []
+        for key in sorted(bk, key=lambda k: (korder[k[0]], k[1:])):
+            tris = [tuple((tuple(_fbits(x) for x in c[0]), c[1], c[2], c[3]) for c in t) for t in bk[key]]
+            textured = key[0] in ("tex", "img")
+            lt = light if light != "auto" else ("vertex" if key[-1] else "dir")
+            for grp in split_objects(level_batches(tris, gif0, gifn, textured)):
+                slot = slot_of[key[:2]] if textured else None
+                a, nv, nb = level_object(mb, header, grp, slot, lt, own_ctx_of.get(slot))
+                kids.append(a)
+                stats_obj.append({"object": "0x%X" % a, "state": si, "texId": key[1] if key[0] == "tex" else None,
+                                  "image": key[1] if key[0] == "img" else None, "vertices": nv, "light": lt})
+                nverts += nv
+                pbytes += nb
+                spts += _batch_points(grp)
+            ntris += len(tris)
+        nkids += len(kids)
+        slo = shi = None
+        if spts:
+            _c, _r, slo, shi = _sphere(spts)
+        if si == 0:
+            lo, hi = slo, shi
+        hs, ps = [], []
+        for hname, hpts in hl:
+            planes = convex_planes(hpts)
+            cv, hlo, hhi = hull_volume(mb, planes, hpts)
+            hs.append({"mesh": hname, "node": "0x%X" % cv, "planes": len(planes),
+                       "min": [round(x, 4) for x in hlo], "max": [round(x, 4) for x in hhi]})
+            log("collision hull %s%s: %d planes" % ("state%d_" % si if si else "", hname, len(planes)))
+        for cname, cverts, ctris in cl:
+            leaf, plo, phi = poly_coll(mb, cverts, ctris)
+            ps.append({"mesh": cname, "node": "0x%X" % leaf, "triangles": len(ctris),
+                       "min": [round(x, 4) for x in plo], "max": [round(x, 4) for x in phi]})
+            log("collision triangles %s%s: %d" % ("state%d_" % si if si else "", cname, len(ctris)))
+        cvs = [int(h["node"], 16) for h in hs + ps]
+        if si == 0:
+            hulls, polys = hs, ps
+            cvs = cvs or [box_hull(mb, lo, hi)]
+        shape = [tuple(h[k]) for h in hs + ps for k in ("min", "max")]       # a collision shape may leave the visual's box
+        sp = spts + shape
+        all_pts += sp
+        groups = kids + ([_group(mb, COLL_FLAGS, cvs, ([slo, shi] if slo else []) + shape)] if cvs else [])
+        roots.append(_group(mb, ROOT_FLAGS, groups, sp))
+    root = roots[0]
     mb.u32(BASE, 1)
     mb.u32(BASE + 4, root)
     mb.d += bytes((-len(mb.d)) % 16)
@@ -960,13 +1009,16 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
                       "matId": COLL_MATID},
             "objects": stats_obj, "triangles": ntris, "vertices": nverts, "packetBytes": pbytes, "bytes": len(mb.d),
             "root": "0x%X" % root, "files": {"ngp": name + ".NGP", "ptr": name + ".PTR", "preview": name + ".preview.glb"}}
+    if len(roots) > 1:
+        meta["kind"] = "destructible"
+        meta["destructible"] = {"class": strength, "states": ["0x%X" % r for r in roots]}
     with open(os.path.join(out_dir, "prop.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=1)
         f.write("\n")
     prop = load_prop(out_dir)
     preview(prop, st, disc, stem + ".preview.glb", preview_tex)
     log("%s: %d triangles (%d degenerate dropped) in %d OBJECTs, %d bytes (%d of packets, %.1f per triangle), scale %.4g, "
-        "bounds %s .. %s" % (name, ntris, gstats["degenerate"], len(kids), len(mb.d), pbytes, len(mb.d) / max(1, ntris), s,
+        "bounds %s .. %s" % (name, ntris, gstats["degenerate"], nkids, len(mb.d), pbytes, len(mb.d) / max(1, ntris), s,
                              [round(x, 2) for x in lo], [round(x, 2) for x in hi]))
     return meta
 
@@ -988,6 +1040,18 @@ class Prop:
         self.root = struct.unpack_from("<I", ngp_bytes, 4)[0] - BASE
         if not 0 <= self.root < len(ngp_bytes):
             raise PropError("%s: root outside the image" % folder)
+        self.destructible = meta.get("destructible")        # {"class", "states": [root addresses]} or None
+        self.states = [self.root]
+        if self.destructible:
+            try:
+                self.states = [int(x, 16) - BASE for x in self.destructible["states"]]
+                cls = int(self.destructible["class"])
+            except (KeyError, TypeError, ValueError):
+                raise PropError("%s: prop.json \"destructible\" needs \"class\" and \"states\"" % folder)
+            if not 2 <= len(self.states) <= MAX_STATES or self.states[0] != self.root or cls not in STRENGTH or                     any(not 0 <= x < len(ngp_bytes) for x in self.states):
+                raise PropError("%s: prop.json \"destructible\": %d states (2 to %d, the first the root), class %r (1 to 5)" % (
+                    folder, len(self.states), MAX_STATES, cls))
+            self.strength = cls
 
     @property
     def size(self):
@@ -1098,7 +1162,8 @@ def check(prop, at=ARENA, log=print):
             raise PropError("packet of slot %d at +0x%X is not a CT32 %dx%d" % (t["slot"], o, tw, th))
     tris = verts = nobj = 0
     pts, hulls = [], []
-    for n, op in walk(img, root):
+    first = {n for n, _op in walk(img, root)}
+    for n, op in [x for r in prop.states for x in walk(img, at + r)]:
         if op == OP_OBJECT:
             nobj += 1
             rp = _rigid_packet(img, n)
@@ -1114,8 +1179,9 @@ def check(prop, at=ARENA, log=print):
             verts += nv
             md = ngp.decode_mesh(img, n)
             tris += len(md.tris) // 3
-            pts += [(v.x, v.y, v.z) for v in md.tris]
-        elif op in (OP_COLL_VOL, OP_POLY_COLL):
+            if n in first:
+                pts += [(v.x, v.y, v.z) for v in md.tris]
+        elif op in (OP_COLL_VOL, OP_POLY_COLL) and n in first:
             hulls.append(lvl.aabb(lvl.leaf_points(img, n)))
     lo = [min(p[c] for p in pts) for c in range(3)]
     hi = [max(p[c] for p in pts) for c in range(3)]
@@ -1252,7 +1318,7 @@ def preview(prop, st, disc, out, textures=False):
 def main(argv):
     args = [a for a in argv if not a.startswith("--")]
     opts = {}
-    for opt in ("--stage", "--units", "--scale", "--height", "--name", "--title", "--light", "--disc", "--at"):
+    for opt in ("--stage", "--units", "--scale", "--height", "--name", "--title", "--light", "--disc", "--at", "--strength"):
         if opt in argv:
             v = argv[argv.index(opt) + 1]
             args.remove(v)
@@ -1265,7 +1331,7 @@ def main(argv):
             build(args[1], args[2], opts["stage"], opts.get("units", "blender"),
                   float(opts["scale"]) if "scale" in opts else None, float(opts["height"]) if "height" in opts else None,
                   opts.get("name"), opts.get("title"), opts.get("light", "auto"), opts.get("disc"),
-                  preview_tex="--preview-tex" in argv)
+                  preview_tex="--preview-tex" in argv, strength=int(opts.get("strength", DEFAULT_STRENGTH)))
             return 0
         if len(args) == 2 and args[0] == "info":
             check(load_prop(args[1]), int(opts["at"], 0) if "at" in opts else ARENA)

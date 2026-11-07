@@ -22,7 +22,11 @@ struct PropModel
     struct Own { uint32_t slot, packet, w, h; std::string png; };
     std::vector<Own> own;                 // texturas proprias: pacote CT32 na imagem, PNG ao lado
     uint32_t root = 0;                    // deslocamento da raiz na imagem
+    std::vector<uint32_t> states;         // destrutivel: a raiz de cada estado (a primeira e a raiz); vazio num prop estatico
+    uint32_t strength = 0;                // destrutivel: a classe de pontos de vida (1 a 5)
 };
+constexpr uint32_t kMaxPropStates = 4;
+constexpr uint32_t kStrengthHp[6] = {0, 10, 50, 100, 150, 250};
 
 // Texturas proprias dos props da carga atual: texId -> PNG que a cena nativa desenha no lugar da copia de 128 do jogo
 // (wotmPropTexture, lido pela thread da cena)
@@ -83,6 +87,21 @@ std::string loadPropModel(const std::filesystem::path &dir, PropModel &m)
     if (m.ngp.size() < 16 || rd(m.ngp, 0) != 1) return "a palavra 0 da imagem nao e 1";
     m.root = rd(m.ngp, 4) - kBase;
     if (m.root >= m.ngp.size()) return "raiz fora da imagem";
+    if (const json::Value *d = meta.get("destructible"); d && d->type == json::Value::Obj)
+    {
+        const json::Value *cls = d->get("class"), *sts = d->get("states");
+        if (!cls || !cls->isInt() || !sts || sts->type != json::Value::Arr) return "\"destructible\" sem \"class\" e \"states\"";
+        for (const json::Value &x : sts->arr)
+        {
+            if (x.type != json::Value::Str) return "\"destructible\": estado que nao e um endereco";
+            const uint32_t a = uint32_t(std::strtoul(x.s.c_str(), nullptr, 16));
+            if (a < kBase || a - kBase >= m.ngp.size()) return "\"destructible\": raiz de estado fora da imagem";
+            m.states.push_back(a - kBase);
+        }
+        m.strength = uint32_t(cls->asInt());
+        if (m.states.size() < 2 || m.states.size() > kMaxPropStates || m.states[0] != m.root || m.strength < 1 || m.strength > 5)
+            return fmt("\"destructible\": %zu estados (2 a %u, o primeiro e a raiz), classe %u (1 a 5)", m.states.size(), kMaxPropStates, m.strength);
+    }
     for (const PropModel::Own &o : m.own)
     {
         const uint32_t bits = rd(m.ngp, size_t(o.packet) + 0xC);
@@ -172,7 +191,13 @@ void propChains(const Stage &st, uint32_t n, std::vector<uint32_t> &chain, std::
     chain.pop_back();
 }
 
-struct PropMade { uint32_t tr, root; std::vector<std::vector<uint32_t>> chains; };
+struct PropMade
+{
+    uint32_t tr, root;
+    std::vector<std::vector<uint32_t>> chains;   // da raiz (ou do INTERACTIVE_STATE, no destrutivel) a cada folha
+    uint32_t ist = 0, destr = 0;                 // destrutivel: os nos desta instancia
+    std::vector<uint32_t> sroots;                // destrutivel: a raiz de cada estado, comum as instancias
+};
 
 void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::filesystem::path &modDir, const std::string &stageName)
 {
@@ -218,6 +243,7 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
     {
         const std::vector<Ent> &ents = models[name];
         const uint32_t top = st.arenaTop;
+        const int64_t iu0 = st.interUsed;
         try
         {
             const std::filesystem::path pdir = childNoCase(modDir, "props"), dir = pdir.empty() ? pdir : childNoCase(pdir, name);
@@ -303,9 +329,16 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
                 st.w32(ti + 12, 0);
             }
             const uint32_t root = at + pm.root;
+            const bool dstr = !pm.states.empty();
+            std::vector<uint32_t> sroots;
             std::vector<std::vector<uint32_t>> chains;
             std::vector<uint32_t> chain;
-            propChains(st, root, chain, chains, 0);
+            if (dstr)
+                for (uint32_t o : pm.states) sroots.push_back(at + o);
+            else
+                sroots.push_back(root);
+            for (uint32_t r : sroots) propChains(st, r, chain, chains, 0);   // um estado por vez (a unica raiz de um prop estatico)
+            const uint32_t nSt = uint32_t(sroots.size());
             std::vector<PropMade> mine;
             int64_t need = 0;
             for (const Ent &en : ents)
@@ -313,6 +346,23 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
                 const uint32_t tTop = st.arenaTop;
                 const bool turn = std::fabs(std::remainder(en.hd, 360.0)) > 1e-6;
                 const uint32_t t = st.alloc(turn ? 0x54 : 0x20, 16);
+                uint32_t ist = 0, destr = 0;
+                if (dstr)
+                {   // T|R -> INTERACTIVE_STATE -> DESTRUCTIBLE -> uma raiz por estado (FORMATS.md); o limiar de cada estado e a vida que resta
+                    ist = st.alloc(0x10, 16);
+                    destr = st.alloc(0xC + 12 * nSt, 16);
+                    st.w32(ist, INTERACTIVE);
+                    st.w32(ist + 0xC, destr);
+                    st.w32(destr, DESTRUCTIBLE);
+                    st.w16(destr + 4, uint16_t(pm.strength));
+                    st.w16(destr + 0xA, uint16_t(nSt));
+                    for (uint32_t i = 0; i < nSt; ++i)
+                    {
+                        st.w32(destr + 0xC + 12 * i, sroots[i]);
+                        st.w16(destr + 0xC + 12 * i + 8, i + 1 < nSt ? uint16_t(std::lround(65535.0 * (nSt - 1 - i) / nSt)) : 0);
+                    }
+                }
+                const uint32_t below = ist ? ist : root;
                 if (turn)
                 {
                     const double cs = std::cos(en.hd * kPi / 180.0), sn = std::sin(en.hd * kPi / 180.0);
@@ -321,19 +371,34 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
                     st.w32(t + 8, 1);
                     for (int r = 0; r < 4; ++r)
                         for (int c = 0; c < 4; ++c) st.wf32(t + 0x10 + 16 * r + 4 * c, rows[r][c]);
-                    st.w32(t + 0x50, root);
+                    st.w32(t + 0x50, below);
                 }
                 else
                 {
                     st.w32(t, TRANSLATE);
                     st.w32(t + 8, 1);
                     for (int i = 0; i < 3; ++i) st.wf32(t + 0x10 + 4 * i, en.pos.v[i]);
-                    st.w32(t + 0x1C, root);
+                    st.w32(t + 0x1C, below);
                 }
                 int64_t cost = 4;
                 std::string bad;
-                for (const std::vector<uint32_t> &ch : chains)
+                if (dstr)
                 {
+                    cost += 0x10 + 15 + 0xC + 12 * nSt + 15;
+                    if (st.interUsed + 1 > kInteractives)
+                        bad = fmt("a fase nao tem vaga de Interactives (%lld de %lld ocupadas)", (long long)st.interUsed, (long long)kInteractives);
+                }
+                std::vector<std::vector<uint32_t>> full;
+                for (const std::vector<uint32_t> &c0 : chains)
+                {
+                    std::vector<uint32_t> c1;
+                    if (dstr) c1 = {ist, destr};
+                    c1.insert(c1.end(), c0.begin(), c0.end());
+                    full.push_back(std::move(c1));
+                }
+                for (const std::vector<uint32_t> &ch : full)
+                {
+                    if (!bad.empty()) break;
                     Box lb, bb;
                     if (!aabb(st.leafPoints(ch.back()), lb)) { bad = fmt("folha %07x sem pontos", ch.back()); break; }
                     std::vector<uint32_t> nodes{t};
@@ -359,22 +424,28 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
                     ++st.stats["skipped"];
                     continue;
                 }
-                mine.push_back({t, root, chains});
+                mine.push_back({t, root, full, ist, destr, dstr ? sroots : std::vector<uint32_t>{}});
                 need += cost;
+                if (dstr) ++st.interUsed;
             }
             if (mine.empty())
             {
                 st.rollback(top);
+                st.interUsed = iu0;
                 continue;
             }
             if (need + (made.empty() ? kReserveGroup : 0) > int64_t(st.arenaFree()))
             {
                 st.rollback(top);
+                st.interUsed = iu0;
                 throw PatchError(fmt("modelo %s: %zu entradas levam ate %lld bytes a mais, a arena tem %u livres", name.c_str(), mine.size(),
                                      (long long)need, st.arenaFree()));
             }
             made.insert(made.end(), mine.begin(), mine.end());
             summary.push_back(fmt("%s x%zu (%zu bytes)", name.c_str(), mine.size(), pm.ngp.size()));
+            if (dstr)
+                st.log.push_back(fmt("props: %s e destrutivel: %u estados, classe de vida %u (%u pontos)", name.c_str(), nSt, pm.strength,
+                                     kStrengthHp[pm.strength]));
             ++st.stats["prop models"];
             for (const auto &[slot, tid] : pm.texOf) st.log.push_back(fmt("props: %s tex%u <- contexto do OBJECT %07x", name.c_str(), tid, ctxFrom[tid].first));
             st.log.insert(st.log.end(), ownLines.begin(), ownLines.end());
@@ -391,6 +462,7 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
         catch (const PatchError &err)
         {
             if (st.arenaTop != top) st.rollback(top);
+            st.interUsed = iu0;
             st.log.push_back(fmt("props do modelo %s pulados (%zu): %s", name.empty() ? "?" : name.c_str(), ents.size(), err.what()));
             st.stats["skipped"] += int(ents.size());
         }
@@ -414,12 +486,20 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
     st.w32(wrap + 0x20, old);
     for (size_t i = 0; i < made.size(); ++i) st.w32(wrap + 0x24 + 4 * uint32_t(i), made[i].tr);
     st.setPtr(slot, wrap);
+    if (!g_breakSteps.empty()) g_breakWraps.push_back(wrap);   // WOTM_LEVELPATCH_BREAK:copies quebra tambem os destrutiveis dos props
     st.parents[wrap] = {world};
     st.parents[old] = {wrap};
     for (const PropMade &pm : made)
     {
         st.parents[pm.tr] = {wrap};
-        st.parents[pm.root].push_back(pm.tr);
+        if (pm.ist)
+        {
+            st.parents[pm.ist] = {pm.tr};
+            st.parents[pm.destr] = {pm.ist};
+            for (uint32_t r : pm.sroots) st.parents[r].push_back(pm.destr);
+        }
+        else
+            st.parents[pm.root].push_back(pm.tr);
         for (const std::vector<uint32_t> &ch : pm.chains)
         {
             std::vector<uint32_t> nodes{world, wrap, pm.tr};

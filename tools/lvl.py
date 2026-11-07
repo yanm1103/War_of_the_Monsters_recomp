@@ -1788,6 +1788,7 @@ class LevelPatch:
         for name in order:
             ents = models[name]
             top = self.arena_top()
+            iu0 = self.interactives_used
             try:
                 pdir = _child_nocase(_child_nocase(mod_dir, "props"), name)
                 if not pdir or not os.path.isfile(os.path.join(pdir, "prop.json")):
@@ -1831,12 +1832,30 @@ class LevelPatch:
                 at = self.alloc(prop.size, 0x80)
                 img.d[at - img.base:at - img.base + prop.size] = prop.resolve(at, lambda tid: ctx[tid][1], own_ids.get)
                 root = at + prop.root
-                chains = self._prop_chains(root)
+                dstr = prop.destructible
+                sroots = [at + o for o in prop.states]
+                chains = [ch for r in sroots for ch in self._prop_chains(r)]      # a state at a time (the one root of a static prop)
+                if dstr:
+                    n_st = len(sroots)
+                    thr = [int(round(65535.0 * (n_st - 1 - i) / n_st)) for i in range(n_st)]      # health left that moves on to state i + 1
                 mine, need = [], 0
                 for k, e, pos, hd in ents:
                     t_top = self.arena_top()
                     turn = abs(math.remainder(hd, 360.0)) > 1e-6
                     t = self.alloc(0x54 if turn else 0x20, 16)
+                    ist = destr = 0
+                    if dstr:        # T|R -> INTERACTIVE_STATE -> DESTRUCTIBLE -> one state root each (docs/FORMATS.md)
+                        ist = self.alloc(0x10, 16)
+                        destr = self.alloc(0xC + 12 * n_st, 16)
+                        self.w32(ist, 0x27)
+                        self.w32(ist + 0xC, destr)
+                        self.w32(destr, 0x1F)
+                        self.w16(destr + 4, prop.strength)
+                        self.w16(destr + 0xA, n_st)
+                        for i, r in enumerate(sroots):
+                            self.w32(destr + 0xC + 12 * i, r)
+                            self.w16(destr + 0xC + 12 * i + 8, thr[i] if i < n_st - 1 else 0)
+                    below = ist or root
                     if turn:
                         cs, sn = math.cos(math.radians(hd)), math.sin(math.radians(hd))
                         self.w32(t, 4)
@@ -1844,15 +1863,20 @@ class LevelPatch:
                         for r, row in enumerate(((cs, sn, 0, 0), (-sn, cs, 0, 0), (0, 0, 1, 0), (pos[0], pos[1], pos[2], 1))):
                             for c in range(4):
                                 self.wf32(t + 0x10 + 16 * r + 4 * c, row[c])
-                        self.w32(t + 0x50, root)
+                        self.w32(t + 0x50, below)
                     else:
                         self.w32(t, 3)
                         self.w32(t + 8, 1)
                         for i in range(3):
                             self.wf32(t + 0x10 + 4 * i, pos[i])
-                        self.w32(t + 0x1C, root)
+                        self.w32(t + 0x1C, below)
                     cost, bad = 4, None
-                    for ch in chains:
+                    if dstr:
+                        cost += 0x10 + 15 + 0xC + 12 * n_st + 15
+                        if self.interactives_used + 1 > INTERACTIVES:
+                            bad = "the stage has no Interactives slot left (%d of %d taken)" % (self.interactives_used, INTERACTIVES)
+                    full = [[ist, destr] + ch for ch in chains] if dstr else chains
+                    for ch in full if not bad else []:
                         lb = aabb(leaf_points(img, ch[-1]))
                         if not lb:
                             bad = "leaf %07x without points" % ch[-1]
@@ -1870,17 +1894,24 @@ class LevelPatch:
                         self.log.append("prop %d (%s) skipped: %s" % (k, e.get("id") or name, bad))
                         self.stats["skipped"] += 1
                         continue
-                    mine.append((t, root, chains))
+                    mine.append((t, root, full, (ist, destr, sroots) if dstr else None))
                     need += cost
+                    if dstr:
+                        self.interactives_used += 1
                 if not mine:
                     self.rollback(top)
+                    self.interactives_used = iu0
                     continue
                 if need + (0 if made else reserve_group) > self.arena_free():
                     self.rollback(top)
+                    self.interactives_used = iu0
                     raise PatchError("model %s: %d entries take up to %d bytes more, the arena has %d left" % (
                         name, len(mine), need, self.arena_free()))
                 made += mine
                 summary.append("%s x%d (%d bytes)" % (name, len(mine), prop.size))
+                if dstr:
+                    self.log.append("props: %s is destructible: %d states, hit point class %d (%d hit points)" % (
+                        name, len(sroots), prop.strength, lvlprop.STRENGTH[prop.strength]))
                 self.stats["prop models"] += 1
                 for t in prop.textures:
                     if "texId" in t:
@@ -1889,6 +1920,7 @@ class LevelPatch:
             except PatchError as err:
                 if self.arena_top() != top:
                     self.rollback(top)
+                self.interactives_used = iu0
                 self.log.append("props of model %s skipped (%d): %s" % (name or "?", len(ents), err))
                 self.stats["skipped"] += len(ents)
         if not made:
@@ -1902,14 +1934,21 @@ class LevelPatch:
         self.w16(wrap + 8, 1 + len(made))
         self.w16(wrap + 0xA, 7)                     # visual | collision | noFOV
         self.w32(wrap + 0x20, old)
-        for i, (t, _r, _c) in enumerate(made):
+        for i, (t, _r, _c, _d) in enumerate(made):
             self.w32(wrap + 0x24 + 4 * i, t)
         self.set_ptr(slot, wrap)
         st.parents[wrap], st.parents[old] = [w], [wrap]
         self.through.add(wrap)
-        for t, root, chains in made:
+        for t, root, chains, dx in made:
             st.parents[t] = [wrap]
-            st.parents[root].append(t)
+            if dx:
+                ist, destr, sroots = dx
+                st.parents[ist] = [t]
+                st.parents[destr] = [ist]
+                for r in sroots:
+                    st.parents[r].append(destr)
+            else:
+                st.parents[root].append(t)
             for ch in chains:
                 nodes = [w, wrap, t] + ch
                 pa = self.alloc(0x24 + 4 * len(nodes))
