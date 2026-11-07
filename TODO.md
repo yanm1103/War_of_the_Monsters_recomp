@@ -9,10 +9,9 @@ O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado s
 ## Editor de fase
 Rearranjar fases existentes (mover, girar, apagar, duplicar prédios e objetos, inclusive de outra fase) com um editor que grava o patch JSON por fase em `mods/<mod>/levels/` (`docs/guides/MODS.md`, "Level patches"; aplicado pelo `wotm_levelpatch.inc`). Fase nova do zero fica para depois.
 3. **Fases custom** (`MODS.md`, "Custom stages"; plano em `docs/investigacoes/2026-11-06/fases_custom_plano.md`): o jogo já carrega pelo `WOTM_MATCH=3,1,@<id>`. Falta:
-   - O painel HUD de uma custom usa o da base.
    - Decisão do dono sobre a trava: hoje a custom herda a da base (alternativa: não listar a custom de base trancada).
 4. **Objetos novos vindos do Blender** (plano em `docs/investigacoes/2026-11-06/objetos_blender_plano.md`; conversor `tools/lvlprop.py`, diário `props_passo0_1.md`; a carga na fase, o editor e a imagem própria do material já existem, `MODS.md`, "props" e "New props"): faltam do passo 3 só a colisão por triângulos (`coll_*`, hoje o `hull_*` convexo já vale), e os passos 5, 6 e 8 (o 4 e o 7 saíram com o pacote CT32 na arena e o texId dado na carga, sem `.TEX` no mod). Textura própria: UV fora de 0..1 é preso na borda (sem repetir).
-5. **Céu:** trocar o skybox da fase pelo editor (o céu é um nó próprio da fase, `lvlglb` já o separa).
+5. **Céu:** o painel Fight HUD and sky troca as imagens do céu por PNG (`lvlhud.py`, papel `sky`); falta trocar a *malha* do céu (outra forma ou outro céu de outra fase).
 6. **Tamanho da fase:** a grade de colisão é um retângulo fixo por fase (7x7 a 102x40 células de 200); o levantamento e a proposta (chave `grid` no patch que refaz a tabela e as listas) estão em `docs/investigacoes/2026-11-06/tamanho_fase.md`. Falta ler `hdLosTest`, câmera e rede dos carros antes de implementar.
 7. **Paleta Ctrl+P:** falta a prévia de cada resultado e achar também os props originais de outras fases (hoje só objetos da fase e props do mod).
 9. **Depois:** fase do zero como "base + geometria trocada" (mesmo relatório, seção 6).

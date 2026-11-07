@@ -88,6 +88,16 @@ def main():
         enc = lambda d: base64.b64encode(d).decode()      # noqa: E731
         r = post("/api/levelpic", {"mod": "m", "name": "MYCITY", "png": enc(png(16, 8))})
         assert os.path.isfile(os.path.join(mods, "m", "levelpics", "mycity.png")), r
+        # Fight HUD of a custom stage: the picture goes in the stage's own folder, not in the mod's LVL/ (CENTRAL keeps its own)
+        rows = get("/api/hud?stage=MYCITY&mod=m")["rows"]
+        assert any(r["role"] == "sky" and r["every"] == 0 for r in rows), "no sky row"
+        row = rows[0]
+        res = post("/api/hud/replace", {"mod": "m", "stage": "MYCITY", "role": row["role"], "png": row["png"], "data": enc(png(16, 8)),
+                                        "every": True})
+        assert os.path.isfile(os.path.join(stages, "ok", row["png"])), res
+        assert not os.path.exists(os.path.join(mods, "m", "LVL", row["png"]))
+        post("/api/hud/remove", {"mod": "m", "stage": "MYCITY", "role": row["role"], "png": row["png"]})
+        assert not os.path.exists(os.path.join(stages, "ok", row["png"]))
         for bad in ({"name": "CENTRAL", "png": enc(png(16, 8))}, {"name": "MYCITY", "png": enc(png(8, 8))}):
             try:
                 post("/api/levelpic", dict(bad, mod="m"))

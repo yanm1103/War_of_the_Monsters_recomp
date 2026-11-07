@@ -699,10 +699,13 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   `levels/<ID>.json`; Test in game opens it with `WOTM_MATCH=3,1,@<id>`. The **+** button next to the stage list (**New stage…**)
   asks for an id, a name and a base among the nine the game allows, and writes `stages/<id>/stage.json`; "Start with the changes I
   have now" also writes them as the new stage's patch when the open stage has that base. A stage with points of its own
-  (`.SPT`, `.PED`...) in its folder shows those in the pedestrian panel and the check (the other kinds from the base). `python
+  (`.SPT`, `.PED`...) in its folder shows those in the pedestrian panel and the check (the other kinds from the base). The Fight HUD
+  panel of a custom stage saves its pictures in the stage's folder (`<BASE>_tNNNN.png`), so they apply to that stage only. `python
   tools/level_editor/test_custom_stages.py` is the integration test (needs the disc set in the editor).
 - **Palette (Ctrl+P):** a search over the stage's objects (name or handle; Enter selects and frames the first) and the mod's props for
   this stage (Enter adds one where the view looks). It opens from anywhere, even in a text field.
+- **Fight HUD and sky** (the monitor button): the pictures of the stage's fight HUD and of its sky (the OBJECTs under the nodes with id 2),
+  each replaceable by a PNG in the mod (`<stage>_tNNNN.png`, "Textures as PNG"). A sky picture is the stage's own (never "apply to all").
 - **Stage picture:** the picture button (lower right of the view) saves the middle 2:1 band of the view, 512x256, as
   `mods/<mod>/levelpics/<name>.png` for a custom stage (`<id>`) and for Training, Lake Powell and Tokyo DM; the other game stages have
   their picture in `SHELL.TEX` (make a custom stage on one). The stage select picks it up the next time the game starts.
