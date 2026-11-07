@@ -834,7 +834,9 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   from its `.glb` (`source.glb`, or the `source` of `prop.json`) at that many game units, scaled about its origin with the same
   units and light; both change the model, so every entry of it takes them, and neither is undoable. A destructible model also has **Strength** (its hit point class; only `prop.json` changes, so it is not a rebuild). It sits in the list's **New props** section,
   and Check names the one the game would skip. Switching to a mod without its model keeps the entry in the file (the editor says
-  how many), where the game skips it.
+  how many), where the game skips it. The same menu ends with **Sky dome**: the stage's own, or one of the mod's models for this
+  stage (the `sky` entry of `props`, above; undoable, counted by Check as a replaced dome, and refused there for a stage with no
+  dome); the editor's view keeps the stage's sky, and the game shows the model.
 - **List:** every object by name, its handle beside it, in sections (**Buildings**, **Pickups**, **Props**, **Terrain** and **New props**, the
   props over 500 units; a click on a header closes or opens it, Terrain starts closed, and the editor remembers them). A copy
   sits under its original, indented. Small marks after the name: a green dot (moved or turned), the copy icon (it has copies),

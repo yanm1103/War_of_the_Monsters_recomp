@@ -330,7 +330,8 @@ STAT_WORDS = (("moved", "moved", "moved"), ("copies", "copy", "copies"), ("delet
               ("ped groups changed", "pedestrian group changed", "pedestrian groups changed"),
               ("ped groups added", "pedestrian group added", "pedestrian groups added"),
               ("ped groups deleted", "pedestrian group deleted", "pedestrian groups deleted"),
-              ("ped groups off", "pedestrian group off", "pedestrian groups off"), ("props", "new prop", "new props"))
+              ("ped groups off", "pedestrian group off", "pedestrian groups off"), ("props", "new prop", "new props"),
+              ("sky domes replaced", "sky dome replaced", "sky domes replaced"))
 
 
 def stats_text(stats):
@@ -417,6 +418,10 @@ def check_patch(disc, name, patch, mod_dir=None, pts_root=None):
                     problems.append({"level": "err", "kind": "prop", "index": k, "id": pe.get("id"), "reason": m.group(2),
                                      "text": "Prop %s was not applied: %s" % (pe.get("name") or pe.get("id") or k + 1,
                                                                               m.group(2))})
+            continue
+        m = re.match(r"sky skipped: (.*)$", line)
+        if m:
+            problems.append({"level": "err", "kind": "sky", "reason": m.group(1), "text": "The sky was not changed: %s" % m.group(1)})
             continue
         m = re.match(r"props: (stopped halfway|skipped): (.*)$", line)
         if m:

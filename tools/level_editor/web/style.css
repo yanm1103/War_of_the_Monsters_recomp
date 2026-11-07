@@ -454,6 +454,8 @@ dialog.pal { width: min(560px, 92vw); }
 .pm-row .pm-meta { color: var(--muted); font-size: 11px; }
 .pm-row:disabled .pm-name { color: var(--disabled); }
 .pm-none { color: var(--muted); font-size: 12px; padding: 4px 6px 6px; line-height: 1.4; }
+.pm-sky { display: flex; align-items: center; gap: 8px; margin: 6px 2px 0; padding-top: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.pm-sky select { flex: 1; min-width: 0; }
 #pmImport { margin-top: 4px; border-top: 1px solid var(--line); border-radius: 0; padding-top: 2px; }
 #propMenu .lbl { display: inline !important; }
 /* the Import a prop dialog */

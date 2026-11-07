@@ -544,6 +544,7 @@ const ENTRY_KEYS = new Set(['handle', 'from', 'pos', 'heading', 'delete', 'copie
 const PEDS_KEYS = new Set(['off', 'segments', 'groups']);
 const PROP_KEYS = new Set(['id', 'model', 'pos', 'heading', 'name']);
 let keep = { top: {}, objects: [], names: {}, peds: {}, pedsRaw: null, props: [] };
+let skyModel = '';   // the model that replaces the sky dome: the patch's props entry {model, sky: true} (MODS.md, "Sky"); shows in the game only
 // New props (the patch's "props", MODS.md): the models of the mod's props/ folder (tools/lvlprop.py), drawn from their preview with
 // the stage's textures. Each entry is a rec like a stage object's, with rec.prop = {id, model}; propRoot holds their nodes, inside
 // stageRoot so that clicks and Drop meet them.
@@ -684,6 +685,7 @@ function buildPatch() {
     if (r.item.iname) e.name = r.item.iname;
     return Object.assign(e, r.extra || {});
   }).concat(keep.props);
+  if (skyModel) props.push({ model: skyModel, sky: true });
   if (props.length) out.props = props;
   const pp = keep.pedsRaw || (discPeds ? peds.patch() : null);
   if (pp || Object.keys(keep.peds).length) out.peds = Object.assign({}, pp, keep.peds);
@@ -691,6 +693,7 @@ function buildPatch() {
 }
 
 function resetAll() {
+  skyModel = '';
   for (const r of [...propRecs]) removeProp(r);
   for (const rec of recs) {
     for (const c of [...rec.copies]) removeCopy(c);
@@ -707,7 +710,11 @@ function applyPatch(patch) {
   keep = { top: {}, objects: [], names: {}, peds: {}, pedsRaw: null, props: [] };
   for (const [k, v] of Object.entries(patch)) if (!['objects', 'names', 'peds', 'props'].includes(k)) keep.top[k] = v;
   if (patch.props !== undefined && !Array.isArray(patch.props)) keep.top.props = patch.props;
-  for (const e of Array.isArray(patch.props) ? patch.props : []) if (!makeProp(e)) keep.props.push(e);
+  skyModel = '';
+  for (const e of Array.isArray(patch.props) ? patch.props : []) {
+    if (e && typeof e === 'object' && e.sky === true && typeof e.model === 'string' && e.model) { skyModel = propKey(e.model); continue; }
+    if (!makeProp(e)) keep.props.push(e);
+  }
   for (const rec of recs) rec.extra = null;
   for (const e of Array.isArray(patch.objects) ? patch.objects : []) {
     const rec = e && typeof e === 'object' ? byHandle.get(normHandle(e.handle)) : null;
@@ -2784,8 +2791,22 @@ function showPropMenu(open = $('propMenu').hidden) {
     : !here.length ? `No props for ${title(stageName)} yet.` + (other ? ` ${other} of this mod ${other === 1 ? 'is' : 'are'} for other stages.` : '') : '';
   $('pmNone').textContent = none;
   $('pmNone').hidden = !none;
+  const sky = $('pmSky');     // the sky dome: one of the models, or the stage's own
+  sky.textContent = '';
+  sky.append(new Option('The stage\'s own', ''));
+  for (const pm of here) if (!pm.info.error) sky.append(new Option(pm.info.model, pm.info.model));
+  if (skyModel && ![...sky.options].some((o) => o.value === skyModel)) sky.append(new Option(`${skyModel} (not in this mod)`, skyModel));
+  sky.value = skyModel;
   (list.querySelector('button:not(:disabled)') || $('pmImport')).focus();
 }
+$('pmSky').onchange = (e) => {
+  const v = e.target.value;
+  if (v === skyModel) return;
+  snapshot(v ? `sky ${v}` : 'stock sky');
+  skyModel = v;
+  msg(v ? `The sky dome is now ${v}. It shows in the game (Reload in game); give it faces turned inward and a texture.` : 'The sky dome is the stage\'s own again.',
+    { level: 'ok', toast: ['Undo', undo] });
+};
 $('addProp').onclick = () => showPropMenu();
 document.addEventListener('pointerdown', (e) => {   // a click anywhere else closes it
   if (!$('propMenu').hidden && !e.target.closest('#propMenu, #addProp')) showPropMenu(false);
