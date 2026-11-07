@@ -60,7 +60,7 @@
     ones with it (light baked in Blender); `vertex` and `dir` force it off or on. `info <prop
     dir> [--at ADDR]` relocates a prop (default the level arena, 0x3E00000) and reads every node, packet and fixup back;
     `load_prop(folder)` returns the `Prop` (`ngp`, `ptr`, `root`, `textures`, `bounds`, `relocate(at)`, `resolve(at, ctx_of)`) the
-    level patch uses, and `stage_ctx` the context a texId takes. Standard library only.
+    level patch uses, and `stage_ctx` the context a texId takes. `modkit.py level prop <mod> <in.glb> --stage <STAGE> [--name N]` builds the prop into `mods/<mod>/props/<NAME>/` (extracted disc folder). Standard library only.
   - `ngp.decode_mesh`: port of the native `decodeObject` (texture per section, ADC like the GS, sprites), used by `gltf.py`.
 - `.sh` scripts must be created by heredoc in bash; writing with Python on Windows leaves CRLF and the WSL `sh` breaks (`sed -i 's/\r$//'` fixes it).
 - The per-function state lives in `config/status.csv` (`python3 tools/progress.py`, ~12 s via WSL, needs `disc/`); the README has no progress block.

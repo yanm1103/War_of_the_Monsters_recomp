@@ -27,7 +27,7 @@ header (shadow bits, fogBurnThru) and the GIF tags come from it; pointLight (0x8
 Light (`--light`): `auto` (default) turns on dirLight (0x100, the stage's three parallel lights) on each OBJECT whose meshes have
 no COLOR_0 and leaves it off where the colors are there (light baked in Blender); `vertex` is off everywhere, `dir` on everywhere.
 Units: `blender` (default) is a Blender scene (Z up, meters, the scene's X/Y are the game's) scaled by S game units per meter
-(default 18, about the size of the game's cars and buildings); `game` is a glb in game units (tools/lvlglb.py), scale 1. Node
+(default 18, about the size of the game's cars and buildings); `game` is a glb in game units (tools/lvlglb.py), scale 1, lifted so its lowest point is at z 0. Node
 transforms are baked into the vertices; the scene origin is the prop's pivot. Colors: `blender` COLOR_0 (linear) to sRGB x 128,
 saturated at 0xFF; `game` the raw bytes (COLOR_0 x 255); no COLOR_0 is 0x80. A material `tex<texId>` (a Blender `.001` suffix
 is ignored) draws with that stage texture; a material with no image is vertex color only. Any other material with an image
@@ -470,15 +470,22 @@ def read_glb(path, units, scale=None, height=None, warn=print):
         s = height / h
     else:
         s = UNITS_PER_METER if units == "blender" else 1.0
-    out, stats = {}, {"degenerate": 0, "triangles": 0, "hulls": []}
+    # a piece of the game's own scene (units game) has its origin where the stage put it (a car at z 0 is half under the road):
+    # the lowest point goes to z 0, so the prop stands on the ground it is placed on
+    zlift = -min(zs) * s if units == "game" else 0.0
+
+    def place(q):
+        x, y, z = (x * s for x in game(q))
+        return (_f32(x), _f32(y), _f32(z + zlift))
+    out, stats = {}, {"degenerate": 0, "triangles": 0, "hulls": [], "lift": zlift}
     for hname, hpts in hull_raw:
-        stats["hulls"].append((hname, [tuple(_f32(x * s) for x in game(q)) for q in hpts]))
+        stats["hulls"].append((hname, [place(q) for q in hpts]))
     for key, tris in raw.items():
         for t in tris:
             lst = out.setdefault(key + (t[0][3] is not None,), [])   # the triangles with COLOR_0 apart (the `auto` light)
             cs = []
             for wp, n, uvv, c, factor in t:
-                p = tuple(_f32(x * s) for x in game(wp))
+                p = place(wp)
                 if n is None:
                     n8 = None
                 else:

@@ -18,9 +18,10 @@ import lvl      # noqa: E402
 import lvlprop  # noqa: E402
 
 
-def make_glb(path, hull_pts, hull_tris):
+def make_glb(path, hull_pts, hull_tris, yoff=0.0):
     """Two meshes: `vis` (a 2 m cube, vertex color only) and `hull_pyr` (the given points and triangles); Blender meters, Y up."""
     cube = [(-1, 0, -1), (1, 0, -1), (1, 2, -1), (-1, 2, -1), (-1, 0, 1), (1, 0, 1), (1, 2, 1), (-1, 2, 1)]
+    cube = [(x, y + yoff, z) for x, y, z in cube]
     cidx = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 3, 6, 2, 3, 7, 6, 0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5]
     blobs, views, accs = b"", [], []
 
@@ -86,6 +87,14 @@ def main():
             assert "flat" in str(e) or "volume" in str(e) or "at least 4" in str(e), e
         else:
             raise AssertionError("a flat hull_ mesh was accepted")
+    # units game: a piece whose origin is at its middle (z -1..1) is lifted so its lowest point is at z 0
+    with tempfile.TemporaryDirectory() as tmp:
+        glb = os.path.join(tmp, "g.glb")
+        make_glb(glb, pts, tris, yoff=-1.0)
+        out = os.path.join(tmp, "MID")
+        lvlprop.build(glb, out, "CENTRAL", "game", None, None, "MID", None, "auto", editor.stage_root(cfg["disc"], "CENTRAL"))
+        meta = json.load(open(os.path.join(out, "prop.json")))
+        assert abs(meta["bounds"]["min"][2]) < 1e-3 and abs(meta["bounds"]["max"][2] - 2) < 1e-3, meta["bounds"]
     print("ok")
 
 
