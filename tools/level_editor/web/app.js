@@ -249,6 +249,7 @@ function gridHelper(size, divisions, opacity) {
 let gridMinor = gridHelper(20000, 200, 0.10), gridMinorStep = 100;
 const gridMajor = gridHelper(20000, 20, 0.28);
 let gridOn = false;
+let skyView = null, skyViewModel = null;   // the swapped-in sky dome's scene, and the preview scene it was made from (updateSkyView)
 let stageRoot = null, skyRoot = null, env = null;   // env: the stage's fog, background and lights (/api/stage, RST/<STAGE>.MRS)
 // pedestrians (web/peds.js): a layer shown with P; pedSel is the marker the gizmo holds (never together with an object)
 const peds = createPeds({ THREE, scene, toThree, toGame });
@@ -279,7 +280,8 @@ function applyLook() {
   const f = env && env.fog && env.fog.fa !== undefined ? env.fog : null;
   scene.fog = gameLook && f ? new THREE.Fog(gsColor(f.rgb), f.fa, f.fb) : null;
   gsFog.gsFogMax.value = f && f.maxV > 0 ? Math.min(255, f.maxV) : 255;
-  if (skyRoot) skyRoot.visible = gameLook;
+  if (skyRoot) skyRoot.visible = gameLook && !skyView;
+  if (skyView) skyView.visible = gameLook;
   renderer.setClearColor(gameLook && env && env.bg ? gsColor(env.bg)
     : getComputedStyle(document.documentElement).getPropertyValue('--view').trim());
   $('look').checked = gameLook;
@@ -395,22 +397,45 @@ function setupDrawing(gltf) {
   gltf.scene.traverse((o) => { if (!sky && o.userData && o.userData.sky) sky = o; });
   if (sky) {
     scene.add(sky);     // out of the stage: clicks, Drop and framing never meet it
-    let n = 0;
-    sky.traverse((o) => {
-      if (!o.isMesh) return;
-      o.material = [].concat(o.material).map((m) => {
-        const c = m.clone();   // clone() leaves out onBeforeCompile and customProgramCacheKey
-        c.onBeforeCompile = m.onBeforeCompile;
-        c.customProgramCacheKey = m.customProgramCacheKey;
-        c.depthTest = false; c.depthWrite = false; c.fog = false; c.transparent = false;
-        return c;
-      });
-      if (o.material.length === 1) o.material = o.material[0];
-      o.renderOrder = -1e6 + n++;
-      o.frustumCulled = false;
-    });
+    skyDrawing(sky, false);
   }
   return sky;
+}
+
+// A sky is drawn first, with no depth test and no fog, around the camera. both: draw the inside and the outside of its faces
+// (a model of the mod's, whose faces the game wants turned inward)
+function skyDrawing(sky, both) {
+  let n = 0;
+  sky.traverse((o) => {
+    if (!o.isMesh) return;
+    o.material = [].concat(o.material).map((m) => {
+      const c = m.clone();   // clone() leaves out onBeforeCompile and customProgramCacheKey
+      c.onBeforeCompile = m.onBeforeCompile;
+      c.customProgramCacheKey = m.customProgramCacheKey;
+      c.depthTest = false; c.depthWrite = false; c.fog = false; c.transparent = false;
+      if (both) c.side = THREE.DoubleSide;
+      return c;
+    });
+    if (o.material.length === 1) o.material = o.material[0];
+    o.renderOrder = -1e6 + n++;
+    o.frustumCulled = false;
+  });
+}
+
+// The sky dome the patch swaps in (props entry {model, sky: true}): its preview, drawn in the place of the stage's sky (the clouds
+// too: the editor's scene does not tell them from the dome). Game look shows it, as it does the stage's own.
+function updateSkyView() {
+  const pm = skyModel ? propModels.get(skyModel) : null, want = pm && pm.scene ? pm.scene : null;
+  if (want !== skyViewModel) {     // the model changed, or its files were made again
+    if (skyView) { scene.remove(skyView); skyView = null; }
+    skyViewModel = want;
+    if (want) {
+      skyView = want.clone(true);
+      skyDrawing(skyView, true);
+      scene.add(skyView);
+    }
+  }
+  applyLook();
 }
 
 // ------------------------------------------------------------------ camera: fly (WASD, default) or orbit; V switches
@@ -487,7 +512,7 @@ function loop() {
   requestAnimationFrame(loop);
   flyStep();
   if (orbit.enabled) orbit.update();
-  if (skyRoot) skyRoot.position.copy(camera.position);   // the sky moves with the camera (it turns with the view, not the stage)
+  for (const s of [skyRoot, skyView]) if (s) s.position.copy(camera.position);   // the sky moves with the camera (it turns with the view, not the stage)
   hoverStep();
   syncBoxes();
   renderer.render(scene, camera);
@@ -544,7 +569,7 @@ const ENTRY_KEYS = new Set(['handle', 'from', 'pos', 'heading', 'delete', 'copie
 const PEDS_KEYS = new Set(['off', 'segments', 'groups']);
 const PROP_KEYS = new Set(['id', 'model', 'pos', 'heading', 'name']);
 let keep = { top: {}, objects: [], names: {}, peds: {}, pedsRaw: null, props: [] };
-let skyModel = '';   // the model that replaces the sky dome: the patch's props entry {model, sky: true} (MODS.md, "Sky"); shows in the game only
+let skyModel = '';   // the model that replaces the sky dome: the patch's props entry {model, sky: true} (MODS.md, "Sky"); the view draws it with Game look (updateSkyView)
 // New props (the patch's "props", MODS.md): the models of the mod's props/ folder (tools/lvlprop.py), drawn from their preview with
 // the stage's textures. Each entry is a rec like a stage object's, with rec.prop = {id, model}; propRoot holds their nodes, inside
 // stageRoot so that clicks and Drop meet them.
@@ -734,6 +759,7 @@ function applyPatch(patch) {
   if (pp && !discPeds) keep.pedsRaw = pp;
   else if (pp) for (const [k, v] of Object.entries(pp)) if (!PEDS_KEYS.has(k)) keep.peds[k] = v;
   updateGridView();
+  updateSkyView();
   pedSel = null;     // the markers are made again
   peds.load(discPeds, keep.pedsRaw ? null : pp);
   applyPedsView();
@@ -2804,7 +2830,8 @@ $('pmSky').onchange = (e) => {
   if (v === skyModel) return;
   snapshot(v ? `sky ${v}` : 'stock sky');
   skyModel = v;
-  msg(v ? `The sky dome is now ${v}. It shows in the game (Reload in game); give it faces turned inward and a texture.` : 'The sky dome is the stage\'s own again.',
+  updateSkyView();
+  msg(v ? `The sky dome is now ${v}. The view shows it with Game look (L); give it faces turned inward and a texture.` : 'The sky dome is the stage\'s own again.',
     { level: 'ok', toast: ['Undo', undo] });
 };
 $('addProp').onclick = () => showPropMenu();
@@ -3339,7 +3366,7 @@ if (new URLSearchParams(location.search).has('debug')) {
                        get modNow() { return modNow; }, get keep() { return keep; }, get game() { return game; },
                        get gizmoObject() { return gizmo.object || null; }, get gizmoMode() { return gizmo.getMode(); },
                        get pedSel() { return pedSel; }, get group() { return group; }, get sel() { return sel; },
-                       get env() { return env; }, get skyRoot() { return skyRoot; }, get stageRoot() { return stageRoot; } };
+                       get env() { return env; }, get skyRoot() { return skyRoot; }, get skyView() { return skyView; }, get stageRoot() { return stageRoot; } };
 }
 loop();
 api('/api/init').then(init).catch((e) => msg(`Couldn't reach the editor program: ${cleanError(e).text}`, { level: 'err' }));

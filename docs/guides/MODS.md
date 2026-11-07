@@ -836,7 +836,8 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   and Check names the one the game would skip. Switching to a mod without its model keeps the entry in the file (the editor says
   how many), where the game skips it. The same menu ends with **Sky dome**: the stage's own, or one of the mod's models for this
   stage (the `sky` entry of `props`, above; undoable, counted by Check as a replaced dome, and refused there for a stage with no
-  dome); the editor's view keeps the stage's sky, and the game shows the model.
+  dome); with Game look (**L**) the view draws the model in the place of the stage's sky (the clouds too, which the editor's
+  scene does not tell from the dome; the game keeps them), both faces of it.
 - **List:** every object by name, its handle beside it, in sections (**Buildings**, **Pickups**, **Props**, **Terrain** and **New props**, the
   props over 500 units; a click on a header closes or opens it, Terrain starts closed, and the editor remembers them). A copy
   sits under its original, indented. Small marks after the name: a green dot (moved or turned), the copy icon (it has copies),
