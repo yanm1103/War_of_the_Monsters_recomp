@@ -726,6 +726,7 @@ function applyPatch(patch) {
   const pp = patch.peds && typeof patch.peds === 'object' ? patch.peds : null;
   if (pp && !discPeds) keep.pedsRaw = pp;
   else if (pp) for (const [k, v] of Object.entries(pp)) if (!PEDS_KEYS.has(k)) keep.peds[k] = v;
+  updateGridView();
   pedSel = null;     // the markers are made again
   peds.load(discPeds, keep.pedsRaw ? null : pp);
   applyPedsView();
@@ -2781,6 +2782,25 @@ document.addEventListener('pointerdown', (e) => {   // a click anywhere else clo
 }, true);
 let ipData = null, ipTitle = '';
 const ipInput = Object.assign(document.createElement('input'), { type: 'file', accept: '.glb,model/gltf-binary' });
+// The collision grid's rectangle on the ground: the disc's in grey, the patch's bigger one in blue
+let gridView = null;
+function updateGridView() {
+  if (gridView) { scene.remove(gridView); gridView.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); }); gridView = null; }
+  if (!stageGrid) return;
+  const rect = (lo, hi, color) => {
+    const pts = [[lo[0], lo[1]], [hi[0], lo[1]], [hi[0], hi[1]], [lo[0], hi[1]]].map((q) => toThree([q[0], q[1], 1]));
+    const l = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.8 }));
+    l.renderOrder = 999;
+    l.raycast = () => {};
+    return l;
+  };
+  gridView = new THREE.Group();
+  gridView.add(rect(stageGrid.min, stageGrid.max, 0x8a8f98));
+  const g = gridNow();
+  if (g) gridView.add(rect(g.min, g.max, 0x4aa3ff));
+  scene.add(gridView);
+}
+
 // Stage size: the patch's "grid" (a collision grid rectangle that holds the disc's). It lives in keep.top, so Undo and Save keep it.
 function gridNow() { return keep.top.grid && Array.isArray(keep.top.grid.min) && Array.isArray(keep.top.grid.max) ? keep.top.grid : null; }
 function gdFill(g) {
@@ -2817,6 +2837,7 @@ $('gdOk').onclick = () => {
   snapshot(same ? "stage size back to the disc's" : 'stage size');
   if (same) delete keep.top.grid; else keep.top.grid = { min: lo, max: hi };
   $('gridDlg').close();
+  updateGridView();
   refreshList();
   msg(same ? "The stage size is the disc's again" : `Stage size ${cols} × ${rows} cells. Check it, then Save`, { level: 'ok', toast: true });
 };
