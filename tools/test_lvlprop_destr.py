@@ -116,6 +116,45 @@ def main():
             assert "broken state" in str(e), e
         else:
             raise AssertionError("debris with no state was accepted")
+        # smoke: an empty named state1_smoke* is a PART_EMITTER in a copy of the state's group, one copy for each instance
+        make_glb(glb, None, None, extra=[("state1_stump", STUMP, CIDX),
+                                         ("state1_smoke_a", None, None, {"translation": [0, 1.5, 0], "extras": {"size": 12, "lifetime": 200}}),
+                                         ("state1_smoke_b", None, None, {"translation": [0.5, 1.0, 0]})])
+        meta = lvlprop.build(glb, out, "CENTRAL", "blender", None, None, "DEST", None, "auto", disc, log=lambda *_: None)
+        sm = meta["destructible"]["smoke"]
+        assert list(sm) == ["1"] and len(sm["1"]) == 2 and sm["1"][0]["pos"][2] > sm["1"][1]["pos"][2] > 0, sm
+        lvlprop.check(lvlprop.load_prop(out), log=lambda *_: None)
+        shutil.rmtree(os.path.join(mod, "props", "DEST"))
+        shutil.copytree(out, os.path.join(mod, "props", "DEST"))
+        st = lvl.Stage("CENTRAL", editor.stage_root(cfg["disc"], "CENTRAL"))
+        lp = lvl.LevelPatch(st)
+        lp.apply(patch)
+        lp.apply_props(patch, mod)
+        img = lp.img
+        dnodes = [n for n in lp.st.parents if n >= lp.arena and img.u32(n) & 63 == 31]
+        assert len(dnodes) == 2, dnodes
+        roots1, roots0, emitters = [], [], []
+        for d in dnodes:
+            roots0.append(img.u32(d + 0xC) & lvl.MASK)
+            r1 = img.u32(d + 0x18) & lvl.MASK
+            roots1.append(r1)
+            ems = [c for c in lvl.children(img, r1) if img.u32(c) & 63 == 22]
+            assert len(ems) == 2, [hex(c) for c in lvl.children(img, r1)]
+            assert img.u32(ems[0] + 4) == 1 and img.f32(ems[0] + 8) == 12.0 and img.u32(ems[0] + 0x3C) == 200, hex(ems[0])
+            assert abs(img.f32(ems[0] + 0x18) - sm["1"][0]["pos"][2]) < 1e-3
+            assert img.u32(ems[0] + 0x5C) & 0x18 == 0                           # not auto-start, not yet activated
+            emitters += ems
+        assert roots0[0] == roots0[1] and roots1[0] != roots1[1] and len(set(emitters)) == 4, (roots0, roots1, emitters)
+        shared = [c for c in lvl.children(img, roots1[0]) if img.u32(c) & 63 != 22]
+        assert shared == [c for c in lvl.children(img, roots1[1]) if img.u32(c) & 63 != 22] and shared      # the meshes stay shared
+        assert lp.stats["smoke emitters"] == 4, lp.stats
+        make_glb(glb, None, None, extra=[("state1_smoke", None, None, {"extras": {"nope": 1}})])
+        try:
+            lvlprop.build(glb, out, "CENTRAL", "blender", None, None, "DEST", None, "auto", disc, log=lambda *_: None)
+        except lvlprop.PropError as e:
+            assert "custom property" in str(e), e
+        else:
+            raise AssertionError("an unknown smoke property was accepted")
         # a four-state prop and a missing middle state
         make_glb(glb, None, None, extra=[("state1_a", STUMP, CIDX), ("state2_a", STUMP, CIDX), ("state3_none", None, None)])
         meta = lvlprop.build(glb, out, "CENTRAL", "blender", None, None, "DEST", None, "auto", disc, strength=3, log=lambda *_: None)

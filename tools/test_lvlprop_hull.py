@@ -51,9 +51,9 @@ def make_glb(path, hull_pts, hull_tris, yoff=0.0, coll=None, extra=()):
     if coll:
         meshes.append(mesh(*coll))
         nodes.append({"mesh": len(meshes) - 1, "name": "coll_wall"})
-    for name, epts, eidx in extra:      # more meshes by name (state1_..., state1_coll_...); no mesh when epts is None
-        if epts is None:
-            nodes.append({"name": name})
+    for name, epts, eidx, *more in extra:      # more meshes by name (state1_..., state1_coll_...); no mesh when epts is None
+        if epts is None:        # an empty; a fourth item adds its fields (translation, extras)
+            nodes.append(dict({"name": name}, **(more[0] if more else {})))
             continue
         meshes.append(mesh(epts, eidx))
         nodes.append({"mesh": len(meshes) - 1, "name": name})

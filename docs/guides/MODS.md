@@ -663,7 +663,14 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   most one per hit. **Debris:** meshes named `state1_debris_<name>` (up to 16 per state) are not part of any state's drawing: each is a
   chunk thrown when the prop enters that state (`ActDebris`, the stages' own action). A chunk flies up and outward from where it sits
   in the prop, spins, bounces and lands on its foot at the prop's base, and is gone after 10 seconds; its origin is the middle of its
-  footprint at its lowest point. A broken state has no smoke of its own. Log: `props: DEST is destructible: 2 states, hit point class 2 (50 hit points)`. Each model takes its file size
+  footprint at its lowest point. **Smoke:** an empty named `state1_smoke_<name>` (up to 8 per state) puts a particle emitter (the
+  stages' own `PART_EMITTER`) at its position in that state: it starts when the prop enters the state. The default is the stages'
+  demolition dust (particle 1, size 30, emitting for 45 fields, a cloud that lives 5 s); the empty's custom properties (Blender:
+  Object properties, Custom Properties) override `preset` (0 to 150, the game's particle table), `size`, `velocity`, `spread`,
+  `heading`, `pitch`, `rate`, `duration`, `onset`, `stretch`, `lifetime`, `gravity`, `airResistance`, `airResistanceTransition`,
+  `initialExpansionRate`, `expansionRate`, `expansionRateTransition` and `alphaFade`. An emitter fires once and remembers it in its
+  own node, so each copy of the prop gets emitters and a group for the state of its own (the meshes stay shared; about 0xB0 bytes
+  per emitter). Log: `props: DEST is destructible: 2 states, hit point class 2 (50 hit points)`, `props: DEST has smoke: 2 emitters in state 1`. Each model takes its file size
   of the arena once, and each entry 100 to 200 bytes more. Skipped with a line: a model missing or made for another stage, a texture
   the stage's `.TEX` does not have, an image larger than every texture bin of the stage, an entry whose box leaves the collision grid. The props are read from the folder at every load,
   so a prop rebuilt during a fight shows after a reload (F10). Log: `[fase]   props: TOWER x3 (1216 bytes); 1660 bytes da arena`,

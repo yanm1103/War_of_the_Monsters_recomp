@@ -25,8 +25,10 @@ struct PropModel
     std::vector<uint32_t> states;         // destrutivel: a raiz de cada estado (a primeira e a raiz); vazio num prop estatico
     std::vector<uint32_t> actions;        // destrutivel: o ActDebris de cada estado (0: nenhum), deslocamento na imagem
     uint32_t strength = 0;                // destrutivel: a classe de pontos de vida (1 a 5)
+    std::map<uint32_t, std::vector<std::vector<uint8_t>>> smoke;   // destrutivel: estado -> os 0x60 bytes de cada emissor de fumaca
 };
 constexpr uint32_t kMaxPropStates = 4;
+constexpr uint32_t kEmitterBytes = 0x60, kMaxEmitters = 8;     // lvlprop.EMITTER_SIZE, MAX_EMITTERS
 constexpr uint32_t kStrengthHp[6] = {0, 10, 50, 100, 150, 250};
 
 // Texturas proprias dos props da carga atual: texId -> PNG que a cena nativa desenha no lugar da copia de 128 do jogo
@@ -111,6 +113,23 @@ std::string loadPropModel(const std::filesystem::path &dir, PropModel &m)
                 m.actions[i] = a - kBase;
             }
         }
+        if (const json::Value *sm = d->get("smoke"); sm && sm->type == json::Value::Obj)
+            for (const auto &kv : sm->obj)
+            {
+                const uint32_t si = uint32_t(std::strtoul(kv.first.c_str(), nullptr, 10));
+                if (kv.second.type != json::Value::Arr || si < 1 || si >= m.states.size() || kv.second.arr.empty() || kv.second.arr.size() > kMaxEmitters)
+                    return "\"destructible\": \"smoke\" com um estado fora da faixa, sem emissor ou com emissores demais";
+                for (const json::Value &e : kv.second.arr)
+                {
+                    const json::Value *hex = e.get("node");
+                    if (!hex || hex->type != json::Value::Str || hex->s.size() != 2 * kEmitterBytes)
+                        return "\"destructible\": emissor de fumaca sem \"node\" de 0x60 bytes";
+                    std::vector<uint8_t> b;
+                    for (size_t i = 0; i < hex->s.size(); i += 2) b.push_back(uint8_t(std::strtoul(hex->s.substr(i, 2).c_str(), nullptr, 16)));
+                    if (b[0] != 22) return "\"destructible\": o \"node\" de fumaca nao e um emissor (op 22)";
+                    m.smoke[si].push_back(std::move(b));
+                }
+            }
         m.strength = uint32_t(cls->asInt());
         if (m.states.size() < 2 || m.states.size() > kMaxPropStates || m.states[0] != m.root || m.strength < 1 || m.strength > 5)
             return fmt("\"destructible\": %zu estados (2 a %u, o primeiro e a raiz), classe %u (1 a 5)", m.states.size(), kMaxPropStates, m.strength);
@@ -360,6 +379,39 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
                 const bool turn = std::fabs(std::remainder(en.hd, 360.0)) > 1e-6;
                 const uint32_t t = st.alloc(turn ? 0x54 : 0x20, 16);
                 uint32_t ist = 0, destr = 0;
+                std::vector<uint32_t> instRoots = sroots;
+                std::vector<std::vector<uint32_t>> instChains = chains;
+                int64_t smokeCost = 0;
+                if (dstr && !pm.smoke.empty())
+                {   // um emissor comeca o efeito uma vez, na primeira vez que e desenhado, e anota isso no proprio no: cada copia do prop
+                    // precisa dos seus, num grupo de estado proprio (as malhas continuam compartilhadas)
+                    for (const auto &[si, blobs] : pm.smoke)
+                    {
+                        const std::vector<uint32_t> kids = st.children(sroots[si]);
+                        std::vector<uint32_t> all = kids;
+                        for (const std::vector<uint8_t> &b : blobs)
+                        {
+                            const uint32_t en = st.alloc(0xB0, 16);
+                            for (size_t o = 0; o < b.size(); o += 4)
+                            {
+                                uint32_t w;
+                                std::memcpy(&w, b.data() + o, 4);
+                                st.w32(en + uint32_t(o), w);
+                            }
+                            all.push_back(en);
+                        }
+                        const uint32_t gr = st.alloc(0x20 + 4 * uint32_t(all.size()), 16);
+                        for (uint32_t o = 0; o < 0x20; o += 4) st.w32(gr + o, st.u32(sroots[si] + o));
+                        st.w16(gr + 8, uint16_t(all.size()));
+                        for (size_t j = 0; j < all.size(); ++j) st.w32(gr + 0x20 + 4 * uint32_t(j), all[j]);
+                        instRoots[si] = gr;
+                        st.stats["smoke emitters"] += int64_t(blobs.size());
+                        smokeCost += 0x20 + 4 * int64_t(all.size()) + 15 + int64_t(blobs.size()) * (0xB0 + 15);
+                    }
+                    instChains.clear();
+                    std::vector<uint32_t> c0;
+                    for (uint32_t r : instRoots) propChains(st, r, c0, instChains, 0);
+                }
                 if (dstr)
                 {   // T|R -> INTERACTIVE_STATE -> DESTRUCTIBLE -> uma raiz por estado (FORMATS.md); o limiar de cada estado e a vida que resta
                     ist = st.alloc(0x10, 16);
@@ -371,7 +423,7 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
                     st.w16(destr + 0xA, uint16_t(nSt));
                     for (uint32_t i = 0; i < nSt; ++i)
                     {
-                        st.w32(destr + 0xC + 12 * i, sroots[i]);
+                        st.w32(destr + 0xC + 12 * i, instRoots[i]);
                         st.w16(destr + 0xC + 12 * i + 8, i + 1 < nSt ? uint16_t(std::lround(65535.0 * (nSt - 1 - i) / nSt)) : 0);
                         if (pm.actions[i]) st.w32(destr + 0xC + 12 * i + 4, at + pm.actions[i]);   // o ActDebris do estado, na imagem do prop
                     }
@@ -398,12 +450,12 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
                 std::string bad;
                 if (dstr)
                 {
-                    cost += 0x10 + 15 + 0xC + 12 * nSt + 15;
+                    cost += 0x10 + 15 + 0xC + 12 * nSt + 15 + smokeCost;
                     if (st.interUsed + 1 > kInteractives)
                         bad = fmt("a fase nao tem vaga de Interactives (%lld de %lld ocupadas)", (long long)st.interUsed, (long long)kInteractives);
                 }
                 std::vector<std::vector<uint32_t>> full;
-                for (const std::vector<uint32_t> &c0 : chains)
+                for (const std::vector<uint32_t> &c0 : instChains)
                 {
                     std::vector<uint32_t> c1;
                     if (dstr) c1 = {ist, destr};
@@ -438,7 +490,7 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
                     ++st.stats["skipped"];
                     continue;
                 }
-                mine.push_back({t, root, full, ist, destr, dstr ? sroots : std::vector<uint32_t>{}});
+                mine.push_back({t, root, full, ist, destr, dstr ? instRoots : std::vector<uint32_t>{}});
                 need += cost;
                 if (dstr) ++st.interUsed;
             }
@@ -460,6 +512,8 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
             if (dstr)
                 st.log.push_back(fmt("props: %s e destrutivel: %u estados, classe de vida %u (%u pontos)", name.c_str(), nSt, pm.strength,
                                      kStrengthHp[pm.strength]));
+            for (const auto &[si, blobs] : pm.smoke)
+                st.log.push_back(fmt("props: %s tem fumaca: %zu emissores no estado %u", name.c_str(), blobs.size(), si));
             ++st.stats["prop models"];
             for (const auto &[slot, tid] : pm.texOf) st.log.push_back(fmt("props: %s tex%u <- contexto do OBJECT %07x", name.c_str(), tid, ctxFrom[tid].first));
             st.log.insert(st.log.end(), ownLines.begin(), ownLines.end());
