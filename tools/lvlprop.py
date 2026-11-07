@@ -3,7 +3,7 @@
 level patch places in the stage (docs/FORMATS.md, ".NGP image", "Fixups", "Meshes", "Stage collision").
 
   python tools/lvlprop.py build <in.glb> <prop dir> --stage CENTRAL [--units blender|game] [--scale S | --height H]
-                                [--name NAME] [--title TEXT] [--light vertex|dir] [--disc DIR] [--preview-tex]
+                                [--name NAME] [--title TEXT] [--light auto|vertex|dir] [--disc DIR] [--preview-tex]
   python tools/lvlprop.py info <prop dir> [--at ADDR]
 
 `build` writes into <prop dir>:
@@ -24,6 +24,8 @@ Template ("first-object-roundtrip"): the first OBJECT of the stage's world root,
 rigid, one texture, strip sections with fog (PRIM.FGE), texture and the asked ABE (default 1, the stages' majority),
 fogBurnThru below 255, no alphaSort, environment map, UV scroll, color animation nor animated or sky node above it. The OBJECT
 header (shadow bits, fogBurnThru) and the GIF tags come from it; pointLight (0x80, the fire's lights) is always on.
+Light (`--light`): `auto` (default) turns on dirLight (0x100, the stage's three parallel lights) on each OBJECT whose meshes have
+no COLOR_0 and leaves it off where the colors are there (light baked in Blender); `vertex` is off everywhere, `dir` on everywhere.
 Units: `blender` (default) is a Blender scene (Z up, meters, the scene's X/Y are the game's) scaled by S game units per meter
 (default 18, about the size of the game's cars and buildings); `game` is a glb in game units (tools/lvlglb.py), scale 1. Node
 transforms are baked into the vertices; the scene origin is the prop's pivot. Colors: `blender` COLOR_0 (linear) to sRGB x 128,
@@ -242,7 +244,7 @@ def _material_key(glb, prim, warn):
 
 def read_glb(path, units, scale=None, height=None, warn=print):
     """Triangles of the .glb in the game's axes and units: ({key: [((x, y, z), n8, uv16, rgba) x 3]}, scale, stats).
-    key = ("tex", texId) or ("color",)."""
+    key = ("tex", texId, vc) or ("color", vc); vc: the triangles came with COLOR_0."""
     glb = ngpmesh.Glb(path)
     j = glb.j
     nodes = glb.nodes
@@ -321,8 +323,8 @@ def read_glb(path, units, scale=None, height=None, warn=print):
         s = UNITS_PER_METER if units == "blender" else 1.0
     out, stats = {}, {"degenerate": 0, "triangles": 0}
     for key, tris in raw.items():
-        lst = out.setdefault(key, [])
         for t in tris:
+            lst = out.setdefault(key + (t[0][3] is not None,), [])   # the triangles with COLOR_0 apart (the `auto` light)
             cs = []
             for wp, n, uvv, c, factor in t:
                 p = tuple(_f32(x * s) for x in game(wp))
@@ -557,14 +559,14 @@ def box_hull(mb, lo, hi, matid=COLL_MATID):
 
 # ---------------------------------------------------------------- build
 
-def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, name=None, title=None, light="vertex",
+def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, name=None, title=None, light="auto",
           disc=None, abe=1, preview_tex=False, log=print):
     """Writes the prop into out_dir; returns the prop.json dict."""
     import lvl
     if units not in ("blender", "game"):
         raise PropError("--units is blender or game")
-    if light not in ("vertex", "dir"):
-        raise PropError("--light is vertex or dir")
+    if light not in ("auto", "vertex", "dir"):
+        raise PropError("--light is auto, vertex or dir")
     name = (name or os.path.basename(os.path.normpath(out_dir))).upper()
     if not NAME_RE.match(name):
         raise PropError("prop name %r: 1 to 8 letters, digits or _" % name)
@@ -584,6 +586,8 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
         if key[0] != "tex":
             continue
         tid = key[1]
+        if tid in slot_of:          # the same texture with and without vertex colors
+            continue
         if tid not in have:
             raise PropError("tex%d is not a texture of %s.TEX" % (tid, stage))
         found = stage_ctx(st.img, tid, objs)
@@ -594,7 +598,7 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
         textures.append({"slot": len(textures), "texId": tid, "ctxFrom": "0x%X" % o,
                          "tex0": "0x%016X" % struct.unpack_from("<Q", ctx, 0)[0]})
         if clamp and 1 in clamp:
-            uvs = [c[2] for t in by_key[key] for c in t]
+            uvs = [c[2] for k in by_key if k[:2] == key[:2] for t in by_key[k] for c in t]
             if any(not (0 <= u <= 4096) for uv in uvs for u in uv):
                 log("warning: tex%d has UVs outside 0..1 and the stage clamps (CLAMP_1 %s): the edge texels stretch" % (
                     tid, clamp))
@@ -605,10 +609,11 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
     for key in sorted(by_key, key=lambda k: (k[0] != "tex", k[1:] if len(k) > 1 else ())):
         tris = [tuple((tuple(_fbits(x) for x in c[0]), c[1], c[2], c[3]) for c in t) for t in by_key[key]]
         textured = key[0] == "tex"
+        lt = light if light != "auto" else ("vertex" if key[-1] else "dir")
         for grp in split_objects(level_batches(tris, gif0, gifn, textured)):
-            a, nv, nb = level_object(mb, header, grp, slot_of[key[1]] if textured else None, light)
+            a, nv, nb = level_object(mb, header, grp, slot_of[key[1]] if textured else None, lt)
             kids.append(a)
-            stats_obj.append({"object": "0x%X" % a, "texId": key[1] if textured else None, "vertices": nv})
+            stats_obj.append({"object": "0x%X" % a, "texId": key[1] if textured else None, "vertices": nv, "light": lt})
             nverts += nv
             pbytes += nb
             all_pts += _batch_points(grp)
@@ -892,7 +897,7 @@ def main(argv):
                 return 2
             build(args[1], args[2], opts["stage"], opts.get("units", "blender"),
                   float(opts["scale"]) if "scale" in opts else None, float(opts["height"]) if "height" in opts else None,
-                  opts.get("name"), opts.get("title"), opts.get("light", "vertex"), opts.get("disc"),
+                  opts.get("name"), opts.get("title"), opts.get("light", "auto"), opts.get("disc"),
                   preview_tex="--preview-tex" in argv)
             return 0
         if len(args) == 2 and args[0] == "info":

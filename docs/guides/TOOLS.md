@@ -47,12 +47,15 @@
     `<NAME>.PTR` in the monster layout (pointers; texIds and OBJECT GS contexts that hold the prop's texture slot until the loader
     writes the stage texId and a live context), a `<NAME>.preview.glb` decoded back from the packets it wrote (`lvlglb`'s
     conventions; materials name `tex<texId>`, images only with `--preview-tex`) and a `prop.json` (stage, slot -> texId, template,
-    bounds, collision). Tree: GROUP (0x0003) -> one OBJECT per texture (split at the 13-bit `numVerts`) + GROUP 0x0102 -> a
+    bounds, collision). Tree: GROUP (0x0003) -> one OBJECT per texture and per "has COLOR_0" (split at the 13-bit `numVerts`) +
+    GROUP 0x0102 -> a
     6-plane `COLL_VOL` box from the bounds. The OBJECT header and GIF tags come from the stage's first OBJECT that round-trips in
     `vifpkt` with fog, one texture and the asked ABE (rule `first-object-roundtrip`); strips keep each triangle's winding (a strip
     that would start at an odd place of its section repeats its first vertex). `blender` units: Z up, meters, 18 game units per
     meter by default, COLOR_0 linear to sRGB x 128; `game` units: a piece of `lvlglb`'s export, raw colors. Materials `tex<texId>`
-    reuse the stage's textures; other images, `state<N>_*` meshes and skins are refused, `coll_*`/`hull_*` skipped. `info <prop
+    reuse the stage's textures; other images, `state<N>_*` meshes and skins are refused, `coll_*`/`hull_*` skipped. `--light auto`
+    (default) turns on dirLight (0x100, the stage's three parallel lights) on the OBJECTs without COLOR_0 and leaves it off on the
+    ones with it (light baked in Blender); `vertex` and `dir` force it off or on. `info <prop
     dir> [--at ADDR]` relocates a prop (default the level arena, 0x3E00000) and reads every node, packet and fixup back;
     `load_prop(folder)` returns the `Prop` (`ngp`, `ptr`, `root`, `textures`, `bounds`, `relocate(at)`, `resolve(at, ctx_of)`) the
     level patch uses, and `stage_ctx` the context a texId takes. Standard library only.

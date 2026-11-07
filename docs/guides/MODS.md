@@ -634,7 +634,9 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   `model` is a folder `mods/<mod>/props/<MODEL>/` of the same mod as the JSON (any case), written by `python tools/lvlprop.py build
   <in.glb> mods/<mod>/props/<MODEL> --stage <FASE>` (`TOOLS.md`): `<MODEL>.NGP`, `<MODEL>.PTR`, `<MODEL>.preview.glb` (what the game
   draws, for the editor) and `prop.json` (`stage`, `textures` as `{"slot", "texId"}`, `bounds`, `light`, counts). A prop belongs to
-  one stage: its textures are the stage's (materials `tex<texId>` in Blender). `pos` is where the model's origin goes; `heading` (degrees,
+  one stage: its textures are the stage's (materials `tex<texId>` in Blender). A mesh with no vertex colors takes the stage's sun
+  (its three parallel lights, as the cars do); a mesh with vertex colors keeps them as its light (bake the light in Blender), and
+  `--light vertex|dir` forces one way for the whole prop. `pos` is where the model's origin goes; `heading` (degrees,
   default 0) turns it about Z. Each entry collides as the box of the model's bounds (monsters stand on it and bump into it; vehicles
   and pedestrians are cut around it like around a moved building) and is drawn with no view culling. Each model takes its file size
   of the arena once, and each entry 100 to 200 bytes more. Skipped with a line: a model missing or made for another stage, a texture
