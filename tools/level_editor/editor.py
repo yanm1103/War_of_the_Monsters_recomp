@@ -502,6 +502,9 @@ def base_of(cfg, name):
     return c["base"] if c else name
 
 
+POINTS_LOCK = threading.Lock()
+
+
 def points_root(cfg, name):
     """A folder with PTS/<BASE>.<ext> for the stage: the base's points, except for the kinds the custom stage's own folder has
     (any file name with that extension, as the game takes them). None when the stage has no points of its own: use the disc's."""
@@ -518,14 +521,17 @@ def points_root(cfg, name):
         return None
     base_root = stage_root(cfg["disc"], c["base"])
     root = os.path.join(CACHE, "pts-%s-%s" % (disc_key(cfg["disc"]), c["id"].upper()))
-    os.makedirs(os.path.join(root, "PTS"), exist_ok=True)
-    for ext in lvl.POINT_EXTS:
-        src = own.get(ext) or os.path.join(base_root, "PTS", "%s.%s" % (c["base"], ext))
-        dst = os.path.join(root, "PTS", "%s.%s" % (c["base"], ext))
-        if os.path.isfile(src):
-            shutil.copyfile(src, dst)
-        elif os.path.exists(dst):
-            os.remove(dst)
+    with POINTS_LOCK:           # the HTTP server is threaded: two requests for one stage share this folder
+        os.makedirs(os.path.join(root, "PTS"), exist_ok=True)
+        for ext in lvl.POINT_EXTS:
+            src = own.get(ext) or os.path.join(base_root, "PTS", "%s.%s" % (c["base"], ext))
+            dst = os.path.join(root, "PTS", "%s.%s" % (c["base"], ext))
+            if os.path.isfile(src):
+                if not (os.path.isfile(dst) and os.path.getsize(dst) == os.path.getsize(src) and
+                        open(dst, "rb").read() == open(src, "rb").read()):
+                    shutil.copyfile(src, dst)
+            elif os.path.exists(dst):
+                os.remove(dst)
     return root
 
 
@@ -582,7 +588,9 @@ def new_stage(cfg, b):
     if len(name) > 17 or not all(32 <= ord(c) < 127 for c in name):
         raise ValueError("The name is up to 17 ASCII characters.")
     folder = os.path.join(cfg["mods"], mod, "stages", sid.lower())
-    os.makedirs(folder, exist_ok=True)
+    if os.path.exists(folder) or sid.upper() in custom_stages(cfg, refused=True):
+        raise ValueError("A stage folder or id %s exists already (a refused one counts: see the game log)." % sid.upper())
+    os.makedirs(folder)
     with open(os.path.join(folder, "stage.json"), "w", encoding="utf-8") as f:
         json.dump({"id": sid, "name": name, "base": base}, f, indent=1)
     patch = b.get("patch")

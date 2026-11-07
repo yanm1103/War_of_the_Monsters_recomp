@@ -148,7 +148,9 @@ def mod_pngs(mod_dir, stage):
     """{png name (lower case): path} of the stage's texture PNGs anywhere in the mod (the file name is what counts)."""
     pat = re.compile(r"^%s(_rtx)?_t\d{4}\.png$" % re.escape(stage.lower()))
     out = {}
-    for d, _dirs, files in os.walk(mod_dir):
+    for d, dirs, files in os.walk(mod_dir):
+        if os.path.basename(mod_dir.rstrip("/\\")) != "stages" and d == mod_dir:
+            dirs[:] = [x for x in dirs if x.lower() != "stages"]     # a custom stage's pictures are its own, not the mod's
         for f in files:
             if pat.match(f.lower()):
                 out[f.lower()] = os.path.join(d, f)

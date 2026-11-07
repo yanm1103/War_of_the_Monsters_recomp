@@ -34,8 +34,8 @@ is ignored) draws with that stage texture; a material with no image is vertex co
 (baseColorTexture, PNG; JPEG and others need Pillow) is a texture of the prop's own: the image goes beside the files as
 `<NAME>_T<slot>.png` and into the image as a `.TEX` packet of a CT32 copy (power of two, at most 128 a side and the stage's largest
 texture bin: own_packet) with its own gsTexCtx (own_ctx, TEX1 of the stage); the loader gives it a texId past the loaded ones and a
-bin, and the PC draws the PNG in its place. UVs outside 0..1 are clamped (warning). Meshes named `coll_*`/`hull_*` are skipped with a warning (the box stands in for them), and
-`state<N>_*` (destructible states) is refused. Only the standard library: it runs inside the level editor.
+bin, and the PC draws the PNG in its place. UVs outside 0..1 are clamped (warning). A mesh named `hull_*` is collision (its convex hull becomes a COLL_VOL), `coll_*` too (its triangles become a POLY_COLL, at most 64);
+without either, a box of the visual stands in. `state<N>_*` (destructible states) is refused. Only the standard library: it runs inside the level editor.
 """
 import json
 import math
@@ -930,8 +930,9 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
                       "min": [round(x, 4) for x in plo], "max": [round(x, 4) for x in phi]})
         log("collision triangles %s: %d" % (cname, len(ctris)))
     cvs = [int(h["node"], 16) for h in hulls + polys] or [box_hull(mb, lo, hi)]
-    cg = _group(mb, COLL_FLAGS, cvs, [lo, hi])
-    root = _group(mb, ROOT_FLAGS, kids + [cg], all_pts)
+    shape = [tuple(h[k]) for h in hulls + polys for k in ("min", "max")]       # a collision shape may leave the visual's box
+    cg = _group(mb, COLL_FLAGS, cvs, [lo, hi] + shape)
+    root = _group(mb, ROOT_FLAGS, kids + [cg], all_pts + shape)
     mb.u32(BASE, 1)
     mb.u32(BASE + 4, root)
     mb.d += bytes((-len(mb.d)) % 16)

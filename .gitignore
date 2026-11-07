@@ -49,3 +49,6 @@ tools/pcsx2_auto/*.bin
 
 # pasta do runtime criada pelo tools/setup_runtime.ps1 (clone do PS2Recomp, build, discroot)
 /runtime/
+
+# paginas de teste e depuracao do editor de fase (locais)
+/tools/level_editor/web/_*

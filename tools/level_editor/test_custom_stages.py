@@ -96,6 +96,10 @@ def main():
                                         "every": True})
         assert os.path.isfile(os.path.join(stages, "ok", row["png"])), res
         assert not os.path.exists(os.path.join(mods, "m", "LVL", row["png"]))
+        # the base stage's picture in the mod does not touch the custom stage's own, and the base's panel does not see it
+        post("/api/hud/replace", {"mod": "m", "stage": "CENTRAL", "role": row["role"], "png": row["png"], "data": enc(png(16, 8))})
+        assert os.path.isfile(os.path.join(stages, "ok", row["png"])), "the base's HUD picture deleted the custom stage's"
+        os.remove(os.path.join(mods, "m", "LVL", row["png"]))
         post("/api/hud/remove", {"mod": "m", "stage": "MYCITY", "role": row["role"], "png": row["png"]})
         assert not os.path.exists(os.path.join(stages, "ok", row["png"]))
         for bad in ({"name": "CENTRAL", "png": enc(png(16, 8))}, {"name": "MYCITY", "png": enc(png(8, 8))}):

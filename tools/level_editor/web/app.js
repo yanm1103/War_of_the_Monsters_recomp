@@ -2804,7 +2804,7 @@ function palResults(q) {
     .map((pm) => ({ kind: 'prop', text: `${pm.info.name || pm.info.model} ${pm.info.model}`, label: `Add ${pm.info.name && pm.info.name.toUpperCase() !== pm.info.model ? pm.info.name + ' · ' : ''}${pm.info.model}`,
                     meta: pm.info.triangles ? `${pm.info.triangles} triangles` : '', run: () => addProp(pm.info.model) }))
     .filter((r) => fits(r.text));
-  const objs = items().filter((it) => !it.rec.deleted || !it.copy).map((it) => ({ it, name: it.copy ? it.iname || `Copy ${it.rec.copies.indexOf(it) + 1}` : nameOf(it) }))
+  const objs = items().filter((it) => !it.rec.deleted).map((it) => ({ it, name: it.copy ? it.iname || `Copy ${it.rec.copies.indexOf(it) + 1}` : nameOf(it) }))
     .filter((o) => fits(`${o.name} ${o.it.rec.info.handle}`)).slice(0, 40)
     .map((o) => ({ kind: 'obj', label: o.name, meta: o.it.rec.info.handle, run: () => { select(o.it); focusSelection(); } }));
   return { props, objs };
