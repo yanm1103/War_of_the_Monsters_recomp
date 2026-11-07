@@ -54,7 +54,8 @@
     `vifpkt` with fog, one texture and the asked ABE (rule `first-object-roundtrip`); strips keep each triangle's winding (a strip
     that would start at an odd place of its section repeats its first vertex). `blender` units: Z up, meters, 18 game units per
     meter by default, COLOR_0 linear to sRGB x 128; `game` units: a piece of `lvlglb`'s export, raw colors. Materials `tex<texId>`
-    reuse the stage's textures; other images, `state<N>_*` meshes and skins are refused, `coll_*` skipped. A `hull_*` mesh is the prop's collision: the convex hull of its vertices (at most 64 distinct, at most 40
+    reuse the stage's textures; other images, `state<N>_*` meshes and skins are refused, A `coll_*` mesh is collision by triangles: its faces (at most 64 triangles, 256 vertices) become a `POLY_COLL` leaf with no box tree, matId `0x10A`, bbox bits all ones;
+    one leaf per `coll_*` mesh. A `hull_*` mesh is the prop's collision: the convex hull of its vertices (at most 64 distinct, at most 40
     faces) becomes a `COLL_VOL` of its planes, one leaf per `hull_*` mesh; without one, the 6-plane box of the visual stands in. `--light auto`
     (default) turns on dirLight (0x100, the stage's three parallel lights) on the OBJECTs without COLOR_0 and leaves it off on the
     ones with it (light baked in Blender); `vertex` and `dir` force it off or on. `info <prop

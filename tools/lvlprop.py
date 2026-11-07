@@ -57,7 +57,9 @@ ARENA = 0x3E00000              # the level patch arena (PS2_RAM_SIZE - 2 MB), in
 ROOT_FLAGS = 0x0003            # visual + collision, no option byte (hdTraversePath stops at flags & (option << 8))
 COLL_FLAGS = 0x0102            # the GROUP the stages' building collision leaves hang from
 COLL_MATID = 1                 # matId of the monsters' and 3-MILE's box hulls
-OP_OBJECT, OP_GROUP, OP_COLL_VOL = 0, 1, 10
+OP_OBJECT, OP_GROUP, OP_COLL_VOL, OP_POLY_COLL = 0, 1, 10, 42
+POLY_MATID = 0x010A            # matId of the stages' building faces (the same on every triangle of a coll_ mesh)
+MAX_COLL_TRIS = 64             # a coll_ mesh is one POLY_COLL object with no box tree (numBBoxes 0): the game walks every triangle
 OWN_MAX_LOG = 7                # a texture of the prop's own: at most 128 texels a side in the game's copy (the PC draws the PNG)
 OWN_PREVIEW_ID = 1000          # the texIds the preview gives the prop's own textures (1000 + slot: past texInfo[1000])
 TEMPLATE_RULE = "first-object-roundtrip"
@@ -400,7 +402,7 @@ def read_glb(path, units, scale=None, height=None, warn=print):
         world[i] = _mat_mul(pm, _node_local(nodes[i]))
         stack.extend((k, world[i]) for k in nodes[i].get("children", []))
     raw = {}           # key -> [[corner, corner, corner]] with corners (pos glTF world, normal, uv, color linear/raw)
-    skipped, hull_raw = [], []
+    skipped, hull_raw, coll_raw = [], [], []
     for i, m in sorted(world.items()):
         nd = nodes[i]
         if "mesh" not in nd:
@@ -415,8 +417,16 @@ def read_glb(path, units, scale=None, height=None, warn=print):
                     pts.append(tuple(m[r][0] * q[0] + m[r][1] * q[1] + m[r][2] * q[2] + m[r][3] for r in range(3)))
             hull_raw.append((name, pts))
             continue
-        if low.startswith("coll_"):
-            skipped.append(name)
+        if low.startswith("coll_"):          # collision by triangles: the mesh's own vertices and faces, no tree
+            cv, ct = [], []
+            for prim in mesh.get("primitives", []):
+                pos = glb.accessor(prim["attributes"]["POSITION"])
+                idx = [v[0] for v in glb.accessor(prim["indices"])] if "indices" in prim else list(range(len(pos)))
+                base = len(cv)
+                cv += [tuple(m[r][0] * q[0] + m[r][1] * q[1] + m[r][2] * q[2] + m[r][3] for r in range(3)) for q in pos]
+                tr = [tuple(base + i for i in idx[k:k + 3]) for k in range(0, len(idx) - 2, 3)]
+                ct += [(b, a, c) if _det3(m) < 0 else (a, b, c) for a, b, c in tr]
+            coll_raw.append((name, cv, ct))
             continue
         if re.match(r"state\d+_", low):
             raise PropError("mesh %s: destructible states are not supported yet (a static prop only)" % name)
@@ -453,8 +463,6 @@ def read_glb(path, units, scale=None, height=None, warn=print):
                 if flip:
                     tri = [tri[0], tri[2], tri[1]]
                 lst.append(tri)
-    if skipped:
-        warn("coll_ meshes (collision by triangles) are a later step; skipped: %s" % ", ".join(skipped))
     if not any(raw.values()):
         raise PropError("%s: no triangles to draw" % path)
 
@@ -477,7 +485,9 @@ def read_glb(path, units, scale=None, height=None, warn=print):
     def place(q):
         x, y, z = (x * s for x in game(q))
         return (_f32(x), _f32(y), _f32(z + zlift))
-    out, stats = {}, {"degenerate": 0, "triangles": 0, "hulls": [], "lift": zlift}
+    out, stats = {}, {"degenerate": 0, "triangles": 0, "hulls": [], "colls": [], "lift": zlift}
+    for cname, cverts, ctris in coll_raw:
+        stats["colls"].append((cname, [place(q) for q in cverts], ctris))
     for hname, hpts in hull_raw:
         stats["hulls"].append((hname, [place(q) for q in hpts]))
     for key, tris in raw.items():
@@ -760,6 +770,40 @@ def hull_volume(mb, planes, pts, matid=COLL_MATID):
     return cv, lo, hi
 
 
+def poly_coll(mb, verts, tris):
+    """POLY_COLL (op 42) of one object with no box tree: `verts` (local floats, at most 256) and `tris` (index triples). The
+    triangle's bbox bits are all ones (the query never rejects one on them); matId POLY_MATID. Returns (leaf, lo, hi)."""
+    used = sorted({i for t in tris for i in t})
+    if not tris:
+        raise PropError("a coll_ mesh with no triangles")
+    if len(tris) > MAX_COLL_TRIS:
+        raise PropError("a coll_ mesh has %d triangles; at most %d (it is a collision shape: simplify it)" % (len(tris), MAX_COLL_TRIS))
+    if len(used) > 256:
+        raise PropError("a coll_ mesh uses %d vertices; at most 256" % len(used))
+    remap = {v: k for k, v in enumerate(used)}
+    pts = [verts[v] for v in used]
+    lo = [min(q[c] for q in pts) for c in range(3)]
+    hi = [max(q[c] for q in pts) for c in range(3)]
+    ctr = [0.5 * (a + b) for a, b in zip(lo, hi)]
+    pool = mb.alloc(12 * len(pts), 16)
+    for k, q in enumerate(pts):
+        mb.raw(pool + 12 * k, struct.pack("<3f", *q))
+    obj = mb.alloc(0x18 + 8 * len(tris), 16)
+    mb.ptr_to(obj, pool, keep_high=False)
+    mb.u16(obj + 4, len(tris))
+    mb.u16(obj + 6, 0)
+    for c in range(3):
+        mb.f(obj + 8 + 4 * c, ctr[c])
+    mb.f(obj + 0x14, max(math.dist(ctr, q) for q in pts))
+    for k, (a, b, c) in enumerate(tris):
+        mb.raw(obj + 0x18 + 8 * k, bytes((remap[a], remap[b], remap[c], 0)) + struct.pack("<HH", POLY_MATID, 0xFFFF))
+    leaf = mb.alloc(0x10, 16)
+    mb.u32(leaf, OP_POLY_COLL)
+    mb.u32(leaf + 4, 1)
+    mb.ptr_to(leaf + 8, obj, keep_high=False)
+    return leaf, lo, hi
+
+
 def box_hull(mb, lo, hi, matid=COLL_MATID):
     """COLL_VOL (op 10) of 6 planes, inside when n . p < d (the monsters' order: +z, +y, -z, -y, +x, -x)."""
     cv = mb.alloc(0x20 + 16 * 6, 16)
@@ -879,7 +923,13 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
         hulls.append({"mesh": hname, "node": "0x%X" % cv, "planes": len(planes),
                       "min": [round(x, 4) for x in hlo], "max": [round(x, 4) for x in hhi]})
         log("collision hull %s: %d planes" % (hname, len(planes)))
-    cvs = [int(h["node"], 16) for h in hulls] or [box_hull(mb, lo, hi)]
+    polys = []
+    for cname, cverts, ctris in gstats["colls"]:
+        leaf, plo, phi = poly_coll(mb, cverts, ctris)
+        polys.append({"mesh": cname, "node": "0x%X" % leaf, "triangles": len(ctris),
+                      "min": [round(x, 4) for x in plo], "max": [round(x, 4) for x in phi]})
+        log("collision triangles %s: %d" % (cname, len(ctris)))
+    cvs = [int(h["node"], 16) for h in hulls + polys] or [box_hull(mb, lo, hi)]
     cg = _group(mb, COLL_FLAGS, cvs, [lo, hi])
     root = _group(mb, ROOT_FLAGS, kids + [cg], all_pts)
     mb.u32(BASE, 1)
@@ -904,7 +954,8 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
             "source": src, "units": units, "scale": s, "kind": "static", "light": light, "textures": textures,
             "template": {"rule": TEMPLATE_RULE, "abe": abe, "object": "0x%X" % tmpl, "bits": "0x%08X" % st.img.u32(tmpl + 0xC)},
             "bounds": {"min": [round(x, 4) for x in lo], "max": [round(x, 4) for x in hi]},
-            "collision": {"auto": "box" if not hulls else "hull", "poly": 0, "hull": len(hulls), "hulls": hulls, "tris": 0,
+            "collision": {"auto": "box" if not (hulls or polys) else "mesh", "poly": len(polys), "polys": polys, "hull": len(hulls),
+                      "hulls": hulls, "tris": sum(p["triangles"] for p in polys),
                       "matId": COLL_MATID},
             "objects": stats_obj, "triangles": ntris, "vertices": nverts, "packetBytes": pbytes, "bytes": len(mb.d),
             "root": "0x%X" % root, "files": {"ngp": name + ".NGP", "ptr": name + ".PTR", "preview": name + ".preview.glb"}}
@@ -1008,8 +1059,8 @@ def walk(img, root):
             raise PropError("node 0x%X outside the image" % n)
         seen.add(n)
         op = img.u32(n) & 63
-        if op not in (OP_GROUP, OP_OBJECT, OP_COLL_VOL):
-            raise PropError("node 0x%X: op %d (a static prop holds GROUP, OBJECT and COLL_VOL)" % (n, op))
+        if op not in (OP_GROUP, OP_OBJECT, OP_COLL_VOL, OP_POLY_COLL):
+            raise PropError("node 0x%X: op %d (a static prop holds GROUP, OBJECT, COLL_VOL and POLY_COLL)" % (n, op))
         out.append((n, op))
         if op == OP_GROUP:
             stack.extend(img.u32(n + 0x20 + 4 * k) & 0x0FFFFFFF for k in range(img.u16(n + 8)))
@@ -1063,14 +1114,14 @@ def check(prop, at=ARENA, log=print):
             md = ngp.decode_mesh(img, n)
             tris += len(md.tris) // 3
             pts += [(v.x, v.y, v.z) for v in md.tris]
-        elif op == OP_COLL_VOL:
+        elif op in (OP_COLL_VOL, OP_POLY_COLL):
             hulls.append(lvl.aabb(lvl.leaf_points(img, n)))
     lo = [min(p[c] for p in pts) for c in range(3)]
     hi = [max(p[c] for p in pts) for c in range(3)]
     for c in range(3):
         if abs(lo[c] - prop.bounds[0][c]) > 1e-2 or abs(hi[c] - prop.bounds[1][c]) > 1e-2:
             raise PropError("decoded bounds %s .. %s differ from prop.json" % (lo, hi))
-    want = prop.meta.get("collision", {}).get("hulls") or []
+    want = (prop.meta.get("collision", {}).get("hulls") or []) + (prop.meta.get("collision", {}).get("polys") or [])
     if want:                # hull_ meshes: each leaf matches the box its prop.json lists
         got = sorted((h for h in hulls if h), key=lambda h: h[0])
         exp = sorted(((tuple(w["min"]), tuple(w["max"])) for w in want))
