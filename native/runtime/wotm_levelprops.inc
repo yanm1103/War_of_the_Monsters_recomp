@@ -231,6 +231,81 @@ struct PropMade
     std::vector<uint32_t> sroots;                // destrutivel: a raiz de cada estado, comum as instancias
 };
 
+// Os slots dos domos do ceu: todo OBJECT debaixo de um no de ceu (id 2) fora das nuvens (o ramo CHAR_INSTANCE, op 25), como [pai, slot] na
+// ordem da arvore (lvl.py sky_plan). PatchError se a fase nao tem nenhum (CANYON1, MINISF).
+std::vector<std::pair<uint32_t, uint32_t>> skyPlan(const Stage &st)
+{
+    std::vector<std::pair<uint32_t, uint32_t>> slots;
+    std::set<uint32_t> seenSlots, seen;
+    std::function<void(uint32_t)> walk = [&](uint32_t n) {
+        if (!seen.insert(n).second) return;
+        for (uint32_t s : st.childSlots(n))
+        {
+            if (!st.ok(s)) continue;
+            const uint32_t c = st.u32(s) & kMask;
+            if (!c || !st.ok(c)) continue;
+            if (st.op(c) == OBJECT)
+            {
+                if (seenSlots.insert(s).second) slots.push_back({n, s});
+            }
+            else if (st.op(c) != CHAR_INSTANCE)
+                walk(c);
+        }
+    };
+    std::vector<uint32_t> all(st.inTree.begin(), st.inTree.end());
+    std::sort(all.begin(), all.end());
+    for (uint32_t n : all)
+        if (st.ident(n) == 2 && st.op(n) == GROUP) walk(n);
+    if (slots.empty()) throw PatchError("o ceu da fase nao tem OBJECT de domo para trocar");
+    return slots;
+}
+
+// O domo vira o modelo (lvl.py sky_swap): cada OBJECT do modelo recebe a primeira palavra, as flags (menos a contagem de vertices) e os
+// campos de +0x20 a +0x4F do primeiro domo; o slot do primeiro domo aponta para a raiz do modelo e os dos outros para um GROUP vazio.
+void skySwap(Stage &st, const std::vector<std::pair<uint32_t, uint32_t>> &slots, uint32_t root, const std::string &name)
+{
+    const uint32_t tpl = st.u32(slots[0].second) & kMask, vmask = 0x1FFFu << 16;
+    std::vector<uint32_t> objs, stack{root};
+    std::set<uint32_t> seen;
+    while (!stack.empty())
+    {
+        const uint32_t n = stack.back();
+        stack.pop_back();
+        if (!seen.insert(n).second) continue;
+        if (st.op(n) == OBJECT) objs.push_back(n);
+        for (uint32_t c : st.children(n)) stack.push_back(c);
+    }
+    for (uint32_t o : objs)
+    {
+        st.w32(o, st.u32(tpl));
+        st.w32(o + 0xC, (st.u32(tpl + 0xC) & ~vmask) | (st.u32(o + 0xC) & vmask));
+        for (uint32_t off = 0x20; off < 0x50; off += 4) st.w32(o + off, st.u32(tpl + off));
+    }
+    uint32_t empty = 0;
+    for (size_t i = 0; i < slots.size(); ++i)
+    {
+        const auto &[p, s] = slots[i];
+        if (i == 0)
+        {
+            st.setPtr(s, root);
+            st.parents[root].push_back(p);
+        }
+        else
+        {
+            if (!empty)
+            {
+                empty = st.alloc(0x20, 16);
+                st.w32(empty, GROUP);
+            }
+            st.setPtr(s, empty);
+            st.parents[empty].push_back(p);
+        }
+    }
+    st.stats["sky domes replaced"] += int64_t(slots.size());
+    st.log.push_back(fmt("sky: modelo %s (%zu objetos) troca %zu domo%s (estilo do OBJECT %07x)", name.c_str(), objs.size(), slots.size(),
+                         slots.size() == 1 ? "" : "s", tpl));
+}
+
 void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::filesystem::path &modDir, const std::string &stageName)
 {
     const json::Value *props = patch.get("props");
@@ -252,7 +327,9 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
             if (const json::Value *m = e.get("model"); m && m->type == json::Value::Str) name = m->s;
             for (char &c : name) c = char(std::toupper(static_cast<unsigned char>(c)));
             Ent en{k, &e, {}, 0.0};
-            if (!Stage::num3(e.get("pos"), en.pos)) throw PatchError("sem \"pos\" [x, y, z]");
+            const json::Value *skyV = e.get("sky");
+            if (!(skyV && skyV->type == json::Value::Bool && skyV->b) && !Stage::num3(e.get("pos"), en.pos))   // a entrada do ceu nao tem lugar
+                throw PatchError("sem \"pos\" [x, y, z]");
             if (const json::Value *h = e.get("heading"); h && h->isInt()) en.hd = h->asNum();
             if (!models.count(name)) order.push_back(name);
             models[name].push_back(en);
@@ -372,9 +449,24 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
             for (uint32_t r : sroots) propChains(st, r, chain, chains, 0);   // um estado por vez (a unica raiz de um prop estatico)
             const uint32_t nSt = uint32_t(sroots.size());
             std::vector<PropMade> mine;
+            std::vector<std::vector<std::pair<uint32_t, uint32_t>>> skyJobs;
             int64_t need = 0;
             for (const Ent &en : ents)
             {
+                if (const json::Value *sv = en.e->get("sky"); sv && sv->type == json::Value::Bool && sv->b)
+                {
+                    try
+                    {
+                        if (dstr) throw PatchError("um modelo de ceu nao tem estados destrutiveis");
+                        skyJobs.push_back(skyPlan(st));
+                    }
+                    catch (const PatchError &err)
+                    {
+                        st.log.push_back(fmt("sky pulado: modelo %s: %s", name.c_str(), err.what()));
+                        ++st.stats["skipped"];
+                    }
+                    continue;
+                }
                 const uint32_t tTop = st.arenaTop;
                 const bool turn = std::fabs(std::remainder(en.hd, 360.0)) > 1e-6;
                 const uint32_t t = st.alloc(turn ? 0x54 : 0x20, 16);
@@ -494,19 +586,20 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
                 need += cost;
                 if (dstr) ++st.interUsed;
             }
-            if (mine.empty())
+            if (mine.empty() && skyJobs.empty())
             {
                 st.rollback(top);
                 st.interUsed = iu0;
                 continue;
             }
-            if (need + (made.empty() ? kReserveGroup : 0) > int64_t(st.arenaFree()))
+            if (need + (made.empty() ? kReserveGroup : 0) + (skyJobs.empty() ? 0 : 0x20 + 15) > int64_t(st.arenaFree()))
             {
                 st.rollback(top);
                 st.interUsed = iu0;
                 throw PatchError(fmt("modelo %s: %zu entradas levam ate %lld bytes a mais, a arena tem %u livres", name.c_str(), mine.size(),
                                      (long long)need, st.arenaFree()));
             }
+            for (const auto &job : skyJobs) skySwap(st, job, root, name);   // por ultimo, quando nada mais pode falhar: os slots passam a apontar para a arena
             made.insert(made.end(), mine.begin(), mine.end());
             summary.push_back(fmt("%s x%zu (%zu bytes)", name.c_str(), mine.size(), pm.ngp.size()));
             if (dstr)

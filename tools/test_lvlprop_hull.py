@@ -18,11 +18,14 @@ import lvl      # noqa: E402
 import lvlprop  # noqa: E402
 
 
-def make_glb(path, hull_pts, hull_tris, yoff=0.0, coll=None, extra=()):
-    """Two meshes: `vis` (a 2 m cube, vertex color only) and `hull_pyr` (the given points and triangles); Blender meters, Y up."""
+def make_glb(path, hull_pts, hull_tris, yoff=0.0, coll=None, extra=(), flip=False):
+    """Two meshes: `vis` (a 2 m cube, vertex color only; `flip`: faces turned inward, for a sky) and `hull_pyr` (the given points and
+    triangles); Blender meters, Y up."""
     cube = [(-1, 0, -1), (1, 0, -1), (1, 2, -1), (-1, 2, -1), (-1, 0, 1), (1, 0, 1), (1, 2, 1), (-1, 2, 1)]
     cube = [(x, y + yoff, z) for x, y, z in cube]
     cidx = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 3, 6, 2, 3, 7, 6, 0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5]
+    if flip:
+        cidx = [cidx[i + j] for i in range(0, len(cidx), 3) for j in (0, 2, 1)]
     blobs, views, accs = b"", [], []
 
     def add(data, ctype, count, typ, target, mm=None):

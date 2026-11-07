@@ -676,6 +676,14 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   the stage's `.TEX` does not have, an image larger than every texture bin of the stage, an entry whose box leaves the collision grid. The props are read from the folder at every load,
   so a prop rebuilt during a fight shows after a reload (F10). Log: `[fase]   props: TOWER x3 (1216 bytes); 1660 bytes da arena`,
   the same numbers as `lvl.py patch`.
+  **Sky:** an entry `{"model": "SKYDOME", "sky": true}` (no `pos`) replaces the stage's sky dome with the model instead of placing it.
+  The dome is every OBJECT under the sky node (id 2) outside the clouds (the `CHAR_INSTANCE` branch, which stays); the model's objects wear
+  the first dome's first word, flags and fields at +0x20..+0x4F (fog burn-through 3500, so the fog never reaches it; the tint) and keep
+  their own vertices and textures; the first dome's slot points at the model and the other domes' (TOKYO has two) at an empty `GROUP`.
+  The sky is drawn around the camera with the dome's blend state, so build the model around its origin with its faces turned
+  inward and a texture (a material `tex<texId>` of the stage's sky, or an image; an untextured sky is not drawn); the stock domes
+  have bounding spheres of radius 9000 to 12000, and `--scale`/`--height` size the model. Its `hull_*`, `coll_*` and automatic box are never used. A model with `state<N>_*` meshes is refused; so
+  is a stage with no dome (CANYON1, MINISF). Log: `[fase]   sky: modelo SKYDOME (1 objetos) troca 1 domo (estilo do OBJECT 0fc8120)`.
 - Check before playing: `python tools/lvl.py patch CENTRAL mods/<mod>/levels/CENTRAL.json` applies the patch to the disc's image, prints
   what changed, each redone collision box, and checks the collision of the result (box rule and cell rule, `FORMATS.md`, "Stage
   collision"). An entry that does not match is skipped with a line saying why.
