@@ -1208,7 +1208,17 @@ function showPropsPanel() {
     scrubField(hin);
     hb.append(hin, document.createTextNode(' units'));
     fact('Height', hb);
-    fact('Kind', s.word);
+    if (p.destructible) {     // the hit point class of the model: prop.json only, read at every load
+      const sb = document.createElement('select');
+      sb.id = 'pPropStr';
+      sb.title = `How much damage model ${i.model} takes before each state moves on (every entry of it; not undoable)`;
+      for (const [c, hp] of [[1, 10], [2, 50], [3, 100], [4, 150], [5, 250]]) sb.add(new Option(`${hp} hit points${c === 1 ? ', any hit counts' : ''}`, String(c)));
+      sb.value = String(p.destructible.class);
+      sb.onchange = () => editPropModel(i.model, { strength: +sb.value }, () => `${i.model} takes ${sb.selectedOptions[0].text.split(',')[0]} to break` +
+        (game.state === 'running' ? '; Test in game shows it' : ''));
+      fact('Strength', sb);
+    }
+    fact('Kind', p.destructible ? `${s.word}, destructible (${p.destructible.states} states)` : s.word);
     fact('Model', i.model, 'mono');
     if (p.triangles != null) fact('Triangles', String(p.triangles));
     if (p.light) fact('Light', { vertex: 'Vertex colors', dir: 'Stage sun', mixed: 'Vertex colors and stage sun' }[p.light] || p.light);

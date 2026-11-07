@@ -654,7 +654,9 @@ def props_list(cfg, mod):
             pv = os.path.join(d, n, (m.get("files") or {}).get("preview", ""))
             e.update(name=m.get("name") or n, stage=(m.get("stage") or "").upper(), triangles=m.get("triangles", 0),
                      bounds=m.get("bounds"), light=prop_light(m), bytes=m.get("bytes"), units=m.get("units"),
-                     scale=m.get("scale"), preview=os.path.isfile(pv))
+                     scale=m.get("scale"), preview=os.path.isfile(pv),
+                     destructible=({"class": (m["destructible"] or {}).get("class"), "states": len((m["destructible"] or {}).get("states") or [])}
+                                    if m.get("destructible") else None))
         except (OSError, ValueError, AttributeError) as err:
             e["error"] = "prop.json does not read: %s" % err
         out.append(e)
@@ -737,6 +739,19 @@ def edit_prop(cfg, b):
     if title is not None:
         title = " ".join(str(title).split())[:64] or m.get("model") or model
     lines = []
+    if b.get("strength") not in (None, ""):      # a destructible's hit point class: only prop.json changes (read at every load)
+        try:
+            cls = int(b["strength"])
+        except (TypeError, ValueError):
+            cls = 0
+        if not m.get("destructible"):
+            raise ValueError("%s is not destructible (a .glb with state1_ meshes makes one)" % model)
+        if cls not in lvlprop.STRENGTH:
+            raise ValueError("The strength is a hit point class, 1 to 5")
+        m["destructible"]["class"] = cls
+        with open(pj, "w", encoding="utf-8") as f:
+            json.dump(m, f, indent=1)
+            f.write("\n")
     if b.get("height") not in (None, ""):
         try:
             h = float(b["height"])
@@ -763,7 +778,8 @@ def edit_prop(cfg, b):
         try:
             lvlprop.build(src, folder, stage, m.get("units") or "blender", m["scale"] * h / old, None, m.get("model") or model,
                           title if title is not None else m.get("name"), m.get("light") or "auto", stage_root(cfg["disc"], stage),
-                          abe=(m.get("template") or {}).get("abe", 1), log=lines.append)
+                          abe=(m.get("template") or {}).get("abe", 1),
+                          strength=(m.get("destructible") or {}).get("class", lvlprop.DEFAULT_STRENGTH), log=lines.append)
         except Exception:
             for n in os.listdir(folder):
                 if n not in backup and n.lower() != "source.glb":
