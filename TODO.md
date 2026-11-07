@@ -9,7 +9,6 @@ O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado s
 ## Editor de fase
 Rearranjar fases existentes (mover, girar, apagar, duplicar prédios e objetos, inclusive de outra fase) com um editor que grava o patch JSON por fase em `mods/<mod>/levels/` (`docs/guides/MODS.md`, "Level patches"; aplicado pelo `wotm_levelpatch.inc`). Fase nova do zero fica para depois.
 3. **Fases custom** (`MODS.md`, "Custom stages"; plano em `docs/investigacoes/2026-11-06/fases_custom_plano.md`): o jogo já carrega pelo `WOTM_MATCH=3,1,@<id>`. Falta:
-   - O painel HUD de uma custom usa o da base.
    - Decisão do dono sobre a trava: hoje a custom herda a da base (alternativa: não listar a custom de base trancada).
 4. **Objetos novos vindos do Blender** (plano em `docs/investigacoes/2026-11-06/objetos_blender_plano.md`; conversor `tools/lvlprop.py`, diário `props_passo0_1.md`; a carga na fase, o editor e a imagem própria do material já existem, `MODS.md`, "props" e "New props"): faltam do passo 3 só a colisão por triângulos (`coll_*`, hoje o `hull_*` convexo já vale), e os passos 5, 6 e 8 (o 4 e o 7 saíram com o pacote CT32 na arena e o texId dado na carga, sem `.TEX` no mod). Textura própria: UV fora de 0..1 é preso na borda (sem repetir).
 5. **Céu:** trocar o skybox da fase pelo editor (o céu é um nó próprio da fase, `lvlglb` já o separa).

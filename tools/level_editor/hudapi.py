@@ -80,15 +80,15 @@ class HudApi:
             raise ValueError("%s is not the %s texture of %s" % (png, role, stage))
         return lvlhud.targets(infos, stage, role, every)
 
-    def replace(self, disc, mods, mod, stage, role, png, data_b64, every):
+    def replace(self, disc, mods, mod, stage, role, png, data_b64, every, sub="LVL"):
         data = base64.b64decode(data_b64)
         if not data.startswith(b"\x89PNG\r\n\x1a\n"):
             raise ValueError("not a PNG")
         mod_dir = os.path.join(mods, mod)
         lines = []
         for st, name in self._targets(disc, stage, role, png, every):
-            lvlhud.write_mod_png(mod_dir, name, data)
-            lines.append("HUD: %s/LVL/%s (%s)" % (mod, name, st))
+            lvlhud.write_mod_png(mod_dir, name, data, sub)
+            lines.append("HUD: %s/%s%s (%s)" % (mod, sub + "/" if sub else "", name, st))
         if len(lines) > 3:
             lines = ["HUD: %s: %d stages (%s)" % (lvlhud.ROLE[role][1], len(lines), ", ".join(s for s, _n in
                      self._targets(disc, stage, role, png, every)))]

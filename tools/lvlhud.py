@@ -182,11 +182,11 @@ def targets(infos, stage, role, every):
     return out
 
 
-def write_mod_png(mod_dir, name, data):
+def write_mod_png(mod_dir, name, data, sub="LVL"):
     """Write a PNG (bytes) as <mod>/LVL/<name>, removing the same name elsewhere in the mod (the game takes any folder)."""
     for old in [p for n, p in mod_pngs(mod_dir, name.split("_")[0]).items() if n == name.lower()]:
         os.remove(old)
-    out = os.path.join(mod_dir, "LVL", name)
+    out = os.path.join(mod_dir, sub, name)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     tmp = out + ".tmp"
     with open(tmp, "wb") as f:

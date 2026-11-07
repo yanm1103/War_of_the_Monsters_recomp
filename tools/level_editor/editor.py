@@ -557,6 +557,15 @@ def save_levelpic(cfg, b):
     return {"saved": path, "size": [w, h]}
 
 
+def hud_target(cfg, stage, mod):
+    """(mods folder, mod, base stage, sub folder, custom) for the HUD panel. A custom stage keeps its HUD pictures in its own
+    folder (stages/<folder>/<BASE>_tNNNN.png, which only that stage takes); the others go in the chosen mod's LVL/."""
+    c = custom_stages(cfg).get((stage or "").upper())
+    if not c:
+        return cfg["mods"], mod, stage, "LVL", False
+    return os.path.join(cfg["mods"], c["mod"], "stages"), c["folder"], c["base"], "", True
+
+
 def new_stage(cfg, b):
     """New stage…: mods/<mod>/stages/<id>/stage.json (id, name, base) and, with a patch, levels/<ID>.json. Returns the listing
     entry. The game reads its registry at boot, so it sees the stage after a restart (Test in game restarts it)."""
@@ -1036,10 +1045,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200, f.read(), "model/gltf-binary")
             if u.path == "/api/hud":
                 mod = q.get("mod", "").strip()
-                return self.send(200, HUD.panel(cfg["disc"], cfg["mods"], mod if mod and not bad_mod(mod) else "", base_of(cfg, q["stage"])))
+                mods_dir, mod_arg, base, _sub, _c = hud_target(cfg, q["stage"], mod if mod and not bad_mod(mod) else "")
+                return self.send(200, HUD.panel(cfg["disc"], mods_dir, mod_arg, base))
             if u.path == "/api/hudimg":
                 mod = q.get("mod", "").strip()
-                path = HUD.image(cfg["disc"], cfg["mods"], "" if bad_mod(mod) else mod, base_of(cfg, q["stage"]), q.get("src"), q.get("png"))
+                mods_dir, mod_arg, base, _sub, _c = hud_target(cfg, q["stage"], "" if bad_mod(mod) else mod)
+                path = HUD.image(cfg["disc"], mods_dir, mod_arg, base, q.get("src"), q.get("png"))
                 if not path or not os.path.isfile(path):
                     return self.send(404, {"error": "not found"})
                 with open(path, "rb") as f:
@@ -1119,12 +1130,13 @@ class Handler(BaseHTTPRequestHandler):
                 # Test without saving writes nothing: no mod needed
                 if bad_mod(mod) and not (self.path == "/api/test" and not b.get("save", True) and not mod):
                     return self.send(400, {"error": bad_mod_reason(mod), "code": "mod"})
-                if self.path == "/api/hud/replace":
-                    return self.send(200, {"lines": HUD.replace(cfg["disc"], cfg["mods"], mod, b["stage"], b["role"], b["png"],
-                                                                b["data"], bool(b.get("every")))})
-                if self.path == "/api/hud/remove":
-                    return self.send(200, {"lines": HUD.remove(cfg["disc"], cfg["mods"], mod, b["stage"], b["role"], b["png"],
-                                                               bool(b.get("every")))})
+                if self.path in ("/api/hud/replace", "/api/hud/remove"):
+                    mods_dir, mod_arg, base, sub, custom = hud_target(cfg, b["stage"], mod)
+                    every = bool(b.get("every")) and not custom        # a custom stage's picture is its own
+                    if self.path == "/api/hud/replace":
+                        return self.send(200, {"lines": HUD.replace(cfg["disc"], mods_dir, mod_arg, base, b["role"], b["png"],
+                                                                    b["data"], every, sub)})
+                    return self.send(200, {"lines": HUD.remove(cfg["disc"], mods_dir, mod_arg, base, b["role"], b["png"], every)})
                 name = b["name"]
                 if self.path == "/api/reload" and not game_running():
                     return self.send(400, {"error": "no game opened by the editor is running: use Test in game"})
