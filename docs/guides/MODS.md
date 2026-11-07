@@ -701,6 +701,11 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   have now" also writes them as the new stage's patch when the open stage has that base. A stage with points of its own
   (`.SPT`, `.PED`...) in its folder shows those in the pedestrian panel and the check (the other kinds from the base). `python
   tools/level_editor/test_custom_stages.py` is the integration test (needs the disc set in the editor).
+- **Palette (Ctrl+P):** a search over the stage's objects (name or handle; Enter selects and frames the first) and the mod's props for
+  this stage (Enter adds one where the view looks). It opens from anywhere, even in a text field.
+- **Stage picture:** the picture button (lower right of the view) saves the middle 2:1 band of the view, 512x256, as
+  `mods/<mod>/levelpics/<name>.png` for a custom stage (`<id>`) and for Training, Lake Powell and Tokyo DM; the other game stages have
+  their picture in `SHELL.TEX` (make a custom stage on one). The stage select picks it up the next time the game starts.
 - **Winning mod:** the game loads, for each stage, the `levels/<STAGE>.json` of the last mod in name order that has one. When
   another mod than the chosen one wins for this stage, a note under the top bar names it when the stage loads (and after a save),
   since the game does not use the chosen mod's file; its X hides it until the next stage or mod.

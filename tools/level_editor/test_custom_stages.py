@@ -3,13 +3,16 @@
 Needs the disc configured in the editor (Settings). Uses a temporary mods folder; nothing in the repo changes.
 Run: python tools/level_editor/test_custom_stages.py
 """
+import base64
 import json
 import shutil
 import os
 import sys
+import struct
 import tempfile
 import threading
 import urllib.error
+import zlib
 import urllib.request
 from http.server import ThreadingHTTPServer
 
@@ -75,6 +78,23 @@ def main():
                 assert e.code == 400
             else:
                 raise AssertionError("accepted " + repr(bad))
+        # Stage picture: a 2:1 PNG goes to levelpics/<id>.png; a game stage with its picture in SHELL.TEX and a 1:1 PNG are refused
+        def png(w, h):
+            def chunk(t, d):
+                return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d))
+            raw = b"".join(b"\x00" + b"\x40\x80\xc0" * w for _ in range(h))
+            return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+                    + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+        enc = lambda d: base64.b64encode(d).decode()      # noqa: E731
+        r = post("/api/levelpic", {"mod": "m", "name": "MYCITY", "png": enc(png(16, 8))})
+        assert os.path.isfile(os.path.join(mods, "m", "levelpics", "mycity.png")), r
+        for bad in ({"name": "CENTRAL", "png": enc(png(16, 8))}, {"name": "MYCITY", "png": enc(png(8, 8))}):
+            try:
+                post("/api/levelpic", dict(bad, mod="m"))
+            except urllib.error.HTTPError as e:
+                assert e.code == 400
+            else:
+                raise AssertionError("accepted " + repr(bad["name"]))
         srv.shutdown()
     print("ok")
 

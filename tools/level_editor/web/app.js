@@ -2780,6 +2780,76 @@ document.addEventListener('pointerdown', (e) => {   // a click anywhere else clo
 }, true);
 let ipData = null, ipTitle = '';
 const ipInput = Object.assign(document.createElement('input'), { type: 'file', accept: '.glb,model/gltf-binary' });
+// Stage picture: the view's middle 2:1 band, 512x256, into mods/<mod>/levelpics/ (the stage select's picture)
+$('picBtn').onclick = async () => {
+  if (!stageName) return;
+  if (!modNow) { msg('Choose a mod first: the picture is saved in it', { level: 'warn', toast: true }); return; }
+  renderer.render(scene, camera);          // the canvas keeps no frame between renders: read it right after one
+  const src = renderer.domElement, w = src.width, h = src.height, cw = Math.min(w, h * 2), ch = cw / 2;
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 256;
+  c.getContext('2d').drawImage(src, (w - cw) / 2, (h - ch) / 2, cw, ch, 0, 0, 512, 256);
+  const png = c.toDataURL('image/png').replace(/^data:[^,]*,/, '');
+  try {
+    const r = await api('/api/levelpic', { mod: modNow, name: stageName, png });
+    msg(`Saved the view as the stage picture: ${r.saved}`, { level: 'ok', toast: true });
+  } catch (e) { msg(cleanError(e).text, { level: 'err', toast: true }); }
+};
+
+// Ctrl+P palette: the stage's objects (select and frame) and the mod's props for this stage (add)
+let palIdx = 0, palRows = [];
+function palResults(q) {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean), fits = (t) => words.every((w) => t.toLowerCase().includes(w));
+  const props = [...propModels.values()].filter((pm) => pm.info.stage === baseOf(stageName) && pm.scene)
+    .map((pm) => ({ kind: 'prop', text: `${pm.info.name || pm.info.model} ${pm.info.model}`, label: `Add ${pm.info.name && pm.info.name.toUpperCase() !== pm.info.model ? pm.info.name + ' · ' : ''}${pm.info.model}`,
+                    meta: pm.info.triangles ? `${pm.info.triangles} triangles` : '', run: () => addProp(pm.info.model) }))
+    .filter((r) => fits(r.text));
+  const objs = items().filter((it) => !it.rec.deleted || !it.copy).map((it) => ({ it, name: it.copy ? it.iname || `Copy ${it.rec.copies.indexOf(it) + 1}` : nameOf(it) }))
+    .filter((o) => fits(`${o.name} ${o.it.rec.info.handle}`)).slice(0, 40)
+    .map((o) => ({ kind: 'obj', label: o.name, meta: o.it.rec.info.handle, run: () => { select(o.it); focusSelection(); } }));
+  return { props, objs };
+}
+function palRender() {
+  const { props, objs } = palResults($('palQ').value);
+  palRows = [...props, ...objs];
+  palIdx = Math.min(palIdx, Math.max(0, palRows.length - 1));
+  const list = $('palList');
+  list.textContent = '';
+  const head = (t) => { const d = document.createElement('div'); d.className = 'pal-h'; d.textContent = t; list.appendChild(d); };
+  let n = 0;
+  const add = (r) => {
+    const i = n++, b = document.createElement('button');
+    b.type = 'button'; b.className = 'ghost'; b.setAttribute('role', 'option'); b.setAttribute('aria-selected', i === palIdx);
+    b.append(icon(r.kind === 'prop' ? 'shape-plus-outline' : 'cube-outline'));
+    const l = document.createElement('span'), m = document.createElement('span');
+    l.textContent = r.label; m.className = 'pal-meta'; m.textContent = r.meta;
+    b.append(l, m);
+    b.onclick = () => palPick(r);
+    list.appendChild(b);
+  };
+  if (props.length) { head('Props'); props.forEach(add); }
+  if (objs.length) { head('Objects'); objs.forEach(add); }
+  if (!palRows.length) { const d = document.createElement('div'); d.className = 'pm-none'; d.textContent = 'Nothing matches.'; list.appendChild(d); }
+  list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+}
+function palPick(r) { $('palDlg').close(); r.run(); }
+function openPalette() {
+  if (!stageName || document.querySelector('dialog[open]')) return;
+  palIdx = 0;
+  $('palQ').value = '';
+  palRender();
+  $('palDlg').showModal();
+  $('palQ').focus();
+}
+$('palQ').oninput = () => { palIdx = 0; palRender(); };
+$('palQ').onkeydown = (e) => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    palIdx = (palIdx + (e.key === 'ArrowDown' ? 1 : -1) + palRows.length) % Math.max(1, palRows.length);
+    palRender();
+  } else if (e.key === 'Enter') { e.preventDefault(); if (palRows[palIdx]) palPick(palRows[palIdx]); }
+};
+
 // New stage…
 const NS_BASES = ['CENTRAL', 'VEGAS', 'CANYON2', 'METRO', 'UFO', 'CAPITOL', 'CANYON1', 'MINISF', 'TOKYODM'];
 const nsErr = (t) => { $('nsErr').hidden = !t; $('nsErr').querySelector('span').textContent = t || ''; };
@@ -3036,6 +3106,7 @@ const FLY_CODES = { KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd', KeyQ: 'q', KeyE:
 window.addEventListener('keyup', (e) => { if (FLY_CODES[e.code]) fly.keys.delete(FLY_CODES[e.code]); });
 window.addEventListener('keydown', (e) => {
   const k = (e.key || '').toLowerCase(), ctrl = e.ctrlKey || e.metaKey, field = typing(e.target);
+  if (ctrl && !e.altKey && k === 'p') { e.preventDefault(); openPalette(); return; }   // the browser's print dialog never opens
   if (document.querySelector('dialog[open]')) {   // a dialog has the keys (Esc closes it, the selection stays)
     if (ctrl && k === 's') e.preventDefault();
     return;

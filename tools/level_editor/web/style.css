@@ -436,6 +436,13 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 #propBar { display: contents; }
 #propMenu { top: 48px; left: 8px; z-index: 4; flex-direction: column; align-items: stretch; gap: 2px; padding: 8px; width: 280px; }
 #propMenu .sec-title { margin: 0 2px 4px; }
+dialog.pal { width: min(560px, 92vw); }
+#palQ { width: 100%; box-sizing: border-box; }
+#palList { display: flex; flex-direction: column; gap: 2px; max-height: 50vh; overflow-y: auto; margin: 8px 0; }
+#palList button { height: auto; min-height: 36px; flex-direction: row; justify-content: flex-start; gap: 10px; text-align: left; }
+#palList button[aria-selected="true"] { background: var(--hover, rgba(128,128,128,.22)); }
+#palList .pal-meta { margin-left: auto; color: var(--muted); font-size: 11px; }
+#palList .pal-h { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-top: 6px; }
 #pmList { display: flex; flex-direction: column; gap: 2px; max-height: 50vh; overflow-y: auto; }
 #propMenu button.pm-row { height: auto; min-height: 40px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px;
   padding: 4px 8px; text-align: left; }
