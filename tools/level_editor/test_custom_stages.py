@@ -78,6 +78,14 @@ def main():
                 assert e.code == 400
             else:
                 raise AssertionError("accepted " + repr(bad))
+        # Stage size: /api/stage tells the disc's grid; a bigger "grid" in the patch passes the check, a smaller one is reported
+        g = base_stage["grid"]
+        assert g and g["cols"] > 1 and g["min"][0] < g["max"][0], g
+        big = {"min": [g["min"][0] - 1000, g["min"][1] - 1000], "max": [g["max"][0] + 1000, g["max"][1] + 1000]}
+        ok = post("/api/check", {"name": "CENTRAL", "mod": "m", "patch": {"objects": [], "grid": big}})
+        assert ok["ok"] and any(l.startswith("grid:") for l in ok["lines"]), ok["problems"]
+        small = post("/api/check", {"name": "CENTRAL", "mod": "m", "patch": {"objects": [], "grid": {"min": [0, 0], "max": [10, 10]}}})
+        assert not small["ok"] and small["problems"][0]["kind"] == "grid", small["problems"]
         # Stage picture: a 2:1 PNG goes to levelpics/<id>.png; a game stage with its picture in SHELL.TEX and a 1:1 PNG are refused
         def png(w, h):
             def chunk(t, d):

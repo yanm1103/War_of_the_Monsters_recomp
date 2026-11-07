@@ -252,7 +252,7 @@ let gridOn = false;
 let stageRoot = null, skyRoot = null, env = null;   // env: the stage's fog, background and lights (/api/stage, RST/<STAGE>.MRS)
 // pedestrians (web/peds.js): a layer shown with P; pedSel is the marker the gizmo holds (never together with an object)
 const peds = createPeds({ THREE, scene, toThree, toGame });
-let discPeds = null, pedSel = null;
+let discPeds = null, pedSel = null, stageGrid = null;   // stageGrid: the disc's collision grid (/api/stage)
 
 function resize() {
   const r = canvas.parentElement.getBoundingClientRect();
@@ -731,7 +731,7 @@ function applyPatch(patch) {
   applyPedsView();
   showPedCounts();
   return { entries: keep.objects.length + Object.keys(keep.names).length, props: keep.props.length,
-           keys: Object.keys(keep.top).concat(Object.keys(keep.peds).map((k) => 'peds.' + k)) };
+           keys: Object.keys(keep.top).filter((k) => k !== 'grid').concat(Object.keys(keep.peds).map((k) => 'peds.' + k)) };
 }
 // the note over the view about what the file keeps that the editor does not show
 function showKeep(k) {
@@ -837,6 +837,7 @@ async function loadStage(name) {
     const gltf = await new GLTFLoader().loadAsync(`/api/glb?name=${encodeURIComponent(name)}`);
     env = info.env || null;
     discPeds = info.peds || null;
+    stageGrid = info.grid || null;
     setLights(env && env.lights);
     skyRoot = setupDrawing(gltf);
     stageRoot = gltf.scene;
@@ -2780,6 +2781,46 @@ document.addEventListener('pointerdown', (e) => {   // a click anywhere else clo
 }, true);
 let ipData = null, ipTitle = '';
 const ipInput = Object.assign(document.createElement('input'), { type: 'file', accept: '.glb,model/gltf-binary' });
+// Stage size: the patch's "grid" (a collision grid rectangle that holds the disc's). It lives in keep.top, so Undo and Save keep it.
+function gridNow() { return keep.top.grid && Array.isArray(keep.top.grid.min) && Array.isArray(keep.top.grid.max) ? keep.top.grid : null; }
+function gdFill(g) {
+  const lo = g ? g.min : stageGrid.min, hi = g ? g.max : stageGrid.max;
+  [$('gdMinX').value, $('gdMinY').value] = lo.map((v) => Math.round(v));
+  [$('gdMaxX').value, $('gdMaxY').value] = hi.map((v) => Math.round(v));
+  gdInfo();
+}
+function gdVals() { return [[+$('gdMinX').value, +$('gdMinY').value], [+$('gdMaxX').value, +$('gdMaxY').value]]; }
+function gdInfo() {
+  const [lo, hi] = gdVals(), c = stageGrid.cell;
+  const cols = Math.floor((hi[0] - lo[0]) / c) + 1, rows = Math.floor((hi[1] - lo[1]) / c) + 1;
+  $('gdInfo').textContent = `${cols} × ${rows} cells of ${c} units (${cols * rows} of 65536 allowed).`;
+}
+$('gridBtn').onclick = () => {
+  if (!stageGrid) { msg('This stage has no collision grid to resize', { level: 'warn', toast: true }); return; }
+  const g = stageGrid;
+  $('gdText').textContent = `The disc's grid is x ${Math.round(g.min[0])} to ${Math.round(g.max[0])}, y ${Math.round(g.min[1])} to ${Math.round(g.max[1])} (${g.cols} × ${g.rows} cells). ` +
+    'The game only collides, shoots and sees across what is inside it, so a prop or a copy placed outside needs a bigger one. It can only grow.';
+  gdFill(gridNow());
+  $('gdErr').hidden = true;
+  $('gridDlg').showModal();
+};
+for (const id of ['gdMinX', 'gdMinY', 'gdMaxX', 'gdMaxY']) $(id).oninput = () => { gdInfo(); $('gdErr').hidden = true; };
+$('gdGrow').onclick = () => { const [lo, hi] = gdVals(); gdFill({ min: lo.map((v) => v - 1000), max: hi.map((v) => v + 1000) }); };
+$('gdReset').onclick = () => gdFill(null);
+$('gdOk').onclick = () => {
+  const [lo, hi] = gdVals(), g = stageGrid, err = (t) => { $('gdErr').hidden = false; $('gdErr').querySelector('span').textContent = t; };
+  if (![...lo, ...hi].every(Number.isFinite)) { err('Type the four numbers.'); return; }
+  if (lo[0] > g.min[0] || lo[1] > g.min[1] || hi[0] < g.max[0] || hi[1] < g.max[1]) { err("The rectangle must hold the disc's grid (it can only grow)."); return; }
+  const cols = Math.floor((hi[0] - lo[0]) / g.cell) + 1, rows = Math.floor((hi[1] - lo[1]) / g.cell) + 1;
+  if (cols * rows > 65536) { err(`${cols} × ${rows} cells is over the 65536 the game allows.`); return; }
+  const same = lo[0] === Math.round(g.min[0]) && lo[1] === Math.round(g.min[1]) && hi[0] === Math.round(g.max[0]) && hi[1] === Math.round(g.max[1]);
+  snapshot(same ? "stage size back to the disc's" : 'stage size');
+  if (same) delete keep.top.grid; else keep.top.grid = { min: lo, max: hi };
+  $('gridDlg').close();
+  refreshList();
+  msg(same ? "The stage size is the disc's again" : `Stage size ${cols} × ${rows} cells. Check it, then Save`, { level: 'ok', toast: true });
+};
+
 // Stage picture: the view's middle 2:1 band, 512x256, into mods/<mod>/levelpics/ (the stage select's picture)
 $('picBtn').onclick = async () => {
   if (!stageName) return;

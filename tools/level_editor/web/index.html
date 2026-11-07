@@ -124,6 +124,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <span class="fsep"></span>
       <button id="focusSel" class="icon ghost" title="Focus the selection (F)" aria-label="Focus the selection" disabled><i class="ic" style="--ic:url(vendor/mdi/crosshairs-gps.svg)"></i></button>
       <button id="frame" class="icon ghost" title="Frame the whole stage (Home)" aria-label="Frame all"><i class="ic" style="--ic:url(vendor/mdi/fit-to-screen-outline.svg)"></i></button>
+      <button id="gridBtn" class="icon ghost" title="Stage size: the collision grid's rectangle (what the game collides, shoots and sees across); a bigger one lets objects go farther out" aria-label="Stage size"><i class="ic" style="--ic:url(vendor/mdi/arrow-expand-all.svg)"></i></button>
       <button id="picBtn" class="icon ghost" title="Use this view as the stage's picture on the stage select (a custom stage, Training, Lake Powell or Tokyo DM)" aria-label="Stage picture"><i class="ic" style="--ic:url(vendor/mdi/image-edit-outline.svg)"></i></button>
       <button id="keysBtn" class="icon ghost" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><i class="ic" style="--ic:url(vendor/mdi/keyboard-outline.svg)"></i></button>
     </div>
@@ -442,6 +443,21 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       </div>
     </div>
     <p class="keys-note">The letter keys are where W, A, S, D, Q and E sit on a QWERTY keyboard, on any layout.</p>
+  </form>
+</dialog>
+<dialog id="gridDlg" class="dlg" aria-labelledby="gdTitle">
+  <form method="dialog">
+    <div class="dlg-head"><h2 id="gdTitle">Stage size</h2>
+      <button type="button" data-close class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+    <div class="dlg-body">
+      <p class="muted" id="gdText"></p>
+      <div class="fl">Lower left (x, y)<span class="gd-pair"><input id="gdMinX" type="number" step="100"><input id="gdMinY" type="number" step="100"></span></div>
+      <div class="fl">Upper right (x, y)<span class="gd-pair"><input id="gdMaxX" type="number" step="100"><input id="gdMaxY" type="number" step="100"></span></div>
+      <div class="gd-btns"><button type="button" id="gdGrow">Grow every side by 1000</button><button type="button" id="gdReset">Back to the disc's</button></div>
+      <div class="help" id="gdInfo"></div>
+      <div class="callout err" id="gdErr" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-circle-outline.svg)"></i><span></span></div>
+    </div>
+    <div class="dlg-foot"><button type="button" data-close>Cancel</button><button id="gdOk" type="button" class="primary">Apply</button></div>
   </form>
 </dialog>
 <dialog id="palDlg" class="dlg pal" aria-label="Find an object or add a prop">

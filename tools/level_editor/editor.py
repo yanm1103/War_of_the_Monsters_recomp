@@ -326,7 +326,7 @@ def stage_env(cfg, disc, name, mod=""):
 
 # lp.stats keys the summary names, in this order (the others are details of how the patch was laid out)
 STAT_WORDS = (("moved", "moved", "moved"), ("copies", "copy", "copies"), ("deleted", "deleted", "deleted"),
-              ("ped segments", "sidewalk", "sidewalks"),
+              ("grid cells", "grid cell", "grid cells"), ("ped segments", "sidewalk", "sidewalks"),
               ("ped groups changed", "pedestrian group changed", "pedestrian groups changed"),
               ("ped groups added", "pedestrian group added", "pedestrian groups added"),
               ("ped groups deleted", "pedestrian group deleted", "pedestrian groups deleted"),
@@ -389,6 +389,10 @@ def check_patch(disc, name, patch, mod_dir=None, pts_root=None):
             h = hex_handle(e["handle"]) if e.get("handle") is not None else ""
             problems.append({"level": "err", "kind": "entry", "handle": h, "reason": m.group(2),
                              "text": "%s was not applied: %s" % (h or "Entry %d" % (k + 1), m.group(2))})
+            continue
+        m = re.match(r"grid skipped: (.*)$", line)
+        if m:
+            problems.append({"level": "err", "kind": "grid", "reason": m.group(1), "text": "The stage size was not applied: %s" % m.group(1)})
             continue
         m = re.match(r"pedestrian group (\d+) skipped: (.*)$", line)
         if m:
@@ -1041,6 +1045,8 @@ class Handler(BaseHTTPRequestHandler):
                     (sorted(have, key=str.lower)[-1] if have else "")
                 return self.send(200, {"objects": describe(q["name"], objs, on, facts, load_names()), "patch": patch,
                                        "env": stage_env(cfg, cfg["disc"], base, mod),
+                                       "grid": {"min": [st.grid.min_x, st.grid.min_y], "max": [st.grid.max_x, st.grid.max_y],
+                                                "cell": st.grid.cell, "cols": st.grid.cols, "rows": st.grid.rows} if st.grid else None,
                                        "peds": pedsapi.stage_peds(st, points_root(cfg, q["name"]) or stage_root(cfg["disc"], base)),
                                        "have": have, "winner": winner, "others": [m for m in have if m != mod]})
             if u.path == "/api/props":          # the mod's props (props/*/prop.json)

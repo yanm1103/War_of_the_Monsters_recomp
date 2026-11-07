@@ -1629,10 +1629,68 @@ class LevelPatch:
                  "INTERACTIVE_STATEs reached more than once: %d" % twice]
         return lines, linked + old == len(self.cells) and shared == 0 and anim_orig == 0 and unregistered == 0 and twice == 0
 
+    GRID_MAX_CELLS = 65536
+
+    def apply_grid(self, spec):
+        """The patch's "grid": {"min": [x, y], "max": [x, y]}, a collision grid rectangle that holds the stage's: a new grid in the
+        arena (same cell size, cols = floor(width / cell) + 1 as the disc's), every path listed again in the cells its box covers,
+        the root of the image pointing to it. The old grid's list nodes are reused. Done before the entries, so they see the new
+        grid. A bad spec raises PatchError (nothing is written)."""
+        st, img = self.st, self.img
+        g = st.grid
+        try:
+            lo, hi = [float(v) for v in spec["min"]], [float(v) for v in spec["max"]]
+            ok = len(lo) == len(hi) == 2 and all(math.isfinite(v) for v in lo + hi)
+        except (TypeError, KeyError, ValueError):
+            ok = False
+        if not ok:
+            raise PatchError('"grid" needs "min" and "max" as [x, y]')
+        if lo[0] > g.min_x or lo[1] > g.min_y or hi[0] < g.max_x or hi[1] < g.max_y:
+            raise PatchError("\"grid\" (%.0f %.0f)-(%.0f %.0f) does not hold the stage's (%.0f %.0f)-(%.0f %.0f)" % (
+                lo[0], lo[1], hi[0], hi[1], g.min_x, g.min_y, g.max_x, g.max_y))
+        cols, rows = int((hi[0] - lo[0]) / g.cell) + 1, int((hi[1] - lo[1]) / g.cell) + 1
+        if cols * rows > self.GRID_MAX_CELLS:
+            raise PatchError("\"grid\" of %d x %d cells: at most %d cells" % (cols, rows, self.GRID_MAX_CELLS))
+        need = 0x20 + 4 * cols * rows + 15
+        if need > self.arena_free():
+            raise PatchError("\"grid\" of %d x %d cells needs %d bytes, the arena has %d" % (cols, rows, need, self.arena_free()))
+        old = g.addr
+        nodes = []                              # the old lists' nodes, cell by cell, head first: they feed the new lists
+        for i in range(g.cols * g.rows):
+            ln, guard = img.u32(old + 0x20 + 4 * i) & MASK, 0
+            while ln and guard < 100000:
+                nodes.append(ln)
+                ln, guard = img.u32(ln) & MASK, guard + 1
+        new = self.alloc(0x20 + 4 * cols * rows, 16)
+        img.d[new - img.base:new - img.base + 0x20] = img.d[old - img.base:old - img.base + 0x20]
+        struct.pack_into("<hh", img.d, new + 4 - img.base, cols, rows)
+        for k, v in enumerate((g.cell, lo[0], lo[1], hi[0], hi[1])):
+            self.wf32(new + 8 + 4 * k, v)
+        slot = next(img.base + 4 + 4 * i for i, r in enumerate(img.roots()) if r & MASK == old)
+        self.set_ptr(slot, new)
+        st.roots = [new if r == old else r for r in st.roots]
+        st.grid = Grid(img, new)                # empty lists: the paths go in below
+        self.free = list(reversed(nodes)) + self.free
+        before = self.stats["new list nodes"]
+        for pa in sorted(self.cells):
+            p = Path(img, pa)
+            cells = st.grid.cells_for_box(p.min, p.max)
+            self.cells[pa] = set(cells)
+            for c in sorted(cells):
+                self._link(c, pa)
+        self.stats["grid cells"] = cols * rows
+        self.log.append("grid: %d x %d cells (was %d x %d), x [%.0f, %.0f] y [%.0f, %.0f]; %d paths listed again, %d new list nodes" % (
+            cols, rows, g.cols, g.rows, lo[0], st.grid.max_x, lo[1], st.grid.max_y, len(self.cells), self.stats["new list nodes"] - before))
+
     def apply(self, patch):
         """Every entry: {"handle", "from": [x, y, z], and "pos"/"heading", "delete": true or "copies": [{"pos", "heading"}]}.
         An entry that does not match the image is skipped with a line in the log."""
         st, img = self.st, self.img
+        if patch.get("grid") is not None:
+            try:
+                self.apply_grid(patch["grid"])
+            except PatchError as err:       # nothing was written: the entries go on with the disc's grid
+                self.log.append("grid skipped: %s" % err)
         for k, e in enumerate(patch.get("objects", [])):
             try:
                 hv = e.get("handle")
