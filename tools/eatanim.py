@@ -364,6 +364,7 @@ def key_poses(g, rig, R, off=None):
     crouch(p, 0.1)
     lean(p, 4)
     hand_to(p, fwd_f, -0.45, side_f)
+    pitch(p, head, 6)   # olha para o civil na mao
     P["dangle"] = p
     P["dangle_t"] = rig.pos(end, p)
     q = {i: p[i].copy() for i in p}   # tomada de impulso: mao desce um pouco, cabeca e tronco para a frente
@@ -484,12 +485,16 @@ def fit_offset(g, rig, R):
 
 
 # quadros da animacao de comer que o native/runtime/wotm_eatmod.inc usa (kTossFrame, kArriveFrame, kEatFrame, kEatFrames)
+# quadros: a mao solta o civil, ele chega ao alto (acima da boca), cai ate a boca e some, o queixo fecha; o segurar dura ate GRAB_END (mais que
+# o tempo maximo que o jogo deixa o civil na mao), com o balanco do idle por cima
 TOSS_FRAME, ARRIVE_FRAME, EAT_FRAME = 20, 34, 50
+APEX_FRAME, LAND_FRAME, VANISH_FRAME = 32, 44, 47
+GRAB_END = 3 * 161 + 0   # tres ciclos do idle (161 quadros): o fim cai na fase 0 do idle
 
 
 def timeline(P):
     """Lista de (quadro, pose) de cada animacao; entre as chaves, slerp suave."""
-    grab = [(0, "rest"), (22, "reach"), (32, "reach"), (70, "dangle"), (80, "dangle")]
+    grab = [(0, "rest"), (22, "reach"), (32, "reach"), (70, "dangle"), (80, "dangle"), (GRAB_END, "dangle")]
     eat = [(0, "dangle"), (10, "wind"), (TOSS_FRAME, "toss"), (ARRIVE_FRAME, "open"), (42, "open"), (EAT_FRAME, "chomp1"), (57, "reopen"),
            (63, "chomp2"), (76, "gulpback"), (92, "gulpdown"), (106, "puff"), (120, "rest")]
     return {"grab": [(f, P[n]) for f, n in grab], "eat": [(f, P[n]) for f, n in eat]}
@@ -504,11 +509,44 @@ def sample(keys, frame):
     return dict(keys[-1][1])
 
 
-def add_animation(g, name, keys, wid):
+def conj(q):
+    return np.array([-q[0], -q[1], -q[2], q[3]])
+
+
+def add_life(g, frames, fade_end, ramp=0):
+    """Poe o balanco do idle (a090, em laco) por cima: os ossos que a animacao nao mexe seguem o idle (cauda, o outro braco, pernas,
+    respiracao) e os que ela mexe ganham a variacao do idle em relacao ao primeiro quadro. No fim o efeito some (fade_end quadros) para
+    a volta ao idle do jogo nao dar salto; `ramp` quadros de entrada (a mao precisa chegar ao chao no pegar)."""
+    try:
+        first, idle_n = eval_pose(g, "a090", 0)
+    except SystemExit:
+        return frames
+    idle = [eval_pose(g, "a090", f)[0] for f in range(idle_n)]
+    n = len(frames)
+    for f in range(n):
+        w = 1.0
+        if fade_end and f > n - 1 - fade_end:
+            w = (n - 1 - f) / float(fade_end)
+        if ramp and f < ramp:
+            w *= f / float(ramp)
+        w = w * w * (3 - 2 * w)
+        ph = idle[f % idle_n]
+        for i in frames[f]:
+            if i not in ph:
+                continue
+            if isinstance(i, tuple):
+                frames[f][i] = frames[f][i] + (ph[i] - first[i]) * w
+            else:
+                d = slerp(np.array([0, 0, 0, 1.0]), qmul(ph[i], conj(first[i])), w)
+                frames[f][i] = qnorm(qmul(d, frames[f][i]))
+    return frames
+
+
+def add_animation(g, name, keys, wid, fade_end=0, ramp=0):
     n = keys[-1][0] + 1
     times = g.add(np.arange(n, dtype=float) / FPS)
     nodes = sorted(keys[0][1], key=lambda i: (isinstance(i, tuple), i[1] if isinstance(i, tuple) else i))
-    frames = [sample(keys, f) for f in range(n)]
+    frames = add_life(g, [sample(keys, f) for f in range(n)], fade_end, ramp)
     channels, samplers = [], []
     for i in nodes:
         out = g.add(np.array([frames[f][i] for f in range(n)]))
@@ -550,11 +588,26 @@ def cmd_build(argv):
     off, pen, nbl = hold_offset(g, rig, R)
     P = key_poses(g, rig, R, off)
     tl = timeline(P)
-    add_animation(g, "a%03d_once" % ids["--grab"], tl["grab"], ids["--grab"])
-    add_animation(g, "a%03d_once" % ids["--eat"], tl["eat"], ids["--eat"])
+    add_animation(g, "a%03d_once" % ids["--grab"], tl["grab"], ids["--grab"], ramp=60)
+    add_animation(g, "a%03d_once" % ids["--eat"], tl["eat"], ids["--eat"], fade_end=24)
     g.write(out)
     print("%s: a%03d_once (pegar, %d quadros) e a%03d_once (comer, %d quadros)" % (out, ids["--grab"], tl["grab"][-1][0] + 1, ids["--eat"],
                                                                                 tl["eat"][-1][0] + 1))
+
+
+def value_at(g, sampler, t):
+    """Valor do canal no tempo t (s): canais constantes tem so 2 amostras, entao nao da para indexar por quadro."""
+    ts = np.asarray(g.read(sampler["input"]), float).reshape(-1)
+    out = g.read(sampler["output"])
+    if t <= ts[0]:
+        return out[0]
+    if t >= ts[-1]:
+        return out[-1]
+    k = int(np.searchsorted(ts, t, side="right")) - 1
+    u = (t - ts[k]) / (ts[k + 1] - ts[k])
+    if out.shape[1] == 4:
+        return slerp(qnorm(out[k]), qnorm(out[k + 1]), u)
+    return out[k] + (out[k + 1] - out[k]) * u
 
 
 def eval_pose(g, name, frame):
@@ -563,7 +616,9 @@ def eval_pose(g, name, frame):
             pose = {}
             for ch in a["channels"]:
                 s = a["samplers"][ch["sampler"]]
-                v = g.read(s["output"])[min(frame, a["extras"]["frames"] - 1)]
+                if ch["target"]["path"] == "scale":
+                    continue
+                v = value_at(g, s, frame / FPS)
                 if ch["target"]["path"] == "translation":
                     pose[("T", ch["target"]["node"])] = v
                 else:

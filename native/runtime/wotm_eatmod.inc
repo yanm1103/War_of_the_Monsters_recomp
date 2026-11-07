@@ -10,6 +10,11 @@
 // The grab/eat clips are played over whatever state the monster is in; when a clip is over (or the civilian is let go) and the state
 // has not changed, the idle state is entered again so the game's own animation comes back.
 //
+// The game's own Circle action has priority: a tap is held back for a moment, and if the game started a pickup, grapple, catch or throw
+// (or the monster already holds something) the tap is not ours; the same goes for the 2nd tap while a civilian is held.
+// The civilian rises above the open mouth and falls straight in. The clips also carry the idle sway (tools/eatanim.py), so the tail, the
+// free arm and the legs keep moving.
+//
 // Pedestrian coordinates: x and y are the street, the third is the height (0 on the ground), the same axes as a monster's locators
 // (z up). Grab and eat are confirmed in a fight; the carry (the height follows the hand) and the animations are not yet.
 //
@@ -58,6 +63,8 @@ struct Hold
     bool clip = false;
     uint32_t clipState = 0, clipId = 0;
     bool eating = false, queued = false, tossed = false;   // the eat clip is running; a tap came during the grab clip; the civilian left the hand
+    bool pend = false;   // a first tap is waiting to see whether the game's own grab takes it
+    std::chrono::steady_clock::time_point pendAt, queuedAt;
     std::chrono::steady_clock::time_point eatStart;
     float from[3] = {0, 0, 0};   // where the civilian left the hand
     std::chrono::steady_clock::time_point clipEnd;
@@ -117,11 +124,14 @@ constexpr uint32_t kAnims = 0x1CF0, kAnimStride = 0x10, kAnimGrab = 299, kAnimEa
 constexpr float kAnimBlend = 20.f;
 
 constexpr uint32_t kState = 0x34, kIdleState = 0x7984;   // Monster::m_state; the StateIdle embedded in Monster
-constexpr double kGrabSeconds = 82.0 / 60.0, kEatSeconds = 122.0 / 60.0;   // clip lengths (tools/eatanim.py: 81 and 121 frames at 60 fps)
-// Frames of the eat clip (tools/eatanim.py TOSS_FRAME, ARRIVE_FRAME, EAT_FRAME): the hand lets go, the civilian reaches the open mouth, the jaw closes on it
-constexpr double kTossT = 20.0 / 60.0, kArriveT = 34.0 / 60.0, kEatT = 50.0 / 60.0;
+constexpr double kGrabSeconds = 82.0 / 60.0, kEatSeconds = 122.0 / 60.0;   // clip lengths (tools/eatanim.py: grab 484 frames, of which the pose is reached at 81, and eat 121, at 60 fps)
+// Frames of the eat clip (tools/eatanim.py TOSS_FRAME, APEX_FRAME, LAND_FRAME, VANISH_FRAME): the hand lets go, the civilian is above the open
+// mouth, it has dropped into it, and it is gone (the jaw closes at frame 50)
+constexpr double kTossT = 20.0 / 60.0, kApexT = 32.0 / 60.0, kLandT = 44.0 / 60.0, kEatT = 47.0 / 60.0;
+constexpr double kDeferSeconds = 0.12;   // a tap waits this long to see whether the game's own grab takes it
+constexpr uint32_t kGameGrabStates[] = {0xDC70, 0xDCE0, 0x10BF0, 0xEF40, 0x1074C};   // PickUp, Grapple, Catch, Throw, TwoHandedThrow
 constexpr uint32_t kMouth = 0x3E50;   // locator 0x80B: monster + id * 16 - 0x4260
-constexpr float kTossArc = 40.f;   // extra height of the toss at its top, in game units
+constexpr float kDropHeight = 60.f;   // how far above the mouth the civilian is thrown, in game units
 
 bool playAnim(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, Hold &hold, uint32_t m, uint32_t id)
 {
@@ -204,7 +214,8 @@ void carry(uint8_t *rdram, uint32_t m, const Hold &h)
         wrF(rdram, h.pos + 8, rdF(rdram, m + kHandR + 8));
 }
 
-// The toss: from where the hand let go to the mouth locator, along an arc
+// The toss: the civilian rises from where the hand let go to a point above the open mouth, then falls straight into it (it follows the
+// mouth locator, which moves with the head)
 void fly(uint8_t *rdram, uint32_t m, Hold &h, double t)
 {
     if (!h.tossed)
@@ -214,16 +225,37 @@ void fly(uint8_t *rdram, uint32_t m, Hold &h, double t)
         h.from[1] = rdF(rdram, h.pos + 4);
         h.from[2] = rdF(rdram, h.pos + 8);
     }
-    const float u = float(std::min(1.0, (t - kTossT) / (kArriveT - kTossT)));
     float a, b;
     ground(rdram, m + kMouth, &a, &b);
-    wrF(rdram, h.pos, h.from[0] + (a - h.from[0]) * u);
-    wrF(rdram, h.pos + 4, h.from[1] + (b - h.from[1]) * u);
-    if (g_cfg.lift && !g_cfg.planeXZ)
+    const float z = rdF(rdram, m + kMouth + 8);
+    const float top = z + kDropHeight;
+    float x = a, y = b, height = top;
+    if (t < kApexT)
     {
-        const float z = rdF(rdram, m + kMouth + 8);
-        wrF(rdram, h.pos + 8, h.from[2] + (z - h.from[2]) * u + kTossArc * 4.f * u * (1.f - u));
+        const float u = float((t - kTossT) / (kApexT - kTossT)), e = 1.f - (1.f - u) * (1.f - u);   // fast then slow: thrown up
+        x = h.from[0] + (a - h.from[0]) * e;
+        y = h.from[1] + (b - h.from[1]) * e;
+        height = h.from[2] + (top - h.from[2]) * e;
     }
+    else
+    {
+        const float u = float(std::min(1.0, (t - kApexT) / (kLandT - kApexT))), e = u * u;   // slow then fast: falls
+        height = top + (z - top) * e;
+    }
+    wrF(rdram, h.pos, x);
+    wrF(rdram, h.pos + 4, y);
+    if (g_cfg.lift && !g_cfg.planeXZ)
+        wrF(rdram, h.pos + 8, height);
+}
+
+// The game's own Circle action (grab an object or monster, catch, throw) has started: it has priority over ours
+bool gameGrabbing(uint8_t *rdram, uint32_t m)
+{
+    const uint32_t cur = rd32(rdram, m + kState);
+    for (uint32_t off : kGameGrabStates)
+        if (cur == m + off)
+            return true;
+    return rd32(rdram, m + kPickup) != 0;
 }
 
 // One Monster::update of a monster that can eat; player is its index in m_monsters[0..3]
@@ -247,7 +279,7 @@ void tick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, in
     const uint32_t cs = rd32(rdram, m + kCs) & 0x1FFFFFFFu;
     if (!cs || rd8(rdram, m + kDead) != 0 || !(rdF(rdram, m + kHealth) > 0.f))
     {
-        h.active = h.eating = h.queued = h.tossed = h.clip = false;
+        h.active = h.eating = h.queued = h.tossed = h.clip = h.pend = false;
         return;
     }
     if (h.clip)
@@ -293,8 +325,16 @@ void tick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, in
             return;
         }
         if (tap)
+        {
             h.queued = true;
-        if (h.queued && !grabbing)   // the second press waits for the grab clip to finish
+            h.queuedAt = now;
+        }
+        if (h.queued && gameGrabbing(rdram, m))   // the game's own grab took the press: the civilian is let go
+        {
+            release(rdram, h);
+            return;
+        }
+        if (h.queued && !grabbing && now - h.queuedAt >= std::chrono::milliseconds(int(kDeferSeconds * 1000.0)))   // waits for the grab clip to finish
         {
             h.queued = false;
             if (playAnim(rdram, ctx, runtime, h, m, kAnimEat))
@@ -313,8 +353,23 @@ void tick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, in
         carry(rdram, m, h);
         return;
     }
-    if (!tap || rd32(rdram, m + kPickup) != 0 || rd32(rdram, m + kTarget) != 0)   // something in the hands: the game's own grab/throw
+    // The press first goes to the game: a grab of an object or monster in reach (or a throw) has priority over eating, so the civilian is
+    // only taken if, a moment later, the game has done nothing with it
+    if (tap)
+    {
+        h.pend = true;
+        h.pendAt = now;
+    }
+    if (!h.pend)
         return;
+    if (rd32(rdram, m + kTarget) != 0 || gameGrabbing(rdram, m))
+    {
+        h.pend = false;
+        return;
+    }
+    if (now - h.pendAt < std::chrono::milliseconds(int(kDeferSeconds * 1000.0)))
+        return;
+    h.pend = false;
     float a, b, d = 0.f;
     ground(rdram, cs + kCsTrans, &a, &b);
     const uint32_t p = nearestPed(rdram, a, b, g_cfg.reach, &d);
