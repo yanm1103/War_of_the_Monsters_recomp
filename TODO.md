@@ -13,7 +13,7 @@ Rearranjar fases existentes (mover, girar, apagar, duplicar prédios e objetos, 
    - Decisão do dono sobre a trava: hoje a custom herda a da base (alternativa: não listar a custom de base trancada).
 4. **Objetos novos vindos do Blender** (plano em `docs/investigacoes/2026-11-06/objetos_blender_plano.md`; conversor `tools/lvlprop.py`, diário `props_passo0_1.md`; a carga na fase, o editor e a imagem própria do material já existem, `MODS.md`, "props" e "New props"): faltam do passo 3 só a colisão por triângulos (`coll_*`, hoje o `hull_*` convexo já vale), e os passos 5, 6 e 8 (o 4 e o 7 saíram com o pacote CT32 na arena e o texId dado na carga, sem `.TEX` no mod). Textura própria: UV fora de 0..1 é preso na borda (sem repetir). Pivô na base para o glb do `lvlglb` (`--units game`: o CAR em z 0 fica meio enterrado).
 5. **Céu:** trocar o skybox da fase pelo editor (o céu é um nó próprio da fase, `lvlglb` já o separa).
-6. **Tamanho da fase:** ver se há limite (grade de colisão, retângulo do `hdLosTest`, rede dos carros, câmera) e deixar definir ou mudar pelo editor.
+6. **Tamanho da fase:** a grade de colisão é um retângulo fixo por fase (7x7 a 102x40 células de 200); o levantamento e a proposta (chave `grid` no patch que refaz a tabela e as listas) estão em `docs/investigacoes/2026-11-06/tamanho_fase.md`. Falta ler `hdLosTest`, câmera e rede dos carros antes de implementar.
 7. **Paleta Ctrl+P:** falta a prévia de cada resultado e achar também os props originais de outras fases (hoje só objetos da fase e props do mod).
 9. **Depois:** fase do zero como "base + geometria trocada" (mesmo relatório, seção 6).
    - Patch de fase acima de 1 MB: segunda arena na memória alta (`WOTM_HIGHRAM`). Contexto: `docs/investigacoes/2026-11-06/copia_profunda.md`.
