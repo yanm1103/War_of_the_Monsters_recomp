@@ -2858,13 +2858,44 @@ $('picBtn').onclick = async () => {
   } catch (e) { msg(cleanError(e).text, { level: 'err', toast: true }); }
 };
 
+// A prop's picture for the palette: its preview scene seen from a corner, drawn once into a small render target of the view's renderer
+let thumbRT = null;
+function propThumb(pm) {
+  if (pm.thumb !== undefined) return pm.thumb;
+  pm.thumb = null;
+  if (!pm.scene) return null;
+  const S = 96, sc = new THREE.Scene(), prev = renderer.getRenderTarget();
+  try {
+    const obj = pm.scene.clone(true);
+    sc.add(obj);
+    sc.background = new THREE.Color(0x30343b);
+    const box = new THREE.Box3().setFromObject(obj), size = box.getSize(new THREE.Vector3()), mid = box.getCenter(new THREE.Vector3());
+    const r = Math.max(size.length() / 2, 1), cam = new THREE.PerspectiveCamera(35, 1, r * 0.05, r * 40);
+    cam.position.copy(mid).add(new THREE.Vector3(0.8, 0.7, 1).normalize().multiplyScalar(r / Math.sin(THREE.MathUtils.degToRad(17.5)) * 1.1));
+    cam.lookAt(mid);
+    thumbRT = thumbRT || new THREE.WebGLRenderTarget(S, S);
+    renderer.setRenderTarget(thumbRT);
+    renderer.render(sc, cam);
+    const px = new Uint8Array(S * S * 4);
+    renderer.readRenderTargetPixels(thumbRT, 0, 0, S, S, px);
+    const c = document.createElement('canvas');
+    c.width = c.height = S;
+    const g = c.getContext('2d'), im = g.createImageData(S, S);
+    for (let y = 0; y < S; y++) im.data.set(px.subarray((S - 1 - y) * S * 4, (S - y) * S * 4), y * S * 4);   // the target is bottom-up
+    g.putImageData(im, 0, 0);
+    pm.thumb = c.toDataURL('image/png');
+  } catch (e) { pm.thumb = null; }
+  finally { renderer.setRenderTarget(prev); }
+  return pm.thumb;
+}
+
 // Ctrl+P palette: the stage's objects (select and frame) and the mod's props for this stage (add)
 let palIdx = 0, palRows = [];
 function palResults(q) {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean), fits = (t) => words.every((w) => t.toLowerCase().includes(w));
   const props = [...propModels.values()].filter((pm) => pm.info.stage === baseOf(stageName) && pm.scene)
     .map((pm) => ({ kind: 'prop', text: `${pm.info.name || pm.info.model} ${pm.info.model}`, label: `Add ${pm.info.name && pm.info.name.toUpperCase() !== pm.info.model ? pm.info.name + ' · ' : ''}${pm.info.model}`,
-                    meta: pm.info.triangles ? `${pm.info.triangles} triangles` : '', run: () => addProp(pm.info.model) }))
+                    meta: pm.info.triangles ? `${pm.info.triangles} triangles` : '', pm, run: () => addProp(pm.info.model) }))
     .filter((r) => fits(r.text));
   const objs = items().filter((it) => !it.rec.deleted).map((it) => ({ it, name: it.copy ? it.iname || `Copy ${it.rec.copies.indexOf(it) + 1}` : nameOf(it) }))
     .filter((o) => fits(`${o.name} ${o.it.rec.info.handle}`)).slice(0, 40)
@@ -2882,7 +2913,9 @@ function palRender() {
   const add = (r) => {
     const i = n++, b = document.createElement('button');
     b.type = 'button'; b.className = 'ghost'; b.setAttribute('role', 'option'); b.setAttribute('aria-selected', i === palIdx);
-    b.append(icon(r.kind === 'prop' ? 'shape-plus-outline' : 'cube-outline'));
+    const pic = r.pm && propThumb(r.pm);
+    if (pic) { const im = document.createElement('img'); im.src = pic; im.alt = ''; im.className = 'pal-pic'; b.append(im); }
+    else b.append(icon(r.kind === 'prop' ? 'shape-plus-outline' : 'cube-outline'));
     const l = document.createElement('span'), m = document.createElement('span');
     l.textContent = r.label; m.className = 'pal-meta'; m.textContent = r.meta;
     b.append(l, m);

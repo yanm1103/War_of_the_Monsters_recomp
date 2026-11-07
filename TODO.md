@@ -13,7 +13,7 @@ Rearranjar fases existentes (mover, girar, apagar, duplicar prédios e objetos, 
 4. **Objetos novos vindos do Blender** (plano em `docs/investigacoes/2026-11-06/objetos_blender_plano.md`; conversor `tools/lvlprop.py`, diário `props_passo0_1.md`; a carga na fase, o editor e a imagem própria do material já existem, `MODS.md`, "props" e "New props"): falta provar jogando a colisão dos props (`hull_*` e `coll_*` carregam e passam a regra da caixa e das células; ninguém bateu neles ainda; `coll_*`: matId e bits de caixa dos triângulos copiados do que os prédios usam) e faltam os passos 5, 6 e 8 (o 4 e o 7 saíram com o pacote CT32 na arena e o texId dado na carga, sem `.TEX` no mod). Textura própria: UV fora de 0..1 é preso na borda (sem repetir).
 5. **Céu:** o painel Fight HUD and sky troca as imagens do céu por PNG (`lvlhud.py`, papel `sky`); falta trocar a *malha* do céu (outra forma ou outro céu de outra fase).
 6. **Tamanho da fase:** a chave `grid` e o botão do editor existem (`MODS.md`, "Level patches"). Falta ver se a rede dos carros e a câmera aceitam objetos longe do retângulo original.
-7. **Paleta Ctrl+P:** falta a prévia de cada resultado e achar também os props originais de outras fases (hoje só objetos da fase e props do mod).
+7. **Paleta Ctrl+P:** falta achar também os props originais de outras fases (hoje só objetos da fase e props do mod; a prévia dos props do mod existe).
 9. **Depois:** fase do zero como "base + geometria trocada" (mesmo relatório, seção 6).
    - Patch de fase acima de 1 MB: segunda arena na memória alta (`WOTM_HIGHRAM`). Contexto: `docs/investigacoes/2026-11-06/copia_profunda.md`.
 

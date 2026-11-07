@@ -444,6 +444,7 @@ dialog.pal { width: min(560px, 92vw); }
 #palList { display: flex; flex-direction: column; gap: 2px; max-height: 50vh; overflow-y: auto; margin: 8px 0; }
 #palList button { height: auto; min-height: 36px; flex-direction: row; justify-content: flex-start; gap: 10px; text-align: left; }
 #palList button[aria-selected="true"] { background: var(--hover, rgba(128,128,128,.22)); }
+#palList .pal-pic { width: 40px; height: 40px; border-radius: 4px; flex: none; }
 #palList .pal-meta { margin-left: auto; color: var(--muted); font-size: 11px; }
 #palList .pal-h { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-top: 6px; }
 #pmList { display: flex; flex-direction: column; gap: 2px; max-height: 50vh; overflow-y: auto; }
