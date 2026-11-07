@@ -400,7 +400,7 @@ def read_glb(path, units, scale=None, height=None, warn=print):
         world[i] = _mat_mul(pm, _node_local(nodes[i]))
         stack.extend((k, world[i]) for k in nodes[i].get("children", []))
     raw = {}           # key -> [[corner, corner, corner]] with corners (pos glTF world, normal, uv, color linear/raw)
-    skipped = []
+    skipped, hull_raw = [], []
     for i, m in sorted(world.items()):
         nd = nodes[i]
         if "mesh" not in nd:
@@ -408,7 +408,14 @@ def read_glb(path, units, scale=None, height=None, warn=print):
         mesh = j["meshes"][nd["mesh"]]
         name = nd.get("name") or mesh.get("name") or "node%d" % i
         low = name.lower()
-        if low.startswith(("coll_", "hull_")):
+        if low.startswith("hull_"):          # a convex hull: its vertices, the planes come later (convex_planes)
+            pts = []
+            for prim in mesh.get("primitives", []):
+                for q in glb.accessor(prim["attributes"]["POSITION"]):
+                    pts.append(tuple(m[r][0] * q[0] + m[r][1] * q[1] + m[r][2] * q[2] + m[r][3] for r in range(3)))
+            hull_raw.append((name, pts))
+            continue
+        if low.startswith("coll_"):
             skipped.append(name)
             continue
         if re.match(r"state\d+_", low):
@@ -447,7 +454,7 @@ def read_glb(path, units, scale=None, height=None, warn=print):
                     tri = [tri[0], tri[2], tri[1]]
                 lst.append(tri)
     if skipped:
-        warn("collision meshes are a later step; skipped (the automatic box stands in): %s" % ", ".join(skipped))
+        warn("coll_ meshes (collision by triangles) are a later step; skipped: %s" % ", ".join(skipped))
     if not any(raw.values()):
         raise PropError("%s: no triangles to draw" % path)
 
@@ -463,7 +470,9 @@ def read_glb(path, units, scale=None, height=None, warn=print):
         s = height / h
     else:
         s = UNITS_PER_METER if units == "blender" else 1.0
-    out, stats = {}, {"degenerate": 0, "triangles": 0}
+    out, stats = {}, {"degenerate": 0, "triangles": 0, "hulls": []}
+    for hname, hpts in hull_raw:
+        stats["hulls"].append((hname, [tuple(_f32(x * s) for x in game(q)) for q in hpts]))
     for key, tris in raw.items():
         for t in tris:
             lst = out.setdefault(key + (t[0][3] is not None,), [])   # the triangles with COLOR_0 apart (the `auto` light)
@@ -685,6 +694,65 @@ def _group(mb, flags, kids, pts):
     return g
 
 
+MAX_PLANES = 40         # what lvl.py and the game hook (leafPoints) read back for the footprint and the grid check
+
+
+def convex_planes(points, eps=1e-3):
+    """The planes {n, d} (unit n, inside when n . p < d) of the convex hull of `points`, by testing every triple of vertices: a
+    plane keeps when all the points are on or under it. Coplanar faces give one plane. Raises PropError for a flat or
+    point-like set, for more than 64 distinct vertices or for more than MAX_PLANES planes."""
+    pts = sorted({tuple(round(x, 4) for x in q) for q in points})
+    if len(pts) < 4:
+        raise PropError("a hull_ mesh needs at least 4 distinct vertices")
+    if len(pts) > 64:
+        raise PropError("a hull_ mesh has %d distinct vertices; at most 64 (make it simpler, it is a collision shape)" % len(pts))
+    planes = []
+    n = len(pts)
+    for i in range(n):
+        for j in range(i + 1, n):
+            for k in range(j + 1, n):
+                a, b, c = pts[i], pts[j], pts[k]
+                u = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+                v = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
+                nm = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+                ln = math.sqrt(sum(x * x for x in nm))
+                if ln < 1e-9:
+                    continue
+                nm = tuple(x / ln for x in nm)
+                d = sum(nm[t] * a[t] for t in range(3))
+                side = [sum(nm[t] * q[t] for t in range(3)) - d for q in pts]
+                if all(x <= eps for x in side):
+                    sign = 1
+                elif all(x >= -eps for x in side):
+                    sign, nm, d = -1, tuple(-x for x in nm), -d
+                else:
+                    continue
+                if not any(sum(nm[t] * pl[0][t] for t in range(3)) > 1 - 1e-4 and abs(d - pl[1]) < 1e-2 for pl in planes):
+                    planes.append((nm, d))
+    if len(planes) < 4:
+        raise PropError("a hull_ mesh is flat: it needs volume")
+    if len(planes) > MAX_PLANES:
+        raise PropError("a hull_ mesh has %d faces; at most %d" % (len(planes), MAX_PLANES))
+    return planes
+
+
+def hull_volume(mb, planes, pts, matid=COLL_MATID):
+    """COLL_VOL (op 10) of the given planes; the local sphere is the points' box center and half its diagonal."""
+    lo = [min(q[c] for q in pts) for c in range(3)]
+    hi = [max(q[c] for q in pts) for c in range(3)]
+    cv = mb.alloc(0x20 + 16 * len(planes), 16)
+    mb.u32(cv, OP_COLL_VOL)
+    mb.s16(cv + 4, len(planes))
+    mb.s16(cv + 6, -1)
+    mb.u16(cv + 8, matid)
+    for c in range(3):
+        mb.f(cv + 0x10 + 4 * c, 0.5 * (lo[c] + hi[c]))
+    mb.f(cv + 0x1C, 0.5 * math.dist(lo, hi))
+    for q, (n, d) in enumerate(planes):
+        mb.raw(cv + 0x20 + 16 * q, struct.pack("<4f", float(n[0]), float(n[1]), float(n[2]), d))
+    return cv, lo, hi
+
+
 def box_hull(mb, lo, hi, matid=COLL_MATID):
     """COLL_VOL (op 10) of 6 planes, inside when n . p < d (the monsters' order: +z, +y, -z, -y, +x, -x)."""
     cv = mb.alloc(0x20 + 16 * 6, 16)
@@ -797,8 +865,15 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
             all_pts += _batch_points(grp)
         ntris += len(tris)
     _ctr, _rad, lo, hi = _sphere(all_pts)
-    cv = box_hull(mb, lo, hi)
-    cg = _group(mb, COLL_FLAGS, [cv], [lo, hi])
+    hulls = []
+    for hname, hpts in gstats["hulls"]:
+        planes = convex_planes(hpts)
+        cv, hlo, hhi = hull_volume(mb, planes, hpts)
+        hulls.append({"mesh": hname, "node": "0x%X" % cv, "planes": len(planes),
+                      "min": [round(x, 4) for x in hlo], "max": [round(x, 4) for x in hhi]})
+        log("collision hull %s: %d planes" % (hname, len(planes)))
+    cvs = [int(h["node"], 16) for h in hulls] or [box_hull(mb, lo, hi)]
+    cg = _group(mb, COLL_FLAGS, cvs, [lo, hi])
     root = _group(mb, ROOT_FLAGS, kids + [cg], all_pts)
     mb.u32(BASE, 1)
     mb.u32(BASE + 4, root)
@@ -822,7 +897,8 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
             "source": src, "units": units, "scale": s, "kind": "static", "light": light, "textures": textures,
             "template": {"rule": TEMPLATE_RULE, "abe": abe, "object": "0x%X" % tmpl, "bits": "0x%08X" % st.img.u32(tmpl + 0xC)},
             "bounds": {"min": [round(x, 4) for x in lo], "max": [round(x, 4) for x in hi]},
-            "collision": {"auto": "box", "poly": 0, "hull": 0, "tris": 0, "matId": COLL_MATID},
+            "collision": {"auto": "box" if not hulls else "hull", "poly": 0, "hull": len(hulls), "hulls": hulls, "tris": 0,
+                      "matId": COLL_MATID},
             "objects": stats_obj, "triangles": ntris, "vertices": nverts, "packetBytes": pbytes, "bytes": len(mb.d),
             "root": "0x%X" % root, "files": {"ngp": name + ".NGP", "ptr": name + ".PTR", "preview": name + ".preview.glb"}}
     with open(os.path.join(out_dir, "prop.json"), "w", encoding="utf-8") as f:
@@ -987,12 +1063,20 @@ def check(prop, at=ARENA, log=print):
     for c in range(3):
         if abs(lo[c] - prop.bounds[0][c]) > 1e-2 or abs(hi[c] - prop.bounds[1][c]) > 1e-2:
             raise PropError("decoded bounds %s .. %s differ from prop.json" % (lo, hi))
-    for h in hulls:
-        if h is None or max(abs(h[0][c] - lo[c]) + abs(h[1][c] - hi[c]) for c in range(3)) > 1e-2:
-            raise PropError("box hull %s does not match the bounds" % (h,))
+    want = prop.meta.get("collision", {}).get("hulls") or []
+    if want:                # hull_ meshes: each leaf matches the box its prop.json lists
+        got = sorted((h for h in hulls if h), key=lambda h: h[0])
+        exp = sorted(((tuple(w["min"]), tuple(w["max"])) for w in want))
+        if len(got) != len(exp) or any(max(abs(g[0][c] - e[0][c]) + abs(g[1][c] - e[1][c]) for c in range(3)) > 1e-2
+                                       for g, e in zip(got, exp)):
+            raise PropError("hull_ leaves %s do not match prop.json" % (got,))
+    else:
+        for h in hulls:
+            if h is None or max(abs(h[0][c] - lo[c]) + abs(h[1][c] - hi[c]) for c in range(3)) > 1e-2:
+                raise PropError("box hull %s does not match the bounds" % (h,))
     if tris != prop.meta.get("triangles", tris):
         raise PropError("decoded %d triangles, prop.json says %d" % (tris, prop.meta["triangles"]))
-    log("%s (%s): %d bytes at 0x%X, %d OBJECTs, %d triangles, %d strip vertices, %d box hulls, %d/%d/%d fixups, bounds %s .. %s"
+    log("%s (%s): %d bytes at 0x%X, %d OBJECTs, %d triangles, %d strip vertices, %d hulls, %d/%d/%d fixups, bounds %s .. %s"
         % (prop.name, prop.stage, prop.size, at, nobj, tris, verts, len(hulls), len(prop.ptr[0]), len(prop.ptr[1]),
            len(prop.ptr[2]), [round(x, 2) for x in lo], [round(x, 2) for x in hi]))
     return {"objects": nobj, "triangles": tris, "vertices": verts, "bounds": (lo, hi)}
