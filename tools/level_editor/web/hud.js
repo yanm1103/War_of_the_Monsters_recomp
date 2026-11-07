@@ -136,7 +136,7 @@ function showGame() {
 async function refresh() {
   const url = `/api/hud?stage=${encodeURIComponent(ctx.stage)}&mod=${encodeURIComponent(ctx.mod || '')}`;
   ctx.data = await ctx.api(url);
-  q('#hudTitle').textContent = `Fight HUD · ${ctx.title}`;
+  q('#hudTitle').textContent = `Fight HUD and sky · ${ctx.title}`;
   // no mod: the mods to pick from, right here
   const nm = q('.hud-nomod');
   nm.hidden = !!ctx.mod;

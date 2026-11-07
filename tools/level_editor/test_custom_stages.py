@@ -89,7 +89,9 @@ def main():
         r = post("/api/levelpic", {"mod": "m", "name": "MYCITY", "png": enc(png(16, 8))})
         assert os.path.isfile(os.path.join(mods, "m", "levelpics", "mycity.png")), r
         # Fight HUD of a custom stage: the picture goes in the stage's own folder, not in the mod's LVL/ (CENTRAL keeps its own)
-        row = get("/api/hud?stage=MYCITY&mod=m")["rows"][0]
+        rows = get("/api/hud?stage=MYCITY&mod=m")["rows"]
+        assert any(r["role"] == "sky" and r["every"] == 0 for r in rows), "no sky row"
+        row = rows[0]
         res = post("/api/hud/replace", {"mod": "m", "stage": "MYCITY", "role": row["role"], "png": row["png"], "data": enc(png(16, 8)),
                                         "every": True})
         assert os.path.isfile(os.path.join(stages, "ok", row["png"])), res

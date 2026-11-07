@@ -704,6 +704,8 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   tools/level_editor/test_custom_stages.py` is the integration test (needs the disc set in the editor).
 - **Palette (Ctrl+P):** a search over the stage's objects (name or handle; Enter selects and frames the first) and the mod's props for
   this stage (Enter adds one where the view looks). It opens from anywhere, even in a text field.
+- **Fight HUD and sky** (the monitor button): the pictures of the stage's fight HUD and of its sky (the OBJECTs under the nodes with id 2),
+  each replaceable by a PNG in the mod (`<stage>_tNNNN.png`, "Textures as PNG"). A sky picture is the stage's own (never "apply to all").
 - **Stage picture:** the picture button (lower right of the view) saves the middle 2:1 band of the view, 512x256, as
   `mods/<mod>/levelpics/<name>.png` for a custom stage (`<id>`) and for Training, Lake Powell and Tokyo DM; the other game stages have
   their picture in `SHELL.TEX` (make a custom stage on one). The stage select picks it up the next time the game starts.

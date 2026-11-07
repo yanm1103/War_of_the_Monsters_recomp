@@ -1132,7 +1132,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(400, {"error": bad_mod_reason(mod), "code": "mod"})
                 if self.path in ("/api/hud/replace", "/api/hud/remove"):
                     mods_dir, mod_arg, base, sub, custom = hud_target(cfg, b["stage"], mod)
-                    every = bool(b.get("every")) and not custom        # a custom stage's picture is its own
+                    every = bool(b.get("every")) and not custom and b.get("role") != "sky"   # a custom stage's picture and a sky are its own
                     if self.path == "/api/hud/replace":
                         return self.send(200, {"lines": HUD.replace(cfg["disc"], mods_dir, mod_arg, base, b["role"], b["png"],
                                                                     b["data"], every, sub)})

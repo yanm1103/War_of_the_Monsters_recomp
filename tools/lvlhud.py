@@ -21,6 +21,7 @@ import ngp   # noqa: E402
 import tex   # noqa: E402
 
 HUD_IDS = (0x1C20, 0x2134)          # id1 range dbProcInteractive hands to Hud::parseHudElements (not opcodes 0x1F/0x27)
+SKY_ID = 2                          # the sky's id1 (tools/lvlglb.py): its subtree is drawn around the camera
 FONT_ID = 18                        # fontSetTexId: the fight font (an OBJECT, not a HUD node)
 BUTTONS = (0x1F51, 0x1F52, 0x1F53, 0x1F54)
 
@@ -35,6 +36,7 @@ ROLES = [
     ("textbox", "Hint box frame", (0x1F43,), True),
     ("letterbox", "Cinema bars", (0x1F44,), True),
     ("buttons", "Button prompts", BUTTONS, True),
+    ("sky", "Sky (drawn around the camera)", (), False),     # not a HUD node: the OBJECTs under the nodes with id 2 (viewSetSkyEntry)
 ]
 ROLE = {r[0]: r for r in ROLES}
 NOTES = {"textbox": "also drawn by the stage's end point (node 0x262A)"}
@@ -84,12 +86,14 @@ def stage_hud(root, stage):
     root holds LVL/<STAGE>.NGP/.TEX/.RTX."""
     base = os.path.join(root, "LVL", stage.upper())
     img = ngp.Image.load(base + ".NGP")
-    by_id, users, font = {}, {}, set()
+    by_id, users, font, sky = {}, {}, set(), set()
     for n in _walk(img):
         w = img.u32(n)
         op, id1 = w & 63, w >> 18
         if id1 == FONT_ID and op == 0 and img.ok(n, 0xA0):
             font.add(img.u16(n + 0x50))
+        if id1 == SKY_ID and op not in (0x1F, 0x27):
+            sky |= _texids(img, n)
         if HUD_IDS[0] <= id1 < HUD_IDS[1] and op not in (0x1F, 0x27):
             t = _texids(img, n)
             by_id.setdefault(id1, set()).update(t)
@@ -100,7 +104,7 @@ def stage_hud(root, stage):
     atlas = by_id.get(0x1F48, set())
     sets = {}
     for key, _label, ids, _same in ROLES:
-        s = set().union(*(by_id.get(i, set()) for i in ids)) if ids else set(font)
+        s = set().union(*(by_id.get(i, set()) for i in ids)) if ids else set(sky) if key == "sky" else set(font)
         if key == "boss":
             s -= atlas
         sets[key] = s

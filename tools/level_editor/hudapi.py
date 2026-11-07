@@ -10,7 +10,7 @@ import threading
 
 import lvlhud
 
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 
 
 class HudApi:
@@ -58,7 +58,7 @@ class HudApi:
             raise ValueError("no stage %s on the disc" % stage)
         p = lvlhud.panel(infos[stage], os.path.join(mods, mod) if mod else None, self._exported(disc, stage))
         for r in p["rows"]:
-            r["every"] = len(lvlhud.targets(infos, stage, r["role"], True))
+            r["every"] = 0 if r["role"] == "sky" else len(lvlhud.targets(infos, stage, r["role"], True))   # a sky is the stage's own
             r["disc"], r["mod"] = bool(r["disc"]), bool(r["mod"])   # the page asks /api/hudimg by name, never by path
         p["versions"] = {st: info["version"] for st, info in sorted(infos.items())}   # the version B note names the stages
         return p
