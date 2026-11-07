@@ -411,6 +411,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
           <dt><kbd>Shift</kbd>+Click / <kbd>Ctrl</kbd>+Click</dt><dd>Add or remove</dd>
           <dt><kbd>Shift</kbd>+Drag</dt><dd>Box select (the kinds shown in the list)</dd>
           <dt><kbd>Ctrl</kbd>+<kbd>A</kbd></dt><dd>Select everything in the list</dd>
+          <dt><kbd>Ctrl</kbd>+<kbd>P</kbd></dt><dd>Find an object or add a prop</dd>
           <dt><kbd>Esc</kbd></dt><dd>Deselect</dd>
         </dl>
       </div>
@@ -440,6 +441,16 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       </div>
     </div>
     <p class="keys-note">The letter keys are where W, A, S, D, Q and E sit on a QWERTY keyboard, on any layout.</p>
+  </form>
+</dialog>
+<dialog id="palDlg" class="dlg pal" aria-label="Find an object or add a prop">
+  <form method="dialog">
+    <div class="dlg-body">
+      <input id="palQ" type="text" spellcheck="false" autocomplete="off" role="combobox" aria-controls="palList" aria-expanded="true"
+        placeholder="Find an object, or add a prop…" aria-label="Find an object, or add a prop">
+      <div id="palList" role="listbox"></div>
+      <div class="help">Enter picks the first result, ↑ ↓ move, Esc closes. Ctrl+P opens this from anywhere.</div>
+    </div>
   </form>
 </dialog>
 <dialog id="stageDlg" class="dlg" aria-labelledby="nsTitle">
