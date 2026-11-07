@@ -21,6 +21,8 @@ pasta de trabalho (<mods>/_work/<mod>/, com o modkit.json dela), e o pack de um 
   python tools/modkit.py monster anim import my_mod fire_togera [editado.glb] # as animacoes editadas tambem
   python tools/modkit.py monster rig my_mod lizardman rig.glb [--front +y|-y] [--scale S | --height H]   # esqueleto proprio
   python tools/modkit.py skin mesh export my_mod green / skin mesh import my_mod green [editado.glb]   # o mesmo numa skin
+  python tools/modkit.py level prop my_mod torre.glb --stage CENTRAL [--name TORRE] [--units blender|game] [--height H] [--light auto|vertex|dir]
+                                                             # prop novo para uma fase (o editor de fase o poe; hull_* = colisao)
   python tools/modkit_gui.py                                 # o mesmo com interface (botao "Mod kit" do launcher)
 
 Opcoes: --disc <pasta ou .iso> (disco extraido ou a ISO; padrao WOTM_DISC ou disc/ do repo; no WotM_ModKit.exe, o iso= do
@@ -1578,7 +1580,7 @@ def main(argv):
     opts, args, i = {}, [], 0
     while i < len(argv):
         if argv[i] in ("--disc", "--mods", "--work", "--base", "--name", "--costume", "--camera", "--narrator", "--front",
-                       "--scale", "--height"):
+                       "--scale", "--height", "--stage", "--units", "--light", "--title"):
             if i + 1 >= len(argv):
                 raise SystemExit("%s needs a value" % argv[i])
             opts[argv[i][2:]] = argv[i + 1]
@@ -1589,7 +1591,7 @@ def main(argv):
         else:
             args.append(argv[i])
             i += 1
-    if not args or args[0] not in ("export", "pack", "check", "revert", "skin", "monster"):
+    if not args or args[0] not in ("export", "pack", "check", "revert", "skin", "monster", "level"):
         print(__doc__)
         return 1
     disc = opts.get("disc") or default_disc()
@@ -1625,6 +1627,26 @@ def main(argv):
             mesh_export(disc, w, mods, args[3], args[0], args[4])
         else:
             mesh_import(disc, w, mods, args[3], args[0], args[4], glb)
+    elif args[0] == "level":
+        if len(args) != 4 or args[1] != "prop" or "stage" not in opts:
+            raise SystemExit("level prop <mod> <in.glb> --stage CENTRAL [--name TORRE] [--units blender|game] [--scale S | --height H] "
+                             "[--light auto|vertex|dir]")
+        if disc_iso(disc):
+            raise SystemExit("level prop needs the disc as an extracted folder (--disc): the .iso is read by the level editor's Import .glb")
+        import lvlprop
+        validate_mod_name(args[2], "level prop")
+        glb = args[3]
+        name = (opts.get("name") or re.sub(r"[^A-Za-z0-9_]", "", os.path.splitext(os.path.basename(glb))[0]).upper()[:8])
+        if not re.match(r"^[A-Z0-9_]{1,8}$", name):
+            raise SystemExit("--name is 1 to 8 letters, digits or _")
+        out = os.path.join(mods, args[2], "props", name)
+        try:
+            lvlprop.build(glb, out, opts["stage"].upper(), opts.get("units", "blender"),
+                          float(opts["scale"]) if "scale" in opts else None, float(opts["height"]) if "height" in opts else None,
+                          name, opts.get("title"), opts.get("light", "auto"), disc)
+        except (lvlprop.PropError, lvlprop.ngpmesh.MeshError, lvlprop.vifpkt.FormatError) as e:
+            raise SystemExit("error: %s" % e)
+        print("prop %s: %s" % (name, out))
     elif args[0] == "skin":
         if len(args) != 5 or args[1] != "new":
             raise SystemExit("skin new <mod> <monster> <id> [--base N] [--name \"GREEN TOGERA\"] [--ai]\n"
