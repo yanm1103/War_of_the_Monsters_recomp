@@ -703,7 +703,10 @@ def ped_net_segments(net):
 
 
 ARENA_SIZE = 0x100000           # the hook's arena for new nodes (wotm_mods_hooks::kLevelArenaSize)
-ANIM_OPS = (25, 17, 35, 38)     # CHAR_INSTANCE, ANIM_XFORM, SKEL_BONE, ANIM_SCALE: the deep copy shares what hangs below them
+ANIM_OPS = (25, 17, 35, 38)     # CHAR_INSTANCE, ANIM_XFORM, SKEL_BONE, ANIM_SCALE: the animated parts
+ANIM_STATE_OPS = (17, 38)       # ANIM_XFORM, ANIM_SCALE: keep per-instance state (visible, rotation, dirty bits) of their CHAR_INSTANCE
+ID2_MAX = 0x7FF                 # ActAnim::ids.anim and _hierhead::id2 have 11 bits
+ACTANIM_MONSTER = 0x1800        # ACTANIM_PLAYER | ACTANIM_AI: the target is a monster
 CB_OPS = (0, 1, 2, 3, 4, 6, 11, 17, 30, 40, 41)   # dbsTraverse calls dbProcInteractive for these when they have an id
 PICKUP_IDS = (0x12C0, 0x13EC)   # a node with an id here is a pickup (one per instance: LevelPickups::createPickup)
 EXCLUDED_IDS = (0x7D0, 0x898)   # ids dbProcInteractive ignores
@@ -736,6 +739,9 @@ def node_size(img, n):
         return None if k > 64 else 0xC + 12 * k
     if o == 22:
         return 0xB0
+    if o in (25, 17, 38):
+        k = img.u32(n + (0x28 if o == 25 else 4))
+        return None if k > 8192 else {25: 0x2C, 17: 0xCC, 38: 0x60}[o] + 4 * k
     return None
 
 
@@ -826,6 +832,13 @@ class LevelPatch:
         self.added_paths = []
         self.through = set()        # GROUPs the patch put between two nodes of a path: the copies', their clones, the pedestrians'
         self.unlinked_before = {pa for pa in self.cells if not self.path_linked(pa)}   # as on the disc: check_copies skips them
+        # the stage's ANIM_MGR root (animationSetGlobal reads its list after the hook), id1 -> id2 of the CHAR_INSTANCEs registered and
+        # cloned, and the cloned ones not in the ANIM_MGR yet
+        self.mgr = next((r for r in st.roots if self.op(r) == 7), 0)
+        self.id2_used = collections.defaultdict(set)
+        for ci in self.instances():
+            self.id2_used[st.ident(ci)].add((self.img.u32(ci) >> 7) & ID2_MAX)
+        self.anim_added = []
         self.interactives_before = self.interactives()
         self.interactives_used = sum(self.interactives_before)
 
@@ -1143,7 +1156,113 @@ class LevelPatch:
         DESTRUCTIBLE, and a node whose id dbProcInteractive registers."""
         return self.op(n) in (22, 6, 39, 31) or registers_id(self.img, n)
 
-    def _under_anim(self, h, a, seen, left):
+    # --- animated parts (src/common/animation.cpp; the hook has the same names)
+    def instances(self):
+        """CHAR_INSTANCEs of the stage's ANIM_MGR list, in the order animationGetHandle looks them up."""
+        img, m = self.img, self.mgr
+        if not m or not img.ok(m, 8):
+            return []
+        out = []
+        for k in range(min(img.u32(m + 4), 4096)):
+            ci = img.u32(m + 8 + 4 * k) & MASK
+            if img.ok(ci, 0x2C):
+                out.append(ci)
+        return out
+
+    def resolve_anim(self, id1, id2, anim):
+        """The CHAR_INSTANCE the stage's animationGetHandle(id1, id2, anim) finds (the first with those ids and an animation with
+        that id), or 0."""
+        img = self.img
+        for ci in self.instances():
+            if img.u32(ci) >> 18 != id1 or (img.u32(ci) >> 7) & ID2_MAX != id2:
+                continue
+            chr_ = img.u32(ci + 0x20) & MASK
+            for k in range(min(img.u16(chr_), 256)):
+                if img.u32(img.u32(chr_ + 0xC + 4 * k) & MASK) >> 18 == anim:
+                    return ci
+        return 0
+
+    def anim_target(self, a):
+        """The CHAR_INSTANCE the ACT_ANIM a (a stage one, not a monster's) animates, or 0."""
+        img = self.img
+        if img.u16(a + 0xC) & ACTANIM_MONSTER:
+            return 0
+        return self.resolve_anim(img.u32(a + 8), img.u16(a + 0xC) & ID2_MAX, img.u16(a + 0xE))
+
+    def anim_state_cost(self, ci):
+        """Bytes of a CHAR_INSTANCE clone's own animation state (clone_anim_state), with each block's alignment."""
+        img = self.img
+        chr_, ctx = img.u32(ci + 0x20) & MASK, img.u32(ci + 0x10) & MASK
+        nan, nch = img.u16(chr_), img.u16(chr_ + 2)
+        c = 4 * nch + 15 + (nch >> 3) + 1 + 3 + 64 * img.u16(chr_ + 4) + 15 + 0x3C * nan + 15
+        for k in range(nan):
+            if img.u32(ctx + 0x3C * k + 0x30) & MASK:
+                c += 2 * img.u16((img.u32(ctx + 0x3C * k + 4) & MASK) + 0xC) + 3
+        return c
+
+    def fresh_id2(self, id1):
+        """An id2 no CHAR_INSTANCE with this id1 uses, from the top down (monsters' dupId is small)."""
+        used = self.id2_used[id1]
+        for v in range(ID2_MAX, 0, -1):
+            if v not in used:
+                used.add(v)
+                return v
+        raise PatchError("no free id2 for the CHAR_INSTANCEs with id1 %x" % id1)
+
+    def clone_anim_state(self, n, a):
+        """Clone a of CHAR_INSTANCE n gets its own animation state: output (val, dirty, atMat), control nodes and each one's key
+        cache, copied from the disc; activeTree 0 (animationSetGlobal makes the AnimPlayer) and a new id2 (the copy's ACT_ANIM
+        looks it up by it)."""
+        img, base = self.img, self.img.base
+        chr_ = img.u32(n + 0x20) & MASK
+        nan, nch = img.u16(chr_), img.u16(chr_ + 2)
+
+        def dup(field, size, align):
+            d, src = self.alloc(size, align), img.u32(n + field) & MASK
+            img.d[d - base:d - base + size] = img.d[src - base:src - base + size]
+            self.set_ptr(a + field, d)
+            return d
+        val = dup(4, 4 * nch, 16)
+        dup(8, (nch >> 3) + 1, 4)
+        dup(0xC, 64 * img.u16(chr_ + 4), 16)        # one matrix per ANIM_XFORM (matrixIdx)
+        ctx = dup(0x10, 0x3C * nan, 16)
+        for k in range(nan):
+            c = ctx + 0x3C * k
+            pk = img.u32(c + 0x30) & MASK
+            if pk:
+                size = 2 * img.u16((img.u32(c + 4) & MASK) + 0xC)
+                d = self.alloc(size, 4)
+                img.d[d - base:d - base + size] = img.d[pk - base:pk - base + size]
+                self.set_ptr(c + 0x30, d)
+        if img.u32(n + 0x18) & MASK == img.u32(n + 4) & MASK:
+            self.set_ptr(a + 0x18, val)         # animPktPtr = val on the stages (no skeleton)
+        self.w32(a + 0x24, 0)
+        self.w32(a, (img.u32(a) & ~(ID2_MAX << 7)) | (self.fresh_id2(self.st.ident(n)) << 7))
+        self.anim_added.append(a)
+        self.stats["anim instances cloned"] += 1
+
+    def register_instances(self):
+        """A new ANIM_MGR in the arena with the old list and the cloned CHAR_INSTANCEs, in the old root's place."""
+        if not self.anim_added:
+            return
+        img, base, m0 = self.img, self.img.base, self.mgr
+        n = min(img.u32(m0 + 4), 4096)
+        m = self.alloc(8 + 4 * (n + len(self.anim_added)), 16)
+        img.d[m - base:m - base + 8 + 4 * n] = img.d[m0 - base:m0 - base + 8 + 4 * n]
+        hi_bits = img.u32(m0 + 8) & ~MASK if n else 0
+        for k, ci in enumerate(self.anim_added):
+            self.w32(m + 8 + 4 * (n + k), hi_bits | ci)
+        self.w32(m + 4, n + len(self.anim_added))
+        for i in range(img.u32(base)):
+            if img.u32(base + 4 + 4 * i) & MASK == m0:
+                self.set_ptr(base + 4 + 4 * i, m)
+        self.st.roots = [m if r == m0 else r for r in self.st.roots]
+        self.mgr = m
+        self.anim_added = []
+
+    def _under_bone(self, h, a, seen, left):
+        """Below a SKEL_BONE (a skeleton: skin matrices through animMatrixPtr) the copy clones nothing; a destructible there is
+        refused."""
         stack = [a]
         while stack:
             x = stack.pop()
@@ -1151,32 +1270,48 @@ class LevelPatch:
                 continue
             seen.add(x)
             if self.op(x) == 39:
-                raise PatchError("copy of %07x: destructible %07x is inside an animated part (%s %07x)" % (
+                raise PatchError("copy of %07x: destructible %07x is inside a skeleton (%s %07x)" % (
                     h, x, OPN.get(self.op(a), self.op(a)), a))
             left[0] += self.op(x) == 22
             stack.extend(children(self.img, x))
 
-    def spine(self, h):
-        """What the deep copy of handle h clones, children first: h and every node of its subtree with a mutable node at or
-        below it. The walk stops at animated parts (they stay shared); returns (nodes, emitters left shared there)."""
+    def anim_targets(self, h):
+        """CHAR_INSTANCEs of h's subtree an ACT_ANIM of its destructibles animates."""
+        sub, out = self.st.subtree(h), set()
+        for n in sub:
+            if self.op(n) == 31:
+                for a, t, _ in act_blocks(self.img, n):
+                    if t == 2:
+                        ci = self.anim_target(a)
+                        if ci and ci in sub:
+                            out.add(ci)
+        return out
+
+    def _spine_walk(self, h, targets, cis):
+        """One pass of the spine: a mutable node, a CHAR_INSTANCE a copy's ACT_ANIM animates and, with `cis`, an ANIM_XFORM/
+        ANIM_SCALE of a CHAR_INSTANCE in `cis` (the nearest one above it: drawing uses its output) pull the node and the ones above
+        it up to h."""
         img, memo, order, seen, left = self.img, {h: None}, [], set(), [0]
-        stack = [[h, children(img, h), 0]]
+        stack = [[h, children(img, h), 0, 0]]
         while stack:
             top = stack[-1]
-            n, ks, i = top
+            n, ks, i, owner = top
             if i < len(ks):
                 top[2] += 1
                 c = ks[i]
                 if c not in memo:
                     memo[c] = None
-                    if self.op(c) in ANIM_OPS:
-                        self._under_anim(h, c, seen, left)
+                    if self.op(c) == 35:
+                        if cis is not None and owner in cis:
+                            raise PatchError("copy of %07x: CHAR_INSTANCE %07x has a skeleton (SKEL_BONE %07x)" % (h, owner, c))
+                        self._under_bone(h, c, seen, left)
                         memo[c] = False
                     else:
-                        stack.append([c, children(img, c), 0])
+                        stack.append([c, children(img, c), 0, c if self.op(c) == 25 else owner])
                 continue
             stack.pop()
-            memo[n] = n == h or self.mutable(n) or any(memo.get(c) for c in ks)
+            memo[n] = n == h or self.mutable(n) or n in targets or \
+                (cis is not None and self.op(n) in ANIM_STATE_OPS and owner in cis) or any(memo.get(c) for c in ks)
             if memo[n]:
                 if node_size(img, n) is None:
                     raise PatchError("copy of %07x: %s %07x, on the way to what it clones, has no known size" % (
@@ -1184,10 +1319,20 @@ class LevelPatch:
                 order.append(n)
         return order, left[0]
 
+    def spine(self, h):
+        """What the deep copy of handle h clones, children first: h and every node of its subtree with a mutable node at or
+        below it. A CHAR_INSTANCE goes in when an ACT_ANIM of the copy animates it or a mutable node hangs below it; then its
+        ANIM_XFORMs/ANIM_SCALEs go in too (they keep the instance's visible flag, rotation and dirty bits). What hangs from a
+        SKEL_BONE stays shared; returns (nodes, emitters left shared there)."""
+        targets = self.anim_targets(h)
+        order, left = self._spine_walk(h, targets, None)
+        cis = {n for n in order if self.op(n) == 25}
+        return self._spine_walk(h, targets, cis) if cis else (order, left)
+
     def rewrite_act(self, a, twins, memo, depth=0):
         """Action a for a copy: a DOMINO aimed at the original's own destructible goes to the copy's, any other DOMINO is dropped
-        (it would break the original's neighbour), so is every GLOBAL_ACTS one, and the GROUPs/TRANSFORMs above a changed one
-        are cloned. 0 = nothing left."""
+        (it would break the original's neighbour); an ANIM of a cloned CHAR_INSTANCE goes to the clone, every other GLOBAL_ACTS
+        one is dropped; the GROUPs/TRANSFORMs above a changed one are cloned. 0 = nothing left."""
         img, base = self.img, self.img.base
         if not a or not img.ok(a, 8) or depth > 16:
             return a
@@ -1205,6 +1350,11 @@ class LevelPatch:
             else:
                 out = 0
                 self.stats["dominoes dropped"] += 1
+        elif t == 2 and self.anim_target(a) in twins:      # ANIM of the copy's own animated part: to the clone, by its id2
+            out = self.alloc(0x10, 16)
+            img.d[out - base:out - base + 0x10] = img.d[a - base:a - base + 0x10]
+            self.w16(out + 0xC, (img.u16(a + 0xC) & ~ID2_MAX) | (img.u32(twins[self.anim_target(a)]) >> 7) & ID2_MAX)
+            self.stats["anim actions redirected"] += 1
         elif t in GLOBAL_ACTS:
             out = 0
             self.stats["global actions dropped"] += 1
@@ -1230,7 +1380,8 @@ class LevelPatch:
 
     def deep_clone(self, order, twins):
         """Clones `order` (children first) into the arena, twins gets original -> clone: child slots go to the clones, ids that
-        register once go to 0, emitters start unlit, and each DESTRUCTIBLE's dominoes are redirected or dropped."""
+        register once go to 0, emitters start unlit, each CHAR_INSTANCE gets its own animation state and id2, and each
+        DESTRUCTIBLE's actions are redone."""
         img, st, base = self.img, self.st, self.img.base
         for n in order:
             size = node_size(img, n)
@@ -1248,6 +1399,8 @@ class LevelPatch:
                         st.parents[twins[c]] = [a]
             if o == 39:
                 self.stats["destructibles copied"] += 1
+            elif o == 25:
+                self.clone_anim_state(n, a)
             elif o == 22:
                 self.w32(a + 0x5C, img.u32(n + 0x5C) & ~0x10)      # isActivated
                 self.stats["emitters cloned"] += 1
@@ -1280,7 +1433,7 @@ class LevelPatch:
         return min(n, g.cols) * min(n, g.rows)
 
     def acts_bound(self, d):
-        return sum(size + 15 + (0xC + 15 if t == 1 else 0) for a, t, size in act_blocks(self.img, d) if t in (0, 1, 8))
+        return sum(size + 15 + (0xC + 15 if t == 1 else 0) for a, t, size in act_blocks(self.img, d) if t in (0, 1, 2, 8))
 
     def private_cost(self, n, top=True):
         o = self.op(n)
@@ -1295,22 +1448,27 @@ class LevelPatch:
 
     def copy_cost(self, h, n, order, pickup):
         img = self.img
+        cis = 0
         if pickup:
             per = self.private_cost(h)
         else:
-            per = sum(node_size(img, x) + 15 for x in order) + sum(self.acts_bound(x) for x in order if self.op(x) == 31)
+            per = sum(node_size(img, x) + 15 for x in order) + sum(self.acts_bound(x) for x in order if self.op(x) == 31) + \
+                sum(self.anim_state_cost(x) for x in order if self.op(x) == 25)
+            cis = sum(1 for x in order if self.op(x) == 25)
         if self.op(h) == 3:
             per += 0x50 + 4 * img.u32(h + 8) + 15       # to_rotate, when the copy turns
         for pa in self.paths_through(h):
             p = Path(img, pa)
             per += 0x24 + 4 * p.length + 3 + 8 * self.cells_bound(p)
-        return 0x20 + 4 * (1 + n) + 15 + per * n
+        mgr_cost = 8 + 4 * (len(self.instances()) + cis * n) + 15 if cis else 0       # register_instances
+        return 0x20 + 4 * (1 + n) + 15 + per * n + mgr_cost
 
     def copy(self, h, places, extra=0):
         """Copies of the object under handle h, each in its own place; a GROUP in the parent's slot holds the original and the
         copies. A pickup gets its own handle, id GROUP, SWITCH and the GROUPs between (clone_private); anything else a deep copy:
         its own handle and every node that keeps state per object with the nodes between (spine), sharing meshes, collision,
-        GS contexts and actions. Each copy gets its own collision paths. `extra` is what the same entry's move takes after."""
+        GS contexts and actions. Each copy gets its own collision paths; the cloned CHAR_INSTANCEs go into a new ANIM_MGR.
+        `extra` is what the same entry's move takes after."""
         img, st = self.img, self.st
         kids = children(img, h)
         ist = next((c for c in kids if self.op(c) == 39), None)
@@ -1324,6 +1482,8 @@ class LevelPatch:
             order = ([img.u32(ist + 0xC) & MASK, ist] if ist else []) + [h]
         else:
             order, left = self.spine(h)
+        if not self.mgr and any(self.op(x) == 25 for x in order):
+            raise PatchError("copy of %07x: it has an animated part and the stage has no ANIM_MGR" % h)
         cost = self.copy_cost(h, len(places), order, pickup) + extra
         if cost > self.arena_free():
             raise PatchError("copy of %07x: %d copies take up to %d bytes, the arena has %d left" % (
@@ -1376,6 +1536,7 @@ class LevelPatch:
             self.grow_spheres(hc, old_pos)
             self.w16(wrap + 8, 2 + i)
             self.stats["copies"] += 1
+        self.register_instances()
         if left:
             self.stats["emitters left shared"] += left * len(places)
 
@@ -1401,18 +1562,20 @@ class LevelPatch:
                     q.append(c)
         return cnt
 
-    def reach_mutable(self, n):
-        seen, stack, out = set(), [n], set()
+    def reach(self, n):
+        """Nodes below n, down to the skeletons (what the deep copy leaves shared)."""
+        seen, stack = set(), [n]
         while stack:
             x = stack.pop()
             if x in seen:
                 continue
             seen.add(x)
-            if self.mutable(x):
-                out.add(x)
-            if self.op(x) not in ANIM_OPS:
+            if self.op(x) != 35:
                 stack.extend(children(self.img, x))
-        return out
+        return seen
+
+    def reach_mutable(self, n):
+        return {x for x in self.reach(n) if self.mutable(x)}
 
     def _next_to(self, a, b):
         """b is a child of a, or hangs from a through GROUPs the patch put in between (self.through)."""
@@ -1442,19 +1605,29 @@ class LevelPatch:
                 linked += 1
             elif pa in self.unlinked_before:
                 old += 1
-        shared = 0
+        shared = anim_orig = unregistered = 0
+        registered = set(self.instances())
         for w in self.wraps:
             kids = children(img, w)
-            orig = self.reach_mutable(kids[0]) if kids else set()
-            shared += sum(len(orig & self.reach_mutable(c)) for c in kids[1:])
+            orig = self.reach(kids[0]) if kids else set()
+            orig_mut = {x for x in orig if self.mutable(x)}
+            for c in kids[1:]:
+                mine = self.reach(c)
+                shared += len(orig_mut & {x for x in mine if self.mutable(x)})
+                unregistered += sum(1 for x in mine - orig if self.op(x) == 25 and x not in registered)
+                for d in mine:
+                    if self.op(d) == 31:
+                        anim_orig += sum(1 for a, t, _ in act_blocks(img, d) if t == 2 and self.anim_target(a) in orig)
         v = self.visits()
         twice = sum(1 for n, c in v.items() if c > 1 and self.op(n) == 39)
         added = sum(1 for pa in self.added_paths if pa in self.cells)
         lines = ["paths linked node to node: %d of %d (%d of them added by copies; %d unlinked as on the disc)" % (
                      linked, len(self.cells), added, old),
                  "mutable nodes the copies share with their originals: %d" % shared,
+                 "ANIM actions of the copies that animate their original's part: %d" % anim_orig,
+                 "CHAR_INSTANCEs of the copies missing from the ANIM_MGR: %d" % unregistered,
                  "INTERACTIVE_STATEs reached more than once: %d" % twice]
-        return lines, linked + old == len(self.cells) and shared == 0 and twice == 0
+        return lines, linked + old == len(self.cells) and shared == 0 and anim_orig == 0 and unregistered == 0 and twice == 0
 
     def apply(self, patch):
         """Every entry: {"handle", "from": [x, y, z], and "pos"/"heading", "delete": true or "copies": [{"pos", "heading"}]}.

@@ -594,12 +594,15 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   `lvl.py` ignore them. A patch with names only still carries `"objects": []`.
 - Works on destructibles (buildings), pickups (cars, trees, rooftop objects) and props. Copies: buildings (with the destructibles
   inside them), props and pickups (a pickup copy has its own handle, id `GROUP` and `SWITCH`, so it breaks and is picked up on its
-  own). A building with a destructible inside an animated part (a crane, a turning sign) is refused (`lvl.py patch` and the log say
-  which part). A domino of the original (breaking it knocks a neighbour down) stays in the copy only when the neighbour is in the copy
-  too; one aimed outside it is dropped, so breaking the copy never breaks the original's neighbours. The copy also leaves out the
-  actions that work on a set part of the stage rather than on the object: an animation of an animated part, a script, and a
-  game event (in CENTRAL, breaking some buildings cuts traffic links; in other stages it moves pickups), so those happen only when
-  the original breaks. Deleting an object cuts the dominoes of its neighbours aimed at it.
+  own). A copy has its own animated parts too: a building that collapses with an animation when it breaks (CENTRAL, ISLAND, METRO,
+  TOKYO) collapses on its own, and a destructible inside an animated part (a crane, a turning sign) is copied with it. Only a
+  destructible inside a skeleton is refused (`lvl.py patch` and the log say which part; no stage has one). A domino of the original
+  (breaking it knocks a neighbour down) stays in the copy only when the neighbour is in the copy too; one aimed outside it is dropped,
+  so breaking the copy never breaks the original's neighbours. The copy also leaves out the actions that work on a set part of the
+  stage rather than on the object: an animation of an animated part outside the copy, a script, and a game event (in CENTRAL,
+  breaking some buildings cuts traffic links; in other stages it moves pickups), so those happen only when the original breaks. An
+  animated part the game itself drives by its id (a level script, a boss) only moves in the original. Deleting an object cuts the
+  dominoes of its neighbours aimed at it.
 - Copies cost room: each one takes arena bytes (1 MB for the whole patch) and slots in the game's table of breakable objects (1024).
   An entry whose copies do not fit is skipped before anything is written. `lvl.py patch` and the log print the table's use:
   `interactives: 348 of 1024 before the patch, 355 after (...)`.
@@ -839,7 +842,16 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   held with the original by a new `GROUP` (noFOV) in the parent's slot, plus copies of the original's paths. A copy clones the handle's
   spine: every node that changes at run time (`DESTRUCTIBLE`, `INTERACTIVE_STATE`, `SWITCH`, `PART_EMITTER`, and nodes with an id that
   `dbProcInteractive` registers) and every node between them and the handle, once each (the image is a DAG); the rest (meshes,
-  animated parts: nothing is cloned below `CHAR_INSTANCE`, `ANIM_XFORM`, `SKEL_BONE`, `ANIM_SCALE`) stays shared. On the clones: the
+  collision, GS contexts, animated parts with nothing of that below them) stays shared, and nothing is cloned below a `SKEL_BONE`. A
+  `CHAR_INSTANCE` is cloned when an `ACT_ANIM` of a destructible of the copy animates it (`animationGetHandle`'s rule: the first
+  instance of the stage's `ANIM_MGR` with that id1/id2 and an animation with that id) or something that changes hangs below it; its
+  `ANIM_XFORM`s and `ANIM_SCALE`s go with it (they keep the instance's visible flag, angles and dirty bits; the matrices are in the
+  instance's `animOutput.atMat[matrixIdx]`). The clone gets its own animation state, copied from the disc: the output block
+  (`val`, `dirty`, `atMat`), the control nodes and each one's key cache (`prevKey`), `animPktPtr` pointed at its own `val` (it is
+  `val` on every stage), `activeTree` 0 and an id2 no instance with the same id1 uses, from 0x7FF down (monsters look theirs up with
+  a small `dupId`). Each copy entry writes a new `ANIM_MGR` in the arena with the old list plus its clones and puts it in the
+  image's root list, so `animationSetGlobal`, which runs after the hook, makes each clone's `AnimPlayer` (0x18 bytes of
+  `MemoryStack::global`) and starts its control nodes (`anim instances cloned` in the log). On the clones: the
   `INTERACTIVE_STATE` id1 is cleared, the `DESTRUCTIBLE` id1 too (except 0x1A90..0x1B57, the "never loses health" range that
   `Destructible::takeHit` reads), the emitter's `isActivated` (bit 4 of +0x5C) is cleared, single-piece ids go to 0 and pickup ids
   stay. "Single-piece" is any id outside 0x7D0..0x897 on an op `dbsTraverse` hands to `dbProcInteractive`, which also clears a few
@@ -847,7 +859,9 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   id1 of its path, so the copy of such a piece is hit with another id. The state actions stay shared, except the `ActGroup`/
   `ActTransform` blocks above an action the copy changes, which are cloned (a `TRANSFORM` left with nothing gets an empty `GROUP`:
   `doTransform` does not test for null): an `ActDomino` aimed at a node of the copy is pointed at its clone, one aimed outside is
-  dropped, and so are `ACT_ANIM` (it plays a fixed animation handle), `ACT_RUNSCRIPT` (a script node with its own place) and
+  dropped; an `ACT_ANIM` whose instance the copy cloned gets the clone's id2 in `ids.anim` (`anim actions redirected`), any other
+  one is dropped (it plays an animation outside the copy, or a monster's), and so are `ACT_RUNSCRIPT` (a script node with its own
+  place) and
   `ACT_GENERICEVENT` (`TheGame`'s handler: `PathNode::removePath` on fixed `PathNet::fodder` links, pickup heights). An emitter with
   `isAutoStart` (bit 3 of +0x5C) takes a lasting `fx[100]` effect and an `autoEmitters[128]` slot from the load on; the game checks
   both, so many copies of such a building leave later explosions without an effect (`auto-start emitters cloned` in the log). After
