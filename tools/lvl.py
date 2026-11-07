@@ -1750,6 +1750,73 @@ class LevelPatch:
         walk(root, [], 0)
         return out
 
+    def sky_plan(self, root):
+        """The slots of the sky's domes: every OBJECT under a sky node (id 2) outside the clouds (the CHAR_INSTANCE branch, op 25), as
+        [(parent, slot)] in tree order. PatchError when the stage has none (CANYON1, MINISF)."""
+        st, img = self.st, self.img
+        slots, seen_slots, seen = [], set(), set()
+
+        def walk(n):
+            if n in seen:
+                return
+            seen.add(n)
+            for s in child_slots(img, n):
+                c = img.u32(s) & MASK
+                if not c or not img.ok(c):
+                    continue
+                op = img.u32(c) & 63
+                if op == 0:
+                    if s not in seen_slots:
+                        seen_slots.add(s)
+                        slots.append((n, s))
+                elif op != 25:
+                    walk(c)
+
+        for n in sorted(st.root_of):
+            if st.ident(n) == 2 and st.op(n) == 1:
+                walk(n)
+        if not slots:
+            raise PatchError("the stage's sky has no dome OBJECT to replace")
+        return slots
+
+    def sky_swap(self, slots, root, name):
+        """The dome takes the model: every OBJECT of the model gets the first dome's first word, flags (but its vertex count) and
+        the fields at +0x20..+0x4F (fog burn-through 3500, tint), the first dome's slot points at the model's root and the other
+        domes' slots at one empty GROUP."""
+        st, img = self.st, self.img
+        tpl = img.u32(slots[0][1]) & MASK
+        vmask = 0x1FFF << 16
+        objs, seen, stack = [], set(), [root]
+        while stack:
+            n = stack.pop()
+            if n in seen:
+                continue
+            seen.add(n)
+            if self.op(n) == 0:
+                objs.append(n)
+            stack.extend(children(img, n))
+        for o in objs:
+            self.w32(o, img.u32(tpl))
+            self.w32(o + 0xC, (img.u32(tpl + 0xC) & ~vmask) | (img.u32(o + 0xC) & vmask))
+            for off in range(0x20, 0x50, 4):
+                self.w32(o + off, img.u32(tpl + off))
+        empty = None
+        for i, (p, s) in enumerate(slots):
+            if i == 0:
+                self.set_ptr(s, root)
+                st.parents[root].append(p)
+            else:
+                if empty is None:
+                    empty = self.alloc(0x20, 16)
+                    for off in range(0, 0x20, 4):
+                        self.w32(empty + off, 0)
+                    self.w32(empty, 1)
+                self.set_ptr(s, empty)
+                st.parents[empty].append(p)
+        self.stats["sky domes replaced"] += len(slots)
+        self.log.append("sky: model %s (%d objects) replaces %d dome%s (style of OBJECT %07x)" % (
+            name, len(objs), len(slots), "" if len(slots) == 1 else "s", tpl))
+
     def apply_props(self, patch, mod_dir):
         """The patch's "props" (docs/guides/MODS.md, "Level patches"), after "objects" and before "peds": each entry {"id",
         "model", "pos": [x, y, z], "heading", "name"} places a prop of <mod_dir>/props/<MODEL>/ (tools/lvlprop.py build). Each
@@ -1773,6 +1840,8 @@ class LevelPatch:
                     raise PatchError("not an object")
                 name = str(e.get("model") or "").upper()
                 p3 = e.get("pos")
+                if e.get("sky") is True:
+                    p3 = [0, 0, 0]                  # the sky entry has no place: the model takes the dome's
                 if not (isinstance(p3, list) and len(p3) == 3 and all(_number(x) for x in p3)):
                     raise PatchError("without \"pos\" [x, y, z]")
                 hd = e.get("heading")
@@ -1841,7 +1910,17 @@ class LevelPatch:
                     n_st = len(sroots)
                     thr = [int(round(65535.0 * (n_st - 1 - i) / n_st)) for i in range(n_st)]      # health left that moves on to state i + 1
                 mine, need = [], 0
+                sky_jobs = []
                 for k, e, pos, hd in ents:
+                    if e.get("sky") is True:
+                        try:
+                            if dstr:
+                                raise PatchError("a sky model has no destructible states")
+                            sky_jobs.append(self.sky_plan(root))
+                        except PatchError as err:
+                            self.log.append("sky skipped: model %s: %s" % (name, err))
+                            self.stats["skipped"] += 1
+                        continue
                     t_top = self.arena_top()
                     turn = abs(math.remainder(hd, 360.0)) > 1e-6
                     t = self.alloc(0x54 if turn else 0x20, 16)
@@ -1924,15 +2003,17 @@ class LevelPatch:
                     need += cost
                     if dstr:
                         self.interactives_used += 1
-                if not mine:
+                if not mine and not sky_jobs:
                     self.rollback(top)
                     self.interactives_used = iu0
                     continue
-                if need + (0 if made else reserve_group) > self.arena_free():
+                if need + (0 if made else reserve_group) + (0x20 + 15 if sky_jobs else 0) > self.arena_free():
                     self.rollback(top)
                     self.interactives_used = iu0
                     raise PatchError("model %s: %d entries take up to %d bytes more, the arena has %d left" % (
                         name, len(mine), need, self.arena_free()))
+                for job in sky_jobs:            # last, when nothing can fail: the slots now point into the arena
+                    self.sky_swap(job, root, name)
                 made += mine
                 summary.append("%s x%d (%d bytes)" % (name, len(mine), prop.size))
                 if dstr:
