@@ -14,6 +14,7 @@ comes from tools/lvl.py (objects, patch, path cuts, collision check) and tools/l
 %LOCALAPPDATA%/WotM/level_editor or ~/.cache/wotm_level_editor). Settings (disc, mods folder, game, theme) live in
 ~/.wotm_level_editor.json. Texts in English, like the mod kit.
 """
+import base64
 import contextlib
 import io
 import glob
@@ -45,6 +46,7 @@ import lvlnames  # noqa: E402
 import modkit   # noqa: E402 - the disc as a folder or a .iso (disc_iso, disc_cache, disc_listdir), as the mod kit reads it
 import hudapi   # noqa: E402 - the HUD panel (web/hud.js)
 import pedsapi  # noqa: E402 - the pedestrians (web/peds.js)
+import lvlprop  # noqa: E402 - new props from Blender (Import .glb)
 
 WEB = os.path.join(HERE, "web")
 CONFIG = os.path.join(os.path.expanduser("~"), ".wotm_level_editor.json")
@@ -323,13 +325,17 @@ def stage_env(cfg, disc, name, mod=""):
 
 
 # lp.stats keys the summary names, in this order (the others are details of how the patch was laid out)
-STAT_WORDS = (("moved", "moved"), ("copies", "copies"), ("deleted", "deleted"), ("ped segments", "sidewalks"),
-              ("ped groups changed", "pedestrian groups changed"), ("ped groups added", "pedestrian groups added"),
-              ("ped groups deleted", "pedestrian groups deleted"), ("ped groups off", "pedestrian groups off"))
+STAT_WORDS = (("moved", "moved", "moved"), ("copies", "copy", "copies"), ("deleted", "deleted", "deleted"),
+              ("ped segments", "sidewalk", "sidewalks"),
+              ("ped groups changed", "pedestrian group changed", "pedestrian groups changed"),
+              ("ped groups added", "pedestrian group added", "pedestrian groups added"),
+              ("ped groups deleted", "pedestrian group deleted", "pedestrian groups deleted"),
+              ("ped groups off", "pedestrian group off", "pedestrian groups off"), ("props", "new prop", "new props"))
 
 
 def stats_text(stats):
-    return ", ".join("%d %s" % (stats[k], w) for k, w in STAT_WORDS if stats.get(k)) or "nothing changed"
+    return ", ".join("%d %s" % (stats[k], one if stats[k] == 1 else many) for k, one, many in STAT_WORDS
+                     if stats.get(k)) or "nothing changed"
 
 
 def hex_handle(h):
@@ -339,9 +345,10 @@ def hex_handle(h):
         return str(h)
 
 
-def check_patch(disc, name, patch):
+def check_patch(disc, name, patch, mod_dir=None):
     """lvl.py patch on a fresh copy of the stage: the log lines, the path cuts and the collision check, and from them a summary,
-    the problems ({level: err or warn, text, kind, handle and reason for an entry the game skips}) and notes."""
+    the problems ({level: err or warn, text, kind, handle and reason for an entry the game skips}) and notes. mod_dir: the mod
+    whose props/ the "props" models come from (None: no mod chosen, so a patch with props says so)."""
     buf = io.StringIO()
     root = stage_root(disc, name)
     coll = {}
@@ -349,6 +356,13 @@ def check_patch(disc, name, patch):
         st = lvl.Stage(name, root)
         lp = lvl.LevelPatch(st)
         lp.apply(patch)
+        if patch.get("props") and not mod_dir:
+            lp.log.append("props: skipped: no mod chosen (a prop's model is in its mod's props folder)")
+        elif mod_dir:
+            try:
+                lp.apply_props(patch, mod_dir)      # the game hook's order: objects, props, pedestrians, then the path cuts
+            except lvl.PatchError as err:        # only a full arena gets here (as lvl.py patch)
+                lp.log.append("props: stopped halfway: %s" % err)
         pts = lvl.stage_points(root, name)
         nets = {"fodder": lvl.net_from_points(pts.get("FOP", [])), "ped": lvl.net_from_points(pts.get("PED", []))}
         try:
@@ -365,6 +379,7 @@ def check_patch(disc, name, patch):
         st.grid = lvl.Grid(st.img, st.grid.addr)
         lvl.check_collision(st, coll)
     objs = patch.get("objects") if isinstance(patch.get("objects"), list) else []
+    props = patch.get("props") if isinstance(patch.get("props"), list) else []
     problems, infos = [], []
     for line in lp.log:
         m = re.match(r"entry (\d+) skipped: (.*)$", line)
@@ -377,12 +392,32 @@ def check_patch(disc, name, patch):
             continue
         m = re.match(r"pedestrian group (\d+) skipped: (.*)$", line)
         if m:
-            problems.append({"level": "err", "kind": "ped", "reason": m.group(2),
+            problems.append({"level": "err", "kind": "ped", "reason": m.group(2), "index": int(m.group(1)),
                              "text": "Pedestrian group %d was not applied: %s" % (int(m.group(1)) + 1, m.group(2))})
             continue
         m = re.match(r"pedestrians: stopped halfway: (.*)$", line)
         if m:
             problems.append({"level": "err", "kind": "ped", "text": "The pedestrians were applied only in part: %s" % m.group(1)})
+            continue
+        m = re.match(r"prop (\d+)(?: \(.*?\))? skipped: (.*)$", line)
+        if m:
+            k = int(m.group(1))
+            pe = props[k] if k < len(props) and isinstance(props[k], dict) else {}
+            problems.append({"level": "err", "kind": "prop", "index": k, "id": pe.get("id"), "reason": m.group(2),
+                             "text": "Prop %s was not applied: %s" % (pe.get("name") or pe.get("id") or k + 1, m.group(2))})
+            continue
+        m = re.match(r"props of model (\S+) skipped \(\d+\): (.*)$", line)
+        if m:                               # every entry of that model
+            for k, pe in enumerate(props):
+                if isinstance(pe, dict) and str(pe.get("model") or "").upper() == m.group(1):
+                    problems.append({"level": "err", "kind": "prop", "index": k, "id": pe.get("id"), "reason": m.group(2),
+                                     "text": "Prop %s was not applied: %s" % (pe.get("name") or pe.get("id") or k + 1,
+                                                                              m.group(2))})
+            continue
+        m = re.match(r"props: (stopped halfway|skipped): (.*)$", line)
+        if m:
+            problems.append({"level": "err", "kind": "prop", "text": "The props were not applied%s: %s" % (
+                " in full" if m.group(1) == "stopped halfway" else "", m.group(2))})
     if coll.get("box_bad"):
         problems.append({"level": "err", "kind": "collision",
                          "text": "Collision boxes: %d out of place (worst %.1f units)" % (coll["box_bad"], coll["worst"])})
@@ -420,6 +455,106 @@ def bad_mod_reason(mod):
 
 def patch_path(cfg, mod, name):
     return os.path.join(cfg["mods"], mod, "levels", name + ".json")
+
+
+# ------------------------------------------------------------------ new props (tools/lvlprop.py; the patch's "props")
+def mod_folder(cfg, mod):
+    """The mod's folder, where the "props" models are (props/<MODEL>/); None with no mod or a bad name."""
+    mod = (mod or "").strip()
+    return None if bad_mod(mod) else os.path.join(cfg["mods"], mod)
+
+
+def props_dir(cfg, mod):
+    d = mod_folder(cfg, mod)
+    return lvl._child_nocase(d, "props") if d and os.path.isdir(d) else None
+
+
+def prop_light(m):
+    """How the prop is lit: vertex, dir, or mixed (auto picks per object: vertex where the mesh has vertex colors)."""
+    got = {o.get("light") for o in m.get("objects") or [] if isinstance(o, dict) and o.get("light")}
+    return got.pop() if len(got) == 1 else "mixed" if got else m.get("light")
+
+
+def props_list(cfg, mod):
+    """The mod's props (props/*/prop.json): model (the folder's name, as the patch names it), name, stage, counts, bounds and
+    light; `error` for a folder whose prop.json does not read."""
+    d = props_dir(cfg, mod)
+    out = []
+    if not d or not os.path.isdir(d):
+        return out
+    for n in sorted(os.listdir(d), key=str.lower):
+        f = os.path.join(d, n, "prop.json")
+        if not os.path.isfile(f):
+            continue
+        e = {"model": n.upper(), "name": n}
+        try:
+            with open(f, encoding="utf-8") as fh:
+                m = json.load(fh)
+            pv = os.path.join(d, n, (m.get("files") or {}).get("preview", ""))
+            e.update(name=m.get("name") or n, stage=(m.get("stage") or "").upper(), triangles=m.get("triangles", 0),
+                     bounds=m.get("bounds"), light=prop_light(m), bytes=m.get("bytes"), units=m.get("units"),
+                     scale=m.get("scale"), preview=os.path.isfile(pv))
+        except (OSError, ValueError, AttributeError) as err:
+            e["error"] = "prop.json does not read: %s" % err
+        out.append(e)
+    return out
+
+
+def prop_preview(cfg, mod, model):
+    """Path of a model's <MODEL>.preview.glb (what the game draws), or None."""
+    d = props_dir(cfg, mod)
+    if not d or not model or any(c in model for c in "\\/:*?\"<>|") or model.startswith("."):
+        return None
+    pdir = lvl._child_nocase(d, model)
+    try:
+        with open(os.path.join(pdir, "prop.json"), encoding="utf-8") as f:
+            m = json.load(f)
+        path = os.path.join(pdir, (m.get("files") or {}).get("preview", ""))
+    except (OSError, ValueError, AttributeError):
+        return None
+    return path if os.path.isfile(path) else None
+
+
+def import_prop(cfg, b):
+    """Import .glb: writes the .glb as props/<NAME>/source.glb of the mod and builds the prop there (lvlprop.build, for the
+    stage). An existing model is replaced only with `replace`. Returns {"prop": props_list entry, "lines"}."""
+    mod, stage = (b.get("mod") or "").strip(), (b.get("stage") or "").upper()
+    if bad_mod(mod):
+        raise ValueError(bad_mod_reason(mod))
+    name = (b.get("name") or "").strip().upper()
+    if not lvlprop.NAME_RE.match(name):
+        raise ValueError("A prop name has 1 to 8 letters, digits or _")
+    root = os.path.join(cfg["mods"], mod)
+    pd = lvl._child_nocase(root, "props") or os.path.join(root, "props")
+    folder = lvl._child_nocase(pd, name) or os.path.join(pd, name)
+    existed = os.path.isdir(folder)
+    if existed and not b.get("replace"):
+        return {"exists": True}
+    data = base64.b64decode(b.get("data") or "")
+    if data[:4] != b"glTF":
+        raise ValueError("That file is not a binary glTF (.glb). In Blender: File > Export > glTF 2.0, format glTF Binary.")
+    os.makedirs(folder, exist_ok=True)
+    src = os.path.join(folder, "source.glb")
+    old = None
+    if existed and os.path.isfile(src):
+        with open(src, "rb") as f:
+            old = f.read()
+    with open(src, "wb") as f:
+        f.write(data)
+    lines = []
+    try:
+        height = float(b["height"]) if b.get("height") not in (None, "") else None
+        lvlprop.build(src, folder, stage, b.get("units") or "blender", None, height, name, (b.get("title") or "").strip() or name,
+                      b.get("light") or "auto", stage_root(cfg["disc"], stage), log=lines.append)
+    except Exception:
+        if not existed:
+            shutil.rmtree(folder, ignore_errors=True)
+        elif old is not None:
+            with open(src, "wb") as f:
+                f.write(old)
+        raise
+    entry = next((e for e in props_list(cfg, mod) if e["model"] == os.path.basename(folder).upper()), None)
+    return {"prop": entry, "lines": lines, "replaced": existed}
 
 
 def list_mods(cfg):
@@ -686,6 +821,14 @@ class Handler(BaseHTTPRequestHandler):
                                        "env": stage_env(cfg, cfg["disc"], q["name"], mod),
                                        "peds": pedsapi.stage_peds(st, stage_root(cfg["disc"], q["name"])),
                                        "have": have, "winner": winner, "others": [m for m in have if m != mod]})
+            if u.path == "/api/props":          # the mod's props (props/*/prop.json)
+                return self.send(200, {"props": props_list(cfg, q.get("mod", ""))})
+            if u.path == "/api/propglb":        # a prop's preview (what the game draws)
+                path = prop_preview(cfg, q.get("mod", ""), q.get("model", ""))
+                if not path:
+                    return self.send(404, {"error": "not found"})
+                with open(path, "rb") as f:
+                    return self.send(200, f.read(), "model/gltf-binary")
             if u.path == "/api/hud":
                 mod = q.get("mod", "").strip()
                 return self.send(200, HUD.panel(cfg["disc"], cfg["mods"], mod if mod and not bad_mod(mod) else "", q["stage"]))
@@ -733,9 +876,14 @@ class Handler(BaseHTTPRequestHandler):
                                {"kind": b.get("kind"), "type": b.get("ptype"), "dims": b.get("dims")})
                 return self.send(200, {"ok": True, "file": USER_NAMES})
             if self.path == "/api/check":
-                return self.send(200, check_patch(cfg["disc"], b["name"], b["patch"]))
+                return self.send(200, check_patch(cfg["disc"], b["name"], b["patch"], mod_folder(cfg, b.get("mod"))))
             if self.path == "/api/paths":       # Settings' badges for what is typed (nothing is saved)
                 return self.send(200, path_states(b))
+            if self.path == "/api/props/import":   # Import .glb: a new prop in the mod, built for the open stage
+                try:
+                    return self.send(200, import_prop(cfg, b))
+                except (ValueError, lvlprop.PropError, lvlprop.ngpmesh.MeshError, lvlprop.vifpkt.FormatError) as e:
+                    return self.send(400, {"error": str(e), "code": "prop"})
             if self.path == "/api/browse":
                 if BROWSE["window"] is None:
                     return self.send(400, {"error": "Browse works in the editor's own window only: type the path."})
@@ -764,7 +912,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(409, {"error": "the game is already open", "code": "running", "stage": GAME["stage"]})
                 if self.path == "/api/test" and not b.get("save", True):
                     return self.send(200, {"ok": True, "lines": [], "launched": launch_game(cfg, name, b.get("training", True))})
-                res = check_patch(cfg["disc"], name, b["patch"])
+                res = check_patch(cfg["disc"], name, b["patch"], mod_folder(cfg, mod))
                 res["saved"] = save_patch(cfg, mod, name, b["patch"])
                 # another mod with this stage's file that loads later wins in the game: the page says so (not a check problem)
                 res["winner"] = patch_winner(cfg, mod, name)

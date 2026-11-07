@@ -43,7 +43,8 @@ $dist = Join-Path $root 'dist'
 $work = Join-Path $root 'work'
 $ico = Join-Path $repo 'native\wotm.ico'
 Remove-Item -Recurse -Force $dist, $work -ErrorAction SilentlyContinue
-$hidden = 'lvl', 'lvlglb', 'lvlnames', 'lvlhud', 'modkit', 'ngp', 'tex', 'gltf', 'iso9660', 'snd989', 'hudapi', 'pedsapi' |
+$hidden = 'lvl', 'lvlglb', 'lvlnames', 'lvlhud', 'lvlprop', 'ngpmesh', 'vifpkt', 'modkit', 'ngp', 'tex', 'gltf', 'iso9660', 'snd989',
+    'hudapi', 'pedsapi' |
     ForEach-Object { '--hidden-import', $_ }
 $exclude = 'numpy', 'monglb', 'pose', 'tkinter' | ForEach-Object { '--exclude-module', $_ }
 & $py -m PyInstaller --noconfirm --clean --onefile --windowed --name WotM_LevelEditor --icon $ico `

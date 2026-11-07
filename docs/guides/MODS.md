@@ -690,8 +690,8 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   another mod than the chosen one wins for this stage, a note under the top bar names it when the stage loads (and after a save),
   since the game does not use the chosen mod's file; its X hides it until the next stage or mod.
 - **Mode rail** (the narrow column on the left): **Objects** (the cube, or **1**) and **Pedestrians** (the walking figure, or
-  **2**; it shows the pedestrian layer, below) switch what the editor works on; **Fight HUD** (the screen icon) opens the HUD
-  panel (below).
+  **2**) switch what the editor works on: the left list, the right panel and what a click in the view picks; the editor remembers
+  the mode. **Fight HUD** (the screen icon) opens the HUD dialog (below).
 - **Status bar and Output:** the bar at the bottom shows the last message, whether the stage has unsaved changes (or when it was
   saved), the last check (passed, how many problems, or not checked since the last change), the game (closed, starting, running,
   patch applied or ignored) and how many objects the mod changes. A click on a field opens the **Output** drawer on its tab:
@@ -734,21 +734,44 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
 - **Move objects on top** (a switch in Actions, on by default, with the count beside it): moving, turning, copying, deleting or
   restoring a building does the same to the pickups that rest on it (`lvl.py objects`, `on <handle>`); Delete counts them
   ("Delete 5 (+3 on top)").
-- **Pedestrians** (the Pedestrians mode, the view's **Layers** menu, or **P**): the stage's pedestrian groups as orange cones, a dashed line from each to the
-  sidewalk it walks, and the sidewalks (`PTS/<STAGE>.PED`) as blue lanes as wide as the walking lane, with a ball at each end. A
-  click picks a cone, a lane or an end; the gizmo, the arrows, **End** and the position fields only move them. The right panel
-  shows what a group walks, its **People** (1 to 255) or a sidewalk's **Lane** (times 10 units to each side), **Duplicate**
-  (groups) and **Delete**. **Add group** and **Add sidewalk** put a new one where the view looks; a new sidewalk is a straight
-  piece to drag by its ends. A red cone has nothing to walk (its nearest node has no link, or the stage has no sidewalks: add one).
-  Limits: 20 groups, 127 sidewalks. The changes go in the patch's `peds` ("Level patches"), and Check lists where each group walks.
-- **HUD panel:** the fight HUD pictures this stage carries (`tools/lvlhud.py`: bar frame and bars, special icon, BOSS label,
-  player numbers, font, pickup ring, hint box, cinema bars, buttons), the disc's beside the mod's. **Replace…** takes an image (a
-  PNG as it is; another format the browser reads becomes a PNG; a shape other than the game's asks first) and writes it into the
-  mod as `LVL/<stage>_tNNNN.png` or `LVL/<stage>_rtx_tNNNN.png` ("Textures as PNG"); **every stage with this picture** writes it
-  for every stage that has the same one (the bar atlas is shared by 17). **Export** downloads the disc's picture, **Remove**
-  takes the mod's out. CANYON1 and TOKYODM carry the other HUD version (B), drawn differently: the panel says so. The game reads
-  the pictures when it loads the stage.
-- **List:** every object by name, its handle beside it, in sections (**Buildings**, **Pickups**, **Props** and **Terrain**, the
+- **Pedestrians mode:** the stage's pedestrian groups as violet cones, a dashed line from each to the sidewalk it walks, and the
+  sidewalks (`PTS/<STAGE>.PED`) as cyan lanes as wide as the walking lane, with a white ball at each end; the selection is amber.
+  The left panel has two meters (groups out of 20, sidewalks out of 127, amber past 90 % and red at the limit), the people of all
+  groups added up, the **Pedestrians in this stage** switch (off takes every group out, the patch's `"off"`; on brings the disc's
+  back) and a list of **Groups** (people per group; a red mark when it walks nothing) and **Sidewalks** (length), numbered by their
+  place in the list. A click, in the view or the list, picks a cone, a lane or an end (the stage's objects are scenery here); the
+  gizmo, the arrows, **End** and the position fields only move them, Turn is off. The right panel says what a group walks
+  ("Walks on sidewalk 2 (492 units long)", with **Show** to select that sidewalk) or a sidewalk's length and lane, and has
+  **People** (1 to 255) or **Width** (units to each side, steps of 10) as a slider and a number (one drag is one Undo step),
+  **Position**, **Drop**, **Duplicate** (groups) and **Delete**. With nothing selected it explains the colors. **Add group** and
+  **Add sidewalk**, on the tool bar, put a new one where the view looks (off at the limit, or with no sidewalk to walk, with the
+  reason in the tooltip); a new sidewalk is a straight piece to drag by its ends. A red cone has nothing to walk (its nearest node
+  has no link, or the stage has no sidewalks: add one). Each group walks the sidewalk with the nearest end, so moving a group can
+  move it to another sidewalk. The changes go in the patch's `peds` ("Level patches"); Check lists where each group walks, and a
+  group the game would skip is a problem that selects it. In the Objects mode the **Pedestrians** layer (the view's **Layers**
+  menu, or **P**) shows the markers faint, not clickable.
+- **Fight HUD dialog:** the fight HUD pictures this stage carries (`tools/lvlhud.py`: bar frame and bars, special icon, BOSS
+  label, player numbers, font, pickup ring, hint box, cinema bars, buttons), each row with the disc's picture (**Original**), the
+  mod's (**In your mod**, or "Not replaced"), the size, format and file. **Replace…** (or a picture dropped on the row) takes an
+  image (a PNG as it is; another format the browser reads becomes a PNG; a shape other than the game's asks first) and writes it
+  into the mod as `LVL/<stage>_tNNNN.png` or `LVL/<stage>_rtx_tNNNN.png` ("Textures as PNG"); **Apply to all N stages with this
+  picture** writes it for every stage that has the same one (the bar atlas is shared by 17). **Save original as PNG** downloads
+  the disc's picture, **Remove** takes the mod's out. The dialog writes into the mod at once, outside Undo, and says so; with no
+  mod chosen, Replace is off and a mod picker sits at the top. Canyon 1 and Tokyo DM carry the other HUD layout (B), drawn
+  differently: the dialog says so on those stages. The game reads the pictures when it loads the stage; with the game open,
+  **Reload in game** sits at the bottom of the dialog.
+- **New props** (the patch's `props`, above): **Add prop** on the tool bar lists the props of the chosen mod made for this stage
+  (`mods/<mod>/props/*/prop.json`, with size and triangles; one whose files do not read is greyed, with the reason) and puts the
+  picked one where the view looks, drawn from its `<MODEL>.preview.glb` with the stage's textures. **Import .glb…** (in that menu;
+  a file can also be dropped on the dialog) takes a Blender export (glTF Binary) and runs `lvlprop.py build` in the mod:
+  **Name** is the folder (1 to 8 letters, digits or `_`; the file's name by default), **Units** Blender meters or game units,
+  **Height** scales the model to that many game units (empty keeps the file's size), **Light** as `--light` (`TOOLS.md`). The
+  `.glb` is kept as `props/<NAME>/source.glb`; a name the mod already has asks before replacing it, and the new model then shows
+  wherever it is placed. A new prop moves, turns, copies (a copy is one more entry with the same model), drops and deletes like
+  any object; it has no disc place, so Restore is off and its badge says **New**. It sits in the list's **New props** section,
+  and Check names the one the game would skip. Switching to a mod without its model keeps the entry in the file (the editor says
+  how many), where the game skips it.
+- **List:** every object by name, its handle beside it, in sections (**Buildings**, **Pickups**, **Props**, **Terrain** and **New props**, the
   props over 500 units; a click on a header closes or opens it, Terrain starts closed, and the editor remembers them). A copy
   sits under its original, indented. Small marks after the name: a green dot (moved or turned), the copy icon (it has copies),
   the bin (deleted: the row is struck through) and the link (it rests on another object; the tooltip names it). Above: the

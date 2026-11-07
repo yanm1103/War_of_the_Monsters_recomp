@@ -6,7 +6,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { createPeds } from './peds.js';
-import { openHud } from './hud.js';
+import { openHud, hudGameChanged } from './hud.js';
 
 // The GS modulates and blends the bytes as they are: no color management (texture, vertex and interface colors stay raw).
 THREE.ColorManagement.enabled = false;
@@ -512,11 +512,10 @@ const hint = { key: '', timer: 0 };
 function hintKey() {
   if (band && !$('band').hidden) return 'band';
   if (gizmo.dragging) return 'gizmo';
-  if (pedSel) return pedSel.kind === 'group' ? 'pedGroup' : 'pedSeg';
+  if (editMode === 'peds') return pedSel ? (pedSel.kind === 'group' ? 'pedGroup' : 'pedSeg') : 'peds';
   if (isDeleted(sel)) return 'deleted';
   if (group.length > 1) return 'many';
   if (sel) return gizmo.getMode() === 'rotate' ? 'turn' : 'one';
-  if (pedsOn) return 'peds';
   return fly.on ? 'fly' : 'orbit';
 }
 function showHint() {
@@ -537,10 +536,17 @@ let cfg = {}, stageName = '', recs = [], byHandle = new Map(), itemOf = new Map(
 let history = [], future = [], savedJson = '';
 let modNow = '', stageTitles = {};   // modNow: the mod the scene was loaded with (Save, Test and Reload write into it)
 // what the file holds that the editor does not edit, given back as it is by buildPatch: top-level keys, entries and names for
-// handles this stage does not have, pedestrian keys peds.js does not know (or the whole "peds" when the stage has no pedestrian data)
+// handles this stage does not have, pedestrian keys peds.js does not know (or the whole "peds" when the stage has no pedestrian data),
+// props whose model the mod does not have for this stage
 const ENTRY_KEYS = new Set(['handle', 'from', 'pos', 'heading', 'delete', 'copies']);
 const PEDS_KEYS = new Set(['off', 'segments', 'groups']);
-let keep = { top: {}, objects: [], names: {}, peds: {}, pedsRaw: null };
+const PROP_KEYS = new Set(['id', 'model', 'pos', 'heading', 'name']);
+let keep = { top: {}, objects: [], names: {}, peds: {}, pedsRaw: null, props: [] };
+// New props (the patch's "props", MODS.md): the models of the mod's props/ folder (tools/lvlprop.py), drawn from their preview with
+// the stage's textures. Each entry is a rec like a stage object's, with rec.prop = {id, model}; propRoot holds their nodes, inside
+// stageRoot so that clicks and Drop meet them.
+let propModels = new Map();   // MODEL -> {info: the /api/props entry, scene: the preview's scene, or null}
+let propRecs = [], propRoot = null, stageTex = new Map();   // stageTex: texId -> the stage's texture
 
 function setWorld(node, posGame, heading, rec) {
   const qWorld = new THREE.Quaternion().setFromAxisAngle(Y, THREE.MathUtils.degToRad(heading - rec.h0)).multiply(rec.q0);
@@ -576,6 +582,79 @@ function removeCopy(item) {
   for (const a of item.attached) if (a.copy) removeCopy(a);
 }
 
+// ------------------------------------------------------------------ new props
+// The mod's models (/api/props) and, for this stage's, the preview's scene; its materials name the stage texture (tex<id>)
+async function loadPropModels(mod) {
+  propModels = new Map();
+  if (!mod) return;
+  let list = [];
+  try { list = (await api(`/api/props?mod=${encodeURIComponent(mod)}`)).props || []; } catch (e) { msg(`Couldn't list the props of mod "${mod}": ${cleanError(e).text}`, { level: 'warn' }); }
+  await Promise.all(list.map(async (p) => {
+    const pm = { info: p, scene: null };
+    propModels.set(p.model, pm);
+    if (p.error || !p.preview || p.stage !== stageName) return;
+    try {
+      const gltf = await new GLTFLoader().loadAsync(`/api/propglb?mod=${encodeURIComponent(mod)}&model=${encodeURIComponent(p.model)}`);
+      gltf.scene.traverse((o) => {
+        if (!o.isMesh) return;
+        for (const m of [].concat(o.material)) {
+          const t = /^tex(\d+)/.exec(m.name || '');
+          if (t) m.map = stageTex.get(+t[1]) || null;
+          gsMaterial(m);
+        }
+      });
+      pm.scene = gltf.scene;
+    } catch (e) { p.error = `its preview does not load (${cleanError(e).text})`; }
+  }));
+}
+const propKey = (m) => String(m || '').toUpperCase();
+// e: a "props" entry {id, model, pos, heading, name}; null (and nothing made) when the model is not one of this stage in the mod
+function makeProp(e) {
+  if (!e || typeof e !== 'object' || !propRoot) return null;
+  const key = propKey(e.model), pm = propModels.get(key);
+  const pos = Array.isArray(e.pos) && e.pos.length === 3 && e.pos.every((x) => typeof x === 'number') ? e.pos : null;
+  if (!pm || !pm.scene || !pos) return null;
+  const node = new THREE.Group();
+  node.add(pm.scene.clone(true));
+  propRoot.add(node);
+  const b = pm.info.bounds || { min: [0, 0, 0], max: [0, 0, 0] };
+  const info = { handle: key, kind: 'newprop', name: pm.info.name || key, nameSrc: 'model', rule: 'New prop', id: 0, model: key,
+                 dims: b.max.map((x, k) => x - b.min[k]), pos, heading: +e.heading || 0, states: 1, paths: 1 };
+  const rec = { info, node, p0: pos, pw: pos, h0: 0, q0: new THREE.Quaternion(), s0: new THREE.Vector3(1, 1, 1), copies: [],
+                deleted: false, prop: { id: String(e.id || newPropId()), model: key } };
+  const extra = Object.fromEntries(Object.entries(e).filter(([k]) => !PROP_KEYS.has(k)));
+  rec.extra = Object.keys(extra).length ? extra : null;
+  rec.item = { rec, node, copy: false, attached: [], iname: e.name ? String(e.name) : '' };
+  itemOf.set(node, rec.item);
+  propRecs.push(rec);
+  setWorld(node, pos, +e.heading || 0, rec);
+  return rec.item;
+}
+function removeProp(rec) {
+  rec.node.parent?.remove(rec.node);
+  itemOf.delete(rec.node);
+  const k = propRecs.indexOf(rec);
+  if (k >= 0) propRecs.splice(k, 1);
+}
+// "prop1", "prop2"...: one more than the highest such id in the file
+function newPropId() {
+  let n = 0;
+  for (const id of propRecs.map((r) => r.prop.id).concat(keep.props.map((e) => e && e.id))) {
+    const m = /^prop(\d+)$/.exec(String(id || ''));
+    if (m) n = Math.max(n, +m[1]);
+  }
+  return 'prop' + (n + 1);
+}
+function addProp(model) {
+  if (!propModels.get(model)?.scene) return;
+  showPropMenu(false);
+  if (editMode !== 'objects') enterMode('objects');
+  snapshot('add prop ' + model);
+  const p = viewPoint(), it = makeProp({ id: newPropId(), model, pos: p });
+  msg(`Added ${nameOf(it)} (${model})`, { level: 'ok', toast: ['Undo', undo] });
+  select(it);
+}
+
 function buildPatch() {
   const objects = [];
   for (const rec of recs) {
@@ -597,12 +676,20 @@ function buildPatch() {
   const names = Object.assign({}, keep.names);
   for (const rec of recs) if (rec.item.iname) names[rec.info.handle] = rec.item.iname;
   const out = Object.keys(names).length ? { objects, names } : { objects };
+  const props = propRecs.map((r) => {
+    const e = { id: r.prop.id, model: r.prop.model, pos: posOf(r.item).map(r1) }, h = headingOf(r.item);
+    if (Math.abs(h) > 0.05) e.heading = r1(h);
+    if (r.item.iname) e.name = r.item.iname;
+    return Object.assign(e, r.extra || {});
+  }).concat(keep.props);
+  if (props.length) out.props = props;
   const pp = keep.pedsRaw || (discPeds ? peds.patch() : null);
   if (pp || Object.keys(keep.peds).length) out.peds = Object.assign({}, pp, keep.peds);
   return Object.assign(out, keep.top);
 }
 
 function resetAll() {
+  for (const r of [...propRecs]) removeProp(r);
   for (const rec of recs) {
     for (const c of [...rec.copies]) removeCopy(c);
     rec.item.iname = '';
@@ -615,8 +702,10 @@ function resetAll() {
 // patch: the mod's file (or an undo step). The parts the editor does not edit go to `keep`; returns how many of them there are.
 function applyPatch(patch) {
   patch = patch && typeof patch === 'object' ? patch : {};
-  keep = { top: {}, objects: [], names: {}, peds: {}, pedsRaw: null };
-  for (const [k, v] of Object.entries(patch)) if (k !== 'objects' && k !== 'names' && k !== 'peds') keep.top[k] = v;
+  keep = { top: {}, objects: [], names: {}, peds: {}, pedsRaw: null, props: [] };
+  for (const [k, v] of Object.entries(patch)) if (!['objects', 'names', 'peds', 'props'].includes(k)) keep.top[k] = v;
+  if (patch.props !== undefined && !Array.isArray(patch.props)) keep.top.props = patch.props;
+  for (const e of Array.isArray(patch.props) ? patch.props : []) if (!makeProp(e)) keep.props.push(e);
   for (const rec of recs) rec.extra = null;
   for (const e of Array.isArray(patch.objects) ? patch.objects : []) {
     const rec = e && typeof e === 'object' ? byHandle.get(normHandle(e.handle)) : null;
@@ -637,19 +726,22 @@ function applyPatch(patch) {
   else if (pp) for (const [k, v] of Object.entries(pp)) if (!PEDS_KEYS.has(k)) keep.peds[k] = v;
   pedSel = null;     // the markers are made again
   peds.load(discPeds, keep.pedsRaw ? null : pp);
-  peds.setVisible(pedsOn);
+  applyPedsView();
   showPedCounts();
-  return { entries: keep.objects.length + Object.keys(keep.names).length, keys: Object.keys(keep.top).concat(Object.keys(keep.peds).map((k) => 'peds.' + k)) };
+  return { entries: keep.objects.length + Object.keys(keep.names).length, props: keep.props.length,
+           keys: Object.keys(keep.top).concat(Object.keys(keep.peds).map((k) => 'peds.' + k)) };
 }
 // the note over the view about what the file keeps that the editor does not show
 function showKeep(k) {
   const title = stageTitles[stageName] || stageName, parts = [];
   if (k.entries) parts.push(`${k.entries} ${k.entries === 1 ? 'change' : 'changes'} in this file ${k.entries === 1 ? 'is' : 'are'} for objects ${title} doesn't have.`);
+  if (k.props) parts.push(`${k.props} new ${k.props === 1 ? 'prop is' : 'props are'} of a model mod "${modNow}" doesn't have for ${title} (its props folder).`);
   if (k.keys.length) parts.push(`The file also has ${k.keys.map((x) => `"${x}"`).join(', ')}, which the editor doesn't edit.`);
   $('keepNote').hidden = !parts.length;
   if (!parts.length) return;
-  $('keepText').textContent = parts.join(' ') + ' Saving keeps ' + (k.entries + k.keys.length === 1 ? 'it' : 'them') + ' in the file as ' +
-    (k.entries + k.keys.length === 1 ? 'it is.' : 'they are.');
+  const n = k.entries + (k.props || 0) + k.keys.length;
+  $('keepText').textContent = parts.join(' ') + ' Saving keeps ' + (n === 1 ? 'it' : 'them') + ' in the file as ' +
+    (n === 1 ? 'it is.' : 'they are.');
   msg($('keepText').textContent, { level: 'warn' });
 }
 
@@ -671,7 +763,8 @@ function restoreTo(p) {
   applyPatch(JSON.parse(p));
   dirty = JSON.stringify(buildPatch()) !== savedJson;
   staleCheck();
-  selectMany(again);
+  // a new prop is made again from the patch: the same id picks its new item
+  selectMany(again.map((it) => (it.rec.prop ? propRecs.find((r) => r.prop.id === it.rec.prop.id)?.item : it)).filter(Boolean));
   showUndo();
 }
 function undo() {
@@ -769,6 +862,16 @@ async function loadStage(name) {
     for (const rec of recs) {
       if (rec.info.on) { const b = byHandle.get(normHandle(rec.info.on)); if (b) b.item.attached.push(rec.item); }
     }
+    stageTex = new Map();
+    stageRoot.traverse((o) => {
+      if (!o.isMesh) return;
+      for (const m of [].concat(o.material)) { const t = /^tex(\d+)$/.exec(m.name || ''); if (t && m.map) stageTex.set(+t[1], m.map); }
+    });
+    propRecs = [];
+    propRoot = new THREE.Group();
+    propRoot.name = 'new props';
+    stageRoot.add(propRoot);
+    await loadPropModels(mod);
     const kept = applyPatch(info.patch);
     savedJson = JSON.stringify(buildPatch());
     dirty = false;
@@ -816,10 +919,11 @@ function focus(item) {
 function items() {
   const out = [];
   for (const rec of recs) { out.push(rec.item); for (const c of rec.copies) out.push(c); }
+  for (const r of propRecs) out.push(r.item);
   return out;
 }
 function changed(rec) {
-  if (rec.deleted || rec.copies.length) return true;
+  if (rec.prop || rec.deleted || rec.copies.length) return true;
   const p = posOf(rec.item);
   return Math.hypot(p[0] - rec.pw[0], p[1] - rec.pw[1], p[2] - rec.pw[2]) > 0.05 || Math.abs(wrapDeg(headingOf(rec.item) - rec.h0)) > 0.05;
 }
@@ -836,7 +940,7 @@ function listed() {   // the items the list shows: kind boxes, "Changed" and the
   const f = $('filter').value.trim().toLowerCase(), kinds = shownKinds(), onlyChanged = $('changedOnly').checked;
   return items().filter((it) => {
     const i = it.rec.info;
-    if (!kinds.has(i.kind) || (onlyChanged && !changed(it.rec))) return false;
+    if (!kinds.has(i.kind === 'newprop' ? 'prop' : i.kind) || (onlyChanged && !changed(it.rec))) return false;
     return !f || `${label(it)} ${i.rule} ${i.handle} ${i.kind} ${i.id.toString(16)}`.toLowerCase().includes(f);
   });
 }
@@ -846,13 +950,15 @@ const SECTIONS = [
   { id: 'pickups', title: 'Pickups', icon: 'package-variant-closed', word: 'Pickup', many: 'pickups' },
   { id: 'props', title: 'Props', icon: 'cube-outline', word: 'Prop', many: 'props' },
   { id: 'terrain', title: 'Terrain', icon: 'terrain', word: 'Terrain piece', many: 'terrain pieces' },
+  { id: 'newprops', title: 'New props', icon: 'shape-plus-outline', word: 'New prop', many: 'new props' },
 ];
 const SEC = Object.fromEntries(SECTIONS.map((s) => [s.id, s]));
-const secOf = (i) => (i.kind === 'destr' ? 'buildings' : i.kind === 'pickup' ? 'pickups' : i.rule === 'Terrain piece' ? 'terrain' : 'props');
+const secOf = (i) => (i.kind === 'newprop' ? 'newprops' : i.kind === 'destr' ? 'buildings' : i.kind === 'pickup' ? 'pickups' : i.rule === 'Terrain piece' ? 'terrain' : 'props');
 const secOpen = (id) => store.get('sec.' + id, id === 'terrain' ? '0' : '1') === '1';
 const setIc = (el, name) => el.style.setProperty('--ic', `url(vendor/mdi/${name}.svg)`);
 // what changed in an original: moved, turned (copies and deleted are said apart)
 function moveState(rec) {
+  if (rec.prop) return { moved: false, turned: false };   // a new prop has no disc place: it is said "New"
   const p = posOf(rec.item);
   return { moved: Math.hypot(p[0] - rec.pw[0], p[1] - rec.pw[1], p[2] - rec.pw[2]) > 0.05,
            turned: Math.abs(wrapDeg(headingOf(rec.item) - rec.h0)) > 0.05 };
@@ -883,6 +989,7 @@ function rowEl(it) {
   h.textContent = it.copy ? it.iname || `Copy ${it.rec.copies.indexOf(it) + 1}` : nameOf(it);
   hd.textContent = i.handle;
   const badge = (name, cls, tip) => { const b = icon(name); b.classList.add(cls); b.title = tip; bd.appendChild(b); };
+  if (it.rec.prop) badge('shape-plus-outline', 'cp', `New prop: model ${i.model} of your mod`);
   let tip = label(it);
   if (!it.copy) {
     const rec = it.rec;
@@ -941,9 +1048,9 @@ function refreshList() {
   const byKind = { destr: 0, pickup: 0, prop: 0 };
   for (const it of all) byKind[it.rec.info.kind] = (byKind[it.rec.info.kind] || 0) + 1;
   for (const [k, v] of Object.entries(byKind)) { const e = document.querySelector(`.kinds .n[data-n="${k}"]`); if (e) e.textContent = v; }
-  const nRecs = recs.filter(changed).length;
+  const nRecs = recs.filter(changed).length + propRecs.length;
   document.querySelector('.kinds .n[data-n="changed"]').textContent = nRecs;
-  const nChanged = buildPatch().objects.length;
+  const bp = buildPatch(), nChanged = bp.objects.length + (bp.props || []).length;
   $('count').textContent = (shown.length === all.length ? `${all.length} objects` : `${shown.length} of ${all.length} shown`) +
     ` · ${nChanged} changed` + (group.length ? ` · ${group.length} selected` : '');
   document.title = `WotM Level Editor — ${stageName}${dirty ? ' *' : ''}`;
@@ -952,6 +1059,7 @@ function refreshList() {
   showSummary(nChanged);
   syncMarks();
   if (sel && !isDeleted(sel) && !$('props').hidden) { showBadge(); showActions(); }
+  if (editMode === 'peds') refreshPedList();
 }
 // the right panel with nothing selected: the stage, how many objects the mod changes, where Save writes
 function showSummary(nChanged) {
@@ -973,6 +1081,7 @@ function showSummary(nChanged) {
 const isDeleted = (it) => !!it && !it.copy && it.rec.deleted;
 function select(item, mode = 'set') {
   if (item && !item.node.visible && !isDeleted(item)) item = null;
+  if (item && editMode === 'peds') enterMode('objects');   // an object (from a Check problem, Resting on) takes the Objects mode
   if (isDeleted(item) || isDeleted(sel)) mode = 'set';   // a deleted original is selected alone (its panel offers Restore)
   if (mode === 'set' || item) pedSel = null;
   if (mode === 'set') group = item ? [item] : [];
@@ -986,6 +1095,7 @@ function select(item, mode = 'set') {
 }
 function selectMany(list, add = false) {
   const vis = list.filter((it) => it.node.visible);
+  if (vis.length && editMode === 'peds') enterMode('objects');
   pedSel = null;
   group = add ? [...group, ...vis.filter((it) => !group.includes(it))] : vis;
   sel = group[group.length - 1] || null;
@@ -995,11 +1105,12 @@ function showSel() {
   gizmo.detach();
   if (sel) pedSel = null;
   peds.highlight(pedSel);
-  const gone = isDeleted(sel);
+  const gone = isDeleted(sel), pm = editMode === 'peds';
   $('props').hidden = !sel || gone;
   $('delProps').hidden = !gone;
   $('pedProps').hidden = !pedSel;
-  $('noSel').hidden = !!sel || !!pedSel;
+  $('noSel').hidden = pm || !!sel;
+  $('pedNoSel').hidden = !pm || !!pedSel;
   if (pedSel) {
     if (gizmo.getMode() !== 'translate') setTool('translate');
     gizmo.attach(pedSel.node);
@@ -1015,14 +1126,16 @@ function showSel() {
     showPropsPanel();
   }
   $('focusSel').disabled = !sel && !pedSel;
-  $('tTurn').disabled = !!pedSel;   // pedestrian markers only move
+  $('tTurn').disabled = pm;   // pedestrian markers only move
+  $('tTurn').title = pm ? 'Pedestrian markers only move' : 'Turn tool (R)';
   syncBoxes();
   refreshList();
   showHint();
   hover.dirty = true;
-  if (sel !== lastScrolled) {   // a pick in the view shows its row (a list click is in view already)
-    lastScrolled = sel;
-    $('list').querySelector('li.it.sel')?.scrollIntoView({ block: 'nearest' });
+  const shown = sel || pedSel;
+  if (shown !== lastScrolled) {   // a pick in the view shows its row (a list click is in view already)
+    lastScrolled = shown;
+    $(pm ? 'pedList' : 'list').querySelector('li.it.sel')?.scrollIntoView({ block: 'nearest' });
   }
 }
 let lastScrolled = null;
@@ -1032,7 +1145,7 @@ function showPropsPanel() {
   $('props').classList.toggle('multi', multi);
   const kinds = new Set(group.map((it) => secOf(it.rec.info)));
   setIc($('pIcon').firstElementChild, multi && kinds.size > 1 ? 'cube-outline' : s.icon);
-  $('pHandle').hidden = multi;
+  $('pHandle').hidden = multi || !!sel.rec.prop;
   $('pGroup').hidden = !multi;
   $('secName').hidden = $('secDetails').hidden = multi;
   const badge = $('pBadge');
@@ -1058,7 +1171,7 @@ function showPropsPanel() {
   $('pModel').disabled = !i.sig;
   const same = recs.filter((r) => r.info.sig && r.info.sig === i.sig).length;
   $('pModelNote').textContent = i.sig ? `Every object with this model, in every stage (${same} in this stage). Not undoable.`
-    : 'This object has no mesh, so it has no model name.';
+    : sel.rec.prop ? "A new prop's model is named by its folder in the mod." : 'This object has no mesh, so it has no model name.';
   // Details
   const dl = $('pFacts');
   dl.textContent = '';
@@ -1070,6 +1183,19 @@ function showPropsPanel() {
     dl.append(dt, dd);
   };
   fact('Size', `${dimsText(i.dims)} units`);
+  if (sel.rec.prop) {
+    const p = propModels.get(i.model)?.info || {};
+    fact('Kind', s.word);
+    fact('Model', i.model, 'mono');
+    if (p.triangles != null) fact('Triangles', String(p.triangles));
+    if (p.light) fact('Light', { vertex: 'Vertex colors', dir: 'Stage sun', mixed: 'Vertex colors and stage sun' }[p.light] || p.light);
+    fact('Folder', `mods/${modNow}/props/${i.model}`, 'mono');
+    fact('Entry id', sel.rec.prop.id, 'mono');
+    $('pWarn').hidden = true;
+    showActions();
+    showProps();
+    return;
+  }
   fact('Kind', i.rule && i.rule !== s.word ? `${s.word} (${i.rule})` : s.word);
   fact('Model id', `0x${i.id.toString(16).toUpperCase()}`, 'mono');
   if (i.sig) fact('Same model', `${same} in this stage`);
@@ -1092,10 +1218,10 @@ function showBadge() {
   const badge = $('pBadge');
   if (group.length > 1) { badge.hidden = true; return; }
   const st = sel.copy ? null : moveState(sel.rec);
-  const text = sel.copy ? 'Copy' : st.moved && st.turned ? 'Moved · Turned' : st.moved ? 'Moved' : st.turned ? 'Turned'
+  const text = sel.copy ? 'Copy' : sel.rec.prop ? 'New' : st.moved && st.turned ? 'Moved · Turned' : st.moved ? 'Moved' : st.turned ? 'Turned'
     : sel.rec.copies.length ? `${sel.rec.copies.length} ${sel.rec.copies.length === 1 ? 'copy' : 'copies'}` : '';
   badge.textContent = text;
-  badge.className = 'badge' + (sel.copy || (text && !st.moved && !st.turned) ? ' copy' : '');
+  badge.className = 'badge' + (sel.copy || sel.rec.prop || (text && !st.moved && !st.turned) ? ' copy' : '');
   badge.hidden = !text;
 }
 // Delete says how many go ("Delete 5 (+3 on top)"); Move objects on top, how many it takes; Restore, whether there is anything to restore
@@ -1113,7 +1239,7 @@ function showActions() {
   $('del').title = `${del} (Del)`;
   const rs = new Set();
   for (const it of group) { rs.add(it.rec); if (carryOn) for (const a of it.rec.item.attached) rs.add(a.rec); }
-  $('reset').disabled = ![...rs].some(changed);
+  $('reset').disabled = ![...rs].some((r) => !r.prop && changed(r));
   $('reset').title = $('reset').disabled ? 'Nothing to restore: it is where the disc has it'
     : "Back to the disc's place, copies removed (with Move objects on top, also the objects on it)";
 }
@@ -1235,9 +1361,10 @@ function pickAt(p, add = false) {
   const ray = new THREE.Raycaster();
   ray.setFromCamera(p, camera);
   const hits = stageRoot ? ray.intersectObject(stageRoot, true).filter((h) => visibleChain(h.object)) : [];
-  if (pedsOn && !add) {   // a marker in front of the stage's first surface (lanes lie just above the sidewalk)
+  if (editMode === 'peds') {   // only the markers, in front of the stage's first surface (lanes lie just above the sidewalk)
+    if (add) return null;
     const ph = ray.intersectObjects(peds.items().map((it) => it.pick), false)[0];
-    if (ph && (!hits.length || ph.distance <= hits[0].distance + 2)) return { ped: ph.object.userData.pedItem };
+    return ph && (!hits.length || ph.distance <= hits[0].distance + 2) ? { ped: ph.object.userData.pedItem } : null;
   }
   const d = deletedHit(ray, hits.length ? hits[0].distance : Infinity);
   if (d) return { deleted: d };
@@ -1269,53 +1396,185 @@ function showProps() {
   $('px').value = r1(p[0]); $('py').value = r1(p[1]); $('pz').value = r1(p[2]); $('ph').value = r1(h);
 }
 
-// ------------------------------------------------------------------ pedestrians (P): groups and the sidewalks they walk
-let pedsOn = store.get('peds', '0') === '1';
-function setPeds(on) {
+// ------------------------------------------------------------------ the modes: Objects (1) and Pedestrians (2)
+// Objects: a click picks the stage's objects; the Pedestrians layer (P, or the Layers menu) shows the markers faint, not clickable.
+// Pedestrians: the left panel lists the groups and the sidewalks, a click picks a marker, the objects are scenery.
+let editMode = store.get('mode', 'objects') === 'peds' ? 'peds' : 'objects';
+let pedsOn = store.get('peds', '0') === '1';   // the Pedestrians layer, for the Objects mode
+const modeNow = () => editMode;
+function applyPedsView() {
+  const pm = editMode === 'peds';
+  peds.setVisible(pm || pedsOn);
+  peds.setDim(!pm);
+  $('pedsOn').checked = pm || pedsOn;
+  $('pedsOn').disabled = pm;
+  $('pedsOn').closest('.switch').classList.toggle('none', pm);
+  $('pedBar').hidden = !pm;
+  $('propBar').hidden = pm;
+  if (pm) showPropMenu(false);
+  document.body.dataset.mode = editMode;
+}
+function setPeds(on) {   // the layer
   pedsOn = on;
   store.set('peds', on ? '1' : '0');
-  peds.setVisible(on);
-  $('pedsOn').checked = on;
-  $('pedBar').hidden = !on;
-  if (!on && pedSel) { pedSel = null; showSel(); }
-  showMode();
-  showPedCounts();
+  applyPedsView();
   showHint();
   hover.dirty = true;
 }
-// The mode rail: Objects (1) and Pedestrians (2). For now the Pedestrians mode is the pedestrian layer on (objects stay clickable).
-const modeNow = () => (pedsOn ? 'peds' : 'objects');
-function setMode(m) { if (m !== modeNow()) setPeds(m === 'peds'); }
+// the mode's own state, without showing the selection (select and selectPed show theirs after it)
+function enterMode(m) {
+  if (m === editMode) return false;
+  editMode = m;
+  store.set('mode', m);
+  if (m === 'peds') { group = []; sel = null; } else pedSel = null;
+  if (m === 'peds' && gizmo.getMode() === 'rotate') setTool('translate');
+  applyPedsView();
+  showMode();
+  hover.dirty = true;
+  return true;
+}
+function setMode(m) { if (enterMode(m)) showSel(); }
 function showMode() {
   for (const [id, m] of [['modeObjects', 'objects'], ['modePeds', 'peds']]) {
-    $(id).classList.toggle('on', modeNow() === m);
-    $(id).setAttribute('aria-pressed', modeNow() === m);
+    $(id).classList.toggle('on', editMode === m);
+    $(id).setAttribute('aria-pressed', editMode === m);
   }
 }
+// the meters, the switch, Add group and Add sidewalk (off at a limit, with the reason in the title), the footer
+function meter(id, n, max) {
+  const m = $(id), f = n / max;
+  m.querySelector('.m-v').textContent = `${n} / ${max}`;
+  const bar = m.querySelector('.m-bar > i');
+  bar.style.width = Math.min(100, f * 100) + '%';
+  m.className = 'meter' + (n >= max ? ' full' : f > 0.9 ? ' high' : '');
+}
 function showPedCounts() {
-  const c = peds.counts();
-  $('pedCounts').textContent = discPeds
+  const c = peds.counts(), have = !!discPeds;
+  meter('mGroups', c.groups, c.maxGroups);
+  meter('mSegs', c.segments, c.maxSegments);
+  $('mPeople').textContent = c.people;
+  $('pedCounts').textContent = have
     ? `${c.groups}/${c.maxGroups} groups · ${c.people} people · ${c.segments}/${c.maxSegments} sidewalks`
     : stageName ? 'This stage has no pedestrian data' : '';
-  $('pedAddGroup').disabled = $('pedAddSeg').disabled = !discPeds;
+  const live = $('pedLive');
+  live.checked = peds.live();
+  live.disabled = !have || (!peds.live() && !peds.hasDiscGroups());
+  const ag = $('pedAddGroup'), as = $('pedAddSeg');
+  const noNet = have && !peds.items().some((it) => it.kind === 'seg');
+  ag.disabled = !have || c.groups >= c.maxGroups || noNet;
+  ag.title = !have ? 'This stage has no pedestrian data'
+    : c.groups >= c.maxGroups ? `A stage holds ${c.maxGroups} pedestrian groups at most`
+    : noNet ? 'This stage has no sidewalks yet: add one first'
+    : 'Add a group of people where the view looks (it walks the sidewalk with the nearest end)';
+  as.disabled = !have || c.segments >= c.maxSegments;
+  as.title = !have ? 'This stage has no pedestrian data'
+    : c.segments >= c.maxSegments ? `A stage holds ${c.maxSegments} sidewalks at most`
+    : 'Add a sidewalk where the view looks; drag its ends into place';
+}
+// the left panel in the Pedestrians mode: the groups (people, a red mark when it has no sidewalk) and the sidewalks (length)
+const PED_SECTIONS = [
+  { id: 'pgroups', title: 'Groups', icon: 'account-group-outline' },
+  { id: 'psegs', title: 'Sidewalks', icon: 'road-variant' },
+];
+function pedRow(e, kind) {
+  const it = e.item, li = document.createElement('li');
+  li.className = 'it';
+  const on = pedSel && (pedSel === it || (kind === 'seg' && pedSel.kind === 'end' && pedSel.seg === it.seg));
+  if (on) li.classList.add('sel');
+  const k = icon(kind === 'group' ? 'account-group-outline' : 'road-variant');
+  k.classList.add('k');
+  const h = document.createElement('span'), bd = document.createElement('span'), hd = document.createElement('span');
+  h.className = 'h'; bd.className = 'bd'; hd.className = 'hd num';
+  h.textContent = peds.label(it);
+  const badge = (name, cls, tip) => { const b = icon(name); b.classList.add(cls); b.title = tip; bd.appendChild(b); };
+  if (kind === 'group') {
+    if (!e.bound) { li.classList.add('bad'); badge('alert-circle-outline', 'dl', 'Not on any sidewalk: nobody walks'); }
+    if (e.added) badge('account-multiple-plus', 'cp', 'A new group');
+    else if (e.changed) badge('circle-medium', 'mv', 'Moved or changed');
+    hd.textContent = e.count;
+    hd.title = `${e.count} people`;
+  } else {
+    hd.textContent = `${e.len} u`;
+    hd.title = `${e.len} units long, ${e.width * 10} units each side`;
+  }
+  li.title = peds.info(it);
+  li.append(k, h, bd, hd);
+  li.onclick = () => { selectPed(it); focusSelection(); };
+  return li;
+}
+function refreshPedList() {
+  showPedCounts();
+  const ul = $('pedList'), en = peds.entries(), frag = document.createDocumentFragment();
+  for (const s of PED_SECTIONS) {
+    const rows = s.id === 'pgroups' ? en.groups : en.segments;
+    const open = secOpen(s.id), h = document.createElement('li'), n = document.createElement('span');
+    h.className = 'sec';
+    h.dataset.sec = s.id;
+    h.tabIndex = 0;
+    h.setAttribute('role', 'button');
+    h.setAttribute('aria-expanded', open);
+    h.title = open ? `Hide the ${s.title.toLowerCase()}` : `Show the ${s.title.toLowerCase()}`;
+    h.append(icon(open ? 'chevron-down' : 'chevron-right'), s.title);
+    const holds = pedSel && rows.some((e) => e.item === pedSel || (pedSel.seg && e.item.seg === pedSel.seg));
+    if (!open && holds) {
+      const d = document.createElement('span');
+      d.className = 'has'; d.title = 'Holds the selection';
+      h.appendChild(d);
+    }
+    n.className = 'n'; n.textContent = rows.length;
+    h.appendChild(n);
+    const flip = () => { store.set('sec.' + s.id, open ? '0' : '1'); refreshPedList(); };
+    h.onclick = flip;
+    h.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); ul.querySelector(`li.sec[data-sec="${s.id}"]`)?.focus(); } };
+    frag.appendChild(h);
+    if (!open) continue;
+    if (!rows.length) {
+      const li = document.createElement('li');
+      li.className = 'none';
+      li.textContent = s.id === 'pgroups' ? 'No groups' : 'No sidewalks';
+      frag.appendChild(li);
+    }
+    for (const e of rows) frag.appendChild(pedRow(e, s.id === 'pgroups' ? 'group' : 'seg'));
+  }
+  ul.replaceChildren(frag);
+  ul.hidden = !discPeds;
+  $('pedNone').hidden = !!discPeds || !stageName;
 }
 function selectPed(it) {
+  enterMode('peds');
   group = []; sel = null; pedSel = it;
   showSel();
 }
-const pedTitle = (it) => (it.kind === 'group' ? `Pedestrian group ${it.group.handle || '(new)'}`
-  : it.kind === 'seg' ? 'Sidewalk' : `Sidewalk end ${it.end ? 'B' : 'A'}`);
+const pedTitle = (it) => peds.label(it);
 function pedPos(it) { return it.kind === 'group' ? it.group.pos : it.kind === 'seg' ? toGame(it.node.position) : it.end ? it.seg.b : it.seg.a; }
+// the right panel for a marker: what it is, what it walks (or how long it is), People or Width, Position, Actions
 function showPed() {
   if (!pedSel) return;
-  const it = pedSel, p = pedPos(it);
-  $('pdTitle').textContent = pedTitle(it);
+  const it = pedSel, p = pedPos(it), grp = it.kind === 'group';
+  setIc($('pdIcon').firstElementChild, grp ? 'account-group-outline' : 'road-variant');
+  $('pdTitle').textContent = peds.label(it);
+  const e = grp ? peds.entries().groups.find((x) => x.item === it) : null;
+  const bt = e ? (e.added ? 'New' : e.changed ? 'Changed' : '') : '';
+  $('pdBadge').textContent = bt;
+  $('pdBadge').className = 'badge' + (bt === 'New' ? ' copy' : '');
+  $('pdBadge').hidden = !bt;
+  $('pdKind').textContent = grp ? 'Pedestrian group' : it.kind === 'seg' ? 'Sidewalk' : `Sidewalk end ${it.end ? 'B' : 'A'}`;
   $('pdInfo').textContent = peds.info(it);
-  $('pdCountRow').hidden = it.kind !== 'group';
-  $('pdWidthRow').hidden = it.kind === 'group';
-  $('pdDup').hidden = it.kind !== 'group';
-  if (it.kind === 'group') $('pdCount').value = it.group.count;
-  else $('pdWidth').value = it.seg.width;
+  const b = grp ? peds.binding(it) : null;
+  $('pdNote').className = 'callout ' + (grp && !b ? 'err' : 'info');
+  setIc($('pdNote').firstElementChild, grp && !b ? 'alert-circle-outline' : 'information-outline');
+  const go = grp ? b && b.seg && b.seg.item : it.kind === 'end' ? it.seg.item : null;
+  $('pdGo').hidden = !go;
+  $('pdGo').onclick = go ? () => { selectPed(go); focusSelection(); } : null;
+  $('pdCountRow').hidden = !grp;
+  $('pdWidthRow').hidden = grp;
+  $('pdDup').hidden = !grp;
+  if (grp) { $('pdCount').value = it.group.count; $('pdCountR').value = it.group.count; }
+  else {
+    const s = it.seg;
+    $('pdLen').textContent = `${Math.round(Math.hypot(s.a[0] - s.b[0], s.a[1] - s.b[1], s.a[2] - s.b[2]))} units`;
+    $('pdWidth').value = s.width * 10; $('pdWidthR').value = s.width * 10;
+  }
   $('pdx').value = r1(p[0]); $('pdy').value = r1(p[1]); $('pdz').value = r1(p[2]);
   showPedCounts();
 }
@@ -1351,17 +1610,26 @@ function pedEdit(fn, label = 'pedestrians') {   // one undo step, then the edit;
 }
 function addPed(kind) {
   if (!discPeds) return;
-  if (!pedsOn) setPeds(true);
+  enterMode('peds');
   const it = pedEdit(() => (kind === 'group' ? peds.addGroup(viewPoint()) : peds.addSegment(viewPoint())),
                      kind === 'group' ? 'add a pedestrian group' : 'add a sidewalk');
   if (it) selectPed(it);
+}
+// the "Pedestrians in this stage" switch: off takes every group out (Undo brings them back), on the disc's groups
+function setPedLive(on) {
+  if (!discPeds) return;
+  pedEdit(() => peds.setLive(on), on ? 'bring the pedestrians back' : 'take the pedestrians out');
+  if (pedSel && pedSel.kind === 'group' && pedSel.group.deleted) pedSel = null;
+  showSel();
+  msg(on ? `The disc's pedestrian groups are back in ${title(stageName)}` : `No pedestrians in ${title(stageName)}: every group is out`,
+      { level: 'ok', toast: on ? true : ['Undo', undo] });
 }
 function pedFromInputs() {
   if (!pedSel) return;
   const it = pedSel;
   pedEdit(() => {
     if (it.kind === 'group') peds.setCount(it, +$('pdCount').value);
-    else peds.setWidth(it, +$('pdWidth').value);
+    else peds.setWidth(it, Math.round((+$('pdWidth').value || 10) / 10));   // the field in units, the patch in tens of units
     const want = [+$('pdx').value, +$('pdy').value, +$('pdz').value], now = pedPos(it);
     if (Math.hypot(want[0] - now[0], want[1] - now[1], want[2] - now[2]) > 0.05) {
       it.node.position.add(toThree(want).sub(toThree(now)));
@@ -1369,6 +1637,17 @@ function pedFromInputs() {
     }
   }, 'edit ' + pedTitle(it).toLowerCase());
 }
+// a slider (People, Width): the marker follows while it moves, and the whole drag is one undo step
+let sliding = null;
+function slideInput(kind) {
+  if (!pedSel) return;
+  const it = pedSel;
+  if (sliding !== it) { snapshot((kind === 'count' ? 'change the people of ' : 'widen ') + pedTitle(it).toLowerCase()); sliding = it; }
+  if (kind === 'count') { peds.setCount(it, +$('pdCountR').value); $('pdCount').value = it.group.count; }
+  else { peds.setWidth(it, +$('pdWidthR').value / 10); $('pdWidth').value = it.seg.width * 10; }
+  $('pdInfo').textContent = peds.info(it);
+}
+function slideDone() { sliding = null; showPed(); refreshList(); }
 function nudgePed(v) {
   pedSel.node.position.add(v);
   peds.moved(pedSel);
@@ -1412,7 +1691,7 @@ gizmo.addEventListener('objectChange', () => {
 });
 
 function setTool(mode) {
-  if (pedSel && mode === 'rotate') return;   // pedestrian markers only move
+  if ((pedSel || editMode === 'peds') && mode === 'rotate') return;   // pedestrian markers only move
   gizmo.setMode(mode);
   gizmo.showX = gizmo.showZ = mode !== 'rotate';
   gizmo.showY = true;
@@ -1512,7 +1791,9 @@ function duplicate() {
   const made = [], done = new Set();
   const copyOf = (it) => {
     const p = posOf(it);
-    const c = makeCopy(it.rec, [p[0] + step, p[1], p[2]], headingOf(it));
+    const at = [p[0] + step, p[1], p[2]];
+    const c = it.rec.prop ? makeProp(Object.assign({ id: newPropId(), model: it.rec.prop.model, pos: at, heading: headingOf(it) }, it.rec.extra || {}))
+      : makeCopy(it.rec, at, headingOf(it));
     done.add(it);
     return c;
   };
@@ -1527,7 +1808,7 @@ function duplicate() {
   selectMany(made);
 }
 // "Hotel", "3 buildings" or "5 objects"
-const KIND_WORDS = { destr: ['building', 'buildings'], pickup: ['pickup', 'pickups'], prop: ['prop', 'props'] };
+const KIND_WORDS = { destr: ['building', 'buildings'], pickup: ['pickup', 'pickups'], prop: ['prop', 'props'], newprop: ['new prop', 'new props'] };
 function countText(list) {
   if (list.length === 1) return nameOf(list[0]);
   const kinds = new Set(list.map((it) => it.rec.info.kind)), w = kinds.size === 1 ? KIND_WORDS[[...kinds][0]] : null;
@@ -1536,6 +1817,7 @@ function countText(list) {
 
 function hideRec(it) {
   if (it.copy) { if (it.rec.copies.includes(it)) removeCopy(it); }
+  else if (it.rec.prop) { if (propRecs.includes(it.rec)) removeProp(it.rec); }
   else { it.rec.deleted = true; it.node.visible = false; }
 }
 function remove() {
@@ -1570,6 +1852,7 @@ function resetSel() {
     if ($('carry').checked) for (const a of it.rec.item.attached) rs.add(a.rec);
   }
   for (const r of rs) {
+    if (r.prop) continue;   // a new prop has no disc place to go back to
     for (const c of [...r.copies]) removeCopy(c);
     r.deleted = false;
     r.node.visible = true;
@@ -1588,7 +1871,7 @@ canvas.parentElement.addEventListener('pointerdown', (e) => {   // capture: befo
   if (e.target !== canvas) { down = null; return; }   // a floating bar's button
   down = [e.clientX, e.clientY];
   dragged = false;
-  if (e.button === 0 && e.shiftKey && gizmo.axis === null) {
+  if (e.button === 0 && e.shiftKey && gizmo.axis === null && editMode === 'objects') {   // box select: objects only
     band = { x: e.clientX, y: e.clientY };
     orbit.enabled = false;
   }
@@ -1663,7 +1946,8 @@ function readCheck(res, patch, mod) {
       const e = objs[+m[1]], rec = e ? byHandle.get(normHandle(e.handle)) : null;
       problems.push({ text: `${rec ? nameOf(rec.item) : e ? e.handle : 'Entry ' + m[1]} was not applied: ${m[2]}`, handle: rec ? rec.info.handle : null });
     } else if ((m = /^pedestrian group (\d+) skipped: (.*)$/.exec(s))) {
-      problems.push({ text: `Pedestrian group ${+m[1] + 1} was not applied: ${m[2]}` });
+      const ped = pedOfEntry(patch && patch.peds, +m[1]);
+      problems.push({ text: `${ped ? peds.label(ped) : 'Pedestrian group ' + (+m[1] + 1)} was not applied: ${m[2]}`, ped });
     } else if ((m = /^box rule: \d+ ok .*?, (\d+) off,.*worst ([\d.]+)/.exec(s))) {
       if (+m[1]) problems.push({ text: `Collision boxes: ${m[1]} out of place (worst ${(+m[2]).toFixed(1)} units)` });
     } else if ((m = /^cell rule: (\d+) of (\d+) paths/.exec(s))) {
@@ -1692,7 +1976,10 @@ function showCheck(chk, lines) {
   p.textContent = '';
   p.appendChild(lineEl(chk.summary, chk.ok ? 'ok' : 'err'));
   for (const pr of chk.problems) {
-    p.appendChild(lineEl(pr.text, 'err', pr.handle ? { go: () => goTo(pr.handle), goTitle: 'Select it and look at it' } : {}));
+    p.appendChild(lineEl(pr.text, 'err', pr.handle ? { go: () => goTo(pr.handle), goTitle: 'Select it and look at it' }
+      : pr.ped ? { go: () => { selectPed(pr.ped); focusSelection(); }, goTitle: 'Select the group and look at it' }
+      : pr.prop && propRecs.includes(pr.prop.rec) ? { go: () => { enterMode('objects'); select(pr.prop); focusSelection(); }, goTitle: 'Select it and look at it' }
+      : {}));
   }
   for (const w of chk.warns) p.appendChild(lineEl(w, 'warn'));
   for (const i of chk.infos) p.appendChild(lineEl(i, 'info'));
@@ -1702,6 +1989,15 @@ function showCheck(chk, lines) {
   p.appendChild(det);
   markTab('check', !chk.ok);
 }
+// the marker of entry k of the patch's "peds".groups: a disc group by its handle, a new one by its place among the new ones
+function pedOfEntry(pp, k) {
+  const e = pp && Array.isArray(pp.groups) ? pp.groups[k] : null;
+  if (!e) return null;
+  const gs = peds.items().filter((it) => it.kind === 'group');
+  if (e.handle != null) return gs.find((it) => it.group.handle && normHandle(it.group.handle) === normHandle(e.handle)) || null;
+  const j = pp.groups.slice(0, k).filter((x) => x && x.handle == null).length;
+  return gs.filter((it) => it.group.handle == null)[j] || null;
+}
 function goTo(handle) {
   const rec = byHandle.get(normHandle(handle));
   if (!rec) return;
@@ -1709,13 +2005,17 @@ function goTo(handle) {
   if (rec.item.node.visible) focus(rec.item);
 }
 // The check as the server gives it (editor.py check_patch): the summary, the problems (an entry the game skips names its object)
-function checkFromServer(res) {
+function checkFromServer(res, patch) {
   const problems = [], warns = [];
   for (const p of res.problems || []) {
     const rec = p.handle ? byHandle.get(normHandle(p.handle)) : null;
-    const text = p.kind === 'entry' && rec ? `${nameOf(rec.item)} was not applied: ${p.reason}` : p.text;
+    const ped = p.kind === 'ped' && p.index !== undefined ? pedOfEntry(patch && patch.peds, p.index) : null;
+    const prop = p.kind === 'prop' && p.id != null ? propRecs.find((r) => r.prop.id === String(p.id))?.item || null : null;
+    const text = p.kind === 'entry' && rec ? `${nameOf(rec.item)} was not applied: ${p.reason}`
+      : ped && p.reason ? `${peds.label(ped)} was not applied: ${p.reason}`
+      : prop && p.reason ? `${nameOf(prop)} was not applied: ${p.reason}` : p.text;
     if (p.level === 'warn') warns.push(text);
-    else problems.push({ text, handle: rec ? rec.info.handle : null });
+    else problems.push({ text, handle: rec ? rec.info.handle : null, ped, prop });
   }
   const n = problems.length;
   return { ok: !n, n, problems, warns, infos: res.infos || [],
@@ -1759,7 +2059,7 @@ async function post(kind, save = true, extra = {}) {
     let chk = null;
     if (kind === 'check' || res.problems || (res.lines && res.lines.length)) {
       // the server's summary and problems; an older reply (lines only) read here
-      chk = res.problems ? checkFromServer(res) : readCheck(res, body.patch, mod);
+      chk = res.problems ? checkFromServer(res, body.patch) : readCheck(res, body.patch, mod);
       ui.check = { state: !same ? 'stale' : chk.ok ? 'ok' : 'bad', n: chk.n };
       showCheck(chk, res.lines);
       msg(chk.summary, { level: chk.ok ? 'ok' : 'err', open: 'check', toast: kind === 'check' && chk.ok ? true : undefined,
@@ -1993,6 +2293,7 @@ function setGameState(s) {
   game.state = s;
   game.running = s !== 'closed';
   showGame();
+  hudGameChanged();
 }
 function showGame() {
   const s = game.state, where = title(gameStage() || stageName);
@@ -2077,33 +2378,48 @@ function setMod(v) {
 }
 // the scene's changes go into mod v without loading its file: unsaved until Save writes them there
 function moveTo(v, say = true) {
+  const p = JSON.stringify(buildPatch());
   setMod(v);
+  // the new props draw from the new mod's models; an entry whose model it lacks stays in the file, unseen
+  loadPropModels(v).then(() => {
+    if (!propRecs.length && !keep.props.length) return;
+    restoreTo(p);
+    const n = keep.props.length;
+    if (n) msg(`${n} new ${n === 1 ? 'prop uses a model' : 'props use models'} that mod "${v}" does not have: the game skips ${n === 1 ? 'it' : 'them'}`, { level: 'warn' });
+  });
   savedJson = '';
   dirty = true;
   showUndo();
   refreshList();
   if (say) msg(`Your changes now go into mod "${v}". Save writes mods/${v}/levels/${stageName}.json.`, { level: 'ok', toast: true });
 }
+// resolves to the mod in use once the switch is decided (the Fight HUD dialog waits for it)
 function switchMod(v) {
-  v = knownMod((v || '').trim());
-  if (!v || v === modNow) { fillMods(); return; }
-  if (badModName(v)) {
-    msg('A mod name can\'t contain \\ / : * ? " < > | or start with _ or .', { level: 'err', toast: true });
-    fillMods();
-    return;
-  }
-  if (!dirty) { setMod(v); loadStage(stageName); return; }
-  const n = unsavedCount();
-  ask(`Switch to mod "${v}"?`,
-      modNow ? `You have ${changesText(n)} for ${modNow}.` : `You have ${changesText(n)}, not saved in any mod yet.`,
-      [['cancel', 'Cancel'], ['discard', `Discard and load ${v}`], ['move', `Move my changes to ${v}`, true]],
-      (a) => {
-        if (a === 'discard') { setMod(v); loadStage(stageName); }
-        else if (a === 'move') moveTo(v);
-        else fillMods();
-      },
-      { icon: 'content-save-alert-outline', note: hasStage(v) ? `${v} already changes this stage; saving will replace its file.` : '' });
+  return new Promise((done) => {
+    v = knownMod((v || '').trim());
+    if (!v || v === modNow) { fillMods(); done(modNow); return; }
+    if (badModName(v)) {
+      msg('A mod name can\'t contain \\ / : * ? " < > | or start with _ or .', { level: 'err', toast: true });
+      fillMods();
+      done(modNow);
+      return;
+    }
+    if (!dirty) { setMod(v); loadStage(stageName); done(modNow); return; }
+    const n = unsavedCount();
+    ask(`Switch to mod "${v}"?`,
+        modNow ? `You have ${changesText(n)} for ${modNow}.` : `You have ${changesText(n)}, not saved in any mod yet.`,
+        [['cancel', 'Cancel'], ['discard', `Discard and load ${v}`], ['move', `Move my changes to ${v}`, true]],
+        (a) => {
+          if (a === 'discard') { setMod(v); loadStage(stageName); }
+          else if (a === 'move') moveTo(v);
+          else fillMods();
+          done(modNow);
+        },
+        { icon: 'content-save-alert-outline', note: hasStage(v) ? `${v} already changes this stage; saving will replace its file.` : '' });
+  });
 }
+// a mod picked somewhere else than the top bar (the Fight HUD dialog): a mod's name, or "New mod…"
+const chooseMod = (v) => (v === NEW_MOD ? pickMod('new').then((m) => (m ? switchMod(m) : modNow)) : switchMod(v));
 $('mod').onchange = (e) => {
   const v = e.target.value;
   e.target.blur();
@@ -2317,13 +2633,134 @@ $('help').onclick = showKeys;
 $('pedAddGroup').onclick = () => addPed('group');
 $('pedAddSeg').onclick = () => addPed('seg');
 for (const id of ['pdCount', 'pdWidth', 'pdx', 'pdy', 'pdz']) $(id).onchange = pedFromInputs;
+$('pdCountR').oninput = () => slideInput('count');
+$('pdWidthR').oninput = () => slideInput('width');
+$('pdCountR').onchange = $('pdWidthR').onchange = slideDone;
+$('pedLive').onchange = (e) => setPedLive(e.target.checked);
 $('pdDrop').onclick = dropToGround;
 $('pdDup').onclick = duplicate;
 $('pdDel').onclick = remove;
-$('hud').onclick = () => {
+
+// Add prop: the mod's models made for this stage, and Import .glb (lvlprop.py on the server; the model lands in mods/<mod>/props/)
+function showPropMenu(open = $('propMenu').hidden) {
+  $('propMenu').hidden = !open;
+  if (open) {   // under the button
+    const r = $("addProp").getBoundingClientRect(), pr = $("propMenu").offsetParent?.getBoundingClientRect();
+    if (pr) $("propMenu").style.left = `${Math.max(8, Math.round(r.left - pr.left))}px`;
+  }
+  $('addProp').classList.toggle('on', open);
+  $('addProp').setAttribute('aria-expanded', open);
+  if (!open) return;
+  showLayers(false);
+  $('pmMod').textContent = modNow ? `mod "${modNow}"` : 'no mod';
+  const list = $('pmList'), all = [...propModels.values()], here = all.filter((pm) => pm.info.stage === stageName);
+  list.textContent = '';
+  for (const pm of here) {
+    const p = pm.info, b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ghost pm-row';
+    b.setAttribute('role', 'menuitem');
+    b.innerHTML = '<span class="pm-name"></span><span class="pm-meta"></span>';
+    b.querySelector('.pm-name').textContent = p.name && p.name.toUpperCase() !== p.model ? `${p.name} · ${p.model}` : p.model;
+    const dims = p.bounds ? p.bounds.max.map((x, k) => x - p.bounds.min[k]) : null;
+    b.querySelector('.pm-meta').textContent = p.error ? `Can't be placed: ${p.error}`
+      : `${dims ? dimsText(dims) + ' units · ' : ''}${p.triangles} triangles`;
+    b.disabled = !pm.scene;
+    b.title = pm.scene ? `Add ${p.model} where the view looks` : `mods/${modNow}/props/${p.model}: ${p.error || 'no preview'}`;
+    b.onclick = () => addProp(p.model);
+    list.appendChild(b);
+  }
+  const other = all.length - here.length;
+  const none = !modNow ? 'Choose a mod first: the props live in its props folder.'
+    : !here.length ? `No props for ${title(stageName)} yet.` + (other ? ` ${other} of this mod ${other === 1 ? 'is' : 'are'} for other stages.` : '') : '';
+  $('pmNone').textContent = none;
+  $('pmNone').hidden = !none;
+  (list.querySelector('button:not(:disabled)') || $('pmImport')).focus();
+}
+$('addProp').onclick = () => showPropMenu();
+document.addEventListener('pointerdown', (e) => {   // a click anywhere else closes it
+  if (!$('propMenu').hidden && !e.target.closest('#propMenu, #addProp')) showPropMenu(false);
+}, true);
+let ipData = null, ipTitle = '';
+const ipInput = Object.assign(document.createElement('input'), { type: 'file', accept: '.glb,model/gltf-binary' });
+const ipErr = (t) => { $('ipErr').hidden = !t; $('ipErr').querySelector('span').textContent = t || ''; };
+const ipRadio = (n) => document.querySelector(`#propDlg input[name="${n}"]:checked`)?.value;
+const ipWhere = () => { $('ipWhere').textContent = `mods/${modNow}/props/${$('ipName').value.trim().toUpperCase() || 'NAME'}/`; };
+async function openImport() {
+  showPropMenu(false);
+  if (!modNow) {
+    const m = await pickMod('save', 'Choose');
+    if (!m) return;
+    moveTo(m, false);
+  }
+  ipData = null;
+  ipTitle = '';
+  $('ipFile').textContent = 'No file chosen';
+  $('ipName').value = $('ipHeight').value = '';
+  ipErr('');
+  $('ipText').textContent = `A Blender model exported as glTF Binary (.glb), for ${title(stageName)}.`;
+  ipWhere();
+  $('propDlg').showModal();
+  $('ipPick').focus();
+}
+$('pmImport').onclick = openImport;
+$('ipPick').onclick = () => ipInput.click();
+$('ipName').oninput = () => { ipWhere(); ipErr(''); };
+// the .glb, from Choose .glb… or dropped on the dialog
+function ipRead(f) {
+  const rd = new FileReader();
+  rd.onload = () => {
+    ipData = String(rd.result).replace(/^data:[^,]*,/, '');
+    ipTitle = f.name.replace(/\.[^.]*$/, '');
+    $('ipFile').textContent = `${f.name} (${Math.max(1, Math.round(f.size / 1024))} KB)`;
+    if (!$('ipName').value) $('ipName').value = f.name.replace(/\.[^.]*$/, '').toUpperCase().replace(/[^A-Z0-9_]/g, '').slice(0, 8);
+    ipWhere();
+    ipErr('');
+  };
+  rd.onerror = () => ipErr(`Couldn't read ${f.name}`);
+  rd.readAsDataURL(f);
+}
+ipInput.onchange = () => { const f = ipInput.files[0]; ipInput.value = ''; if (f) ipRead(f); };
+$('propDlg').addEventListener('dragover', (e) => e.preventDefault());
+$('propDlg').addEventListener('drop', (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) ipRead(f); });
+async function doImport(replace = false) {
+  const name = $('ipName').value.trim().toUpperCase();
+  if (!ipData) { ipErr('Choose a .glb file first.'); return; }
+  if (!/^[A-Z0-9_]{1,8}$/.test(name)) { ipErr('The name is 1 to 8 letters, digits or _.'); $('ipName').focus(); return; }
+  const h = $('ipHeight').value.trim();
+  const body = { mod: modNow, stage: stageName, name, data: ipData, units: ipRadio('ipUnits'), height: h ? +h : '',
+                 light: ipRadio('ipLight'), title: ipTitle, replace };
+  const ok = $('ipOk');
+  ok.disabled = true;
+  ok.textContent = 'Importing…';
+  let res;
+  try { res = await api('/api/props/import', body); }
+  catch (e) { ipErr(cleanError(e).text); return; }
+  finally { ok.disabled = false; ok.textContent = 'Import'; }
+  if (res.exists) {
+    ask(`Replace ${name}?`, `Mod "${modNow}" already has a prop ${name}. The new model takes its place wherever it is used.`,
+        [['cancel', 'Cancel'], ['replace', 'Replace', true]], (a) => { if (a === 'replace') doImport(true); });
+    return;
+  }
+  $('propDlg').close();
+  const p = JSON.stringify(buildPatch());
+  await loadPropModels(modNow);
+  restoreTo(p);
+  const m = res.prop || {};
+  msg(`${res.replaced ? 'Replaced' : 'Imported'} ${m.model || name}: ${m.triangles} triangles` + (m.error ? `, but ${m.error}` : ''),
+      { level: m.error ? 'warn' : 'ok' });
+  if (!res.replaced && !m.error) addProp(m.model || name);
+}
+$('ipOk').onclick = () => doImport(false);
+$('ipName').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); doImport(false); } };
+// the Fight HUD dialog (web/hud.js): it writes into the mod at once; its messages show as toasts over it
+function openHudDialog() {
   if (!stageName) return;
-  openHud({ stage: stageName, mod: modNow, api, log });
-};
+  openHud({ stage: stageName, title: title(stageName), titleOf: title, mod: modNow, api, log, msg, ask,
+            mods: () => modList, newMod: NEW_MOD, chooseMod,
+            game: () => ({ running: game.state === 'running', dirty }), reload: reloadGame });
+}
+$('hud').onclick = openHudDialog;
 $('drop').onclick = dropToGround;
 $('dup').onclick = duplicate;
 $('del').onclick = remove;
@@ -2459,8 +2896,9 @@ window.addEventListener('keydown', (e) => {
   if (field) return;
   if (k === '?' && !ctrl && !e.altKey) { e.preventDefault(); showKeys(); return; }
   if (k === 'escape' && !$('layersMenu').hidden) { showLayers(false); return; }   // the menu first, the selection stays
+  if (k === 'escape' && !$('propMenu').hidden) { showPropMenu(false); return; }
   if (ctrl && k === 'd') { e.preventDefault(); duplicate(); }
-  else if (e.ctrlKey && k === 'a') { e.preventDefault(); selectMany(listed()); }
+  else if (e.ctrlKey && k === 'a') { e.preventDefault(); if (editMode === 'objects') selectMany(listed()); }
   else if (k === 'delete') remove();
   else if (e.ctrlKey || e.altKey || e.metaKey) return;
   else if (k.startsWith('arrow') && (sel || pedSel)) {
@@ -2477,7 +2915,7 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'r') setTool('rotate');
   else if (k === 'f') focusSelection();
   else if (k === 'l') setLook(!gameLook);
-  else if (k === 'p') setPeds(!pedsOn);
+  else if (k === 'p') { if (editMode === 'objects') setPeds(!pedsOn); }
   else if (k === '1') setMode('objects');
   else if (k === '2') setMode('peds');
   else if (k === 'escape') select(null);
@@ -2514,7 +2952,8 @@ function init(r, load = true) {
 setTool('translate');
 orbit.enabled = false;
 setView(fly.on);
-setPeds(pedsOn);
+applyPedsView();
+showMode();
 // the editor program quits a few seconds after its page closes (a reload asks again at once and keeps it)
 window.addEventListener('pagehide', () => { try { navigator.sendBeacon('/api/bye', '{}'); } catch (e) { /* ignore */ } });
 if (new URLSearchParams(location.search).has('debug')) {
@@ -2523,8 +2962,11 @@ if (new URLSearchParams(location.search).has('debug')) {
                        redo, resetAll, applyPatch, frameAll, resetSel, gameLine, post, setRunning, applyTheme, refreshList,
                        msg, toast, openOutput, closeOutput, showStatus, setGameState, readCheck, gameResult,
                        setMode, turnBy, showSummary, secOf, SECTIONS, get mode() { return modeNow(); },
+                       refreshPedList, setPedLive, slideInput, slideDone, showPed, pedOfEntry, openHudDialog, chooseMod,
+                       get pedsLayer() { return pedsOn; },
                        ask, askUnsaved, unsavedCount, switchMod, setMod, moveTo, fillMods, pickMod, openSettings, checkPaths, showPaths,
-                       showWinner, winnerOf, checkFromServer, init,
+                       showWinner, winnerOf, checkFromServer, init, addProp, showPropMenu, openImport, doImport, ipRead, loadPropModels,
+                       get propRecs() { return propRecs; }, get propModels() { return propModels; },
                        get stageHave() { return stageHave; }, set stageHave(v) { stageHave = v; },
                        get modList() { return modList; }, set modList(v) { modList = v; }, get savedJson() { return savedJson; },
                        gizmo, boxes, hoverBox, marks, hover, hoverPick: pickAt, hoverStep, syncMarks, syncBoxes,

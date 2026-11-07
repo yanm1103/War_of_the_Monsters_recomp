@@ -6,30 +6,47 @@
 //   peds.load(disc, patchPeds)   disc: /api/stage "peds" ({groups: [{handle, pos, count}], net: [{pos, links: [[k, w, d]]}], hasNet})
 //   peds.patch()                 the "peds" object for the patch, or null when nothing changed
 //   peds.items()                 [{kind: 'group' | 'seg' | 'end', node: Object3D, ...}] for picking; node.userData.pedItem = item
+//   peds.entries()               {groups: [{item, no, count, bound, changed, added}], segments: [{item, no, len, width}]} for the list
 //   peds.moved(item)             after the gizmo moved item.node (ends follow a segment, a segment follows its ends)
 //   peds.addGroup(pos), peds.addSegment(pos), peds.remove(item), peds.setCount(item, n), peds.setWidth(item, w)
-//   peds.info(item)              text for the properties panel: what the group walks, or the segment's length
+//   peds.setLive(on)             every group out of the stage (off), or the disc's groups back (on)
+//   peds.label(item), peds.info(item)   "Group 3", "Sidewalk 12"; what the group walks, or the segment's length and lane
+//   peds.binding(item)           {nodes: [i, k], seg, no, len}: the segment a group walks (the nearest node and its link 0), or null
 //   peds.counts()                {groups, segments, maxGroups, maxSegments, people}
+//   peds.setDim(on), peds.setVisible(on), peds.highlight(item)
+// Groups and sidewalks are numbered by their place in the list (1..N), not by the net's nodes.
 
 export const MAX_GROUPS = 20;
 export const MAX_SEGMENTS = 127;   // 255 nodes (tools/lvl.py NET_NODES // 2)
 const DEFAULT_NET = [{ pos: [-100, 0, 250], links: [[1, 250, 0]] }, { pos: [100, 0, 250], links: [[0, 250, 0]] }];
 const LIFT = 1.5;                  // markers just above the sidewalk
+// the scene's colors, the same in both themes: sidewalks cyan, groups violet, a group with nothing to walk red, the selection amber
+export const COLORS = { lane: 0x36C5F0, group: 0xB57BFF, bad: 0xF0605A, sel: 0xFFC233, end: 0xFFFFFF };
+const DIM = 0.35;                  // the markers in the Objects mode
 
 export function createPeds({ THREE, scene, toThree, toGame }) {
   const root = new THREE.Group();
   root.name = 'peds';
   scene.add(root);
+  const basic = (color, o = {}) => new THREE.MeshBasicMaterial(Object.assign({ color }, o));
+  const laneOpts = { transparent: true, depthWrite: false, side: THREE.DoubleSide };
   const mats = {
-    lane: new THREE.MeshBasicMaterial({ color: 0x3fb6ff, transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide }),
-    laneSel: new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.38, depthWrite: false, side: THREE.DoubleSide }),
-    line: new THREE.LineBasicMaterial({ color: 0x3fb6ff }),
-    end: new THREE.MeshBasicMaterial({ color: 0x3fb6ff }),
-    group: new THREE.MeshBasicMaterial({ color: 0xff8a3f }),
-    groupBad: new THREE.MeshBasicMaterial({ color: 0xe5534b }),
-    bind: new THREE.LineDashedMaterial({ color: 0xff8a3f, dashSize: 12, gapSize: 8 }),
+    lane: basic(COLORS.lane, Object.assign({ opacity: 0.22 }, laneOpts)),
+    laneSel: basic(COLORS.sel, Object.assign({ opacity: 0.45 }, laneOpts)),
+    line: new THREE.LineBasicMaterial({ color: COLORS.lane }),
+    lineSel: new THREE.LineBasicMaterial({ color: COLORS.sel }),
+    end: basic(COLORS.end),
+    endSel: basic(COLORS.sel),
+    group: basic(COLORS.group),
+    groupBad: basic(COLORS.bad),
+    groupSel: basic(COLORS.sel),
+    bind: new THREE.LineDashedMaterial({ color: COLORS.group, dashSize: 12, gapSize: 8 }),
   };
-  for (const m of Object.values(mats)) m.fog = false;   // markers stay clear in the Game look's fog
+  for (const m of Object.values(mats)) {
+    m.fog = false;                     // markers stay clear in the Game look's fog
+    m.userData.opacity = m.opacity;
+    m.userData.transparent = m.transparent;
+  }
   const geo = { end: new THREE.SphereGeometry(7, 12, 8), group: new THREE.ConeGeometry(14, 40, 16) };
   geo.group.translate(0, 20, 0);
 
@@ -38,6 +55,7 @@ export function createPeds({ THREE, scene, toThree, toGame }) {
   let groups = [];      // [{handle|null, from, pos, count, count0, deleted, item}]
   let discSegsJson = '[]';
   let visible = true;
+  let selItem = null;   // the marker the editor has selected (amber)
 
   const v3 = (p) => toThree(p).add(new THREE.Vector3(0, LIFT, 0));
   const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
@@ -64,6 +82,13 @@ export function createPeds({ THREE, scene, toThree, toGame }) {
     return { i: best, k: n.links[0][0], a: n.pos, b: nodes[n.links[0][0]].pos };
   }
   function segsEdited() { return JSON.stringify(segs.map((s) => [s.a.map(r1), s.b.map(r1), s.width])) !== discSegsJson; }
+  // the segment of the list that a pair of nodes is: 2k and 2k+1 once edited, else the disc's link (the order of discSegments)
+  function segOfNodes(i, k) {
+    if (segsEdited()) return segs[Math.floor(i / 2)] || null;
+    const key = Math.min(i, k) + '-' + Math.max(i, k);
+    const j = discSegments().findIndex((s) => s.key === key);
+    return j >= 0 ? segs[j] || null : null;
+  }
 
   // ------------------------------------------------------------ meshes
   function laneGeometry(s) {
@@ -76,6 +101,12 @@ export function createPeds({ THREE, scene, toThree, toGame }) {
     g.setIndex([0, 1, 2, 2, 1, 3]);
     return g;
   }
+  function paintSeg(s) {
+    const on = !!selItem && selItem.seg === s;
+    s.item.lane.material = on ? mats.laneSel : mats.lane;
+    s.item.axis.material = on ? mats.lineSel : mats.line;
+    for (const e of s.ends) e.node.material = selItem === e ? mats.endSel : mats.end;
+  }
   function placeSeg(s) {
     s.item.node.position.copy(toThree(s.a).lerp(toThree(s.b), 0.5));
     s.item.node.updateMatrixWorld(true);
@@ -86,6 +117,7 @@ export function createPeds({ THREE, scene, toThree, toGame }) {
     s.ends[0].node.position.copy(v3(s.a));
     s.ends[1].node.position.copy(v3(s.b));
     for (const e of s.ends) e.node.updateMatrixWorld(true);
+    paintSeg(s);
   }
   function makeSeg(a, b, width) {
     const s = { a: [...a], b: [...b], width };
@@ -126,7 +158,7 @@ export function createPeds({ THREE, scene, toThree, toGame }) {
     node.visible = visible && !g.deleted;
     node.updateMatrixWorld(true);
     const b = g.deleted ? null : bind(g.pos);
-    node.material = b || g.deleted ? mats.group : mats.groupBad;
+    node.material = selItem === g.item ? mats.groupSel : b || g.deleted ? mats.group : mats.groupBad;
     line.visible = visible && !!b;
     if (b) {
       line.geometry.setFromPoints([v3(g.pos), v3(b.a).lerp(v3(b.b), 0.5)]);
@@ -140,6 +172,7 @@ export function createPeds({ THREE, scene, toThree, toGame }) {
     for (const s of segs) dropSeg(s);
     for (const g of groups) root.remove(g.item.node, g.item.line);
     segs = []; groups = [];
+    selItem = null;
   }
   function discSegments() {
     const out = [], seen = new Set(), net = disc.hasNet ? disc.net : [];
@@ -149,7 +182,7 @@ export function createPeds({ THREE, scene, toThree, toGame }) {
       const key = Math.min(i, k) + '-' + Math.max(i, k);
       if (k >= net.length || seen.has(key)) return;
       seen.add(key);
-      out.push({ a: n.pos, b: net[k].pos, width: n.links[0][1] });
+      out.push({ a: n.pos, b: net[k].pos, width: n.links[0][1], key });
     });
     return out;
   }
@@ -174,7 +207,8 @@ export function createPeds({ THREE, scene, toThree, toGame }) {
     const out = {};
     if (segsEdited()) out.segments = segs.map((s) => ({ a: s.a.map(r1), b: s.b.map(r1), width: s.width }));
     const discG = groups.filter((g) => g.handle != null);
-    const allOff = discG.length > 0 && discG.every((g) => g.deleted);
+    // "off" takes out every disc group, and the game then leaves out the new ones too: only when no new group is left
+    const allOff = discG.length > 0 && discG.every((g) => g.deleted) && !groups.some((g) => g.handle == null && !g.deleted);
     if (allOff) out.off = true;
     const list = [];
     for (const g of groups) {
@@ -222,6 +256,7 @@ export function createPeds({ THREE, scene, toThree, toGame }) {
     return s.item;
   }
   function remove(item) {
+    if (selItem && (selItem === item || (item.kind !== 'group' && selItem.seg === item.seg))) selItem = null;
     if (item.kind === 'group') {
       const g = item.group;
       if (g.handle == null) { root.remove(g.item.node, g.item.line); groups.splice(groups.indexOf(g), 1); }
@@ -233,26 +268,67 @@ export function createPeds({ THREE, scene, toThree, toGame }) {
       placeAll();
     }
   }
+  // the "Pedestrians in this stage" switch: off takes out every group (new ones too), on brings the disc's groups back
+  function setLive(on) {
+    if (on) { for (const g of groups) if (g.handle != null) g.deleted = false; }
+    else {
+      for (const g of [...groups]) {
+        if (g.handle == null) { root.remove(g.item.node, g.item.line); groups.splice(groups.indexOf(g), 1); }
+        else g.deleted = true;
+      }
+      if (selItem && selItem.kind === 'group') selItem = null;
+    }
+    placeAll();
+  }
+  const live = () => groups.some((g) => !g.deleted);
+  const hasDiscGroups = () => groups.some((g) => g.handle != null);
   function setCount(item, n) { item.group.count = Math.max(1, Math.min(255, Math.round(n) || 1)); }
   function setWidth(item, w) { const s = item.seg; s.width = Math.max(1, Math.min(255, Math.round(w) || 1)); placeSeg(s); placeAll(); }
+
+  // ------------------------------------------------------------ what the panel and the list say
+  const liveGroups = () => groups.filter((g) => !g.deleted);
+  const groupNo = (g) => liveGroups().indexOf(g) + 1;
+  const segNo = (s) => segs.indexOf(s) + 1;
+  const segLen = (s) => Math.round(dist(s.a, s.b));
+  function binding(item) {
+    const pos = item.kind === 'group' ? item.group.pos : null;
+    if (!pos || item.group.deleted) return null;
+    const b = bind(pos);
+    if (!b) return null;
+    const seg = segOfNodes(b.i, b.k);
+    return { nodes: [b.i, b.k], seg, no: seg ? segNo(seg) : 0, len: Math.round(dist(b.a, b.b)) };
+  }
+  function label(item) {
+    if (item.kind === 'group') return item.group.deleted ? 'Removed group' : `Group ${groupNo(item.group)}`;
+    const n = segNo(item.seg);
+    return item.kind === 'seg' ? `Sidewalk ${n}` : `Sidewalk ${n} · end ${item.end ? 'B' : 'A'}`;
+  }
   function info(item) {
     if (item.kind === 'group') {
       const g = item.group;
-      if (g.deleted) return 'removed';
-      const b = bind(g.pos);
-      if (!b) return netNodes().length ? 'no sidewalk: its nearest node has no link' : 'the stage has no pedestrian net: add a sidewalk';
-      return `walks the sidewalk ${b.i}-${b.k} (${Math.round(dist(b.a, b.b))} long), the one with the nearest end`;
+      if (g.deleted) return 'Removed from this stage in your mod.';
+      const b = binding(item);
+      if (!b) return netNodes().length ? 'Not on any sidewalk: move it closer to one.' : 'This stage has no sidewalks yet: add one first.';
+      return `Walks on sidewalk ${b.no || '?'} (${b.len} units long)`;
     }
     const s = item.seg;
-    return `sidewalk ${segs.indexOf(s)}: ${Math.round(dist(s.a, s.b))} long, lane ${s.width * 10} to each side`;
+    if (item.kind === 'end') return `End ${item.end ? 'B' : 'A'} of sidewalk ${segNo(s)} (${segLen(s)} units long). Drag it to stretch the sidewalk.`;
+    return `Sidewalk ${segNo(s)} · ${segLen(s)} units long · ${s.width * 10} units each side`;
+  }
+  function entries() {
+    return {
+      groups: liveGroups().map((g, k) => ({ item: g.item, no: k + 1, count: g.count, bound: !!bind(g.pos), added: g.handle == null,
+                                            changed: g.handle != null && (dist(g.pos, g.from) > 0.05 || g.count !== g.count0) })),
+      segments: segs.map((s, k) => ({ item: s.item, no: k + 1, len: segLen(s), width: s.width })),
+    };
   }
   function counts() {
-    const live = groups.filter((g) => !g.deleted);
-    return { groups: live.length, segments: segs.length, maxGroups: MAX_GROUPS, maxSegments: MAX_SEGMENTS,
-             people: live.reduce((n, g) => n + g.count, 0) };
+    const lv = liveGroups();
+    return { groups: lv.length, segments: segs.length, maxGroups: MAX_GROUPS, maxSegments: MAX_SEGMENTS,
+             people: lv.reduce((n, g) => n + g.count, 0) };
   }
   function items() {
-    return [...groups.filter((g) => !g.deleted).map((g) => g.item), ...segs.flatMap((s) => [s.item, ...s.ends])];
+    return [...liveGroups().map((g) => g.item), ...segs.flatMap((s) => [s.item, ...s.ends])];
   }
   // End: onto the ground; groundAt(v) gives the scene height under a scene point (or null). A sidewalk drops both ends.
   function drop(item, groundAt) {
@@ -265,10 +341,20 @@ export function createPeds({ THREE, scene, toThree, toGame }) {
     placeAll();
   }
   function setVisible(on) { visible = on; root.visible = on; placeAll(); }
+  // the Objects mode shows the markers faint (the Pedestrians layer), the Pedestrians mode as they are
+  function setDim(on) {
+    for (const m of Object.values(mats)) {
+      const tr = on || m.userData.transparent;
+      if (m.transparent !== tr) { m.transparent = tr; m.needsUpdate = true; }
+      m.opacity = m.userData.opacity * (on ? DIM : 1);
+    }
+  }
   function highlight(item) {
-    for (const s of segs) s.item.lane.material = item && item.seg === s ? mats.laneSel : mats.lane;
+    selItem = item || null;
+    for (const s of segs) paintSeg(s);
+    placeAll();
   }
 
-  return { load, patch, items, moved, addGroup, addSegment, remove, setCount, setWidth, info, counts, setVisible, highlight, drop,
-           root, defaultNet: DEFAULT_NET };
+  return { load, patch, items, entries, moved, addGroup, addSegment, remove, setLive, live, hasDiscGroups, setCount, setWidth,
+           label, info, binding, counts, setVisible, setDim, highlight, drop, root, mats, defaultNet: DEFAULT_NET };
 }

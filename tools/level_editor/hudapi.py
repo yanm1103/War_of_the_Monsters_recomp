@@ -60,6 +60,7 @@ class HudApi:
         for r in p["rows"]:
             r["every"] = len(lvlhud.targets(infos, stage, r["role"], True))
             r["disc"], r["mod"] = bool(r["disc"]), bool(r["mod"])   # the page asks /api/hudimg by name, never by path
+        p["versions"] = {st: info["version"] for st, info in sorted(infos.items())}   # the version B note names the stages
         return p
 
     def image(self, disc, mods, mod, stage, src, png):

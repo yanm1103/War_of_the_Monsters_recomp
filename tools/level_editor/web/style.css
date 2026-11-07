@@ -250,32 +250,33 @@ aside { background: var(--surface-1); padding: 12px; overflow: auto; min-height:
 .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--changed); flex: none; }
 
 /* the object list: sections (Buildings, Pickups, Props, Terrain) with a sticky header; one row per object and copy */
-#list { list-style: none; margin: 0 -12px; padding: 0 0 4px; overflow: auto; flex: 1; min-height: 0; }
-#list li.sec { position: sticky; top: 0; z-index: 1; height: 24px; display: flex; align-items: center; gap: 4px; padding: 0 12px 0 8px;
+:is(#list, #pedList) { list-style: none; margin: 0 -12px; padding: 0 0 4px; overflow: auto; flex: 1; min-height: 0; }
+:is(#list, #pedList) li.sec { position: sticky; top: 0; z-index: 1; height: 24px; display: flex; align-items: center; gap: 4px; padding: 0 12px 0 8px;
                background: var(--surface-1); cursor: pointer; user-select: none; font: 600 11px/16px var(--font-ui); letter-spacing: .06em;
                text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); }
-#list li.sec:hover { color: var(--fg); }
-#list li.sec .ic { width: 16px; height: 16px; }
-#list li.sec .n { margin-left: auto; font-variant-numeric: tabular-nums; letter-spacing: 0; }
-#list li.sec .has { width: 6px; height: 6px; border-radius: 50%; background: var(--sel); margin-left: 4px; }
-#list li.it { height: var(--h-row); display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: center; gap: 8px;
+:is(#list, #pedList) li.sec:hover { color: var(--fg); }
+:is(#list, #pedList) li.sec .ic { width: 16px; height: 16px; }
+:is(#list, #pedList) li.sec .n { margin-left: auto; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+:is(#list, #pedList) li.sec .has { width: 6px; height: 6px; border-radius: 50%; background: var(--sel); margin-left: 4px; }
+:is(#list, #pedList) li.it { height: var(--h-row); display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: center; gap: 8px;
               padding: 0 12px; cursor: pointer; white-space: nowrap; }
-#list li.it:hover { background: var(--surface-2); }
-#list li.it > .k { width: 16px; height: 16px; color: var(--muted); }
-#list li.it .h { overflow: hidden; text-overflow: ellipsis; color: var(--fg); font-weight: 500; }
-#list li.it.rule .h { color: var(--fg-2); font-weight: 400; }
-#list li.it.copy { padding-left: 30px; }
-#list li.it.copy .h { color: var(--fg-2); font-weight: 400; }
-#list li.it .bd { display: inline-flex; gap: 2px; }
-#list li.it .bd .ic { width: 14px; height: 14px; }
-#list li.it .bd .mv { color: var(--changed); } #list li.it .bd .cp { color: var(--added); }
-#list li.it .bd .dl { color: var(--danger); } #list li.it .bd .on { color: var(--muted); }
-#list li.it .hd { color: var(--muted); font: 11px/16px var(--font-mono); opacity: .6; }
-#list li.it:hover .hd, #list li.it.sel .hd, #list li.it.sel2 .hd { opacity: 1; }
-#list li.it.sel { background: var(--sel-bg); box-shadow: inset 3px 0 0 var(--sel); }
-#list li.it.sel2 { background: var(--sel-bg-2); box-shadow: inset 3px 0 0 var(--sel-2); }
-#list li.it.deleted > :not(.bd) { opacity: .55; }
-#list li.it.deleted .h { text-decoration: line-through; }
+:is(#list, #pedList) li.it:hover { background: var(--surface-2); }
+:is(#list, #pedList) li.it > .k { width: 16px; height: 16px; color: var(--muted); }
+:is(#list, #pedList) li.it .h { overflow: hidden; text-overflow: ellipsis; color: var(--fg); font-weight: 500; }
+:is(#list, #pedList) li.it.rule .h { color: var(--fg-2); font-weight: 400; }
+:is(#list, #pedList) li.it.copy { padding-left: 30px; }
+:is(#list, #pedList) li.it.copy .h { color: var(--fg-2); font-weight: 400; }
+:is(#list, #pedList) li.it .bd { display: inline-flex; gap: 2px; }
+:is(#list, #pedList) li.it .bd .ic { width: 14px; height: 14px; }
+:is(#list, #pedList) li.it .bd .mv { color: var(--changed); } :is(#list, #pedList) li.it .bd .cp { color: var(--added); }
+:is(#list, #pedList) li.it .bd .dl { color: var(--danger); } :is(#list, #pedList) li.it .bd .on { color: var(--muted); }
+:is(#list, #pedList) li.it .hd { color: var(--muted); font: 11px/16px var(--font-mono); opacity: .6; }
+:is(#list, #pedList) li.it:is(:hover, .sel, .sel2) .hd { opacity: 1; }
+#pedList li.none { padding: 4px 12px 4px 30px; color: var(--muted); font-size: 12px; }
+:is(#list, #pedList) li.it.sel { background: var(--sel-bg); box-shadow: inset 3px 0 0 var(--sel); }
+:is(#list, #pedList) li.it.sel2 { background: var(--sel-bg-2); box-shadow: inset 3px 0 0 var(--sel-2); }
+:is(#list, #pedList) li.it.deleted > :not(.bd) { opacity: .55; }
+:is(#list, #pedList) li.it.deleted .h { text-decoration: line-through; }
 .list-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 8px; padding-top: 32px;
               color: var(--muted); text-align: center; }
 .list-empty > .ic { width: 28px; height: 28px; }
@@ -307,7 +308,7 @@ aside { background: var(--surface-1); padding: 12px; overflow: auto; min-height:
 .p-sub .handle .ic { width: 12px; height: 12px; opacity: 0; transition: opacity .12s; }
 .p-sub .handle:hover .ic, .p-sub .handle:focus-visible .ic { opacity: 1; }
 .p-sub .handle:not([hidden]) + span::before { content: "·"; margin-right: 6px; }
-#list li.it { scroll-margin-top: 24px; }
+:is(#list, #pedList) li.it { scroll-margin-top: 24px; }
 /* sections */
 .psec { border-top: 1px solid var(--line); padding: 12px 0; }
 .psec:last-child { padding-bottom: 0; }
@@ -389,7 +390,7 @@ details.fold[open] > summary { margin-bottom: 8px; }
 #hint.gone { opacity: 0; }
 #band { position: absolute; border: 1px solid var(--sel); background: color-mix(in srgb, var(--sel) 12%, transparent); pointer-events: none; }
 /* the floating bars over the view */
-.float, #pedBar { position: absolute; display: flex; align-items: center; gap: 2px; padding: 4px;
+.float { position: absolute; display: flex; align-items: center; gap: 2px; padding: 4px;
                   background: color-mix(in srgb, var(--surface-1) 86%, transparent); backdrop-filter: blur(8px);
                   border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-pop); z-index: 2; }
 .float .fsep { width: 1px; height: 20px; background: var(--line); margin: 0 3px; flex: none; }
@@ -426,7 +427,25 @@ details.fold[open] > summary { margin-bottom: 8px; }
   .float .seg > button { padding: 0 6px; }
   #toolBar .tgl { width: var(--h-ctl); padding: 0; }
 }
-#pedBar { top: 52px; right: 8px; gap: 6px; }
+/* Add group and Add sidewalk, on the tool bar in the Pedestrians mode */
+#pedBar { display: contents; }
+/* Add prop: the mod's models for this stage, under the tool bar's button */
+#propBar { display: contents; }
+#propMenu { top: 48px; left: 8px; z-index: 4; flex-direction: column; align-items: stretch; gap: 2px; padding: 8px; width: 280px; }
+#propMenu .sec-title { margin: 0 2px 4px; }
+#pmList { display: flex; flex-direction: column; gap: 2px; max-height: 50vh; overflow-y: auto; }
+#propMenu button.pm-row { height: auto; min-height: 40px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px;
+  padding: 4px 8px; text-align: left; }
+.pm-row .pm-name { color: var(--fg); font-weight: 600; }
+.pm-row .pm-meta { color: var(--muted); font-size: 11px; }
+.pm-row:disabled .pm-name { color: var(--disabled); }
+.pm-none { color: var(--muted); font-size: 12px; padding: 4px 6px 6px; line-height: 1.4; }
+#pmImport { margin-top: 4px; border-top: 1px solid var(--line); border-radius: 0; padding-top: 2px; }
+#propMenu .lbl { display: inline !important; }
+/* the Import a prop dialog */
+#propDlg { width: 460px; }
+.ip-file { display: flex; align-items: center; gap: 10px; margin: 4px 0 10px; }
+.ip-file #ipFile { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* notes over the view's upper left (under the tool bar): the mod that wins in the game, what the file keeps */
 #notes { position: absolute; top: 52px; left: 8px; max-width: min(520px, 55%); display: flex; flex-direction: column; gap: 8px; z-index: 2;
          pointer-events: none; }
@@ -566,3 +585,75 @@ dialog.dlg .callout { font-size: 12px; line-height: 18px; }
 .kl dd { margin: 0; color: var(--fg); }
 .keys-note { margin: 14px 0 0; font-size: 12px; line-height: 16px; color: var(--muted); }
 @media (max-width: 680px) { .keys-cols { grid-template-columns: minmax(0, 1fr); } }
+
+/* ------------------------------------------------------------------ the Pedestrians mode (body[data-mode]) */
+/* the left panel: the Objects mode's search, chips and list (.obj), or #pedPanel */
+body[data-mode="peds"] #left > .obj { display: none !important; }
+body:not([data-mode="peds"]) #pedPanel { display: none; }
+#pedPanel { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
+/* the meters: groups and sidewalks against the stage's limits (amber past 90 %, red at the limit), and the people */
+.meters { display: flex; flex-direction: column; gap: 8px; flex: none; padding: 2px 0 10px; border-bottom: 1px solid var(--line); }
+.meter .m-top, .m-people { display: flex; justify-content: space-between; font-size: 12px; line-height: 16px; color: var(--fg-2); }
+.meter .m-v, #mPeople { color: var(--fg); font-weight: 600; }
+.m-bar { height: 4px; margin-top: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; }
+.m-bar > i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 2px; transition: width .2s; }
+.meter.high .m-bar > i { background: var(--warn); }
+.meter.full .m-bar > i { background: var(--danger); }
+.meter.full .m-v { color: var(--danger); }
+.switch.live { flex: none; width: 100%; font-weight: 500; }
+.switch.live .tx { flex: 1; }
+#pedList li.it .k { color: #B57BFF; }
+#pedList li.sec[data-sec="psegs"] ~ li.it .k { color: #36C5F0; }
+#pedList li.it.bad .k { color: var(--danger); }
+#pedCounts { font-size: 12px; line-height: 16px; flex: none; }
+/* the Layers switch while the Pedestrians mode shows the markers anyway */
+#layersMenu .switch.none { color: var(--muted); }
+/* the right panel: nothing selected (what the colors are), and a group or a sidewalk */
+#pedNoSel { font-size: 12px; line-height: 18px; color: var(--fg-2); }
+.pn-text { margin: 0 0 12px; }
+.pn-text b { color: var(--fg); font-weight: 600; }
+.legend { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.legend li { display: flex; align-items: center; gap: 8px; }
+.legend .sw { width: 16px; height: 10px; margin: 0; flex: none; }
+.legend .sw.lane { background: color-mix(in srgb, #36C5F0 45%, transparent); border-top: 2px solid #36C5F0; border-radius: 2px; height: 8px; }
+.legend .sw.end { width: 10px; height: 10px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 1px var(--line-strong); margin: 0 3px; }
+.legend .sw.grp, .legend .sw.bad { width: 0; height: 0; border-radius: 0; background: none; border: 7px solid transparent;
+                                   border-bottom: 12px solid #B57BFF; border-top: 0; margin: 0 1px; }
+.legend .sw.bad { border-bottom-color: #F0605A; }
+#pdNote { align-items: center; }
+#pdNote > span { min-width: 0; overflow-wrap: anywhere; }
+button.small-btn { height: 22px; padding: 0 8px; font-size: 12px; flex: none; }
+/* People and Width: a slider and its number */
+.slide-row { display: flex; align-items: center; gap: 8px; }
+.slide-row > input[type=range] { flex: 1; min-width: 0; margin: 0; }
+.slide-row > input[type=number] { width: 64px; flex: none; }
+.slide-row > .lbl { color: var(--muted); font-size: 12px; flex: none; }
+.slide-row > .field.suf { width: 84px; flex: none; }
+.slide-row > .field.suf > input { width: 100%; }
+#pdWidthRow .facts { margin-bottom: 8px; }
+#pedCounts { display: none; }   /* the meters say it; the text stays for the harness */
+
+/* ------------------------------------------------------------------ the Fight HUD dialog (hud.js) */
+#hudDlg { width: 760px; max-width: calc(100vw - 32px); }
+#hudDlg .hud-nomod { align-items: center; }
+#hudDlg .hud-nomod > select { width: 160px; flex: none; }
+#hudDlg .hud-list { border-top: 1px solid var(--line); margin-top: 4px; }
+.hud-row { display: grid; grid-template-columns: 96px 16px 96px minmax(0, 1fr); gap: 12px; align-items: start; padding: 12px 8px;
+           border-bottom: 1px solid var(--line); border-radius: var(--r-md); transition: background-color .12s; }
+.hud-row.drop { background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: inset 0 0 0 2px var(--accent); }
+.hud-fig { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.hud-fig figcaption { font-size: 11px; line-height: 16px; color: var(--muted); }
+.hud-thumb { width: 96px; height: 96px; object-fit: contain; border: 1px solid var(--line); border-radius: var(--r-sm);
+             background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 12px 12px; }
+.hud-thumb.none { display: grid; place-items: center; color: var(--muted); font-size: 11px; line-height: 14px; text-align: center;
+                  background: transparent; border-style: dashed; border-color: var(--line-strong); padding: 4px; }
+.hud-arrow { margin-top: 40px; color: var(--muted); }
+.hud-info { min-width: 0; }
+.hud-name { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.hud-name .badge { margin-left: 0; }
+.hud-meta { color: var(--muted); font-size: 12px; line-height: 18px; margin-top: 2px; overflow-wrap: anywhere; }
+.hud-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.hud-acts > button { height: 26px; }
+#hudDlg label.hud-every { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; color: var(--fg-2); font-size: 12px; cursor: pointer; }
+#hudDlg .dlg-foot { align-items: center; }
+#hudDlg .hud-game { margin-right: auto; font-size: 12px; }

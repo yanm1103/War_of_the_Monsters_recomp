@@ -1,28 +1,13 @@
-// HUD panel: the fight HUD textures the stage carries (tools/lvlhud.py), each replaced by a PNG in the mod
+// The Fight HUD dialog: the fight HUD pictures the stage carries (tools/lvlhud.py), each replaced by a PNG in the mod
 // (<mod>/LVL/<stage>_t<id>.png, MODS.md "Textures as PNG"). Server: GET /api/hud, POST /api/hud/replace and /api/hud/remove.
-// openHud({stage, mod, api, log}) opens the dialog; it builds itself the first time.
+// openHud(ctx) opens it (it builds itself the first time). ctx, from app.js:
+//   stage, title (the stage's title), titleOf(name), mod, api(url, body), msg(text, {level}), ask(head, text, buttons, then, o),
+//   mods() (the mod names), newMod (the "New mod…" value), chooseMod(v) -> Promise(mod in use),
+//   game() -> {running, dirty}, reload() (Reload in game).
+// The CSS is in style.css (#hudDlg).
 
 let dlg = null;
 let ctx = null;
-
-const css = `
-#hudDlg { width: 720px; max-width: calc(100vw - 32px); }
-#hudDlg .hud-top { display: flex; align-items: baseline; gap: 10px; }
-#hudDlg .hud-top .grow { flex: 1; }
-#hudDlg .hud-warn { color: var(--warn); margin: 6px 0; }
-#hudDlg .hud-list { max-height: 60vh; overflow: auto; margin: 8px 0; border-top: 1px solid var(--line); }
-#hudDlg .hud-row { display: grid; grid-template-columns: 72px 72px 1fr; gap: 10px; align-items: center; padding: 8px 0;
-  border-bottom: 1px solid var(--line); }
-#hudDlg .hud-thumb { width: 72px; height: 72px; object-fit: contain; border: 1px solid var(--line); border-radius: 3px;
-  background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 12px 12px; }
-#hudDlg .hud-thumb.none { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 11px;
-  background: var(--panel2); text-align: center; }
-#hudDlg .hud-name { font-weight: 600; }
-#hudDlg .hud-meta { color: var(--muted); font-size: 12px; }
-#hudDlg .hud-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; align-items: center; }
-#hudDlg .hud-acts label { display: inline-flex; gap: 4px; margin: 0; align-items: center; }
-#hudDlg .hud-acts label input { display: inline; width: auto; margin: 0; }
-`;
 
 function el(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);
@@ -34,27 +19,45 @@ function el(tag, attrs = {}, ...kids) {
   for (const k of kids) if (k != null) e.append(k);
   return e;
 }
+const icon = (name, cls = '') => el('i', { class: ('ic ' + cls).trim(), style: `--ic:url(vendor/mdi/${name}.svg)` });
+const q = (sel) => dlg.querySelector(sel);
 
 function build() {
-  document.head.append(el('style', {}, css));
-  dlg = el('dialog', { id: 'hudDlg' });
+  dlg = el('dialog', { id: 'hudDlg', class: 'dlg', 'aria-labelledby': 'hudTitle' });
   dlg.innerHTML = `<form method="dialog">
-    <div class="hud-top"><h2>Fight HUD</h2><span class="grow"></span><span class="hud-stage muted"></span></div>
-    <p class="muted small">The stage's file carries the fight HUD. A replaced texture is a PNG in the mod, any size with the same
-    proportions; 255 alpha is the game's opaque. It shows in the next fight on this stage (or after Reload in game).</p>
-    <div class="hud-warn" hidden></div>
-    <div class="hud-list"></div>
-    <div class="row end"><button value="close" class="primary">Close</button></div>
+    <div class="dlg-head"><h2 id="hudTitle"></h2>
+      <button type="button" data-close class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+    <div class="dlg-body">
+      <div class="callout info"><i class="ic" style="--ic:url(vendor/mdi/information-outline.svg)"></i><span>Changes are written to your
+        mod right away; Undo does not reach them. A picture can be any size with the same proportions, and 255 alpha is opaque.</span></div>
+      <div class="callout warn hud-nomod" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i>
+        <span>Choose or create a mod to replace HUD pictures.</span><select class="hud-mod" aria-label="Mod"></select></div>
+      <div class="callout warn hud-b" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span></span></div>
+      <div class="hud-list"></div>
+    </div>
+    <div class="dlg-foot"><span class="hud-game muted"></span><button type="button" class="hud-reload" hidden><i class="ic"
+      style="--ic:url(vendor/mdi/refresh.svg)"></i>Reload in game</button><button value="close" class="primary">Close</button></div>
   </form>`;
   document.body.append(dlg);
+  dlg.querySelector('[data-close]').addEventListener('click', () => dlg.close('cancel'));
+  q('.hud-reload').addEventListener('click', () => ctx.reload());
+  q('.hud-mod').addEventListener('change', async (e) => {
+    const v = e.target.value;
+    e.target.blur();
+    if (!v) return;
+    ctx.mod = (await ctx.chooseMod(v)) || '';
+    await refresh();
+  });
 }
 
 const stamp = () => Date.now().toString(36);
 const imgUrl = (src, png) => `/api/hudimg?src=${src}&stage=${encodeURIComponent(ctx.stage)}&mod=${encodeURIComponent(ctx.mod || '')}&png=${encodeURIComponent(png)}&t=${stamp()}`;
+const say = (text, level = 'info') => ctx.msg(text, { level, toast: true, open: false });
 
-function thumb(url, title) {
-  if (!url) return el('div', { class: 'hud-thumb none' }, title);
-  return el('img', { class: 'hud-thumb', src: url, title, alt: title });
+function thumb(url, cap, empty) {
+  const box = url ? el('img', { class: 'hud-thumb', src: url, alt: cap, draggable: 'false' })
+    : el('div', { class: 'hud-thumb none' }, empty);
+  return el('figure', { class: 'hud-fig' }, box, el('figcaption', {}, cap));
 }
 
 // A picked file as PNG bytes (base64) and its size: a PNG goes as it is (exact pixels and alpha), the rest through a canvas
@@ -83,68 +86,113 @@ function pick() {
   });
 }
 
+const psmText = (p) => ({ T8: '8-bit', T8H: '8-bit', T4: '4-bit', T4HL: '4-bit', T4HH: '4-bit', CT32: '32-bit', CT24: '24-bit',
+                          CT16: '16-bit', CT16S: '16-bit' }[p] || p);
+
 function row(r) {
   const every = el('input', { type: 'checkbox' });
-  const everyLbl = r.every > 1 ? el('label', { title: r.same ? 'This picture is the same in every stage' :
-    `Every stage with HUD version ${ctx.data.version}` }, every, ` every stage with this picture (${r.every})`) : null;
-  const acts = el('div', { class: 'hud-acts' },
-    el('button', { type: 'button', onclick: () => replace(r, every.checked) }, 'Replace…'),
-    el('button', { type: 'button', title: 'Save the disc picture as a PNG to edit', onclick: () => {
+  const noMod = !ctx.mod;
+  const replaceBtn = el('button', { type: 'button', onclick: () => replace(r, every.checked), disabled: noMod,
+                                    title: noMod ? 'Choose or create a mod to replace HUD pictures' : 'Pick a PNG for this picture (or drop one on the row)' },
+                        icon('image-edit-outline'), 'Replace…');
+  const acts = el('div', { class: 'hud-acts' }, replaceBtn,
+    el('button', { type: 'button', class: 'ghost', title: 'Save the picture of the disc as a PNG, to edit it', onclick: () => {
       const a = el('a', { href: imgUrl('disc', r.png), download: r.png });
       document.body.append(a); a.click(); a.remove();
-    } }, 'Export'),
-    r.mod ? el('button', { type: 'button', class: 'danger', onclick: () => remove(r, every.checked) }, 'Remove') : null,
-    everyLbl);
-  return el('div', { class: 'hud-row' },
-    thumb(r.disc ? imgUrl('disc', r.png) : null, 'disc'),
-    thumb(r.mod ? imgUrl('mod', r.png) : null, r.mod ? 'mod' : 'not replaced'),
-    el('div', {},
-      el('div', { class: 'hud-name' }, r.label),
-      el('div', { class: 'hud-meta' }, `${r.png} · ${r.w}×${r.h} ${r.psm} · ${r.file === 'rtx' ? '.RTX' : '.TEX'}` +
-        (r.note ? ` · ${r.note}` : '') + (r.mod ? ' · replaced by the mod' : '')),
-      acts));
+    } }, icon('download-outline'), 'Save original as PNG'),
+    r.mod ? el('button', { type: 'button', class: 'ghost danger', title: 'Take the PNG out of your mod (the disc\'s picture comes back)',
+                           onclick: () => remove(r, every.checked) }, icon('delete-outline'), 'Remove') : null);
+  const everyLbl = r.every > 1 ? el('label', { class: 'hud-every', title: r.same ? 'This picture is the same in every stage'
+    : `Every stage with this stage's HUD layout` }, every, `Apply to all ${r.every} stages with this picture`) : null;
+  const li = el('div', { class: 'hud-row' + (r.mod ? ' on' : '') },
+    thumb(r.disc ? imgUrl('disc', r.png) : null, 'Original', 'none'),
+    icon('arrow-right', 'hud-arrow'),
+    thumb(r.mod ? imgUrl('mod', r.png) : null, 'In your mod', 'Not replaced'),
+    el('div', { class: 'hud-info' },
+      el('div', { class: 'hud-name' }, el('span', {}, r.label), r.mod ? el('span', { class: 'badge' }, 'Replaced') : null),
+      el('div', { class: 'hud-meta num' }, `${r.w}×${r.h} · ${psmText(r.psm)} · ${r.file === 'rtx' ? '.RTX' : '.TEX'}` +
+        (r.note ? ` · ${r.note}` : '')),
+      acts, everyLbl));
+  // drop a picture on the row: the same as Replace…
+  li.addEventListener('dragover', (e) => { if (ctx.mod && e.dataTransfer.types.includes('Files')) { e.preventDefault(); li.classList.add('drop'); } });
+  li.addEventListener('dragleave', () => li.classList.remove('drop'));
+  li.addEventListener('drop', (e) => {
+    e.preventDefault();
+    li.classList.remove('drop');
+    const f = e.dataTransfer.files[0];
+    if (f) replace(r, every.checked, f);
+  });
+  return li;
+}
+
+function showGame() {
+  const g = ctx.game();
+  q('.hud-reload').hidden = !g.running;
+  q('.hud-reload').title = g.dirty ? 'Load this stage again in the game (it also saves your unsaved stage changes)'
+    : 'Load this stage again in the game, with the pictures of your mod';
+  q('.hud-game').textContent = g.running ? '' : 'The pictures show in the next fight on this stage.';
 }
 
 async function refresh() {
-  const q = `/api/hud?stage=${encodeURIComponent(ctx.stage)}&mod=${encodeURIComponent(ctx.mod || '')}`;
-  ctx.data = await ctx.api(q);
-  dlg.querySelector('.hud-stage').textContent = `${ctx.stage} · HUD version ${ctx.data.version}`;
-  const warn = dlg.querySelector('.hud-warn');
-  warn.hidden = ctx.data.version !== 'B';
-  warn.textContent = 'This stage has the other HUD version (B, as in CANYON1 and TOKYODM): its bar atlas, special icon, player ' +
-    'number and font are drawn differently, so a picture made for the other stages comes out wrong here.';
-  const list = dlg.querySelector('.hud-list');
-  list.replaceChildren(...ctx.data.rows.map(row));
+  const url = `/api/hud?stage=${encodeURIComponent(ctx.stage)}&mod=${encodeURIComponent(ctx.mod || '')}`;
+  ctx.data = await ctx.api(url);
+  q('#hudTitle').textContent = `Fight HUD · ${ctx.title}`;
+  // no mod: the mods to pick from, right here
+  const nm = q('.hud-nomod');
+  nm.hidden = !!ctx.mod;
+  if (!ctx.mod) {
+    const sel = q('.hud-mod');
+    sel.replaceChildren(el('option', { value: '' }, 'Choose a mod…'),
+                        ...ctx.mods().map((m) => el('option', { value: m }, m)), el('option', { value: ctx.newMod }, 'New mod…'));
+    sel.value = '';
+  }
+  const b = q('.hud-b');
+  b.hidden = ctx.data.version !== 'B';
+  if (!b.hidden) {
+    const others = Object.entries(ctx.data.versions || {}).filter(([s, v]) => v === 'B' && s !== ctx.stage).map(([s]) => ctx.titleOf(s));
+    b.querySelector('span').textContent = 'This stage uses a different HUD layout' + (others.length ? ` (like ${others.join(' and ')})` : '') +
+      '. Pictures made for other stages will not line up here.';
+  }
+  q('.hud-list').replaceChildren(...ctx.data.rows.map(row));
+  showGame();
 }
 
-async function replace(r, every) {
-  if (!ctx.mod) { ctx.log('HUD: choose a mod first (Mod, at the top).', 'err'); return; }
-  const f = await pick();
+async function replace(r, every, file = null) {
+  if (!ctx.mod) { say('Choose or create a mod to replace HUD pictures.', 'warn'); return; }
+  const f = file || await pick();
   if (!f) return;
   let img;
-  try { img = await asPng(f); } catch (e) { ctx.log(`HUD: ${f.name} is not an image the browser reads.`, 'err'); return; }
+  try { img = await asPng(f); } catch (e) { say(`${f.name} is not a picture the editor can read.`, 'err'); return; }
   const want = r.w / r.h, got = img.w / img.h;
-  if (Math.abs(want - got) > 0.01 * want &&
-      !confirm(`${f.name} is ${img.w}×${img.h}; the game's texture is ${r.w}×${r.h}. With other proportions it comes out stretched. Use it anyway?`))
-    return;
+  if (Math.abs(want - got) > 0.01 * want) {
+    const go = await new Promise((res) => ctx.ask('Different proportions', `${f.name} is ${img.w}×${img.h}; the game's picture is ` +
+      `${r.w}×${r.h}. With other proportions it comes out stretched.`, [['cancel', 'Cancel'], ['use', 'Use it anyway', true]],
+      (v) => res(v === 'use'), { icon: 'image-edit-outline' }));
+    if (!go) return;
+  }
   try {
     const res = await ctx.api('/api/hud/replace', { stage: ctx.stage, mod: ctx.mod, role: r.role, png: r.png, data: img.data, every });
-    ctx.log(res.lines);
-  } catch (e) { ctx.log(`HUD: ${e.message}`, 'err'); }
+    ctx.msg(res.lines, { level: 'muted' });
+    say(`${r.label}: replaced in mod "${ctx.mod}"` + (every && r.every > 1 ? ` on ${r.every} stages` : ''), 'ok');
+  } catch (e) { say(`Couldn't replace ${r.label}: ${e.message}`, 'err'); }
   await refresh();
 }
 
 async function remove(r, every) {
   try {
     const res = await ctx.api('/api/hud/remove', { stage: ctx.stage, mod: ctx.mod, role: r.role, png: r.png, every });
-    ctx.log(res.lines);
-  } catch (e) { ctx.log(`HUD: ${e.message}`, 'err'); }
+    ctx.msg(res.lines, { level: 'muted' });
+    say(`${r.label}: the disc's picture is back`, 'ok');
+  } catch (e) { say(`Couldn't remove ${r.label}: ${e.message}`, 'err'); }
   await refresh();
 }
 
 export async function openHud(opts) {
   if (!dlg) build();
   ctx = { ...opts };
-  try { await refresh(); } catch (e) { ctx.log(`HUD: ${e.message}`, 'err'); return; }
+  try { await refresh(); } catch (e) { ctx.msg(`Couldn't open the fight HUD: ${e.message}`, { level: 'err' }); return; }
   dlg.showModal();
+  q('.dlg-foot .primary').focus();
 }
+// app.js calls it when the game starts or stops while the dialog is open
+export function hudGameChanged() { if (dlg && dlg.open && ctx) showGame(); }
