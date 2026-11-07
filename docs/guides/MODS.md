@@ -726,8 +726,11 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   selected; with **Changed** on, every deleted one does (a click on the box selects it), and a green box marks each changed object.
 - **Right panel:** with nothing selected, what a click does, the stage, how many objects the mod changes and the file **Save**
   writes (`mods/<mod>/levels/<STAGE>.json`). With an object: its kind, name and state (Moved, Turned, Copy), its handle (a click
-  copies it) and these sections. **Transform**: **X**, **Y** and **Z** (the height) in the gizmo's colors; dragging a letter
-  sideways changes the number (a snap step, or 1 unit, per 3 pixels; Shift: ten), and the gizmo's blue arrow points to -Y.
+  copies it) and these sections. Every number field changes when dragged sideways (one step per 3 pixels; Shift: ten; within the
+  field's limits); a click without dragging types in it. The object, the pedestrian marker or the People and Width of a group
+  follow the drag, which is one undo step; the new prop's Height builds once, on release. **Transform**: **X**, **Y** and **Z**
+  (the height) in the gizmo's colors, also dragged by their letter (a snap step, or 1 unit, per step), and the gizmo's blue arrow
+  points to -Y.
   **Heading**, with buttons that turn 90° either way. **Actions**: **Drop** (**End**: down or up onto the first surface
   under the object's middle, another object's roof included), **Duplicate**, **Restore original** (back to the disc's place,
   copies removed; off when there is nothing to restore) and **Delete**, which says how many objects go. **Name** (closed at first)

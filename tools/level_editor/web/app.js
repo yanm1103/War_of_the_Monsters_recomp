@@ -1201,6 +1201,7 @@ function showPropsPanel() {
     hin.title = `Scale model ${i.model} to this many game units high (every entry of it; not undoable)`;
     hin.onchange = () => resizeProp(i.model, +hin.value);
     hin.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); hin.blur(); } };
+    scrubField(hin);
     hb.append(hin, document.createTextNode(' units'));
     fact('Height', hb);
     fact('Kind', s.word);
@@ -2567,6 +2568,82 @@ function scrub(letter, axis) {
   letter.addEventListener('click', (e) => { if (used) { e.preventDefault(); used = false; } });   // no focus on the field after a drag
 }
 document.querySelectorAll('#props .xyz .pre.scrub').forEach((l, n) => scrub(l, n));
+// Dragging a number field sideways changes it: one step per 3 px (Shift: ten), within its min and max; a click without dragging
+// types in it. o.step(): the step (default the field's own); o.begin/o.live/o.end: hooks around a drag (one undo step for the whole
+// drag), o.live called at each new value. Without o.live the field gets one 'change' on release (a costly change, like Height).
+function scrubField(inp, o = {}) {
+  inp.classList.add('scrubbable');
+  inp.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || inp.disabled || document.activeElement === inp) return;   // typing in it: the pointer selects text
+    e.preventDefault();
+    const other = document.activeElement;
+    if (other && other !== document.body && other.blur) other.blur();   // commit what was typed elsewhere
+    try { inp.setPointerCapture(e.pointerId); } catch (err) { /* a synthetic pointer */ }
+    const x0 = e.clientX, v0 = +inp.value || 0, step0 = (o.step ? o.step() : +inp.step) || 1;
+    const lo = inp.min !== '' ? +inp.min : -Infinity, hi = inp.max !== '' ? +inp.max : Infinity;
+    let moved = false;
+    const move = (ev) => {
+      const dx = ev.clientX - x0;
+      if (!moved) {
+        if (Math.abs(dx) < 3) return;
+        moved = true;
+        document.body.classList.add('scrubbing');
+        if (o.begin) o.begin();
+      }
+      const v = Math.round(Math.min(hi, Math.max(lo, v0 + Math.round(dx / 3) * step0 * (ev.shiftKey ? 10 : 1))) * 1000) / 1000;
+      if (String(v) === inp.value) return;
+      inp.value = String(v);
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      if (o.live) o.live();
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      document.body.classList.remove('scrubbing');
+      if (!moved) { inp.focus(); inp.select(); return; }
+      if (o.end) o.end();
+      else if (!o.live && String(v0) !== inp.value) inp.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  });
+}
+// the selection's X, Y, Z and heading: the object follows the drag
+{
+  let start = null;
+  const live = () => {
+    if (!start || !sel || isDeleted(sel)) return;
+    setWorld(sel.node, [+$('px').value, +$('py').value, +$('pz').value], +$('ph').value, sel.rec);
+    carry(start);
+  };
+  const hooks = (turn) => ({
+    step: () => ($('snap').checked ? (turn ? snapTurn() : snapMove()) : 1),
+    begin: () => { if (sel && !isDeleted(sel)) { snapshot('edit ' + whatSel()); start = startMove(); } },
+    live,
+    end: () => { if (start) { start = null; showProps(); refreshList(); } },
+  });
+  for (const id of ['px', 'py', 'pz']) scrubField($(id), hooks(false));
+  scrubField($('ph'), hooks(true));
+}
+// a pedestrian group's or segment's fields: People and Width through their sliders, X, Y, Z moving the marker
+scrubField($('pdCount'), { live: () => { $('pdCountR').value = $('pdCount').value; slideInput('count'); }, end: slideDone });
+scrubField($('pdWidth'), { live: () => { $('pdWidthR').value = $('pdWidth').value; slideInput('width'); }, end: slideDone });
+{
+  let it = null;
+  const live = () => {
+    if (!it || pedSel !== it) return;
+    const want = [+$('pdx').value, +$('pdy').value, +$('pdz').value], now = pedPos(it);
+    it.node.position.add(toThree(want).sub(toThree(now)));
+    try { peds.moved(it); } catch (e) { msg(`Pedestrians: ${e.message}`, { level: 'warn', toast: true }); }
+  };
+  for (const id of ['pdx', 'pdy', 'pdz']) {
+    scrubField($(id), { begin: () => { it = pedSel; if (it) snapshot('move ' + pedTitle(it).toLowerCase()); }, live,
+                        end: () => { it = null; showPed(); showPedCounts(); refreshList(); } });
+  }
+}
+for (const id of ['snapMove', 'snapTurn', 'ipHeight']) scrubField($(id));
 $('undo').onclick = undo;
 $('redo').onclick = redo;
 $('frame').onclick = frameAll;

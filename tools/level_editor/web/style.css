@@ -325,6 +325,8 @@ details.fold[open] > summary { margin-bottom: 8px; }
 .xyz { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .xyz .field > input { padding-left: 22px; }
 .field > .pre.scrub { pointer-events: auto; cursor: ew-resize; padding: 0 3px; margin-left: -3px; user-select: none; }
+.scrubbable:not(:focus) { cursor: ew-resize; }
+body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: none; }
 .field.suf > input { padding-left: 8px; padding-right: 20px; }
 .field > .post { position: absolute; right: 8px; pointer-events: none; color: var(--muted); font-style: normal; font-size: 12px; }
 .heading-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
