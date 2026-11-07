@@ -436,6 +436,9 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 #propBar { display: contents; }
 #propMenu { top: 48px; left: 8px; z-index: 4; flex-direction: column; align-items: stretch; gap: 2px; padding: 8px; width: 280px; }
 #propMenu .sec-title { margin: 0 2px 4px; }
+.gd-pair { display: flex; gap: 8px; }
+.gd-pair input { flex: 1; min-width: 0; }
+.gd-btns { display: flex; gap: 8px; margin: 8px 0; }
 dialog.pal { width: min(560px, 92vw); }
 #palQ { width: 100%; box-sizing: border-box; }
 #palList { display: flex; flex-direction: column; gap: 2px; max-height: 50vh; overflow-y: auto; margin: 8px 0; }

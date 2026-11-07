@@ -630,6 +630,12 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   node nearest to it, so moving a group can move it to another sidewalk: `lvl.py patch` prints the segment each group walks
   (`walks 2-3 (725 long)`) and the segments nobody walks; the game logs the same report (`[fase]   pedestres: grupo ... anda em
   2-3`; also without `peds` with `WOTM_LEVELPATCH=2`).
+- `grid` (at the top beside `objects`): a bigger collision grid, `{"min": [x, y], "max": [x, y]}`. The disc's grid is a fixed rectangle
+  of 200-unit cells (`python tools/lvl.py collision <FASE>` prints it; 7 x 7 to 102 x 40 cells): the game collides, shoots and sees only
+  inside it, and a box outside is refused. The new rectangle must hold the disc's one (it can only grow) and have at most 65536 cells
+  (cols = floor(width / 200) + 1). The patch builds the grid in the arena (4 bytes a cell, 1 MB for the whole patch), lists every path
+  again in the cells its box covers and points the image's root to it; it runs before the entries, so props and copies see it. A bad
+  rectangle is skipped with a line (`[fase]   grid pulada: ...`) and the stage keeps the disc's grid. Log: `grid: 36 x 36 celulas (eram 18 x 16)...`.
 - `props` (at the top beside `objects`): new static objects made in Blender, placed in the stage.
   ```json
   "props": [{"id": "tower1", "model": "TOWER", "pos": [845.9, 1003.2, 0.5], "heading": 90, "name": "Water tower"}]
@@ -707,6 +713,8 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   this stage (Enter adds one where the view looks). It opens from anywhere, even in a text field.
 - **Fight HUD and sky** (the monitor button): the pictures of the stage's fight HUD and of its sky (the OBJECTs under the nodes with id 2),
   each replaceable by a PNG in the mod (`<stage>_tNNNN.png`, "Textures as PNG"). A sky picture is the stage's own (never "apply to all").
+- **Stage size** (the expand button): the rectangle of the collision grid (`grid` in the patch), four numbers and "Grow every side by 1000";
+  it can only grow. Check reports a rectangle the game would skip.
 - **Stage picture:** the picture button (lower right of the view) saves the middle 2:1 band of the view, 512x256, as
   `mods/<mod>/levelpics/<name>.png` for a custom stage (`<id>`) and for Training, Lake Powell and Tokyo DM; the other game stages have
   their picture in `SHELL.TEX` (make a custom stage on one). The stage select picks it up the next time the game starts.

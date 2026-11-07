@@ -1378,8 +1378,69 @@ struct Stage
         const json::Value *h = e.get("heading");
         return h && h->isInt() ? h->asNum() : std::nan("");
     }
+    // "grid": {"min": [x, y], "max": [x, y]}: grade de colisao maior, na arena (lvl.py LevelPatch.apply_grid, mesma conta e mesma ordem):
+    // celulas do mesmo tamanho, colunas = piso(largura / celula) + 1, cada caminho listado de novo nas celulas da sua caixa, a raiz da
+    // imagem apontando para a grade nova, os nos da lista velha reaproveitados. Valida tudo antes de escrever
+    void applyGrid(const json::Value &g)
+    {
+        const auto xy = [](const json::Value *v, double (&o)[2]) {
+            if (!v || v->type != json::Value::Arr || v->arr.size() != 2 || !v->arr[0].isInt() || !v->arr[1].isInt()) return false;
+            o[0] = v->arr[0].asNum(), o[1] = v->arr[1].asNum();
+            return std::isfinite(o[0]) && std::isfinite(o[1]);
+        };
+        double lo[2], hi2[2];
+        if (g.type != json::Value::Obj || !xy(g.get("min"), lo) || !xy(g.get("max"), hi2)) throw PatchError("\"grid\" precisa de \"min\" e \"max\" como [x, y]");
+        if (lo[0] > minX || lo[1] > minY || hi2[0] < maxX || hi2[1] < maxY)
+            throw PatchError(fmt("\"grid\" (%.0f %.0f)-(%.0f %.0f) nao contem a da fase (%.0f %.0f)-(%.0f %.0f)", lo[0], lo[1], hi2[0], hi2[1], minX, minY, maxX, maxY));
+        const double wc = std::floor((hi2[0] - lo[0]) / cell) + 1, wr = std::floor((hi2[1] - lo[1]) / cell) + 1;
+        if (wc * wr > 65536.0) throw PatchError(fmt("\"grid\" de %.0f x %.0f celulas: no maximo 65536 celulas", wc, wr));
+        const int nc = int(wc), nr = int(wr);
+        const uint32_t need = 0x20 + 4 * uint32_t(nc * nr) + 15;
+        if (need > arenaFree()) throw PatchError(fmt("\"grid\" de %d x %d celulas leva %u bytes, a arena tem %u livres", nc, nr, need, arenaFree()));
+        const uint32_t old = grid;
+        const int oc = cols, orow = rows;
+        std::vector<uint32_t> nodes;   // os nos das listas velhas, celula a celula, cabeca primeiro
+        for (int i = 0; i < cols * rows; ++i)
+        {
+            uint32_t ln = u32(old + 0x20 + 4 * i) & kMask;
+            for (int guard = 0; ln && ok(ln, 8) && guard < 100000; ++guard) nodes.push_back(ln), ln = u32(ln) & kMask;
+        }
+        const uint32_t nu = alloc(0x20 + 4 * uint32_t(nc * nr), 16);
+        copyBytes(nu, old, 0x20);
+        w16(nu + 4, uint16_t(nc)), w16(nu + 6, uint16_t(nr));
+        wf32(nu + 8, cell), wf32(nu + 0xC, lo[0]), wf32(nu + 0x10, lo[1]), wf32(nu + 0x14, hi2[0]), wf32(nu + 0x18, hi2[1]);
+        const uint32_t nroots = u32(kBase);
+        for (uint32_t i = 0; i < nroots && i < 4096; ++i)
+            if ((u32(kBase + 4 + 4 * i) & kMask) == old) setPtr(kBase + 4 + 4 * i, nu);
+        for (uint32_t &r : roots)
+            if (r == old) r = nu;
+        grid = nu, cols = nc, rows = nr;
+        cell = f32(grid + 8), minX = f32(grid + 0xC), minY = f32(grid + 0x10), maxX = f32(grid + 0x14), maxY = f32(grid + 0x18);
+        freeNodes.insert(freeNodes.begin(), nodes.rbegin(), nodes.rend());
+        const int before = stats["new list nodes"];
+        for (auto &kv : cells)
+        {
+            const std::set<int> cs = cellsFor(path(kv.first).box);
+            for (int c : cs) link(c, kv.first);
+            kv.second = cs;
+        }
+        stats["grid cells"] = nc * nr;
+        log.push_back(fmt("grid: %d x %d celulas (eram %d x %d), x [%.0f, %.0f] y [%.0f, %.0f]; %zu caminhos listados de novo, %d nos novos", nc, nr, oc, orow,
+                          lo[0], maxX, lo[1], maxY, cells.size(), stats["new list nodes"] - before));
+    }
     void apply(const json::Value &patch)
     {
+        if (const json::Value *gs = patch.get("grid"))
+        {
+            try
+            {
+                applyGrid(*gs);
+            }
+            catch (const PatchError &e)
+            {   // nada foi escrito: os objetos seguem com a grade do disco
+                log.push_back(fmt("grid pulada: %s", e.what()));
+            }
+        }
         const json::Value *objs = patch.get("objects");
         if (!objs) return;   // so "props" ou "peds" (o lvl.py le a lista que falta como vazia)
         if (objs->type != json::Value::Arr) throw PatchError("\"objects\" nao e uma lista");
