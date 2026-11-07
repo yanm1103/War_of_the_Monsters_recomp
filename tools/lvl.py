@@ -1651,7 +1651,7 @@ class LevelPatch:
         cols, rows = int((hi[0] - lo[0]) / g.cell) + 1, int((hi[1] - lo[1]) / g.cell) + 1
         if cols * rows > self.GRID_MAX_CELLS:
             raise PatchError("\"grid\" of %d x %d cells: at most %d cells" % (cols, rows, self.GRID_MAX_CELLS))
-        need = 0x20 + 4 * cols * rows + 15
+        need = 0x20 + 8 * cols * rows + 31      # the cells, and the lists of moving objects (csListArr: one pointer a cell)
         if need > self.arena_free():
             raise PatchError("\"grid\" of %d x %d cells needs %d bytes, the arena has %d" % (cols, rows, need, self.arena_free()))
         old = g.addr
@@ -1662,8 +1662,10 @@ class LevelPatch:
                 nodes.append(ln)
                 ln, guard = img.u32(ln) & MASK, guard + 1
         new = self.alloc(0x20 + 4 * cols * rows, 16)
+        cs_lists = self.alloc(4 * cols * rows, 4)       # empty: the game indexes it by cell, so the disc's (one entry per old cell) is too short
         img.d[new - img.base:new - img.base + 0x20] = img.d[old - img.base:old - img.base + 0x20]
         struct.pack_into("<hh", img.d, new + 4 - img.base, cols, rows)
+        self.set_ptr(new + 0x1C, cs_lists)
         for k, v in enumerate((g.cell, lo[0], lo[1], hi[0], hi[1])):
             self.wf32(new + 8 + 4 * k, v)
         slot = next(img.base + 4 + 4 * i for i, r in enumerate(img.roots()) if r & MASK == old)
