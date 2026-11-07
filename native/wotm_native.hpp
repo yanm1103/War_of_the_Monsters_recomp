@@ -1061,9 +1061,18 @@ public:
     // hiAlpha: a textura original passa de 0x80 (texmods::loadPng)
     bool modTexture(const Ram &ram, uint32_t texId, const gs::Tex0 &t0, bool tcc, bool rawAlpha, std::vector<uint32_t> &px, uint32_t &w, uint32_t &h,
                     bool hiAlpha) {
+        char what[64];
+        // textura propria de um prop do Blender: o PNG inteiro no lugar da copia CT32 de ate 128 que o jogo sobe
+        if (propTexture && texId && texId < 999 && t0.psm == gs::CT32) {
+            texmods::Png png;
+            if (propTexture(texId, png.host, png.mod, png.rel)) {
+                const UploadHdr hd = UploadHdr::read(ram, ram.u32(addr::texInfo + 16 * texId) & 0x0FFFFFFF);
+                std::snprintf(what, sizeof what, "prop tex%u", texId);
+                if (texmods::loadPng(png, what, hd.w, hd.h, rawAlpha, tcc, px, w, h, hiAlpha)) return true;
+            }
+        }
         texmods::Index &ix = texmods::Index::get();
         if (ix.empty()) return false;
-        char what[64];
         if (t0.psm == gs::T8H || t0.psm == gs::T4HL || t0.psm == gs::T4HH) {
             const auto it = rtxImgSrc_.find((t0.psm << 16) | t0.tbp0);
             if (it == rtxImgSrc_.end()) return false;
@@ -2072,6 +2081,8 @@ public:
         return (from >= 0 && int(slot) == from) ? uint32_t(to) : slot;
     }
 
+    // PNG da textura propria de um prop (texId da carga atual); quem aplica o patch da fase preenche (wotm_live.inc)
+    bool (*propTexture)(uint32_t texId, std::string &host, std::string &mod, std::string &rel) = nullptr;
     unsigned (*movieTexture)() = nullptr;   // textura do filme (texId 999); 0 = sem quadro. Quem toca o filme preenche (wotm_live.inc)
     // quadro anterior (texId 0), render texture de cabeca para baixo com a tela de 640x224 do GS inteira; 0 = nao ha. Preenche: wotm_live.inc
     unsigned (*screenTexture)() = nullptr;

@@ -246,8 +246,12 @@ def _paeth(a, b, c):
 
 
 def read_png(path):
-    """PNG de 8 bits sem entrelacamento: tons de cinza, RGB, paleta, cinza+alfa e RGBA. Devolve (w, h, [(r,g,b,a)])."""
-    d = open(path, "rb").read()
+    """PNG de 8 bits sem entrelacamento: tons de cinza, RGB, paleta, cinza+alfa e RGBA. Devolve (w, h, [(r,g,b,a)]).
+    `path` tambem pode ser o conteudo do arquivo (bytes)."""
+    if isinstance(path, (bytes, bytearray)):
+        d, path = bytes(path), "PNG"
+    else:
+        d = open(path, "rb").read()
     if d[:8] != b"\x89PNG\r\n\x1a\n":
         raise ValueError("%s: nao e PNG" % path)
     o, idat, plte, trns = 8, b"", None, None

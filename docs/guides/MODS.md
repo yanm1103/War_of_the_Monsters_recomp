@@ -636,14 +636,19 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   ```
   `model` is a folder `mods/<mod>/props/<MODEL>/` of the same mod as the JSON (any case), written by `python tools/lvlprop.py build
   <in.glb> mods/<mod>/props/<MODEL> --stage <FASE>` (`TOOLS.md`): `<MODEL>.NGP`, `<MODEL>.PTR`, `<MODEL>.preview.glb` (what the game
-  draws, for the editor) and `prop.json` (`stage`, `textures` as `{"slot", "texId"}`, `bounds`, `light`, counts). A prop belongs to
-  one stage: its textures are the stage's (materials `tex<texId>` in Blender). A mesh with no vertex colors takes the stage's sun
+  draws, for the editor) and `prop.json` (`stage`, `textures` as `{"slot", "texId"}` or, for an image of its own, `{"slot", "png",
+  "packet", "game"}`, `bounds`, `light`, counts). A prop belongs to one stage. A material `tex<texId>` in Blender draws with that
+  texture of the stage; a material with an image (PNG, or JPEG with Pillow, which the editor's exe carries) draws with that image: the PC draws the PNG
+  (`<MODEL>_T<slot>.png` in the folder) at its own size, and the game keeps a copy of at most 128 x 128 (CT32) in the arena, with a
+  texId past the loaded textures and the smallest texture bin of the stage it fits in (log `[fase]   props: KRAB KRAB_T0.png:
+  textura propria 128x128, tex335, caixa de 65536 bytes` and `[mods] prop tex335 <- <mod>/props/KRAB/KRAB_T0.png`). The UVs are
+  clamped to the image (no tiling). A mesh with no vertex colors takes the stage's sun
   (its three parallel lights, as the cars do); a mesh with vertex colors keeps them as its light (bake the light in Blender), and
   `--light vertex|dir` forces one way for the whole prop. `pos` is where the model's origin goes; `heading` (degrees,
   default 0) turns it about Z. Each entry collides as the box of the model's bounds (monsters stand on it and bump into it; vehicles
   and pedestrians are cut around it like around a moved building) and is drawn with no view culling. Each model takes its file size
   of the arena once, and each entry 100 to 200 bytes more. Skipped with a line: a model missing or made for another stage, a texture
-  the stage's `.TEX` does not have, an entry whose box leaves the collision grid. The props are read from the folder at every load,
+  the stage's `.TEX` does not have, an image larger than every texture bin of the stage, an entry whose box leaves the collision grid. The props are read from the folder at every load,
   so a prop rebuilt during a fight shows after a reload (F10). Log: `[fase]   props: TOWER x3 (1216 bytes); 1660 bytes da arena`,
   the same numbers as `lvl.py patch`.
 - Check before playing: `python tools/lvl.py patch CENTRAL mods/<mod>/levels/CENTRAL.json` applies the patch to the disc's image, prints

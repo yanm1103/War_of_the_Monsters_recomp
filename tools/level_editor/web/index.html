@@ -465,8 +465,8 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
           <label title="The vertex colors are the light (bake it in Blender)"><input type="radio" name="ipLight" value="vertex">Vertex colors</label>
           <label title="The stage's three parallel lights, as the cars take them"><input type="radio" name="ipLight" value="dir">Stage sun</label>
         </div></div>
-      <div class="help">Materials named <span class="mono">tex&lt;id&gt;</span> draw with that texture of the stage; a material with no
-        picture is vertex color only.</div>
+      <div class="help">A material with an image draws with it (PNG or JPEG). Materials named
+        <span class="mono">tex&lt;id&gt;</span> draw with that texture of the stage; a material with no picture is vertex color only.</div>
       <div class="callout err" id="ipErr" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-circle-outline.svg)"></i><span></span></div>
     </div>
     <div class="dlg-foot"><button type="button" data-close>Cancel</button><button id="ipOk" type="button" class="primary">Import</button></div>

@@ -30,8 +30,11 @@ Units: `blender` (default) is a Blender scene (Z up, meters, the scene's X/Y are
 (default 18, about the size of the game's cars and buildings); `game` is a glb in game units (tools/lvlglb.py), scale 1. Node
 transforms are baked into the vertices; the scene origin is the prop's pivot. Colors: `blender` COLOR_0 (linear) to sRGB x 128,
 saturated at 0xFF; `game` the raw bytes (COLOR_0 x 255); no COLOR_0 is 0x80. A material `tex<texId>` (a Blender `.001` suffix
-is ignored) draws with that stage texture; a material with no image is vertex color only; any other image is refused (new
-textures are a later step). Meshes named `coll_*`/`hull_*` are skipped with a warning (the box stands in for them), and
+is ignored) draws with that stage texture; a material with no image is vertex color only. Any other material with an image
+(baseColorTexture, PNG; JPEG and others need Pillow) is a texture of the prop's own: the image goes beside the files as
+`<NAME>_T<slot>.png` and into the image as a `.TEX` packet of a CT32 copy (power of two, at most 128 a side and the stage's largest
+texture bin: own_packet) with its own gsTexCtx (own_ctx, TEX1 of the stage); the loader gives it a texId past the loaded ones and a
+bin, and the PC draws the PNG in its place. UVs outside 0..1 are clamped (warning). Meshes named `coll_*`/`hull_*` are skipped with a warning (the box stands in for them), and
 `state<N>_*` (destructible states) is refused. Only the standard library: it runs inside the level editor.
 """
 import json
@@ -55,6 +58,8 @@ ROOT_FLAGS = 0x0003            # visual + collision, no option byte (hdTraverseP
 COLL_FLAGS = 0x0102            # the GROUP the stages' building collision leaves hang from
 COLL_MATID = 1                 # matId of the monsters' and 3-MILE's box hulls
 OP_OBJECT, OP_GROUP, OP_COLL_VOL = 0, 1, 10
+OWN_MAX_LOG = 7                # a texture of the prop's own: at most 128 texels a side in the game's copy (the PC draws the PNG)
+OWN_PREVIEW_ID = 1000          # the texIds the preview gives the prop's own textures (1000 + slot: past texInfo[1000])
 TEMPLATE_RULE = "first-object-roundtrip"
 ANIM_OPS = (17, 25, 35, 38)    # ANIM_XFORM, CHAR_INSTANCE, SKEL_BONE, ANIM_SCALE
 SKY_ID = 2
@@ -182,6 +187,32 @@ def stage_tex_ids(disc, stage):
     return {p.texId for p in tex.parse(data)["packets"]}
 
 
+def stage_tex_sizes(disc, stage):
+    """The block sizes of the stage's .TEX header [(count, bytes)]: texmAllocateBinSpace makes one VRAM bin of each, and a
+    texture of the prop's own takes the smallest that fits it."""
+    import tex
+    path = tex.sibling(os.path.join(disc, "LVL", stage + ".NGP"), ".TEX")
+    if not path:
+        raise PropError("%s.TEX not found" % stage)
+    data, _ = tex.read_file(path)
+    sizes = tex.parse(data)["sizes"]
+    if not sizes:
+        raise PropError("%s.TEX has no block sizes" % stage)
+    return sizes
+
+
+def stage_tex1(img, objs):
+    """TEX1_1 of the first stage OBJECT context (by address) with no mipmaps (MXL 0): the filter a prop's own texture takes."""
+    for o in objs:
+        for k in range(min(img.u16(o + 0x5A), 5)):
+            a = o + 0x70 + 0x30 * k
+            if img.u32(a + 0x18) == 0x14:
+                t1 = img.u32(a + 0x10) | img.u32(a + 0x14) << 32
+                if not (t1 >> 2) & 7:
+                    return t1
+    return 0x120           # MMAG and MMIN linear, the stages' value
+
+
 # ---------------------------------------------------------------- the .glb
 
 def _mat_mul(a, b):
@@ -225,7 +256,8 @@ def _srgb(c):
 
 
 def _material_key(glb, prim, warn):
-    """("tex", texId), or ("color",) for a material with no image; raises for an image that is not a stage texture."""
+    """("tex", texId) for a material named tex<texId>, ("img", image index) for one with an image of its own, or ("color",)
+    for a material with no image."""
     mats = glb.j.get("materials", [])
     if "material" not in prim or prim["material"] >= len(mats):
         return ("color",), (1.0, 1.0, 1.0, 1.0)
@@ -237,9 +269,119 @@ def _material_key(glb, prim, warn):
     if t:
         return ("tex", int(t.group(1))), factor
     if "baseColorTexture" in pbr:
-        raise PropError("material %r has an image of its own: new textures are not supported yet (name the material "
-                        "tex<texId> to draw with one of the stage's textures)" % name)
+        texs = glb.j.get("textures", [])
+        ti = pbr["baseColorTexture"].get("index", -1)
+        src = texs[ti].get("source") if 0 <= ti < len(texs) else None
+        if src is None or src >= len(glb.j.get("images", [])):
+            raise PropError("material %r: its image is not in the file (export with Images: Automatic or PNG)" % name)
+        return ("img", src), factor
     return ("color",), factor
+
+
+def glb_image(glb, index):
+    """(bytes, mimeType, name) of image `index` of the .glb (inside the file: a bufferView)."""
+    im = glb.j["images"][index]
+    if "bufferView" not in im:
+        raise PropError("image %d (%s) is a separate file: export the .glb with the images inside (glTF Binary)" % (
+            index, im.get("uri", "?")))
+    v = glb.j["bufferViews"][im["bufferView"]]
+    o = v.get("byteOffset", 0)
+    data = bytes(glb.bin[o:o + v["byteLength"]])
+    mime = im.get("mimeType") or ("image/png" if data[:8] == b"\x89PNG\r\n\x1a\n" else "image/jpeg" if data[:2] == b"\xff\xd8"
+                                  else "?")
+    return data, mime, im.get("name") or "image%d" % index
+
+
+def decode_image(data, mime):
+    """(w, h, [(r, g, b, a)]) of a PNG (or, with Pillow installed, a JPEG); the PNG bytes the PC draws (the same file when it
+    is a PNG)."""
+    try:
+        from PIL import Image
+    except ImportError:
+        Image = None
+    if Image is not None:
+        import io
+        im = Image.open(io.BytesIO(data)).convert("RGBA")
+        png = data
+        if data[:8] != b"\x89PNG\r\n\x1a\n":
+            out = io.BytesIO()
+            im.save(out, "PNG")
+            png = out.getvalue()
+        flat = getattr(im, "get_flattened_data", None) or im.getdata
+        return im.width, im.height, list(flat()), png
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise PropError("a %s image needs Pillow (pip install pillow); or set Images to PNG in Blender's glTF export" % mime)
+    import tex
+    try:
+        w, h, px = tex.read_png(data)
+    except ValueError as e:
+        raise PropError("image: %s" % e)
+    return w, h, px, data
+
+
+def own_size(w, h, max_bytes):
+    """Power-of-two size of the game's copy of a w x h image: the largest at most the image, 128 a side, and 4 bytes a
+    texel within `max_bytes` (the stage's largest texture block)."""
+    def floor2(n):
+        return 1 << max(3, min(OWN_MAX_LOG, n.bit_length() - 1))
+    tw, th = floor2(w), floor2(h)
+    while tw * th * 4 > max_bytes and max(tw, th) > 8:
+        if tw >= th:
+            tw //= 2
+        else:
+            th //= 2
+    return tw, th
+
+
+def resample(px, w, h, tw, th):
+    """Box filter from w x h to tw x th (at most 8 x 8 samples a texel), alpha-weighted color."""
+    out = []
+    for y in range(th):
+        y0, y1 = y * h // th, max(y * h // th + 1, (y + 1) * h // th)
+        ys = range(y0, y1, max(1, (y1 - y0) // 8))
+        for x in range(tw):
+            x0, x1 = x * w // tw, max(x * w // tw + 1, (x + 1) * w // tw)
+            r = g = b = a = n = 0
+            for yy in ys:
+                row = yy * w
+                for xx in range(x0, x1, max(1, (x1 - x0) // 8)):
+                    c = px[row + xx]
+                    r += c[0] * c[3]
+                    g += c[1] * c[3]
+                    b += c[2] * c[3]
+                    a += c[3]
+                    n += 1
+            out.append((r // a, g // a, b // a, a // n) if a else (0, 0, 0, 0))
+    return out
+
+
+def own_packet(tw, th, px):
+    """A .TEX packet (docs/FORMATS.md, ".TEX and .RTX files") of a CT32 texture: descriptor (texId and bin 0: the loader
+    writes them), DMA ret tag + VIF DIRECT, the sceGsLoadImage of sceGsSetDefLoadImage (DBP 0: texmActivateTexture writes
+    the VRAM slot) and the texels. CT32 has no palette, so nothing goes to the .RTX."""
+    import tex
+    pix = tex.encode(px, tex.CT32)
+    qwc = len(pix) // 16
+    lw, lh = tw.bit_length() - 1, th.bit_length() - 1
+    tbw = 1 if tw <= 64 else tw // 64
+    d = bytearray(0x80)
+    struct.pack_into("<IIHHI", d, 0, (8 + qwc) << 2, 0, 0, 0, tex.CT32 | lw << 8 | lh << 12)
+    struct.pack_into("<IIII", d, 0x10, 0x60000000 | (6 + qwc), 0, 0, 0x50000000 | (6 + qwc))
+    struct.pack_into("<QQ", d, 0x20, 4 | 1 << 60, 0xE)                              # A+D, 4 registers
+    struct.pack_into("<QQ", d, 0x30, tbw << 48 | tex.CT32 << 56, 0x50)               # BITBLTBUF (DBP 0)
+    struct.pack_into("<QQ", d, 0x40, 0, 0x51)                                        # TRXPOS
+    struct.pack_into("<QQ", d, 0x50, tw | th << 32, 0x52)                            # TRXREG
+    struct.pack_into("<QQ", d, 0x60, 0, 0x53)                                        # TRXDIR
+    struct.pack_into("<QQ", d, 0x70, qwc | 0x8000 | 2 << 58, 0)                      # IMAGE, EOP
+    return bytes(d) + pix
+
+
+def own_ctx(tw, th, tex1):
+    """gsTexCtx of a CT32 texture: TEX0_1 (TBP0 0, texmActivateTexture writes it; TCC 1, MODULATE, no CLUT) and the stage's
+    TEX1_1."""
+    tbw = 1 if tw <= 64 else tw // 64
+    tex0 = tbw << 14 | (tw.bit_length() - 1) << 26 | (th.bit_length() - 1) << 30 | 1 << 34
+    return struct.pack("<QQQQQQ", tex0, 0x06, tex1, 0x14, 0, 0)
 
 
 def read_glb(path, units, scale=None, height=None, warn=print):
@@ -284,8 +426,8 @@ def read_glb(path, units, scale=None, height=None, warn=print):
             nrm = glb.accessor(at["NORMAL"]) if "NORMAL" in at else None
             uv = glb.accessor(at["TEXCOORD_0"]) if "TEXCOORD_0" in at else None
             col = glb.accessor(at["COLOR_0"]) if "COLOR_0" in at else None
-            if key[0] == "tex" and uv is None:
-                warn("mesh %s: material tex%d without UVs (every corner at UV 0, 0)" % (name, key[1]))
+            if key[0] in ("tex", "img") and uv is None:
+                warn("mesh %s: material %s without UVs (every corner at UV 0, 0)" % (name, "tex%d" % key[1] if key[0] == "tex" else "with image %d" % key[1]))
             idx = [v[0] for v in glb.accessor(prim["indices"])] if "indices" in prim else list(range(len(pos)))
 
             def corner(v):
@@ -334,7 +476,7 @@ def read_glb(path, units, scale=None, height=None, warn=print):
                     g = game(n)
                     ln = math.sqrt(sum(x * x for x in g))
                     n8 = tuple(max(-127, min(127, int(round(x / ln * 127)))) for x in g) if ln > 1e-12 else None
-                if key[0] == "tex":
+                if key[0] in ("tex", "img"):
                     uvv = uvv if uvv is not None else (0.0, 0.0)
                     uv16 = tuple(max(-32768, min(32767, int(round(x * 4096)))) for x in uvv)
                 else:
@@ -486,9 +628,10 @@ def _batch_points(batches):
     return [tuple(struct.unpack("<f", struct.pack("<I", x))[0] for x in p) for b in batches for p in b.pos]
 
 
-def level_object(mb, header, batches, slot, light):
+def level_object(mb, header, batches, slot, light, ctx=None):
     """A rigid stage OBJECT for the batches: the template's header (0x70 bytes) with id 0, polyPkt, numVerts, sphere, one
-    texture slot (texId and context hold the slot; None: untextured) and dirLight per `light`. Returns its address."""
+    texture slot (texId and context hold the slot; None: untextured; `ctx`: the context of a texture of the prop's own, written
+    as it is) and dirLight per `light`. Returns its address."""
     pkt = vifpkt.Packet(False)
     pkt.batches = batches
     blob = vifpkt.encode(pkt)
@@ -517,8 +660,11 @@ def level_object(mb, header, batches, slot, light):
         mb.u16(a + 0x50, slot)
         mb.ptr[1].append(a + 0x50 - BASE)
         mb.u16(a + 0x5A, 1)
-        mb.raw(a + 0x70, struct.pack("<I", slot) + bytes(0x2C))
-        mb.ptr[2].append(a + 0x70 - BASE)
+        if ctx is not None:
+            mb.raw(a + 0x70, ctx)
+        else:
+            mb.raw(a + 0x70, struct.pack("<I", slot) + bytes(0x2C))
+            mb.ptr[2].append(a + 0x70 - BASE)
     mb.u32(a + 0x64, 0)
     mb.u32(a + 0x68, 0xFFFFFFFF)
     return a, nverts, len(blob)
@@ -582,11 +728,12 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
     have = stage_tex_ids(disc, stage)
     clamp = world_clamp(st)
     textures, slot_of = [], {}
-    for key in sorted(by_key, key=lambda k: (k[0] != "tex", k[1:] if len(k) > 1 else ())):
+    korder = {"tex": 0, "img": 1, "color": 2}
+    for key in sorted(by_key, key=lambda k: (korder[k[0]], k[1:])):
         if key[0] != "tex":
             continue
         tid = key[1]
-        if tid in slot_of:          # the same texture with and without vertex colors
+        if key[:2] in slot_of:      # the same texture with and without vertex colors
             continue
         if tid not in have:
             raise PropError("tex%d is not a texture of %s.TEX" % (tid, stage))
@@ -594,7 +741,7 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
         if found is None:
             raise PropError("tex%d: no OBJECT of %s draws with it (the loader takes its context from one)" % (tid, stage))
         o, ctx = found
-        slot_of[tid] = len(textures)
+        slot_of[key[:2]] = len(textures)
         textures.append({"slot": len(textures), "texId": tid, "ctxFrom": "0x%X" % o,
                          "tex0": "0x%016X" % struct.unpack_from("<Q", ctx, 0)[0]})
         if clamp and 1 in clamp:
@@ -604,16 +751,47 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
                     tid, clamp))
 
     mb = Mini()
+    # the prop's own images: a CT32 packet each inside the image (the loader gives it a texId past every loaded .TEX) and the
+    # PNG the PC draws at full size
+    own_ctx_of, own_files = {}, []
+    imgs = sorted({k[1] for k in by_key if k[0] == "img"})
+    if imgs:
+        glb = ngpmesh.Glb(glb_path)
+        max_bytes = max(sz for _n, sz in stage_tex_sizes(disc, stage))
+        tex1 = stage_tex1(st.img, objs)
+        for idx in imgs:
+            data, mime, iname = glb_image(glb, idx)
+            w, h, px, png = decode_image(data, mime)
+            tw, th = own_size(w, h, max_bytes)
+            pkt = own_packet(tw, th, resample(px, w, h, tw, th) if (tw, th) != (w, h) else px)
+            at = mb.alloc(len(pkt), 0x80)
+            mb.raw(at, pkt)
+            slot = len(textures)
+            fname = "%s_T%d.png" % (name, slot)
+            own_files.append((fname, png))
+            slot_of[("img", idx)] = slot
+            own_ctx_of[slot] = own_ctx(tw, th, tex1)
+            textures.append({"slot": slot, "image": iname, "png": fname, "size": [w, h], "packet": "0x%X" % (at - BASE),
+                             "game": [tw, th], "bytes": len(pkt) - 0x80})
+            log("image %s: %dx%d, the game's copy %dx%d CT32 (%d bytes); the PC draws %s" % (iname, w, h, tw, th, len(pkt) - 0x80,
+                                                                                           fname))
+            uvs = [c[2] for k in by_key if k[:2] == ("img", idx) for t in by_key[k] for c in t]
+            if clamp and 1 in clamp and any(not (0 <= u <= 4096) for uv in uvs for u in uv):
+                log("warning: image %s has UVs outside 0..1 and the stage clamps (CLAMP_1 %s): the edge texels stretch" % (
+                    iname, clamp))
+
     kids, stats_obj, all_pts = [], [], []
     ntris = nverts = pbytes = 0
-    for key in sorted(by_key, key=lambda k: (k[0] != "tex", k[1:] if len(k) > 1 else ())):
+    for key in sorted(by_key, key=lambda k: (korder[k[0]], k[1:])):
         tris = [tuple((tuple(_fbits(x) for x in c[0]), c[1], c[2], c[3]) for c in t) for t in by_key[key]]
-        textured = key[0] == "tex"
+        textured = key[0] in ("tex", "img")
         lt = light if light != "auto" else ("vertex" if key[-1] else "dir")
         for grp in split_objects(level_batches(tris, gif0, gifn, textured)):
-            a, nv, nb = level_object(mb, header, grp, slot_of[key[1]] if textured else None, lt)
+            slot = slot_of[key[:2]] if textured else None
+            a, nv, nb = level_object(mb, header, grp, slot, lt, own_ctx_of.get(slot))
             kids.append(a)
-            stats_obj.append({"object": "0x%X" % a, "texId": key[1] if textured else None, "vertices": nv, "light": lt})
+            stats_obj.append({"object": "0x%X" % a, "texId": key[1] if key[0] == "tex" else None,
+                              "image": key[1] if key[0] == "img" else None, "vertices": nv, "light": lt})
             nverts += nv
             pbytes += nb
             all_pts += _batch_points(grp)
@@ -633,6 +811,12 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
     with open(stem + ".PTR", "wb") as f:
         for lst in mb.ptr:
             f.write(struct.pack("<I", len(lst)) + struct.pack("<%dI" % len(lst), *lst))
+    for f in os.listdir(out_dir):          # the images of an earlier build of this prop
+        if re.match(r"%s_T\d+\.png$" % re.escape(name), f, re.I) and f not in dict(own_files):
+            os.remove(os.path.join(out_dir, f))
+    for fname, png in own_files:
+        with open(os.path.join(out_dir, fname), "wb") as f:
+            f.write(png)
     src = os.path.relpath(os.path.abspath(glb_path), os.path.abspath(out_dir)).replace("\\", "/")
     meta = {"format": 1, "model": name, "name": title or os.path.splitext(os.path.basename(glb_path))[0], "stage": stage,
             "source": src, "units": units, "scale": s, "kind": "static", "light": light, "textures": textures,
@@ -686,10 +870,18 @@ class Prop:
             struct.pack_into("<I", d, off, (v + delta) & 0xFFFFFFFF)
         return d
 
-    def resolve(self, at, ctx_of):
-        """relocate(at) with each slot's texId written and each context filled: ctx_of(texId) -> 0x30 bytes."""
+    @property
+    def own(self):
+        """The textures of the prop's own: {"slot", "packet" (offset in the image, a .TEX packet), "png", "game": [w, h], ...}."""
+        return [t for t in self.textures if "texId" not in t]
+
+    def resolve(self, at, ctx_of, own_id=None):
+        """relocate(at) with each slot's texId written and each context filled: ctx_of(texId) -> 0x30 bytes for the stage's
+        textures; own_id(slot) -> the texId given to a texture of the prop's own (its context is in the image already)."""
         d = self.relocate(at)
-        tid = {t["slot"]: t["texId"] for t in self.textures}
+        tid = {t["slot"]: t["texId"] if "texId" in t else own_id(t["slot"]) if own_id else 0 for t in self.textures}
+        for t in self.own:
+            struct.pack_into("<H", d, int(t["packet"], 16) + 8, tid[t["slot"]])
         for off in self.ptr[1]:
             struct.pack_into("<H", d, off, tid[struct.unpack_from("<H", d, off)[0]])
         for off in self.ptr[2]:
@@ -761,6 +953,14 @@ def check(prop, at=ARENA, log=print):
     for off in prop.ptr[2]:
         if img.u32(at + off) >= nslots or any(d[off + 4:off + 0x30]):
             raise PropError("context at +0x%X does not hold a slot" % off)
+    for t in prop.own:              # a .TEX packet of a CT32 texture, w x h as prop.json says
+        o, (tw, th) = int(t["packet"], 16), t["game"]
+        if o % 0x80 or o + 0x80 + 4 * tw * th > len(d):
+            raise PropError("packet of slot %d at +0x%X: outside the image or not 0x80-aligned" % (t["slot"], o))
+        bits = struct.unpack_from("<I", d, o + 0xC)[0]
+        if bits & 0x3F or 1 << ((bits >> 8) & 15) != tw or 1 << ((bits >> 12) & 15) != th or \
+                struct.unpack_from("<I", d, o + 0x50)[0] != tw or struct.unpack_from("<I", d, o + 0x54)[0] != th:
+            raise PropError("packet of slot %d at +0x%X is not a CT32 %dx%d" % (t["slot"], o, tw, th))
     tris = verts = nobj = 0
     pts, hulls = [], []
     for n, op in walk(img, root):
@@ -808,8 +1008,8 @@ def preview(prop, st, disc, out, textures=False):
     import gltf
     import tex
     objs = stage_objects(st)
-    ctx = {t["texId"]: stage_ctx(st.img, t["texId"], objs)[1] for t in prop.textures}
-    d = prop.resolve(BASE, ctx.get)
+    ctx = {t["texId"]: stage_ctx(st.img, t["texId"], objs)[1] for t in prop.textures if "texId" in t}
+    d = prop.resolve(BASE, ctx.get, lambda s: OWN_PREVIEW_ID + s)
     img = ngp.Image(bytes(d), BASE)
     g = gltf.Glb()
     g.j["extensionsUsed"] = ["KHR_materials_unlit"]
@@ -838,6 +1038,30 @@ def preview(prop, st, disc, out, textures=False):
                 g.j["materials"].append(m)
                 cache[key] = len(g.j["materials"]) - 1
             return cache[key]
+    # a texture of the prop's own: material own<slot> with the PNG the PC draws
+    stage_material, own_of, own_tex, own_mat = material, {OWN_PREVIEW_ID + t["slot"]: t for t in prop.own}, {}, {}
+
+    def material(node, slot, blend, gs, extras):
+        tid = img.u16(node + 0x50) if slot != ngp.SLOT_NOTEX and img.u16(node + 0x5A) else None
+        if tid not in own_of:
+            return stage_material(node, slot, blend, gs, extras)
+        key = (tid, blend, tuple(sorted(extras.items())))
+        if key not in own_mat:
+            t = own_of[tid]
+            if tid not in own_tex:
+                with open(os.path.join(prop.folder, t["png"]), "rb") as f:
+                    own_tex[tid] = g.image(f.read(), t["png"])
+            m = {"name": "own%d" % t["slot"], "doubleSided": True,
+                 "pbrMetallicRoughness": {"baseColorTexture": {"index": own_tex[tid]}, "metallicFactor": 0.0,
+                                          "roughnessFactor": 1.0},
+                 "extensions": {"KHR_materials_unlit": {}},
+                 "extras": dict(extras, gs={"blend": gs[0] if blend else None, "aref": gs[1],
+                                            "zmsk": bool(gs[2]) if blend else False})}
+            if blend:
+                m["alphaMode"] = "BLEND"
+            g.j["materials"].append(m)
+            own_mat[key] = len(g.j["materials"]) - 1
+        return own_mat[key]
     gs = ngp.gs_apply(st.img, ngp.GS_DEFAULT, st.img.u32(st.world + 4)) if st.world else ngp.GS_DEFAULT
     top = {"name": prop.name, "extras": {"prop": prop.name, "stage": prop.stage}, "children": []}
     g.j["nodes"].append(top)

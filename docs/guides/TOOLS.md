@@ -46,7 +46,8 @@
     prop of one stage from a `.glb`, as a mini image prelinked at 0xA00000 (`<NAME>.NGP`, word 0 = 1, word 1 = the root) with a
     `<NAME>.PTR` in the monster layout (pointers; texIds and OBJECT GS contexts that hold the prop's texture slot until the loader
     writes the stage texId and a live context), a `<NAME>.preview.glb` decoded back from the packets it wrote (`lvlglb`'s
-    conventions; materials name `tex<texId>`, images only with `--preview-tex`) and a `prop.json` (stage, slot -> texId, template,
+    conventions; materials name `tex<texId>`, images only with `--preview-tex`; an image of the prop's own is embedded as material
+    `own<slot>`) and a `prop.json` (stage, slot -> texId or the prop's own image: `<NAME>_T<slot>.png`, packet offset, game size; template,
     bounds, collision). Tree: GROUP (0x0003) -> one OBJECT per texture and per "has COLOR_0" (split at the 13-bit `numVerts`) +
     GROUP 0x0102 -> a
     6-plane `COLL_VOL` box from the bounds. The OBJECT header and GIF tags come from the stage's first OBJECT that round-trips in

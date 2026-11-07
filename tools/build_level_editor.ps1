@@ -19,7 +19,7 @@ $py = Join-Path $venv 'Scripts\python.exe'
 $editor = Join-Path $repo 'tools\level_editor'
 
 # --- venv com as versoes fixas ------------------------------------------------------------------------------------------------------
-$pins = @('pyinstaller==6.16.0')
+$pins = @('pyinstaller==6.16.0', 'pillow==12.2.0')   # Pillow: imagens JPEG dos props (lvlprop.decode_image)
 if (-not (Test-Path $py)) {
     $base = (Get-Command py -ErrorAction SilentlyContinue).Source
     $baseArgs = @('-3')
@@ -44,7 +44,7 @@ $work = Join-Path $root 'work'
 $ico = Join-Path $repo 'native\wotm.ico'
 Remove-Item -Recurse -Force $dist, $work -ErrorAction SilentlyContinue
 $hidden = 'lvl', 'lvlglb', 'lvlnames', 'lvlhud', 'lvlprop', 'ngpmesh', 'vifpkt', 'modkit', 'ngp', 'tex', 'gltf', 'iso9660', 'snd989',
-    'hudapi', 'pedsapi' |
+    'hudapi', 'pedsapi', 'PIL.Image', 'PIL.PngImagePlugin', 'PIL.JpegImagePlugin' |
     ForEach-Object { '--hidden-import', $_ }
 $exclude = 'numpy', 'monglb', 'pose', 'tkinter' | ForEach-Object { '--exclude-module', $_ }
 & $py -m PyInstaller --noconfirm --clean --onefile --windowed --name WotM_LevelEditor --icon $ico `

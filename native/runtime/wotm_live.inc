@@ -362,6 +362,7 @@ inline const char *g_stage = "idle";   // current native-layer stage, for crash 
 } // namespace wotm_live
 void wotmCrashTrace(void *exceptionContext);   // wotm_standalone.cpp
 unsigned wotmLevelPatchLoads();                // wotm_levelpatch.inc: cargas da fase com o patch ja aplicado
+bool wotmPropTexture(uint32_t texId, std::string &host, std::string &mod, std::string &rel);   // wotm_levelpatch.inc: PNG de textura de prop
 namespace wotm_live
 {
 #ifdef _WIN32
@@ -1574,6 +1575,7 @@ static bool wotmDrawNative(const uint8_t *rdram)
         new (&S) wotm_live::State();
     }
     wotm_live::g_state = &S;
+    S.scene.propTexture = wotmPropTexture;
     S.scene.movieTexture = []() -> unsigned {   // objeto do menu com texId 999
 #ifdef WOTM_HAVE_FMV
         if (const unsigned id = wotm::fmv::Player::get().screenTexture()) return id;

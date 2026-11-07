@@ -1744,8 +1744,19 @@ class LevelPatch:
                     have = lvlprop.stage_tex_ids(st.disc, st.name)
                     objs = sorted(o for o in st.root_of if self.op(o) == 0)
                     self.log.append("props: the stage's .TEX has %d textures" % len(have))
-                ctx = {}
+                ctx, own_ids, own_lines = {}, {}, []
+                for t in prop.own:          # a texture of its own: a texId past the loaded ones, the smallest bin that fits
+                    tw, th = t["game"]
+                    fit = [sz for _n, sz in lvlprop.stage_tex_sizes(st.disc, st.name) if sz >= 4 * tw * th]
+                    if not fit:
+                        raise PatchError("model %s: image %s (%dx%d) is bigger than every texture bin of the stage" % (
+                            name, t.get("png"), tw, th))
+                    own_ids[int(t["slot"])] = self.next_own_tex = (getattr(self, "next_own_tex", 0) or max(have) + 1)
+                    self.next_own_tex += 1
+                    own_lines.append("props: %s %s: own texture %dx%d, bin of %d bytes" % (name, t.get("png"), tw, th, min(fit)))
                 for t in prop.textures:
+                    if "texId" not in t:
+                        continue
                     tid = int(t["texId"])
                     if tid not in have:
                         raise PatchError("model %s: tex%d is not in %s.TEX" % (name, tid, st.name))
@@ -1760,7 +1771,7 @@ class LevelPatch:
                         if s not in slots:
                             raise PatchError("model %s: slot %d without a texture in prop.json" % (name, s))
                 at = self.alloc(prop.size, 0x80)
-                img.d[at - img.base:at - img.base + prop.size] = prop.resolve(at, lambda tid: ctx[tid][1])
+                img.d[at - img.base:at - img.base + prop.size] = prop.resolve(at, lambda tid: ctx[tid][1], own_ids.get)
                 root = at + prop.root
                 chains = self._prop_chains(root)
                 mine, need = [], 0
@@ -1814,7 +1825,9 @@ class LevelPatch:
                 summary.append("%s x%d (%d bytes)" % (name, len(mine), prop.size))
                 self.stats["prop models"] += 1
                 for t in prop.textures:
-                    self.log.append("props: %s tex%d <- context of OBJECT %07x" % (name, int(t["texId"]), ctx[int(t["texId"])][0]))
+                    if "texId" in t:
+                        self.log.append("props: %s tex%d <- context of OBJECT %07x" % (name, int(t["texId"]), ctx[int(t["texId"])][0]))
+                self.log += own_lines
             except PatchError as err:
                 if self.arena_top() != top:
                     self.rollback(top)

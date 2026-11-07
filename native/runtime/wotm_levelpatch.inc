@@ -19,6 +19,7 @@
 #include <fstream>
 #include <thread>
 #include <map>
+#include <mutex>
 #include <set>
 #include <stdexcept>
 #include <unordered_map>
@@ -1844,6 +1845,10 @@ bool findPatch(const std::string &name, Found &out)
 
 void applyFor(uint8_t *rdram)
 {
+    {
+        const std::lock_guard<std::mutex> lk(g_propTexMu);
+        g_propTex.clear();
+    }
     breakArm({});
     const std::string name = stageName(rdram);
     if (name.empty()) return;
@@ -1952,6 +1957,17 @@ void dbInitDbHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 } // namespace wotm_levelpatch
 
 unsigned wotmLevelPatchLoads() { return wotm_levelpatch::g_applied.load(); }
+
+// PNG da textura propria de um prop da carga atual (wotm_levelprops.inc); a cena nativa o desenha no lugar da copia do jogo
+bool wotmPropTexture(uint32_t texId, std::string &host, std::string &mod, std::string &rel)
+{
+    using namespace wotm_levelpatch;
+    const std::lock_guard<std::mutex> lk(g_propTexMu);
+    const auto it = g_propTex.find(texId);
+    if (it == g_propTex.end()) return false;
+    host = it->second.host, mod = it->second.mod, rel = it->second.rel;
+    return true;
+}
 
 void wotmLevelPatchInstall(PS2Runtime &runtime)
 {

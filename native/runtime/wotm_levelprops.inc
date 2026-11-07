@@ -5,11 +5,13 @@
 // <mod do JSON>/props/<MODELO>/, lida do sistema de arquivos a cada carga (fora do Registry: um prop novo vale no F10). Cada modelo vai
 // uma vez para a arena (alinhado a 0x80: os pacotes sao), relocado pela lista 1 do .PTR; a lista 2 (texIds) recebe o texId da fase do
 // slot e a lista 3 (gsTexCtx, 0x30 bytes) o contexto vivo do primeiro OBJECT da fase, por endereco, com aquele texId (o TBP0 o
-// texmActivateTexture remenda a cada upload). Cada entrada e um TRANSLATE (sem rumo) ou ROTATE sobre a raiz comum do modelo, todas num
+// texmActivateTexture remenda a cada upload). Uma textura propria (imagem do Blender) ja vem na imagem como pacote CT32 de .TEX e
+// contexto proprio: ganha um texId depois dos carregados, a menor caixa de VRAM em que cabe e a entrada de texInfo; a cena nativa
+// desenha o PNG ao lado no lugar dela (wotmPropTexture). Cada entrada e um TRANSLATE (sem rumo) ou ROTATE sobre a raiz comum do modelo, todas num
 // GROUP novo (flags 7: visual, colisao, noFOV) no primeiro slot do GROUP do mundo, como os pedestres. Cada folha de colisao de cada
 // entrada ganha um caminho [mundo, props, T|R, raiz, ..., folha] com a caixa pela regra dos 8 cantos, as celulas e uma planta para o
 // cutNets. Recusado com uma linha e sem deixar nada na arena: modelo que falta ou de outra fase, texId fora do .TEX carregado ou sem
-// OBJECT que desenhe com ele, entrada com caixa fora da grade, modelo cujas entradas nao cabem na arena.
+// OBJECT que desenhe com ele, imagem maior que todas as caixas, entrada com caixa fora da grade, modelo cujas entradas nao cabem na arena.
 
 struct PropModel
 {
@@ -17,8 +19,16 @@ struct PropModel
     std::vector<uint8_t> ngp;
     std::array<std::vector<uint32_t>, 3> ptr;
     std::map<uint32_t, uint32_t> texOf;   // slot -> texId
+    struct Own { uint32_t slot, packet, w, h; std::string png; };
+    std::vector<Own> own;                 // texturas proprias: pacote CT32 na imagem, PNG ao lado
     uint32_t root = 0;                    // deslocamento da raiz na imagem
 };
+
+// Texturas proprias dos props da carga atual: texId -> PNG que a cena nativa desenha no lugar da copia de 128 do jogo
+// (wotmPropTexture, lido pela thread da cena)
+struct PropPng { std::string host, mod, rel; };
+std::mutex g_propTexMu;
+std::map<uint32_t, PropPng> g_propTex;
 
 bool readHostFile(const std::filesystem::path &p, std::vector<uint8_t> &out)
 {
@@ -45,9 +55,22 @@ std::string loadPropModel(const std::filesystem::path &dir, PropModel &m)
     if (tex && tex->type == json::Value::Arr)
         for (const json::Value &t : tex->arr)
         {
-            const json::Value *s = t.get("slot"), *id = t.get("texId");
-            if (!s || !id || !s->isInt() || !id->isInt()) return "textura sem \"slot\" ou \"texId\"";
-            m.texOf[uint32_t(s->asInt())] = uint32_t(id->asInt());
+            const json::Value *s = t.get("slot"), *id = t.get("texId"), *pk = t.get("packet"), *gm = t.get("game"), *png = t.get("png");
+            if (!s || !s->isInt()) return "textura sem \"slot\"";
+            if (id && id->isInt())
+            {
+                m.texOf[uint32_t(s->asInt())] = uint32_t(id->asInt());
+                continue;
+            }
+            // textura propria (lvlprop.own_packet): "packet" (deslocamento na imagem), "game" [w, h] e "png"
+            if (!pk || pk->type != json::Value::Str || !gm || gm->type != json::Value::Arr || gm->arr.size() != 2 || !gm->arr[0].isInt() ||
+                !gm->arr[1].isInt() || !png || png->type != json::Value::Str)
+                return "textura sem \"texId\" nem \"packet\", \"game\" e \"png\"";
+            PropModel::Own o{uint32_t(s->asInt()), uint32_t(std::strtoul(pk->s.c_str(), nullptr, 16)), uint32_t(gm->arr[0].asInt()),
+                             uint32_t(gm->arr[1].asInt()), png->s};
+            if (o.w < 8 || o.w > 1024 || (o.w & (o.w - 1)) || o.h < 8 || o.h > 1024 || (o.h & (o.h - 1)))
+                return fmt("textura %u com tamanho %ux%u", o.slot, o.w, o.h);
+            m.own.push_back(o);
         }
     auto fileName = [&](const char *key, const char *ext) {
         const json::Value *v = files ? files->get(key) : nullptr;
@@ -60,6 +83,13 @@ std::string loadPropModel(const std::filesystem::path &dir, PropModel &m)
     if (m.ngp.size() < 16 || rd(m.ngp, 0) != 1) return "a palavra 0 da imagem nao e 1";
     m.root = rd(m.ngp, 4) - kBase;
     if (m.root >= m.ngp.size()) return "raiz fora da imagem";
+    for (const PropModel::Own &o : m.own)
+    {
+        const uint32_t bits = rd(m.ngp, size_t(o.packet) + 0xC);
+        if (o.packet % 0x80 || size_t(o.packet) + 0x80 + 4 * size_t(o.w) * o.h > m.ngp.size() || (bits & 0x3F) != 0 ||
+            (1u << ((bits >> 8) & 0xF)) != o.w || (1u << ((bits >> 12) & 0xF)) != o.h)
+            return fmt("textura %u: o pacote em 0x%X nao e CT32 %ux%u", o.slot, o.packet, o.w, o.h);
+    }
     size_t o = 0;
     for (int k = 0; k < 3; ++k)
     {
@@ -97,6 +127,36 @@ std::set<uint32_t> loadedTexIds(const Stage &st)
         off = next;
     }
     return out;
+}
+
+// Maior texId dos pacotes carregados: todos os .TEX (fase e monstros, ja relocados) e .RTX de fileStatus. Uma textura propria
+// fica depois dele em texInfo, onde nada da carga a sobrescreve
+uint32_t maxLoadedTexId(const Stage &st)
+{
+    constexpr uint32_t kFs = wotm::sym::fileStatus;
+    uint32_t mx = 0;
+    for (const bool rtx : {false, true})
+    {
+        const uint32_t tab = rtx ? kFs + 0x78 : kFs;
+        const int n = std::min<int>(st.u8(rtx ? kFs + 0xB0 : kFs + 0x38), 14);
+        for (int i = 0; i < n; ++i)
+        {
+            const uint32_t a = st.u32(tab + 4 * uint32_t(i)) & kMask, nx = st.u32(tab + 4 * uint32_t(i + 1)) & kMask;
+            if (!a) continue;
+            const uint32_t b = nx > a && nx - a <= 0x1000000u ? nx : a + 0x1000000u;
+            uint32_t off = a + 16 * st.u32(a + 4);
+            for (int k = 0; off + 16 <= b && k < 4096; ++k)
+            {
+                mx = std::max<uint32_t>(mx, st.u16(off + 8));
+                const uint32_t size = st.u32(off);
+                if (!size) break;
+                const uint32_t next = off + (size >> 2) * 16;
+                if (next <= off) break;
+                off = next;
+            }
+        }
+    }
+    return mx;
 }
 
 // Cadeias da raiz do prop ate cada folha de colisao (op 10, 11, 42), em pre-ordem na ordem dos slots (lvl.py _prop_chains)
@@ -148,6 +208,8 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
     }
     bool haveTex = false;
     std::set<uint32_t> texIds;
+    uint32_t nextOwn = 0;                            // proximo texId de textura propria
+    std::array<std::pair<uint32_t, uint32_t>, 15> bins{};   // texAllBins: (quantas, bytes) de cada caixa de VRAM da carga
     std::vector<uint32_t> objs;
     std::vector<PropMade> made;
     std::vector<std::string> summary;
@@ -173,6 +235,27 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
                     if (st.op(n) == OBJECT) objs.push_back(n);
                 std::sort(objs.begin(), objs.end());
                 st.log.push_back(fmt("props: o .TEX da fase tem %zu texturas", texIds.size()));
+                nextOwn = maxLoadedTexId(st) + 1;
+                for (uint32_t b = 0; b < 15; ++b)
+                    bins[b] = {st.u32(wotm::sym::texAllBins + 8 * b), st.u32(wotm::sym::texAllBins + 8 * b + 4)};
+            }
+            // texturas proprias: o proximo texId livre e a menor caixa de VRAM em que a copia CT32 cabe (lvl.py apply_props)
+            std::map<uint32_t, uint32_t> ownId, ownBin;   // slot -> texId, slot -> caixa
+            std::vector<std::string> ownLines;
+            uint32_t ownNext = nextOwn;
+            for (const PropModel::Own &o : pm.own)
+            {
+                int bin = -1;
+                for (uint32_t b = 0; b < 15; ++b)
+                    if (bins[b].first && bins[b].second >= 4 * o.w * o.h && (bin < 0 || bins[b].second < bins[bin].second)) bin = int(b);
+                if (bin < 0)
+                    throw PatchError(fmt("modelo %s: imagem %s (%ux%u) maior que todas as caixas de textura da fase", name.c_str(), o.png.c_str(),
+                                         o.w, o.h));
+                if (ownNext >= 999) throw PatchError(fmt("modelo %s: sem texId livre para %s (o 999 e o do filme)", name.c_str(), o.png.c_str()));
+                ownId[o.slot] = ownNext++;
+                ownBin[o.slot] = uint32_t(bin);
+                ownLines.push_back(fmt("props: %s %s: textura propria %ux%u, tex%u, caixa de %u bytes", name.c_str(), o.png.c_str(), o.w, o.h,
+                                       ownId[o.slot], bins[bin].second));
             }
             std::map<uint32_t, std::pair<uint32_t, uint32_t>> ctxFrom;   // texId -> (OBJECT, seu gsTexCtx com ele) (lvlprop.stage_ctx)
             for (const auto &[slot, tid] : pm.texOf)
@@ -192,15 +275,33 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
                 {
                     uint32_t slot = 0;
                     std::memcpy(&slot, pm.ngp.data() + off, k == 1 ? 2 : 4);
-                    if (!pm.texOf.count(slot)) throw PatchError(fmt("modelo %s: slot %u sem textura no prop.json", name.c_str(), slot));
+                    if (!pm.texOf.count(slot) && (k == 2 || !ownId.count(slot)))
+                        throw PatchError(fmt("modelo %s: slot %u sem textura no prop.json", name.c_str(), slot));
                 }
             // a imagem na arena: ponteiros relocados, slots trocados pelo texId e o contexto vivo
             const uint32_t at = st.alloc(uint32_t(pm.ngp.size()), 0x80), delta = at - kBase;
             std::memcpy(rdram + (at & PS2_RAM_MASK), pm.ngp.data(), pm.ngp.size());
             st.w32(at + 4, st.u32(at + 4) + delta);
             for (uint32_t off : pm.ptr[0]) st.w32(at + off, st.u32(at + off) + delta);
-            for (uint32_t off : pm.ptr[1]) st.w16(at + off, uint16_t(pm.texOf[st.u16(at + off)]));
+            for (uint32_t off : pm.ptr[1])
+            {
+                const uint32_t slot = st.u16(at + off);
+                st.w16(at + off, uint16_t(pm.texOf.count(slot) ? pm.texOf[slot] : ownId[slot]));
+            }
             for (uint32_t off : pm.ptr[2]) st.copyBytes(at + off, ctxFrom[pm.texOf[st.u32(at + off)]].second, 0x30);
+            // textura propria: o pacote ganha o texId e a caixa, e o texInfo dele aponta para o pacote, fora da VRAM (o primeiro
+            // desenho a sobe, como as do .TEX: texmActivateTexture)
+            for (const PropModel::Own &o : pm.own)
+            {
+                const uint32_t pk = at + o.packet, id = ownId[o.slot], bin = ownBin[o.slot];
+                st.w16(pk + 8, uint16_t(id));
+                st.w32(pk + 0xC, (st.u32(pk + 0xC) & 0x07FFFFFFu) | bin << 27);
+                const uint32_t ti = wotm::sym::texInfo + 16 * id;
+                st.w32(ti, pk);
+                st.w32(ti + 4, (o.w <= 64 ? 1u : o.w / 64) << 14 | bin << 20);
+                st.w32(ti + 8, 0);
+                st.w32(ti + 12, 0);
+            }
             const uint32_t root = at + pm.root;
             std::vector<std::vector<uint32_t>> chains;
             std::vector<uint32_t> chain;
@@ -276,6 +377,16 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
             summary.push_back(fmt("%s x%zu (%zu bytes)", name.c_str(), mine.size(), pm.ngp.size()));
             ++st.stats["prop models"];
             for (const auto &[slot, tid] : pm.texOf) st.log.push_back(fmt("props: %s tex%u <- contexto do OBJECT %07x", name.c_str(), tid, ctxFrom[tid].first));
+            st.log.insert(st.log.end(), ownLines.begin(), ownLines.end());
+            nextOwn = ownNext;
+            {
+                const std::lock_guard<std::mutex> lk(g_propTexMu);
+                for (const PropModel::Own &o : pm.own)
+                    if (const std::filesystem::path png = childNoCase(dir, o.png); !png.empty())
+                        g_propTex[ownId[o.slot]] = {png.string(), modDir.filename().string(), "props/" + name + "/" + o.png};
+                    else
+                        st.log.push_back(fmt("props: %s sem o %s: fica a copia %ux%u do jogo", name.c_str(), o.png.c_str(), o.w, o.h));
+            }
         }
         catch (const PatchError &err)
         {
