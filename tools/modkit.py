@@ -21,7 +21,7 @@ pasta de trabalho (<mods>/_work/<mod>/, com o modkit.json dela), e o pack de um 
   python tools/modkit.py monster anim import my_mod fire_togera [editado.glb] # as animacoes editadas tambem
   python tools/modkit.py monster rig my_mod lizardman rig.glb [--front +y|-y] [--scale S | --height H]   # esqueleto proprio
   python tools/modkit.py skin mesh export my_mod green / skin mesh import my_mod green [editado.glb]   # o mesmo numa skin
-  python tools/modkit.py level prop my_mod torre.glb --stage CENTRAL [--name TORRE] [--units blender|game] [--height H] [--light auto|vertex|dir]
+  python tools/modkit.py level prop my_mod torre.glb --stage CENTRAL [--name TORRE] [--units blender|game] [--height H] [--light auto|vertex|dir] [--strength 1..5]
                                                              # prop novo para uma fase (o editor de fase o poe; hull_* = colisao)
   python tools/modkit_gui.py                                 # o mesmo com interface (botao "Mod kit" do launcher)
 
@@ -1580,7 +1580,7 @@ def main(argv):
     opts, args, i = {}, [], 0
     while i < len(argv):
         if argv[i] in ("--disc", "--mods", "--work", "--base", "--name", "--costume", "--camera", "--narrator", "--front",
-                       "--scale", "--height", "--stage", "--units", "--light", "--title"):
+                       "--scale", "--height", "--stage", "--units", "--light", "--title", "--strength"):
             if i + 1 >= len(argv):
                 raise SystemExit("%s needs a value" % argv[i])
             opts[argv[i][2:]] = argv[i + 1]
@@ -1630,7 +1630,7 @@ def main(argv):
     elif args[0] == "level":
         if len(args) != 4 or args[1] != "prop" or "stage" not in opts:
             raise SystemExit("level prop <mod> <in.glb> --stage CENTRAL [--name TORRE] [--units blender|game] [--scale S | --height H] "
-                             "[--light auto|vertex|dir]")
+                             "[--light auto|vertex|dir] [--strength 1..5]")
         if disc_iso(disc):
             raise SystemExit("level prop needs the disc as an extracted folder (--disc): the .iso is read by the level editor's Import .glb")
         import lvlprop
@@ -1643,7 +1643,8 @@ def main(argv):
         try:
             lvlprop.build(glb, out, opts["stage"].upper(), opts.get("units", "blender"),
                           float(opts["scale"]) if "scale" in opts else None, float(opts["height"]) if "height" in opts else None,
-                          name, opts.get("title"), opts.get("light", "auto"), disc)
+                          name, opts.get("title"), opts.get("light", "auto"), disc,
+                          strength=int(opts.get("strength", lvlprop.DEFAULT_STRENGTH)))
         except (lvlprop.PropError, lvlprop.ngpmesh.MeshError, lvlprop.vifpkt.FormatError) as e:
             raise SystemExit("error: %s" % e)
         print("prop %s: %s" % (name, out))
