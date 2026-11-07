@@ -1185,6 +1185,24 @@ function showPropsPanel() {
   fact('Size', `${dimsText(i.dims)} units`);
   if (sel.rec.prop) {
     const p = propModels.get(i.model)?.info || {};
+    const uses = propRecs.filter((r) => r.prop.model === i.model).length;
+    $('pModel').disabled = false;
+    $('pModel').value = p.name && p.name !== i.model ? p.name : '';
+    $('pModel').placeholder = i.model;
+    $('pModelNote').textContent = `The name of model ${i.model} in the list, for every entry of it (${uses} in this stage). Not undoable.`;
+    // Height: the model is built again from its .glb at that size; every entry of it takes it
+    const hb = document.createElement('span'), hin = document.createElement('input');
+    hb.className = 'hfield';
+    hin.type = 'number';
+    hin.id = 'pPropH';
+    hin.min = '0.1';
+    hin.step = 'any';
+    hin.value = String(Math.round(i.dims[2] * 10) / 10);
+    hin.title = `Scale model ${i.model} to this many game units high (every entry of it; not undoable)`;
+    hin.onchange = () => resizeProp(i.model, +hin.value);
+    hin.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); hin.blur(); } };
+    hb.append(hin, document.createTextNode(' units'));
+    fact('Height', hb);
     fact('Kind', s.word);
     fact('Model', i.model, 'mono');
     if (p.triangles != null) fact('Triangles', String(p.triangles));
@@ -2772,7 +2790,32 @@ $('pName').onchange = () => {
   sel.iname = $('pName').value.trim();
   showSel();
 };
+// A new prop's model, changed in its folder (/api/props/edit): every entry of it in the stage is made again from the new files
+async function editPropModel(model, change, done) {
+  let res;
+  try { res = await api('/api/props/edit', Object.assign({ mod: modNow, model }, change)); }
+  catch (e) { msg(`Couldn't change ${model}: ${cleanError(e).text}`, { level: 'err' }); showSel(); return; }
+  const p = JSON.stringify(buildPatch());
+  await loadPropModels(modNow);
+  restoreTo(p);
+  const m = res.prop || {};
+  msg(done(m) + (m.error ? `, but ${m.error}` : ''), { level: m.error ? 'warn' : 'ok', detail: (res.lines || []).join('\n') || undefined });
+}
+function resizeProp(model, h) {
+  if (!(h >= 0.1)) { msg('The height is a number of game units above 0', { level: 'warn' }); showSel(); return; }
+  const n = propRecs.filter((r) => r.prop.model === model).length;
+  editPropModel(model, { height: h }, (m) => {
+    const b = m.bounds;
+    return `${model} is ${b ? Math.round((b.max[2] - b.min[2]) * 10) / 10 : h} units high now` +
+      (n > 1 ? ` (its ${n} entries in this stage)` : '') + (game.state === 'running' ? '; Test in game shows it' : '');
+  });
+}
 $('pModel').onchange = async () => {
+  if (sel && sel.rec.prop) {
+    const model = sel.rec.info.model, title = $('pModel').value.trim();
+    editPropModel(model, { title }, () => (title ? `Model ${model} renamed to "${title}"` : `Model ${model} goes by its folder's name`));
+    return;
+  }
   if (!sel || !sel.rec.info.sig) return;
   const i = sel.rec.info, name = $('pModel').value.trim();
   try {

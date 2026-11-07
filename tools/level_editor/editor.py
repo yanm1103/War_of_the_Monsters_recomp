@@ -557,6 +557,69 @@ def import_prop(cfg, b):
     return {"prop": entry, "lines": lines, "replaced": existed}
 
 
+def edit_prop(cfg, b):
+    """A model of the mod changed in place: `title` (prop.json "name", what the list shows; empty = the folder's name) and/or
+    `height` (game units: built again from its source .glb, scaled about the origin, with the same units, light and template ABE;
+    every entry of the model takes it). Returns {"prop": props_list entry, "lines"}."""
+    mod = (b.get("mod") or "").strip()
+    if bad_mod(mod):
+        raise ValueError(bad_mod_reason(mod))
+    model = (b.get("model") or "").strip().upper()
+    d = props_dir(cfg, mod)
+    folder = lvl._child_nocase(d, model) if d and lvlprop.NAME_RE.match(model) else None
+    pj = os.path.join(folder, "prop.json") if folder else None
+    if not pj or not os.path.isfile(pj):
+        raise ValueError("Mod %s has no prop %s" % (mod, model))
+    with open(pj, encoding="utf-8") as f:
+        m = json.load(f)
+    title = b.get("title")
+    if title is not None:
+        title = " ".join(str(title).split())[:64] or m.get("model") or model
+    lines = []
+    if b.get("height") not in (None, ""):
+        try:
+            h = float(b["height"])
+        except (TypeError, ValueError):
+            raise ValueError("The height is a number of game units")
+        if not 0.1 <= h <= 100000:
+            raise ValueError("The height goes from 0.1 to 100000 game units")
+        lo, hi = m["bounds"]["min"], m["bounds"]["max"]
+        old = hi[2] - lo[2]
+        if old <= 1e-6 or not m.get("scale"):
+            raise ValueError("%s is flat: it has no height to scale" % model)
+        src = os.path.join(folder, "source.glb")
+        if not os.path.isfile(src):
+            src = os.path.normpath(os.path.join(folder, m.get("source") or "source.glb"))
+        if not os.path.isfile(src):
+            raise ValueError("The .glb %s was made from is gone (%s): import it again" % (model, m.get("source")))
+        backup = {}
+        for n in os.listdir(folder):
+            p = os.path.join(folder, n)
+            if os.path.isfile(p) and n.lower() != "source.glb":
+                with open(p, "rb") as f:
+                    backup[n] = f.read()
+        stage = (m.get("stage") or "").upper()
+        try:
+            lvlprop.build(src, folder, stage, m.get("units") or "blender", m["scale"] * h / old, None, m.get("model") or model,
+                          title if title is not None else m.get("name"), m.get("light") or "auto", stage_root(cfg["disc"], stage),
+                          abe=(m.get("template") or {}).get("abe", 1), log=lines.append)
+        except Exception:
+            for n in os.listdir(folder):
+                if n not in backup and n.lower() != "source.glb":
+                    os.remove(os.path.join(folder, n))
+            for n, data in backup.items():
+                with open(os.path.join(folder, n), "wb") as f:
+                    f.write(data)
+            raise
+    elif title is not None:
+        m["name"] = title
+        with open(pj, "w", encoding="utf-8") as f:
+            json.dump(m, f, indent=1)
+            f.write("\n")
+    entry = next((e for e in props_list(cfg, mod) if e["model"] == os.path.basename(folder).upper()), None)
+    return {"prop": entry, "lines": lines}
+
+
 def list_mods(cfg):
     d = cfg["mods"]
     if not os.path.isdir(d):
@@ -883,6 +946,11 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     return self.send(200, import_prop(cfg, b))
                 except (ValueError, lvlprop.PropError, lvlprop.ngpmesh.MeshError, lvlprop.vifpkt.FormatError) as e:
+                    return self.send(400, {"error": str(e), "code": "prop"})
+            if self.path == "/api/props/edit":     # a model's name in the list or its height (built again from its .glb)
+                try:
+                    return self.send(200, edit_prop(cfg, b))
+                except (ValueError, KeyError, OSError, lvlprop.PropError, lvlprop.ngpmesh.MeshError, lvlprop.vifpkt.FormatError) as e:
                     return self.send(400, {"error": str(e), "code": "prop"})
             if self.path == "/api/browse":
                 if BROWSE["window"] is None:

@@ -776,7 +776,10 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   **Height** scales the model to that many game units (empty keeps the file's size), **Light** as `--light` (`TOOLS.md`). The
   `.glb` is kept as `props/<NAME>/source.glb`; a name the mod already has asks before replacing it, and the new model then shows
   wherever it is placed. A new prop moves, turns, copies (a copy is one more entry with the same model), drops and deletes like
-  any object; it has no disc place, so Restore is off and its badge says **New**. It sits in the list's **New props** section,
+  any object; it has no disc place, so Restore is off and its badge says **New**. In its panel, **Model name** is the model's
+  name in the list (`prop.json` `name`; empty goes back to the folder's name) and **Height** (Details) builds the model again
+  from its `.glb` (`source.glb`, or the `source` of `prop.json`) at that many game units, scaled about its origin with the same
+  units and light; both change the model, so every entry of it takes them, and neither is undoable. It sits in the list's **New props** section,
   and Check names the one the game would skip. Switching to a mod without its model keeps the entry in the file (the editor says
   how many), where the game skips it.
 - **List:** every object by name, its handle beside it, in sections (**Buildings**, **Pickups**, **Props**, **Terrain** and **New props**, the
