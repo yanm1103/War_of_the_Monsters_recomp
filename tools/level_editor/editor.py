@@ -457,6 +457,91 @@ def patch_path(cfg, mod, name):
     return os.path.join(cfg["mods"], mod, "levels", name + ".json")
 
 
+# ------------------------------------------------------------------ custom stages (mods/<mod>/stages/<folder>/stage.json)
+CUSTOM_BASES = ("CENTRAL", "VEGAS", "CANYON2", "METRO", "UFO", "CAPITOL", "CANYON1", "MINISF", "TOKYODM")
+CUSTOM_ID = re.compile(r"^[A-Za-z][A-Za-z0-9]{0,7}$")
+
+
+def custom_stages(cfg, refused=False):
+    """The valid custom stages of every mod: {ID (capitals): {id, name, base, mod, folder}}; with refused=True also the ones the
+    game refuses, which carry a reason. Two mods with one id: the last by name, as the game."""
+    out = {}
+    for mod in sorted(list_mods(cfg), key=str.lower):
+        sdir = os.path.join(cfg["mods"], mod, "stages")
+        if not os.path.isdir(sdir):
+            continue
+        for folder in sorted(os.listdir(sdir)):
+            path = os.path.join(sdir, folder, "stage.json")
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, encoding="utf-8") as f:
+                    j = json.load(f)
+                sid, base = str(j.get("id") or ""), str(j.get("base") or "").upper()
+                name = str(j.get("name") or sid.upper())
+            except (OSError, ValueError, AttributeError) as e:
+                out["?" + mod + "/" + folder] = {"id": folder, "mod": mod, "folder": folder, "reason": "stage.json: %s" % e}
+                continue
+            reason = ""
+            if not CUSTOM_ID.match(sid):
+                reason = "the id must be 1 to 8 letters and digits, starting with a letter"
+            elif sid.upper() in LEVEL_NUM or sid.upper() in ("TRAINING",):
+                reason = "the id repeats a game stage"
+            elif base not in CUSTOM_BASES:
+                reason = "the base must be one of " + ", ".join(CUSTOM_BASES)
+            if reason and not refused:
+                continue
+            out[sid.upper() or "?" + mod + "/" + folder] = {"id": sid, "name": name[:17], "base": base, "mod": mod,
+                                                         "folder": folder, "reason": reason}
+    return out
+
+
+def base_of(cfg, name):
+    """The game stage whose files a stage name reads: a custom stage's base, else the name itself."""
+    c = custom_stages(cfg).get((name or "").upper())
+    return c["base"] if c else name
+
+
+def new_stage(cfg, b):
+    """New stage…: mods/<mod>/stages/<id>/stage.json (id, name, base) and, with a patch, levels/<ID>.json. Returns the listing
+    entry. The game reads its registry at boot, so it sees the stage after a restart (Test in game restarts it)."""
+    mod, sid, base = (b.get("mod") or "").strip(), (b.get("id") or "").strip(), (b.get("base") or "").strip().upper()
+    if bad_mod(mod):
+        raise ValueError(bad_mod_reason(mod))
+    if not CUSTOM_ID.match(sid):
+        raise ValueError("The id is 1 to 8 letters and digits, starting with a letter.")
+    if sid.upper() in LEVEL_NUM or sid.upper() in custom_stages(cfg):
+        raise ValueError("A stage called %s exists already." % sid.upper())
+    if base not in CUSTOM_BASES:
+        raise ValueError("The base must be one of %s." % ", ".join(CUSTOM_BASES))
+    name = (b.get("name") or "").strip() or sid.upper()
+    if len(name) > 17 or not all(32 <= ord(c) < 127 for c in name):
+        raise ValueError("The name is up to 17 ASCII characters.")
+    folder = os.path.join(cfg["mods"], mod, "stages", sid.lower())
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, "stage.json"), "w", encoding="utf-8") as f:
+        json.dump({"id": sid, "name": name, "base": base}, f, indent=1)
+    patch = b.get("patch")
+    if isinstance(patch, dict):
+        save_patch(cfg, mod, sid.upper(), patch)
+    return {"name": sid.upper(), "title": name, "level": LEVEL_NUM.get(base), "custom": True, "base": base, "mod": mod, "id": sid}
+
+
+def stage_list(cfg):
+    """The disc's stages, then the valid custom stages (name = the id in capitals, "custom": true, "base", "mod") and, with
+    their reason, the refused ones."""
+    base = STAGES.list(cfg["disc"])
+    if not base:
+        return base
+    names = {s["name"] for s in base}
+    for key, c in custom_stages(cfg).items():
+        if c["base"] not in names:
+            continue
+        base.append({"name": key, "title": c["name"], "level": LEVEL_NUM.get(c["base"]), "custom": True, "base": c["base"],
+                     "mod": c["mod"], "id": c["id"]})
+    return base
+
+
 # ------------------------------------------------------------------ new props (tools/lvlprop.py; the patch's "props")
 def mod_folder(cfg, mod):
     """The mod's folder, where the "props" models are (props/<MODEL>/); None with no mod or a bad name."""
@@ -518,7 +603,7 @@ def prop_preview(cfg, mod, model):
 def import_prop(cfg, b):
     """Import .glb: writes the .glb as props/<NAME>/source.glb of the mod and builds the prop there (lvlprop.build, for the
     stage). An existing model is replaced only with `replace`. Returns {"prop": props_list entry, "lines"}."""
-    mod, stage = (b.get("mod") or "").strip(), (b.get("stage") or "").upper()
+    mod, stage = (b.get("mod") or "").strip(), base_of(cfg, (b.get("stage") or "").upper()).upper()
     if bad_mod(mod):
         raise ValueError(bad_mod_reason(mod))
     name = (b.get("name") or "").strip().upper()
@@ -717,7 +802,8 @@ def launch_game(cfg, name, training):
         raise SettingsError("Can't find the game (wotm.exe).")
     env = dict(os.environ)
     os.makedirs(CACHE, exist_ok=True)
-    env.update({"WOTM_MODS": os.path.abspath(cfg["mods"]), "WOTM_MATCH": "3,%d" % LEVEL_NUM.get(name, 1),
+    env.update({"WOTM_MODS": os.path.abspath(cfg["mods"]), "WOTM_MATCH": ("3,1,@" + custom_stages(cfg)[name.upper()]["id"]) if name.upper() in custom_stages(cfg)
+                else "3,%d" % LEVEL_NUM.get(name, 1),
                 "WOTM_FULLSCREEN": "0", "WOTM_LEVELPATCH": "1", "WOTM_LEVELRELOAD": RELOAD_FILE})
     if training:
         env["WOTM_TRAINING"] = "1"
@@ -747,7 +833,7 @@ def is_clone():
 
 
 def init_reply(cfg):
-    return {"config": cfg, "stages": STAGES.list(cfg["disc"]), "mods": list_mods(cfg), "discError": disc_error(cfg["disc"]),
+    return {"config": cfg, "stages": stage_list(cfg), "mods": list_mods(cfg), "discError": disc_error(cfg["disc"]),
             "gameRunning": game_running(), "gameStage": GAME["stage"] if game_running() else "",
             "clone": is_clone() or bool(cfg.get("elf")), "canBrowse": BROWSE["window"] is not None}
 
@@ -866,7 +952,8 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/init":
                 return self.send(200, init_reply(cfg))
             if u.path == "/api/stage":
-                st, objs, on = STAGES.objects(cfg["disc"], q["name"])
+                base = base_of(cfg, q["name"])      # a custom stage reads its base's files, and its own patch
+                st, objs, on = STAGES.objects(cfg["disc"], base)
                 patch = {}
                 if q.get("mod"):
                     try:
@@ -874,15 +961,15 @@ class Handler(BaseHTTPRequestHandler):
                             patch = json.load(f)
                     except (OSError, ValueError):
                         pass
-                facts = STAGES.facts(cfg["disc"], q["name"])
+                facts = STAGES.facts(cfg["disc"], base)
                 # the mods with a file for this stage, and the one the game uses (the last by name)
                 mod = q.get("mod", "")
                 have = [m for m in list_mods(cfg) if os.path.isfile(patch_path(cfg, m, q["name"]))]
                 winner = patch_winner(cfg, mod, q["name"]) if mod and not bad_mod(mod) else \
                     (sorted(have, key=str.lower)[-1] if have else "")
                 return self.send(200, {"objects": describe(q["name"], objs, on, facts, load_names()), "patch": patch,
-                                       "env": stage_env(cfg, cfg["disc"], q["name"], mod),
-                                       "peds": pedsapi.stage_peds(st, stage_root(cfg["disc"], q["name"])),
+                                       "env": stage_env(cfg, cfg["disc"], base, mod),
+                                       "peds": pedsapi.stage_peds(st, stage_root(cfg["disc"], base)),
                                        "have": have, "winner": winner, "others": [m for m in have if m != mod]})
             if u.path == "/api/props":          # the mod's props (props/*/prop.json)
                 return self.send(200, {"props": props_list(cfg, q.get("mod", ""))})
@@ -894,10 +981,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200, f.read(), "model/gltf-binary")
             if u.path == "/api/hud":
                 mod = q.get("mod", "").strip()
-                return self.send(200, HUD.panel(cfg["disc"], cfg["mods"], mod if mod and not bad_mod(mod) else "", q["stage"]))
+                return self.send(200, HUD.panel(cfg["disc"], cfg["mods"], mod if mod and not bad_mod(mod) else "", base_of(cfg, q["stage"])))
             if u.path == "/api/hudimg":
                 mod = q.get("mod", "").strip()
-                path = HUD.image(cfg["disc"], cfg["mods"], "" if bad_mod(mod) else mod, q["stage"], q.get("src"), q.get("png"))
+                path = HUD.image(cfg["disc"], cfg["mods"], "" if bad_mod(mod) else mod, base_of(cfg, q["stage"]), q.get("src"), q.get("png"))
                 if not path or not os.path.isfile(path):
                     return self.send(404, {"error": "not found"})
                 with open(path, "rb") as f:
@@ -906,7 +993,7 @@ class Handler(BaseHTTPRequestHandler):
                 run = game_running()
                 return self.send(200, {"lines": game_stage_lines(cfg), "running": run, "stage": GAME["stage"] if run else ""})
             if u.path == "/api/glb":
-                with open(STAGES.glb(cfg["disc"], q["name"]), "rb") as f:
+                with open(STAGES.glb(cfg["disc"], base_of(cfg, q["name"])), "rb") as f:
                     return self.send(200, f.read(), "model/gltf-binary")
             return self.static(u.path)
         except Exception as e:      # noqa: BLE001 - the page shows the error
@@ -932,6 +1019,11 @@ class Handler(BaseHTTPRequestHandler):
                 cfg.update({k: v for k, v in b.items() if k in ("disc", "mods", "game", "elf", "cwd", "iso", "theme", "mod")})
                 save_config(cfg)
                 return self.send(200, init_reply(cfg))
+            if self.path == "/api/stage/new":
+                try:
+                    return self.send(200, new_stage(cfg, b))
+                except ValueError as e:
+                    return self.send(400, {"error": str(e), "code": "newstage"})
             if self.path == "/api/names":
                 if not b.get("sig"):
                     return self.send(400, {"error": "this object has no mesh to name as a model"})
@@ -939,7 +1031,7 @@ class Handler(BaseHTTPRequestHandler):
                                {"kind": b.get("kind"), "type": b.get("ptype"), "dims": b.get("dims")})
                 return self.send(200, {"ok": True, "file": USER_NAMES})
             if self.path == "/api/check":
-                return self.send(200, check_patch(cfg["disc"], b["name"], b["patch"], mod_folder(cfg, b.get("mod"))))
+                return self.send(200, check_patch(cfg["disc"], base_of(cfg, b["name"]), b["patch"], mod_folder(cfg, b.get("mod"))))
             if self.path == "/api/paths":       # Settings' badges for what is typed (nothing is saved)
                 return self.send(200, path_states(b))
             if self.path == "/api/props/import":   # Import .glb: a new prop in the mod, built for the open stage
@@ -980,7 +1072,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(409, {"error": "the game is already open", "code": "running", "stage": GAME["stage"]})
                 if self.path == "/api/test" and not b.get("save", True):
                     return self.send(200, {"ok": True, "lines": [], "launched": launch_game(cfg, name, b.get("training", True))})
-                res = check_patch(cfg["disc"], name, b["patch"], mod_folder(cfg, mod))
+                res = check_patch(cfg["disc"], base_of(cfg, name), b["patch"], mod_folder(cfg, mod))
                 res["saved"] = save_patch(cfg, mod, name, b["patch"])
                 # another mod with this stage's file that loads later wins in the game: the page says so (not a check problem)
                 res["winner"] = patch_winner(cfg, mod, name)

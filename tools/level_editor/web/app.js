@@ -531,6 +531,8 @@ function showHint() {
 // ------------------------------------------------------------------ model
 // rec: one object of the stage (handle). item: what can be selected, the object itself or one of its copies.
 // group: every selected item; sel: the one the gizmo and the fields act on (the last picked), the others follow it.
+let stageBases = {};     // a custom stage's name -> the game stage it is built on (its files, its handles, its props)
+const baseOf = (n) => stageBases[n] || n;
 let cfg = {}, stageName = '', recs = [], byHandle = new Map(), itemOf = new Map(), sel = null, group = [], dirty = false;
 // undo and redo: {p: the patch as JSON before the change, label}; savedJson: the patch the mod's file holds
 let history = [], future = [], savedJson = '';
@@ -592,7 +594,7 @@ async function loadPropModels(mod) {
   await Promise.all(list.map(async (p) => {
     const pm = { info: p, scene: null };
     propModels.set(p.model, pm);
-    if (p.error || !p.preview || p.stage !== stageName) return;
+    if (p.error || !p.preview || p.stage !== baseOf(stageName)) return;
     try {
       const gltf = await new GLTFLoader().loadAsync(`/api/propglb?mod=${encodeURIComponent(mod)}&model=${encodeURIComponent(p.model)}`);
       gltf.scene.traverse((o) => {
@@ -2748,7 +2750,7 @@ function showPropMenu(open = $('propMenu').hidden) {
   if (!open) return;
   showLayers(false);
   $('pmMod').textContent = modNow ? `mod "${modNow}"` : 'no mod';
-  const list = $('pmList'), all = [...propModels.values()], here = all.filter((pm) => pm.info.stage === stageName);
+  const list = $('pmList'), all = [...propModels.values()], here = all.filter((pm) => pm.info.stage === baseOf(stageName));
   list.textContent = '';
   for (const pm of here) {
     const p = pm.info, b = document.createElement('button');
@@ -2778,6 +2780,47 @@ document.addEventListener('pointerdown', (e) => {   // a click anywhere else clo
 }, true);
 let ipData = null, ipTitle = '';
 const ipInput = Object.assign(document.createElement('input'), { type: 'file', accept: '.glb,model/gltf-binary' });
+// New stage…
+const NS_BASES = ['CENTRAL', 'VEGAS', 'CANYON2', 'METRO', 'UFO', 'CAPITOL', 'CANYON1', 'MINISF', 'TOKYODM'];
+const nsErr = (t) => { $('nsErr').hidden = !t; $('nsErr').querySelector('span').textContent = t || ''; };
+const nsWhere = () => { $('nsWhere').textContent = modNow ? `mods/${modNow}/stages/${($('nsId').value.trim() || '<id>').toLowerCase()}/` : '(choose a mod first)'; };
+$('newStage').onclick = () => {
+  if (!stageName) return;
+  if (!modNow) { msg('Choose a mod first: the new stage is saved in it', { level: 'warn', toast: true }); return; }
+  const b = $('nsBase');
+  b.innerHTML = NS_BASES.filter((x) => stageTitles[x]).map((x) => `<option value="${x}">${stageTitles[x]} (${x})</option>`).join('');
+  b.value = NS_BASES.includes(baseOf(stageName)) ? baseOf(stageName) : (b.options[0] || {}).value;
+  $('nsId').value = $('nsName').value = '';
+  $('nsCopy').checked = true;
+  nsErr('');
+  nsWhere();
+  $('stageDlg').showModal();
+  $('nsId').focus();
+};
+$('nsId').oninput = () => { nsWhere(); nsErr(''); };
+$('nsOk').onclick = async () => {
+  const id = $('nsId').value.trim();
+  if (!/^[A-Za-z][A-Za-z0-9]{0,7}$/.test(id)) { nsErr('The id is 1 to 8 letters and digits, starting with a letter.'); $('nsId').focus(); return; }
+  const base = $('nsBase').value;
+  // the patch carries the base's handles: it comes along only when the open stage has that base
+  const withPatch = $('nsCopy').checked && baseOf(stageName) === base;
+  let res;
+  try { res = await api('/api/stage/new', { mod: modNow, id, name: $('nsName').value.trim(), base, patch: withPatch ? buildPatch() : null }); }
+  catch (e) { nsErr(cleanError(e).text); return; }
+  $('stageDlg').close();
+  cfg = Object.assign({}, cfg);
+  const o = document.createElement('option');
+  o.value = res.name;
+  o.textContent = `${res.title} (custom, on ${res.base})`;
+  $('stage').appendChild(o);
+  stageTitles[res.name] = res.title;
+  stageBases[res.name] = res.base;
+  dirty = false;
+  $('stage').value = res.name;
+  await loadStage(res.name);
+  msg(`Created ${res.title} on ${stageTitles[res.base] || res.base}. Test in game opens it`, { level: 'ok', toast: true });
+};
+
 const ipErr = (t) => { $('ipErr').hidden = !t; $('ipErr').querySelector('span').textContent = t || ''; };
 const ipRadio = (n) => document.querySelector(`#propDlg input[name="${n}"]:checked`)?.value;
 const ipWhere = () => { $('ipWhere').textContent = `mods/${modNow}/props/${$('ipName').value.trim().toUpperCase() || 'NAME'}/`; };
@@ -3055,8 +3098,9 @@ function init(r, load = true) {
   const s = $('stage');
   const prev = stageName || (new URLSearchParams(location.search).get('stage') || 'CENTRAL').toUpperCase();   // ?stage=METRO
   // "Midtown (CENTRAL)", but "UFO" once when the title is the file's name
-  s.innerHTML = r.stages.map((x) => `<option value="${x.name}">${x.title}${x.title.toUpperCase() === x.name ? '' : ` (${x.name})`}</option>`).join('');
+  s.innerHTML = r.stages.map((x) => `<option value="${x.name}">${x.title}${x.custom ? ` (custom, on ${x.base})` : x.title.toUpperCase() === x.name ? '' : ` (${x.name})`}</option>`).join('');
   stageTitles = Object.fromEntries(r.stages.map((x) => [x.name, x.title]));
+  stageBases = Object.fromEntries(r.stages.filter((x) => x.custom).map((x) => [x.name, x.base]));
   game.stage = r.gameStage || '';
   setRunning(!!r.gameRunning);
   if (r.discError || !r.stages.length) {

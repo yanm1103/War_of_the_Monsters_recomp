@@ -1,0 +1,92 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pedtest</title></head>
+<body>
+<pre id="out">running</pre>
+<iframe id="f" style="width:1280px;height:800px"></iframe>
+<script>
+// headless check of the pedestrians and the HUD wiring: /_pedtest.html?stage=CENTRAL
+const q = new URLSearchParams(location.search);
+const out = [];
+const say = (s) => { out.push(s); document.getElementById('out').textContent = out.join('\n'); };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const ok = (c, m) => say((c ? 'ok   ' : 'FAIL ') + m);
+try { localStorage.setItem('wotmLevelEditor.peds', '0'); } catch (e) {}
+const f = document.getElementById('f');
+f.src = '/?debug&stage=' + (q.get('stage') || 'CENTRAL');
+(async () => {
+  let D;
+  for (let i = 0; i < 900; i++) { await sleep(100); D = f.contentWindow.wotmDebug; if (D && D.items().length) break; }
+  if (!D || !D.items().length) { say('FAIL no stage'); say('DONE'); return; }
+  const doc = f.contentDocument, $ = (id) => doc.getElementById(id);
+  try {
+    const P = D.peds;
+    ok(!P.root.visible && $('pedBar').hidden, 'layer off by default');
+    D.setPeds(true);
+    const c0 = P.counts();
+    ok(P.root.visible && !$('pedBar').hidden, `layer on: ${$('pedCounts').textContent}`);
+    ok(D.buildPatch().peds === undefined, 'no edit, no peds in the patch');
+    const g = P.items().find((i) => i.kind === 'group');
+    D.selectPed(g);
+    ok(!$('pedProps').hidden && $('props').hidden && D.pedSel === g, `selected: ${$('pdTitle').textContent} | ${$('pdInfo').textContent}`);
+    // move by the position fields
+    $('pdx').value = +$('pdx').value + 40; D.pedFromInputs();
+    let p = D.buildPatch().peds;
+    ok(p && p.groups && p.groups[0].pos, `moved: ${JSON.stringify(p)}`);
+    $('pdCount').value = 33; D.pedFromInputs();
+    p = D.buildPatch().peds;
+    ok(p.groups[0].count === 33, `count 33: ${JSON.stringify(p.groups[0])}`);
+    D.undo();
+    p = D.buildPatch().peds;
+    ok(p && p.groups[0].count === undefined && D.pedSel === null, `undo count: ${JSON.stringify(p)}`);
+    D.undo();
+    ok(D.buildPatch().peds === undefined, 'undo move: no peds');
+    // arrows
+    const g2 = P.items().find((i) => i.kind === 'group');
+    D.selectPed(g2);
+    const before = JSON.stringify(g2.group.pos);
+    D.nudge(1, 0, 0, false);
+    ok(JSON.stringify(g2.group.pos) !== before, `nudge: ${before} -> ${JSON.stringify(g2.group.pos.map(Math.round))}`);
+    // drop
+    g2.node.position.y += 300; P.moved(g2);
+    const hi = g2.group.pos[2];
+    D.dropToGround();
+    ok(g2.group.pos[2] < hi - 100, `drop: z ${Math.round(hi)} -> ${Math.round(g2.group.pos[2])}`);
+    // add a group and a sidewalk where the view looks
+    D.addPed('group');
+    ok(P.counts().groups === c0.groups + 1 && D.pedSel && D.pedSel.kind === 'group' && !D.pedSel.group.handle, `add group: ${$('pedCounts').textContent}`);
+    D.addPed('seg');
+    ok(P.counts().segments === c0.segments + 1 && D.pedSel.kind === 'seg', `add sidewalk: ${$('pdInfo').textContent}`);
+    $('pdWidth').value = 6; D.pedFromInputs();
+    ok(D.pedSel.seg.width === 6, 'width 6');
+    // delete the new sidewalk, then a disc group
+    D.remove();
+    ok(P.counts().segments === c0.segments && D.pedSel === null && $('pedProps').hidden, 'delete sidewalk');
+    D.selectPed(g2); D.remove();
+    p = D.buildPatch().peds;
+    ok(p.groups.some((e) => e.delete), `delete group: ${JSON.stringify(p)}`);
+    // object selection clears the marker
+    D.selectPed(P.items().find((i) => i.kind === 'group'));
+    D.select(D.items()[0]);
+    ok(D.pedSel === null && !$('props').hidden && $('pedProps').hidden, 'an object takes the selection');
+    // Check on the server, with the pedestrian report
+    const res = await f.contentWindow.fetch('/api/check', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: q.get('stage') || 'CENTRAL', patch: D.buildPatch() }) }).then((r) => r.json());
+    ok(res.lines && res.lines.some((l) => /group .* at \(/.test(l)), `check: ${res.ok} ${res.lines.length} lines; ${res.lines.filter((l) => /ped|group/i.test(l)).slice(0, 4).join(' / ')}`);
+    // HUD dialog
+    $('mod').value = 'ZZHudTestNone';
+    $('hud').click();
+    for (let i = 0; i < 300 && !(doc.getElementById('hudDlg') && doc.getElementById('hudDlg').open); i++) await sleep(100);
+    const dlg = doc.getElementById('hudDlg');
+    ok(dlg && dlg.open, `HUD open: ${dlg ? dlg.querySelector('.hud-stage').textContent : '-'}, ${dlg ? dlg.querySelectorAll('.hud-list > *').length : 0} rows`);
+    if (dlg) {
+      await sleep(1500);
+      const imgs = [...dlg.querySelectorAll('img')];
+      ok(imgs.length && imgs.every((i) => i.complete && i.naturalWidth > 0), `HUD thumbnails: ${imgs.filter((i) => i.naturalWidth > 0).length}/${imgs.length}`);
+    }
+    const errs = [...doc.querySelectorAll('#output .line.err')].map((d) => d.textContent);
+    ok(!errs.length, 'log errors: ' + errs.join(' | '));
+  } catch (e) { say('FAIL exception ' + e.stack); }
+  say('DONE');
+})();
+</script>
+</body></html>

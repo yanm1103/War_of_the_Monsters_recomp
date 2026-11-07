@@ -694,6 +694,13 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   unsaved changes) saves and has that game load the stage again, as **F10** does there; with the game on another stage it offers a
   restart on this one. **Stop** (the square, while the game runs) closes the game the editor opened. In a window narrower than
   1440 px, Check, Save, Test and Reload show only their icon. The **?** button (or **?**, or **F1**) lists every shortcut.
+- **Custom stages:** the stage list also shows the valid custom stages of every mod (`stages/<folder>/stage.json`, "Custom stages")
+  as "MY CITY (custom, on CENTRAL)". One opens with its base's objects, scene and handles and saves its patch as
+  `levels/<ID>.json`; Test in game opens it with `WOTM_MATCH=3,1,@<id>`. The **+** button next to the stage list (**New stage…**)
+  asks for an id, a name and a base among the nine the game allows, and writes `stages/<id>/stage.json`; "Start with the changes I
+  have now" also writes them as the new stage's patch when the open stage has that base. A stage with points of its own
+  (`.SPT`, `.PED`...) in its folder still shows the base's in the pedestrian and path panels. `python
+  tools/level_editor/test_custom_stages.py` is the integration test (needs the disc set in the editor).
 - **Winning mod:** the game loads, for each stage, the `levels/<STAGE>.json` of the last mod in name order that has one. When
   another mod than the chosen one wins for this stage, a note under the top bar names it when the stage loads (and after a save),
   since the game does not use the chosen mod's file; its X hides it until the next stage or mod.
