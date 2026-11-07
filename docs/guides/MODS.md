@@ -645,8 +645,9 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   clamped to the image (no tiling). A mesh with no vertex colors takes the stage's sun
   (its three parallel lights, as the cars do); a mesh with vertex colors keeps them as its light (bake the light in Blender), and
   `--light vertex|dir` forces one way for the whole prop. `pos` is where the model's origin goes; `heading` (degrees,
-  default 0) turns it about Z. Each entry collides as the box of the model's bounds (monsters stand on it and bump into it; vehicles
-  and pedestrians are cut around it like around a moved building) and is drawn with no view culling. Each model takes its file size
+  default 0) turns it about Z. Each entry collides as the box of the model's bounds, or as the shapes the .glb names (a mesh `hull_*` is a convex hull, up to 64
+  vertices and 40 faces; a mesh `coll_*` is collision by triangles, up to 64 of them; one leaf per mesh, not drawn) (monsters stand on it
+  and bump into it; vehicles and pedestrians are cut around it like around a moved building) and is drawn with no view culling. Each model takes its file size
   of the arena once, and each entry 100 to 200 bytes more. Skipped with a line: a model missing or made for another stage, a texture
   the stage's `.TEX` does not have, an image larger than every texture bin of the stage, an entry whose box leaves the collision grid. The props are read from the folder at every load,
   so a prop rebuilt during a fight shows after a reload (F10). Log: `[fase]   props: TOWER x3 (1216 bytes); 1660 bytes da arena`,
