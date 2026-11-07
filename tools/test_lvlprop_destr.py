@@ -64,6 +64,20 @@ def main():
         # each instance has a path per state's leaf: [world, props, T|R, IST, DESTR, state root, ..., leaf]
         paths = [p for p in lp.redone.values() if p[2] == "prop"]
         assert len(paths) == 2 * 2, len(paths)         # the box of state 0 and the triangles of state 1, twice
+        # the editor: the list says it is destructible; its strength changes in prop.json only; a height rebuild keeps it
+        cfg2 = dict(cfg, mods=tmp)
+        entry = [e for e in editor.props_list(cfg2, "mod") if e["model"] == "DEST"][0]
+        assert entry["destructible"] == {"class": 2, "states": 2}, entry
+        r = editor.edit_prop(cfg2, {"mod": "mod", "model": "DEST", "strength": 4})
+        assert r["prop"]["destructible"]["class"] == 4, r
+        assert lvlprop.load_prop(os.path.join(mod, "props", "DEST")).strength == 4
+        for bad in (0, 6, "x"):
+            try:
+                editor.edit_prop(cfg2, {"mod": "mod", "model": "DEST", "strength": bad})
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("strength %r accepted" % (bad,))
         # a four-state prop and a missing middle state
         make_glb(glb, None, None, extra=[("state1_a", STUMP, CIDX), ("state2_a", STUMP, CIDX), ("state3_none", None, None)])
         meta = lvlprop.build(glb, out, "CENTRAL", "blender", None, None, "DEST", None, "auto", disc, strength=3, log=lambda *_: None)
