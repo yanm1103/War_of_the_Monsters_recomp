@@ -249,7 +249,7 @@ function gridHelper(size, divisions, opacity) {
 let gridMinor = gridHelper(20000, 200, 0.10), gridMinorStep = 100;
 const gridMajor = gridHelper(20000, 20, 0.28);
 let gridOn = false;
-let skyView = null, skyViewModel = null;   // the swapped-in sky dome's scene, and the preview scene it was made from (updateSkyView)
+let skyViews = { dome: null, clouds: null };   // the models swapped into the sky: {from: the preview scene, view: its copy in the view} (updateSkyView)
 let stageRoot = null, skyRoot = null, env = null;   // env: the stage's fog, background and lights (/api/stage, RST/<STAGE>.MRS)
 // pedestrians (web/peds.js): a layer shown with P; pedSel is the marker the gizmo holds (never together with an object)
 const peds = createPeds({ THREE, scene, toThree, toGame });
@@ -280,8 +280,8 @@ function applyLook() {
   const f = env && env.fog && env.fog.fa !== undefined ? env.fog : null;
   scene.fog = gameLook && f ? new THREE.Fog(gsColor(f.rgb), f.fa, f.fb) : null;
   gsFog.gsFogMax.value = f && f.maxV > 0 ? Math.min(255, f.maxV) : 255;
-  if (skyRoot) skyRoot.visible = gameLook && !skyView;
-  if (skyView) skyView.visible = gameLook;
+  if (skyRoot) skyRoot.visible = gameLook;
+  for (const s of Object.values(skyViews)) if (s) s.view.visible = gameLook;
   renderer.setClearColor(gameLook && env && env.bg ? gsColor(env.bg)
     : getComputedStyle(document.documentElement).getPropertyValue('--view').trim());
   $('look').checked = gameLook;
@@ -422,19 +422,23 @@ function skyDrawing(sky, both) {
   });
 }
 
-// The sky dome the patch swaps in (props entry {model, sky: true}): its preview, drawn in the place of the stage's sky (the clouds
-// too: the editor's scene does not tell them from the dome). Game look shows it, as it does the stage's own.
+// The models the patch swaps into the sky (props entries {model, sky: true} for the dome and {model, sky: "clouds"} for the cloud layer):
+// their previews, drawn in the place of the stage's own part (the meshes of the stage's sky that sit under a CHAR_INSTANCE carry
+// userData.clouds). Game look shows them, as it does the stage's own. The view draws the cloud layer still, with no animation.
 function updateSkyView() {
-  const pm = skyModel ? propModels.get(skyModel) : null, want = pm && pm.scene ? pm.scene : null;
-  if (want !== skyViewModel) {     // the model changed, or its files were made again
-    if (skyView) { scene.remove(skyView); skyView = null; }
-    skyViewModel = want;
+  for (const [kind, key] of [['dome', skyModel], ['clouds', cloudsModel]]) {
+    const pm = key ? propModels.get(key) : null, want = pm && pm.scene ? pm.scene : null, cur = skyViews[kind];
+    if ((cur ? cur.from : null) === want) continue;     // else the model changed, or its files were made again
+    if (cur) scene.remove(cur.view);
+    skyViews[kind] = null;
     if (want) {
-      skyView = want.clone(true);
-      skyDrawing(skyView, true);
-      scene.add(skyView);
+      const view = want.clone(true);
+      skyDrawing(view, true);
+      scene.add(view);
+      skyViews[kind] = { from: want, view };
     }
   }
+  if (skyRoot) skyRoot.traverse((o) => { if (o.isMesh) o.visible = !skyViews[o.userData.clouds ? 'clouds' : 'dome']; });
   applyLook();
 }
 
@@ -512,7 +516,7 @@ function loop() {
   requestAnimationFrame(loop);
   flyStep();
   if (orbit.enabled) orbit.update();
-  for (const s of [skyRoot, skyView]) if (s) s.position.copy(camera.position);   // the sky moves with the camera (it turns with the view, not the stage)
+  for (const s of [skyRoot, ...Object.values(skyViews).map((v) => v && v.view)]) if (s) s.position.copy(camera.position);   // the sky moves with the camera (it turns with the view, not the stage)
   hoverStep();
   syncBoxes();
   renderer.render(scene, camera);
@@ -569,7 +573,7 @@ const ENTRY_KEYS = new Set(['handle', 'from', 'pos', 'heading', 'delete', 'copie
 const PEDS_KEYS = new Set(['off', 'segments', 'groups']);
 const PROP_KEYS = new Set(['id', 'model', 'pos', 'heading', 'name']);
 let keep = { top: {}, objects: [], names: {}, peds: {}, pedsRaw: null, props: [] };
-let skyModel = '';   // the model that replaces the sky dome: the patch's props entry {model, sky: true} (MODS.md, "Sky"); the view draws it with Game look (updateSkyView)
+let skyModel = '', cloudsModel = '';   // the models that replace the sky dome and the cloud layer: the patch's props entries {model, sky: true} and {model, sky: "clouds"} (MODS.md, "Sky"); the view draws them with Game look (updateSkyView)
 // New props (the patch's "props", MODS.md): the models of the mod's props/ folder (tools/lvlprop.py), drawn from their preview with
 // the stage's textures. Each entry is a rec like a stage object's, with rec.prop = {id, model}; propRoot holds their nodes, inside
 // stageRoot so that clicks and Drop meet them.
@@ -711,6 +715,7 @@ function buildPatch() {
     return Object.assign(e, r.extra || {});
   }).concat(keep.props);
   if (skyModel) props.push({ model: skyModel, sky: true });
+  if (cloudsModel) props.push({ model: cloudsModel, sky: 'clouds' });
   if (props.length) out.props = props;
   const pp = keep.pedsRaw || (discPeds ? peds.patch() : null);
   if (pp || Object.keys(keep.peds).length) out.peds = Object.assign({}, pp, keep.peds);
@@ -718,7 +723,7 @@ function buildPatch() {
 }
 
 function resetAll() {
-  skyModel = '';
+  skyModel = cloudsModel = '';
   for (const r of [...propRecs]) removeProp(r);
   for (const rec of recs) {
     for (const c of [...rec.copies]) removeCopy(c);
@@ -735,9 +740,10 @@ function applyPatch(patch) {
   keep = { top: {}, objects: [], names: {}, peds: {}, pedsRaw: null, props: [] };
   for (const [k, v] of Object.entries(patch)) if (!['objects', 'names', 'peds', 'props'].includes(k)) keep.top[k] = v;
   if (patch.props !== undefined && !Array.isArray(patch.props)) keep.top.props = patch.props;
-  skyModel = '';
+  skyModel = cloudsModel = '';
   for (const e of Array.isArray(patch.props) ? patch.props : []) {
     if (e && typeof e === 'object' && e.sky === true && typeof e.model === 'string' && e.model) { skyModel = propKey(e.model); continue; }
+    if (e && typeof e === 'object' && e.sky === 'clouds' && typeof e.model === 'string' && e.model) { cloudsModel = propKey(e.model); continue; }
     if (!makeProp(e)) keep.props.push(e);
   }
   for (const rec of recs) rec.extra = null;
@@ -2817,23 +2823,28 @@ function showPropMenu(open = $('propMenu').hidden) {
     : !here.length ? `No props for ${title(stageName)} yet.` + (other ? ` ${other} of this mod ${other === 1 ? 'is' : 'are'} for other stages.` : '') : '';
   $('pmNone').textContent = none;
   $('pmNone').hidden = !none;
-  const sky = $('pmSky');     // the sky dome: one of the models, or the stage's own
-  sky.textContent = '';
-  sky.append(new Option('The stage\'s own', ''));
-  for (const pm of here) if (!pm.info.error) sky.append(new Option(pm.info.model, pm.info.model));
-  if (skyModel && ![...sky.options].some((o) => o.value === skyModel)) sky.append(new Option(`${skyModel} (not in this mod)`, skyModel));
-  sky.value = skyModel;
+  for (const [id, cur] of [['pmSky', skyModel], ['pmClouds', cloudsModel]]) {     // the sky dome and the cloud layer: one of the models, or the stage's own
+    const sky = $(id);
+    sky.textContent = '';
+    sky.append(new Option('The stage\'s own', ''));
+    for (const pm of here) if (!pm.info.error) sky.append(new Option(pm.info.model, pm.info.model));
+    if (cur && ![...sky.options].some((o) => o.value === cur)) sky.append(new Option(`${cur} (not in this mod)`, cur));
+    sky.value = cur;
+  }
   (list.querySelector('button:not(:disabled)') || $('pmImport')).focus();
 }
-$('pmSky').onchange = (e) => {
-  const v = e.target.value;
-  if (v === skyModel) return;
-  snapshot(v ? `sky ${v}` : 'stock sky');
-  skyModel = v;
+// kind: 'dome' or 'clouds'
+function pickSky(kind, v) {
+  const dome = kind === 'dome', cur = dome ? skyModel : cloudsModel, what = dome ? 'sky dome' : 'cloud layer';
+  if (v === cur) return;
+  snapshot(v ? `${what} ${v}` : `stock ${what}`);
+  if (dome) skyModel = v; else cloudsModel = v;
   updateSkyView();
-  msg(v ? `The sky dome is now ${v}. The view shows it with Game look (L); give it faces turned inward and a texture.` : 'The sky dome is the stage\'s own again.',
+  msg(v ? `The ${what} is now ${v}. The view shows it with Game look (L); give it faces turned inward and a texture.` : `The ${what} is the stage's own again.`,
     { level: 'ok', toast: ['Undo', undo] });
-};
+}
+$('pmSky').onchange = (e) => pickSky('dome', e.target.value);
+$('pmClouds').onchange = (e) => pickSky('clouds', e.target.value);
 $('addProp').onclick = () => showPropMenu();
 document.addEventListener('pointerdown', (e) => {   // a click anywhere else closes it
   if (!$('propMenu').hidden && !e.target.closest('#propMenu, #addProp')) showPropMenu(false);
@@ -3366,7 +3377,7 @@ if (new URLSearchParams(location.search).has('debug')) {
                        get modNow() { return modNow; }, get keep() { return keep; }, get game() { return game; },
                        get gizmoObject() { return gizmo.object || null; }, get gizmoMode() { return gizmo.getMode(); },
                        get pedSel() { return pedSel; }, get group() { return group; }, get sel() { return sel; },
-                       get env() { return env; }, get skyRoot() { return skyRoot; }, get skyView() { return skyView; }, get stageRoot() { return stageRoot; } };
+                       get env() { return env; }, get skyRoot() { return skyRoot; }, get skyViews() { return skyViews; }, get stageRoot() { return stageRoot; } };
 }
 loop();
 api('/api/init').then(init).catch((e) => msg(`Couldn't reach the editor program: ${cleanError(e).text}`, { level: 'err' }));

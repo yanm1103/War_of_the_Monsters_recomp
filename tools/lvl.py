@@ -39,6 +39,12 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 # ------------------------------------------------------------------------------------------------------------- hierarchy
+def sky_kind(e):
+    """What a props entry replaces in the sky: "dome" (`"sky": true`), "clouds" (`"sky": "clouds"`) or "" (it places a prop)."""
+    s = e.get("sky")
+    return "dome" if s is True else "clouds" if s == "clouds" else ""
+
+
 def child_slots(img, n):
     """Addresses of a node's child pointers, as dbsTraverse walks them, plus the DESTRUCTIBLE states and both CONTROL children."""
     u32, u16, u8 = img.u32, img.u16, img.u8
@@ -1779,10 +1785,51 @@ class LevelPatch:
             raise PatchError("the stage's sky has no dome OBJECT to replace")
         return slots
 
-    def sky_swap(self, slots, root, name):
-        """The dome takes the model: every OBJECT of the model gets the first dome's first word, flags (but its vertex count) and
-        the fields at +0x20..+0x4F (fog burn-through 3500, tint), the first dome's slot points at the model's root and the other
-        domes' slots at one empty GROUP."""
+    def sky_clouds_plan(self, root):
+        """The slots of the sky's cloud layer, as [(parent, slot)]: the OBJECTs under the first CHAR_INSTANCE (op 25) of a sky node
+        (id 2), through its ANIM_XFORM, which keeps turning whatever hangs there. PatchError when the stage has none."""
+        st, img = self.st, self.img
+        slots, seen = [], set()
+
+        def walk(n):
+            if n in seen:
+                return
+            seen.add(n)
+            for s in child_slots(img, n):
+                c = img.u32(s) & MASK
+                if not c or not img.ok(c):
+                    continue
+                if img.u32(c) & 63 == 0:
+                    slots.append((n, s))
+                else:
+                    walk(c)
+
+        def find(n):
+            if slots or n in seen:
+                return
+            seen.add(n)
+            for s in child_slots(img, n):
+                c = img.u32(s) & MASK
+                if not c or not img.ok(c):
+                    continue
+                if img.u32(c) & 63 == 25:
+                    walk(c)
+                else:
+                    find(c)
+                if slots:
+                    return
+
+        for n in sorted(st.root_of):
+            if st.ident(n) == 2 and st.op(n) == 1 and not slots:
+                find(n)
+        if not slots:
+            raise PatchError("the stage's sky has no cloud layer OBJECT to replace")
+        return slots
+
+    def sky_swap(self, slots, root, name, clouds=False):
+        """The dome (or, with `clouds`, the cloud layer) takes the model: every OBJECT of the model gets the first one's first word,
+        flags (but its vertex count) and the fields at +0x20..+0x4F (fog burn-through 3500 for a dome, tint), the first slot points
+        at the model's root and the other domes' slots at one empty GROUP."""
         st, img = self.st, self.img
         tpl = img.u32(slots[0][1]) & MASK
         vmask = 0x1FFF << 16
@@ -1813,9 +1860,10 @@ class LevelPatch:
                     self.w32(empty, 1)
                 self.set_ptr(s, empty)
                 st.parents[empty].append(p)
-        self.stats["sky domes replaced"] += len(slots)
-        self.log.append("sky: model %s (%d objects) replaces %d dome%s (style of OBJECT %07x)" % (
-            name, len(objs), len(slots), "" if len(slots) == 1 else "s", tpl))
+        what = "cloud layer" if clouds else "dome"
+        self.stats["sky clouds replaced" if clouds else "sky domes replaced"] += len(slots)
+        self.log.append("sky: model %s (%d objects) replaces %d %s%s (style of OBJECT %07x)" % (
+            name, len(objs), len(slots), what, "" if len(slots) == 1 else "s", tpl))
 
     def apply_props(self, patch, mod_dir):
         """The patch's "props" (docs/guides/MODS.md, "Level patches"), after "objects" and before "peds": each entry {"id",
@@ -1840,8 +1888,8 @@ class LevelPatch:
                     raise PatchError("not an object")
                 name = str(e.get("model") or "").upper()
                 p3 = e.get("pos")
-                if e.get("sky") is True:
-                    p3 = [0, 0, 0]                  # the sky entry has no place: the model takes the dome's
+                if sky_kind(e):
+                    p3 = [0, 0, 0]                  # the sky entry has no place: the model takes the dome's or the clouds'
                 if not (isinstance(p3, list) and len(p3) == 3 and all(_number(x) for x in p3)):
                     raise PatchError("without \"pos\" [x, y, z]")
                 hd = e.get("heading")
@@ -1912,11 +1960,14 @@ class LevelPatch:
                 mine, need = [], 0
                 sky_jobs = []
                 for k, e, pos, hd in ents:
-                    if e.get("sky") is True:
+                    if sky_kind(e):
                         try:
                             if dstr:
                                 raise PatchError("a sky model has no destructible states")
-                            sky_jobs.append(self.sky_plan(root))
+                            if any(j[1] != (sky_kind(e) == "clouds") for j in sky_jobs):
+                                raise PatchError("a model cannot be both the dome and the clouds")
+                            sky_jobs.append((self.sky_clouds_plan(root) if sky_kind(e) == "clouds" else self.sky_plan(root),
+                                             sky_kind(e) == "clouds"))
                         except PatchError as err:
                             self.log.append("sky skipped: model %s: %s" % (name, err))
                             self.stats["skipped"] += 1
@@ -2012,8 +2063,8 @@ class LevelPatch:
                     self.interactives_used = iu0
                     raise PatchError("model %s: %d entries take up to %d bytes more, the arena has %d left" % (
                         name, len(mine), need, self.arena_free()))
-                for job in sky_jobs:            # last, when nothing can fail: the slots now point into the arena
-                    self.sky_swap(job, root, name)
+                for job, clouds in sky_jobs:    # last, when nothing can fail: the slots now point into the arena
+                    self.sky_swap(job, root, name, clouds)
                 made += mine
                 summary.append("%s x%d (%d bytes)" % (name, len(mine), prop.size))
                 if dstr:

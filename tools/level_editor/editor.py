@@ -331,7 +331,8 @@ STAT_WORDS = (("moved", "moved", "moved"), ("copies", "copy", "copies"), ("delet
               ("ped groups added", "pedestrian group added", "pedestrian groups added"),
               ("ped groups deleted", "pedestrian group deleted", "pedestrian groups deleted"),
               ("ped groups off", "pedestrian group off", "pedestrian groups off"), ("props", "new prop", "new props"),
-              ("sky domes replaced", "sky dome replaced", "sky domes replaced"))
+              ("sky domes replaced", "sky dome replaced", "sky domes replaced"),
+              ("sky clouds replaced", "cloud layer replaced", "cloud layers replaced"))
 
 
 def stats_text(stats):

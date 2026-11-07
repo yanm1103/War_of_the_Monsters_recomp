@@ -684,6 +684,12 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   inward and a texture (a material `tex<texId>` of the stage's sky, or an image; an untextured sky is not drawn); the stock domes
   have bounding spheres of radius 9000 to 12000, and `--scale`/`--height` size the model. Its `hull_*`, `coll_*` and automatic box are never used. A model with `state<N>_*` meshes is refused; so
   is a stage with no dome (CANYON1, MINISF). Log: `[fase]   sky: modelo SKYDOME (1 objetos) troca 1 domo (estilo do OBJECT 0fc8120)`.
+  **Clouds:** `{"model": "SKYCLOUDS", "sky": "clouds"}` replaces the cloud layer the same way: the OBJECTs under the first `CHAR_INSTANCE`
+  of a sky node, through its `ANIM_XFORM`, so the model gets whatever the stage's animation does to the layer (build it around its
+  origin; the stock layer is a bowl 22000 across and 3500 high, its z from 0 up). The model wears the stock
+  layer's style (its own blending) and the dome stays. 14 stages have a layer (every one but BIGSHOT, CANYON2, TOKYODM, TRAINING and UFO,
+  which are refused with a line). One model cannot be both the dome and the clouds (the second entry is skipped). Log: `sky: modelo
+  SKYCLOUDS (1 objetos) troca 1 camada de nuvens (estilo do OBJECT 0fc7400)`; `lvl.py` and Check count it as a cloud layer replaced.
 - Check before playing: `python tools/lvl.py patch CENTRAL mods/<mod>/levels/CENTRAL.json` applies the patch to the disc's image, prints
   what changed, each redone collision box, and checks the collision of the result (box rule and cell rule, `FORMATS.md`, "Stage
   collision"). An entry that does not match is skipped with a line saying why.
@@ -834,10 +840,11 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   from its `.glb` (`source.glb`, or the `source` of `prop.json`) at that many game units, scaled about its origin with the same
   units and light; both change the model, so every entry of it takes them, and neither is undoable. A destructible model also has **Strength** (its hit point class; only `prop.json` changes, so it is not a rebuild). It sits in the list's **New props** section,
   and Check names the one the game would skip. Switching to a mod without its model keeps the entry in the file (the editor says
-  how many), where the game skips it. The same menu ends with **Sky dome**: the stage's own, or one of the mod's models for this
-  stage (the `sky` entry of `props`, above; undoable, counted by Check as a replaced dome, and refused there for a stage with no
-  dome); with Game look (**L**) the view draws the model in the place of the stage's sky (the clouds too, which the editor's
-  scene does not tell from the dome; the game keeps them), both faces of it.
+  how many), where the game skips it. The same menu ends with **Sky dome** and **Cloud layer**: the stage's own, or one of the mod's
+  models for this stage (the `sky` entries of `props`, above; undoable, counted by Check as a replaced dome or cloud layer, and
+  refused there for a stage with no such part); with Game look (**L**) the view draws the model in the place of the stage's own
+  part (the scene tells them apart: the meshes under a `CHAR_INSTANCE` are the layer), both faces of it. The view draws the layer
+  still, with no animation.
 - **List:** every object by name, its handle beside it, in sections (**Buildings**, **Pickups**, **Props**, **Terrain** and **New props**, the
   props over 500 units; a click on a header closes or opens it, Terrain starts closed, and the editor remembers them). A copy
   sits under its original, indented. Small marks after the name: a green dot (moved or turned), the copy icon (it has copies),

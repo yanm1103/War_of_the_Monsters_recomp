@@ -131,6 +131,8 @@ def export(st, objs, disc, out, lod=99, on=None):
             return ngp.gs_apply(img, gs, img.u32(node + 8))
         return gs
 
+    in_clouds = [0]     # > 0 while walking below a CHAR_INSTANCE (op 25)
+
     def walk(node, m, owner, state, depth=0, gs=ngp.GS_DEFAULT, sky=False):
         if depth > 64 or not img.ok(node, 4):
             return
@@ -164,7 +166,9 @@ def export(st, objs, disc, out, lod=99, on=None):
             mi = mesh(node, gs)
             stats["sky objects"] += bool(sky and mi is not None)
             if mi is not None:
-                new_node({"mesh": mi, "matrix": gl_matrix(m)}, owner_node(owner, state))
+                # a mesh under a CHAR_INSTANCE of the sky is the cloud layer (the editor shows it apart from the dome: extras.clouds)
+                new_node({"mesh": mi, "matrix": gl_matrix(m), **({"extras": {"clouds": True}} if sky and in_clouds[0] else {})},
+                         owner_node(owner, state))
                 stats["instances"] += 1
         elif op == 1:
             if img.u16(node + 0xA) & 1:
@@ -192,7 +196,9 @@ def export(st, objs, disc, out, lod=99, on=None):
         elif op == 35:
             kids(node + 0xC, img.u32(node + 4), m)
         elif op == 25:
+            in_clouds[0] += 1
             kids(node + 0x2C, img.u32(node + 0x28), m)
+            in_clouds[0] -= 1
         elif op == 17:
             kids(node + 0xCC, img.u32(node + 4), m)
         elif op == 38:
