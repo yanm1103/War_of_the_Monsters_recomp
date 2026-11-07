@@ -5,6 +5,8 @@
 //   2nd tap: the civilian is eaten: it is turned off (position w = -1, the same mark pedsTurnOff leaves), the monster heals and
 //            the player gets points. A civilian that is not eaten within a few seconds is let go.
 // Everything is read and written in guest memory from a Monster::update hook, so no game function is replaced.
+// Toss and gulp: the 1st tap scoops the nearest civilian and holds it out; the 2nd tap (it waits for the grab clip to end) tosses it, the head
+// goes back, the jaw opens and closes on it, and the eat (heal + points, the civilian gone) happens as the jaw closes.
 // The grab/eat clips are played over whatever state the monster is in; when a clip is over (or the civilian is let go) and the state
 // has not changed, the idle state is entered again so the game's own animation comes back.
 //
@@ -54,7 +56,10 @@ struct Hold
     // Our clip is the visible animation until the game's state machine starts another one (it only does so when the state changes), so
     // the clip's state is remembered: if it is still the monster's state when the clip is over, the idle state is entered again
     bool clip = false;
-    uint32_t clipState = 0;
+    uint32_t clipState = 0, clipId = 0;
+    bool eating = false, queued = false, tossed = false;   // the eat clip is running; a tap came during the grab clip; the civilian left the hand
+    std::chrono::steady_clock::time_point eatStart;
+    float from[3] = {0, 0, 0};   // where the civilian left the hand
     std::chrono::steady_clock::time_point clipEnd;
 } g_hold[4];
 
@@ -112,9 +117,13 @@ constexpr uint32_t kAnims = 0x1CF0, kAnimStride = 0x10, kAnimGrab = 299, kAnimEa
 constexpr float kAnimBlend = 20.f;
 
 constexpr uint32_t kState = 0x34, kIdleState = 0x7984;   // Monster::m_state; the StateIdle embedded in Monster
-constexpr double kGrabSeconds = 82.0 / 60.0, kEatSeconds = 86.0 / 60.0;   // clip lengths (tools/eatanim.py: 81 and 85 frames at 60 fps)
+constexpr double kGrabSeconds = 82.0 / 60.0, kEatSeconds = 74.0 / 60.0;   // clip lengths (tools/eatanim.py: 81 and 73 frames at 60 fps)
+// Frames of the eat clip (tools/eatanim.py TOSS_FRAME, ARRIVE_FRAME, EAT_FRAME): the hand lets go, the civilian reaches the open mouth, the jaw closes
+constexpr double kTossT = 14.0 / 60.0, kArriveT = 28.0 / 60.0, kEatT = 31.0 / 60.0;
+constexpr uint32_t kMouth = 0x3E50;   // locator 0x80B: monster + id * 16 - 0x4260
+constexpr float kTossArc = 40.f;   // extra height of the toss at its top, in game units
 
-void playAnim(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, Hold &hold, uint32_t m, uint32_t id)
+bool playAnim(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, Hold &hold, uint32_t m, uint32_t id)
 {
     const uint32_t h = m + kAnims + kAnimStride * id;
     if (!rd32(rdram, h))
@@ -123,13 +132,15 @@ void playAnim(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, Hold &hold
         if (!said)
             std::fprintf(stderr, "[eatmod] este modelo nao tem a animacao %u (tools/eatanim.py + modkit monster anim import); segue sem animacao\n", id);
         said = true;
-        return;
+        return false;
     }
     wotm_coop::callF(rdram, ctx, runtime, fn::animationTransitionInto__FR11_animHandlefii, {h, 1u, 1u}, {kAnimBlend});
     hold.clip = true;
+    hold.clipId = id;
     hold.clipState = rd32(rdram, m + kState);
     hold.clipEnd = std::chrono::steady_clock::now() +
                    std::chrono::milliseconds(int((id == kAnimGrab ? kGrabSeconds : kEatSeconds) * 1000.0));
+    return true;
 }
 
 // Gives the animation back to the game: if the monster is still in the state it was in when the clip started, enter idle again (the game
@@ -174,6 +185,47 @@ void eat(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, int
     std::fprintf(stderr, "[eatmod] jogador %d comeu um civil (%+.0f%% de vida, %d pontos)\n", player + 1, g_cfg.healPct, g_cfg.points);
 }
 
+// Lets the civilian go back on the street (a carried one is up in the air when the grab ends without an eat)
+void release(uint8_t *rdram, Hold &h)
+{
+    if (h.active && alive(rdram, h.pos) && g_cfg.lift && !g_cfg.planeXZ)
+        wrF(rdram, h.pos + 8, 0.f);
+    h.active = h.eating = h.queued = h.tossed = false;
+}
+
+// The carried civilian follows the right hand; a civilian's third coordinate is its height (0 on the street), so it goes up with the hand
+void carry(uint8_t *rdram, uint32_t m, const Hold &h)
+{
+    float a, b;
+    ground(rdram, m + kHandR, &a, &b);
+    wrF(rdram, h.pos, a);
+    wrF(rdram, h.pos + 4, b);
+    if (g_cfg.lift && !g_cfg.planeXZ)
+        wrF(rdram, h.pos + 8, rdF(rdram, m + kHandR + 8));
+}
+
+// The toss: from where the hand let go to the mouth locator, along an arc
+void fly(uint8_t *rdram, uint32_t m, Hold &h, double t)
+{
+    if (!h.tossed)
+    {
+        h.tossed = true;
+        h.from[0] = rdF(rdram, h.pos);
+        h.from[1] = rdF(rdram, h.pos + 4);
+        h.from[2] = rdF(rdram, h.pos + 8);
+    }
+    const float u = float(std::min(1.0, (t - kTossT) / (kArriveT - kTossT)));
+    float a, b;
+    ground(rdram, m + kMouth, &a, &b);
+    wrF(rdram, h.pos, h.from[0] + (a - h.from[0]) * u);
+    wrF(rdram, h.pos + 4, h.from[1] + (b - h.from[1]) * u);
+    if (g_cfg.lift && !g_cfg.planeXZ)
+    {
+        const float z = rdF(rdram, m + kMouth + 8);
+        wrF(rdram, h.pos + 8, h.from[2] + (z - h.from[2]) * u + kTossArc * 4.f * u * (1.f - u));
+    }
+}
+
 // One Monster::update of a monster that can eat; player is its index in m_monsters[0..3]
 void tick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, int player)
 {
@@ -191,43 +243,74 @@ void tick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, in
     }
     h.prevCircle = circle;
 
+    const auto now = std::chrono::steady_clock::now();
     const uint32_t cs = rd32(rdram, m + kCs) & 0x1FFFFFFFu;
     if (!cs || rd8(rdram, m + kDead) != 0 || !(rdF(rdram, m + kHealth) > 0.f))
     {
-        h.active = false;
-        h.clip = false;
+        h.active = h.eating = h.queued = h.tossed = h.clip = false;
         return;
     }
     if (h.clip)
     {
         if (rd32(rdram, m + kState) != h.clipState)
             h.clip = false;   // the game's own state machine started another animation
-        else if (!h.active && std::chrono::steady_clock::now() > h.clipEnd)
+        else if (!h.active && now > h.clipEnd)
             endClip(rdram, ctx, runtime, h, m);
     }
     if (h.active)
     {
-        const bool timedOut = std::chrono::duration<double>(std::chrono::steady_clock::now() - h.since).count() > kHoldSeconds;
-        if (timedOut || !alive(rdram, h.pos))
+        if (!alive(rdram, h.pos))
         {
-            h.active = false;
+            release(rdram, h);
+            endClip(rdram, ctx, runtime, h, m);
+            return;
+        }
+        if (h.eating)
+        {
+            const double t = std::chrono::duration<double>(now - h.eatStart).count();
+            if (!h.clip)   // hit or otherwise sent to another state in the middle of the toss: the civilian drops
+            {
+                release(rdram, h);
+                return;
+            }
+            if (t >= kEatT)
+            {
+                eat(rdram, ctx, runtime, m, player, h.pos);
+                h.active = h.eating = h.queued = h.tossed = false;   // the clip plays on to its end
+                return;
+            }
+            if (t < kTossT)
+                carry(rdram, m, h);
+            else
+                fly(rdram, m, h, t);
+            return;
+        }
+        const bool grabbing = h.clip && h.clipId == kAnimGrab && now <= h.clipEnd;
+        if (std::chrono::duration<double>(now - h.since).count() > kHoldSeconds)
+        {
+            release(rdram, h);
             endClip(rdram, ctx, runtime, h, m);   // let go: out of the pose that held it
             return;
         }
         if (tap)
+            h.queued = true;
+        if (h.queued && !grabbing)   // the second press waits for the grab clip to finish
         {
-            playAnim(rdram, ctx, runtime, h, m, kAnimEat);
-            eat(rdram, ctx, runtime, m, player, h.pos);
-            h.active = false;
-            return;
+            h.queued = false;
+            if (playAnim(rdram, ctx, runtime, h, m, kAnimEat))
+            {
+                h.eating = true;
+                h.tossed = false;
+                h.eatStart = now;
+            }
+            else   // a model without the clips: eaten at once
+            {
+                eat(rdram, ctx, runtime, m, player, h.pos);
+                h.active = false;
+                return;
+            }
         }
-        // carried: it follows the right hand; a civilian's third coordinate is its height (0 on the street), so it goes up with the hand
-        float a, b;
-        ground(rdram, m + kHandR, &a, &b);
-        wrF(rdram, h.pos, a);
-        wrF(rdram, h.pos + 4, b);
-        if (g_cfg.lift && !g_cfg.planeXZ)
-            wrF(rdram, h.pos + 8, rdF(rdram, m + kHandR + 8));
+        carry(rdram, m, h);
         return;
     }
     if (!tap || rd32(rdram, m + kPickup) != 0 || rd32(rdram, m + kTarget) != 0)   // something in the hands: the game's own grab/throw
@@ -246,8 +329,9 @@ void tick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, in
     }
     playAnim(rdram, ctx, runtime, h, m, kAnimGrab);
     h.active = true;
+    h.eating = h.queued = h.tossed = false;
     h.pos = p;
-    h.since = std::chrono::steady_clock::now();
+    h.since = now;
     std::fprintf(stderr, "[eatmod] jogador %d pegou um civil a %.0f (%.1f %.1f)\n", player + 1, d, rdF(rdram, p), rdF(rdram, p + 4));
 }
 
