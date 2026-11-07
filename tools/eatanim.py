@@ -25,6 +25,8 @@ roles.json (nomes de nos do .glb; o `roles` escreve um palpite, confira):
   opcionais: "jaw" (osso do queixo: abre na mordida), "tip" (no da ponta da mao; o pulso fica parado e a ponta vai ao alvo),
   "pelvis" + "legs" ([[quadril, joelho, tornozelo], ...]) + "crouch" (unidades): a bacia desce no pegar e os pes ficam plantados,
   "lean" (graus do tronco ao pegar, padrao 40), "jaw_open" (25), "head_back" (14). tools/eatanim_togera.json e o do Togera.
+  "hold_offset" ([x, y, z], espaco do jogo): de quanto a mao para antes da boca. Sem ele, o build procura o menor desvio em que as
+  pecas rigidas do braco (laminas) nao invadem a frente do rosto; "head_radius" ajusta a esfera da cabeca.
 Espaco do jogo: o que o no "WotM" guarda (Z para cima).
 Os ossos que as animacoes novas nao mexem ficam parados no primeiro quadro do idle (regra do import de animacao nova).
 """
@@ -282,11 +284,14 @@ def load_roles(g, rig, path):
     return dict(head=head, spine=spine, arm=arm, mouth=mouth, fwd=fwd / np.linalg.norm(fwd), jaw=need("jaw"), tip=need("tip"),
                 pelvis=need("pelvis"), legs=[[g.name[n] for n in leg] for leg in r.get("legs", [])], crouch=float(r.get("crouch", 0)),
                 lean=float(r.get("lean", 40)), jaw_open=float(r.get("jaw_open", 25)), head_back=float(r.get("head_back", 14)),
+                head_radius=float(r.get("head_radius", 0)), hold_offset=r.get("hold_offset"),
                 )
 
 
-def key_poses(g, rig, R):
-    """Poses-chave (osso -> quaternion local; ("T", osso) -> translacao) do pegar e do comer."""
+def key_poses(g, rig, R, off=None):
+    """Poses-chave (osso -> quaternion local; ("T", osso) -> translacao) do pegar e do comer. `off`: de quanto a mao para antes da boca
+    (espaco do jogo); a mao nao vai ate a boca quando ha laminas no braco que atravessariam a cabeca."""
+    off = np.zeros(3) if off is None else np.asarray(off, float)
     lat = np.cross([0, 0, 1.0], R["fwd"])   # girar +a em torno disto baixa a frente (cabecear)
     arm, head, jaw, spine, pelvis = R["arm"], R["head"], R["jaw"], R["spine"], R["pelvis"]
     end = R["tip"] if R["tip"] is not None else arm[-1]
@@ -341,22 +346,104 @@ def key_poses(g, rig, R):
     crouch(p, 0.25)
     lean(p, 8)
     pitch(p, head, 10)
-    to(p, mouth_of(p))
+    to(p, mouth_of(p) + off)
     P["hold"] = p
     q = {i: p[i].copy() for i in p}   # boca aberta: cabeca para tras (e queixo para baixo, se ha um osso dele)
     pitch(q, head, -R["head_back"])
     if jaw is not None:
         pitch(q, jaw, R["jaw_open"])
-    to(q, mouth_of(q))
+    to(q, mouth_of(q) + off)
     P["open"] = q
     q = {i: p[i].copy() for i in p}   # mordida: cabeca para baixo, queixo fechado
     pitch(q, head, 18)
-    to(q, mouth_of(q))
+    to(q, mouth_of(q) + off)
     P["bite"] = q
     P["mouth_of"] = mouth_of
     P["ground"] = ground
+    P["off"] = off
+    P["height"] = height
     P["end"] = end
     return P
+
+
+def blades(g, rig):
+    """Pecas rigidas (sem skin) presas a um osso, como as laminas do Togera: [(no, [pontos no espaco do no], raio)]."""
+    out = []
+    for i, n in enumerate(g.nodes):
+        if "mesh" not in n or "skin" in n:
+            continue
+        if not any(g.nodes[k].get("name", "").startswith("bone") for k in rig.chain(i)[:-1]):
+            continue
+        attrs = g.j["meshes"][n["mesh"]]["primitives"][0]["attributes"]
+        V = g.read(attrs["POSITION"])
+        c = V.mean(0)
+        axis = np.linalg.svd(V - c, full_matrices=False)[2][0]
+        t = (V - c) @ axis
+        radius = float(np.percentile(np.linalg.norm((V - c) - np.outer(t, axis), axis=1), 90))
+        pts = [c + axis * (t.min() + (t.max() - t.min()) * u) for u in np.linspace(0, 1, 7)]
+        out.append((i, pts, radius))
+    return out
+
+
+def head_sphere(rig, R):
+    """Esfera da cabeca (centro meio caminho entre o osso e a boca) no repouso: devolve uma funcao pose -> (centro, raio)."""
+    h0 = rig.pos(R["head"])
+    off = np.linalg.inv(rig.rot(R["head"])) @ (0.5 * (R["mouth"] - h0))
+    radius = R["head_radius"] if R.get("head_radius") else 0.9 * float(np.linalg.norm(R["mouth"] - h0)) + 4.0
+    return lambda pose: (rig.pos(R["head"], pose) + rig.rot(R["head"], pose) @ off, radius)
+
+
+def penetration(g, rig, R, bl, pose):
+    """O quanto uma lamina invade a frente do rosto nesta pose (0 = livre; 1 = no centro). A "frente do rosto" e um elipsoide diante
+    da cabeca (a lamina nao precisa tocar a cabeca: vista de cima, uma lamina diante do rosto parece atravessa-la)."""
+    c, _r = head_sphere(rig, R)(pose)
+    h = R.get("_height", 119.0)
+    fwd = np.array(R["fwd"])
+    side = np.cross([0, 0, 1.0], fwd)
+    ax = np.array([0.34 * h, 0.6 * h, 0.6 * h])
+    worst = 0.0
+    for node, pts, rad in bl:
+        M = rig.world(node, pose)
+        for p in pts:
+            d = M[:3, :3] @ p + M[:3, 3] - c
+            u = np.array([d @ side, d @ fwd - 0.34 * h, d[2] - 0.12 * h]) / ax
+            worst = max(worst, 1.0 - float(np.linalg.norm(u)))
+    return worst
+
+
+def fit_offset(g, rig, R):
+    """Procura o desvio da mao (para a frente, para cima, para o lado do braco) em que nenhuma lamina atravessa a cabeca em
+    nenhum quadro das duas animacoes; o menor desvio que serve. Devolve (desvio, penetracao, quantas laminas)."""
+    bl = blades(g, rig)
+    side = np.cross([0, 0, 1.0], R["fwd"])
+    if rig.pos(R["arm"][0])[0] * side[0] + rig.pos(R["arm"][0])[1] * side[1] < 0:
+        side = -side
+    h = max(rig.pos(i)[2] for i in range(len(g.nodes)) if i != g.root)
+    R["_height"] = h
+    if not bl:
+        return np.zeros(3), 0.0, 0
+
+    def worst(off):
+        P = key_poses(g, rig, R, off)
+        tl = timeline(P)
+        w = 0.0
+        for keys in tl.values():
+            for f in range(0, keys[-1][0] + 1, 3):
+                w = max(w, penetration(g, rig, R, bl, sample(keys, f)))
+        return w
+
+    best = None
+    cands = []
+    for fo in (0.0, 0.08, 0.16, 0.24):
+        for up in (0.0, -0.08, -0.16, -0.24):
+            for sd in (0.0, 0.1, 0.2, 0.3, 0.4):
+                cands.append((fo + abs(up) + sd, np.array(R["fwd"]) * fo * h + np.array([0, 0, 1.0]) * up * h + side * sd * h))
+    for cost, off in cands:
+        w = worst(off)
+        score = w * 3.0 + cost   # penetracao pesa mais, mas a mao nao deve ir longe demais da boca
+        if best is None or score < best[2] - 1e-9:
+            best = (off, w, score)
+    return best[0], best[1], len(bl)
 
 
 def timeline(P):
@@ -389,6 +476,17 @@ def add_animation(g, name, keys, wid):
     g.j.setdefault("animations", []).append({"name": name, "channels": channels, "samplers": samplers, "extras": {"wotmAnim": wid, "frames": n}})
 
 
+def hold_offset(g, rig, R):
+    """O desvio da mao: o do roles.json ("hold_offset": [x, y, z] no espaco do jogo) ou o que fit_offset acha."""
+    if R.get("hold_offset") is not None:
+        off, pen, nbl = np.array(R["hold_offset"], float), 0.0, 0
+    else:
+        off, pen, nbl = fit_offset(g, rig, R)
+    print("laminas: %d; mao %.1f a frente/cima/lado da boca (%.1f %.1f %.1f); atravessa a cabeca em %.2f unidades no pior quadro" %
+          (nbl, float(np.linalg.norm(off)), *off, pen))
+    return off, pen, nbl
+
+
 def cmd_build(argv):
     ids = {"--grab": 299, "--eat": 298}
     pos = []
@@ -407,7 +505,8 @@ def cmd_build(argv):
             raise SystemExit("o .glb ja tem a animacao %s; escolha outro id (--grab/--eat)" % a["name"])
     rig = Rig(g)
     R = load_roles(g, rig, roles)
-    P = key_poses(g, rig, R)
+    off, pen, nbl = hold_offset(g, rig, R)
+    P = key_poses(g, rig, R, off)
     tl = timeline(P)
     add_animation(g, "a%03d_once" % ids["--grab"], tl["grab"], ids["--grab"])
     add_animation(g, "a%03d_once" % ids["--eat"], tl["eat"], ids["--eat"])
@@ -435,13 +534,14 @@ def cmd_check(argv):
     g = Glb(argv[0])
     rig = Rig(g)
     R = load_roles(g, rig, argv[1])
-    P = key_poses(g, rig, R)
+    off, _pen, _n = hold_offset(g, rig, R)
+    P = key_poses(g, rig, R, off)
     hand, ok = P["end"], True
     for anim, frame, what, target in (("a299", 79, "mao na boca ao fim do pegar", None), ("a299", 22, "mao no chao no meio do pegar", P["ground"]),
                                       ("a298", 0, "mao na boca ao comecar a comer", None), ("a298", 83, "de volta ao repouso", rig.pos(hand))):
         pose, n = eval_pose(g, anim, frame)
         full = dict(pose)
-        tgt = P["mouth_of"](full) if target is None else target
+        tgt = P["mouth_of"](full) + P["off"] if target is None else target
         d = float(np.linalg.norm(rig.pos(hand, full) - tgt))
         h = max(rig.pos(i)[2] for i in range(len(g.nodes)) if i != g.root)
         good = d < 0.06 * h

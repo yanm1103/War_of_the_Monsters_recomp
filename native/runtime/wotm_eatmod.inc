@@ -5,6 +5,8 @@
 //   2nd tap: the civilian is eaten: it is turned off (position w = -1, the same mark pedsTurnOff leaves), the monster heals and
 //            the player gets points. A civilian that is not eaten within a few seconds is let go.
 // Everything is read and written in guest memory from a Monster::update hook, so no game function is replaced.
+// The grab/eat clips are played over whatever state the monster is in; when a clip is over (or the civilian is let go) and the state
+// has not changed, the idle state is entered again so the game's own animation comes back.
 //
 // Pedestrian coordinates: x and y are the street, the third is the height (0 on the ground), the same axes as a monster's locators
 // (z up). Grab and eat are confirmed in a fight; the carry (the height follows the hand) and the animations are not yet.
@@ -49,6 +51,11 @@ struct Hold
     uint32_t logged = 0;   // the monster whose animation handles were last logged
     uint32_t pos = 0;   // guest address of the held civilian's 16-byte position
     std::chrono::steady_clock::time_point since;
+    // Our clip is the visible animation until the game's state machine starts another one (it only does so when the state changes), so
+    // the clip's state is remembered: if it is still the monster's state when the clip is over, the idle state is entered again
+    bool clip = false;
+    uint32_t clipState = 0;
+    std::chrono::steady_clock::time_point clipEnd;
 } g_hold[4];
 
 constexpr double kHoldSeconds = 6.0;
@@ -104,7 +111,10 @@ uint32_t nearestPed(uint8_t *rdram, float a, float b, float reach, float *dist)
 constexpr uint32_t kAnims = 0x1CF0, kAnimStride = 0x10, kAnimGrab = 299, kAnimEat = 298;
 constexpr float kAnimBlend = 20.f;
 
-void playAnim(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, uint32_t id)
+constexpr uint32_t kState = 0x34, kIdleState = 0x7984;   // Monster::m_state; the StateIdle embedded in Monster
+constexpr double kGrabSeconds = 82.0 / 60.0, kEatSeconds = 86.0 / 60.0;   // clip lengths (tools/eatanim.py: 81 and 85 frames at 60 fps)
+
+void playAnim(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, Hold &hold, uint32_t m, uint32_t id)
 {
     const uint32_t h = m + kAnims + kAnimStride * id;
     if (!rd32(rdram, h))
@@ -116,6 +126,21 @@ void playAnim(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m
         return;
     }
     wotm_coop::callF(rdram, ctx, runtime, fn::animationTransitionInto__FR11_animHandlefii, {h, 1u, 1u}, {kAnimBlend});
+    hold.clip = true;
+    hold.clipState = rd32(rdram, m + kState);
+    hold.clipEnd = std::chrono::steady_clock::now() +
+                   std::chrono::milliseconds(int((id == kAnimGrab ? kGrabSeconds : kEatSeconds) * 1000.0));
+}
+
+// Gives the animation back to the game: if the monster is still in the state it was in when the clip started, enter idle again (the game
+// goes on to run/walk by itself next frame if the stick is held). A state that changed already started its own animation
+void endClip(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, Hold &hold, uint32_t m)
+{
+    if (!hold.clip)
+        return;
+    hold.clip = false;
+    if (rd32(rdram, m + kState) == hold.clipState)
+        wotm_modes4::call(rdram, ctx, runtime, fn::enterNewState__7MonsterP12MonsterState, {m, m + kIdleState});
 }
 
 bool canEat(uint32_t m)
@@ -170,7 +195,15 @@ void tick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, in
     if (!cs || rd8(rdram, m + kDead) != 0 || !(rdF(rdram, m + kHealth) > 0.f))
     {
         h.active = false;
+        h.clip = false;
         return;
+    }
+    if (h.clip)
+    {
+        if (rd32(rdram, m + kState) != h.clipState)
+            h.clip = false;   // the game's own state machine started another animation
+        else if (!h.active && std::chrono::steady_clock::now() > h.clipEnd)
+            endClip(rdram, ctx, runtime, h, m);
     }
     if (h.active)
     {
@@ -178,11 +211,12 @@ void tick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, in
         if (timedOut || !alive(rdram, h.pos))
         {
             h.active = false;
+            endClip(rdram, ctx, runtime, h, m);   // let go: out of the pose that held it
             return;
         }
         if (tap)
         {
-            playAnim(rdram, ctx, runtime, m, kAnimEat);
+            playAnim(rdram, ctx, runtime, h, m, kAnimEat);
             eat(rdram, ctx, runtime, m, player, h.pos);
             h.active = false;
             return;
@@ -210,7 +244,7 @@ void tick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, in
                      g_cfg.reach, far, g_cfg.planeXZ ? "xz" : "xy", rdF(rdram, cs + kCsTrans), rdF(rdram, cs + kCsTrans + 4), rdF(rdram, cs + kCsTrans + 8));
         return;
     }
-    playAnim(rdram, ctx, runtime, m, kAnimGrab);
+    playAnim(rdram, ctx, runtime, h, m, kAnimGrab);
     h.active = true;
     h.pos = p;
     h.since = std::chrono::steady_clock::now();
