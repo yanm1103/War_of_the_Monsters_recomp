@@ -23,6 +23,7 @@ struct PropModel
     std::vector<Own> own;                 // texturas proprias: pacote CT32 na imagem, PNG ao lado
     uint32_t root = 0;                    // deslocamento da raiz na imagem
     std::vector<uint32_t> states;         // destrutivel: a raiz de cada estado (a primeira e a raiz); vazio num prop estatico
+    std::vector<uint32_t> actions;        // destrutivel: o ActDebris de cada estado (0: nenhum), deslocamento na imagem
     uint32_t strength = 0;                // destrutivel: a classe de pontos de vida (1 a 5)
 };
 constexpr uint32_t kMaxPropStates = 4;
@@ -97,6 +98,18 @@ std::string loadPropModel(const std::filesystem::path &dir, PropModel &m)
             const uint32_t a = uint32_t(std::strtoul(x.s.c_str(), nullptr, 16));
             if (a < kBase || a - kBase >= m.ngp.size()) return "\"destructible\": raiz de estado fora da imagem";
             m.states.push_back(a - kBase);
+        }
+        m.actions.assign(m.states.size(), 0);
+        if (const json::Value *ac = d->get("actions"); ac && ac->type == json::Value::Arr)
+        {
+            if (ac->arr.size() != m.states.size()) return "\"destructible\": \"actions\" nao tem um item por estado";
+            for (size_t i = 0; i < ac->arr.size(); ++i)
+            {
+                if (ac->arr[i].type == json::Value::Null) continue;
+                const uint32_t a = ac->arr[i].type == json::Value::Str ? uint32_t(std::strtoul(ac->arr[i].s.c_str(), nullptr, 16)) : 0;
+                if (a < kBase || a - kBase + 0x10 > m.ngp.size()) return "\"destructible\": acao fora da imagem";
+                m.actions[i] = a - kBase;
+            }
         }
         m.strength = uint32_t(cls->asInt());
         if (m.states.size() < 2 || m.states.size() > kMaxPropStates || m.states[0] != m.root || m.strength < 1 || m.strength > 5)
@@ -360,6 +373,7 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
                     {
                         st.w32(destr + 0xC + 12 * i, sroots[i]);
                         st.w16(destr + 0xC + 12 * i + 8, i + 1 < nSt ? uint16_t(std::lround(65535.0 * (nSt - 1 - i) / nSt)) : 0);
+                        if (pm.actions[i]) st.w32(destr + 0xC + 12 * i + 4, at + pm.actions[i]);   // o ActDebris do estado, na imagem do prop
                     }
                 }
                 const uint32_t below = ist ? ist : root;

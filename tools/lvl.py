@@ -1855,6 +1855,8 @@ class LevelPatch:
                         for i, r in enumerate(sroots):
                             self.w32(destr + 0xC + 12 * i, r)
                             self.w16(destr + 0xC + 12 * i + 8, thr[i] if i < n_st - 1 else 0)
+                            if prop.actions[i] is not None:                  # the state's ActDebris, in the prop's image
+                                self.w32(destr + 0xC + 12 * i + 4, at + prop.actions[i])
                     below = ist or root
                     if turn:
                         cs, sn = math.cos(math.radians(hd)), math.sin(math.radians(hd))
