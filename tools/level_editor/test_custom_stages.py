@@ -4,6 +4,7 @@ Needs the disc configured in the editor (Settings). Uses a temporary mods folder
 Run: python tools/level_editor/test_custom_stages.py
 """
 import json
+import shutil
 import os
 import sys
 import tempfile
@@ -52,6 +53,13 @@ def main():
         assert os.path.isfile(path) and not os.path.exists(os.path.join(mods, "m", "levels", "CENTRAL.json"))
         post("/api/save", {"name": "MYCITY", "mod": "m", "patch": {"objects": []}})
         assert not os.path.exists(path)
+        # own points: a .PED in the folder replaces the base's net in the editor (and in its check)
+        other = os.path.join(editor.stage_root(cfg["disc"], "VEGAS"), "PTS", "VEGAS.PED")
+        if os.path.isfile(other):
+            shutil.copyfile(other, os.path.join(stages, "ok", "my.ped"))
+            own = get("/api/stage?name=MYCITY&mod=m")["peds"]["net"]
+            assert len(own) != len(base_stage["peds"]["net"]), "the custom stage kept the base's pedestrian net"
+            assert post("/api/check", {"name": "MYCITY", "mod": "m", "patch": {"objects": []}})["ok"]
         # New stage…: written to the mod, listed at once, with the patch it was given
         made = post("/api/stage/new", {"mod": "m", "id": "newone", "name": "New One", "base": "VEGAS",
                                        "patch": {"objects": [], "names": {"0x1": "x"}}})
