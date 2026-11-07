@@ -15,7 +15,6 @@ Rearranjar fases existentes (mover, girar, apagar, duplicar prédios e objetos, 
 5. **Céu:** trocar o skybox da fase pelo editor (o céu é um nó próprio da fase, `lvlglb` já o separa).
 6. **Tamanho da fase:** ver se há limite (grade de colisão, retângulo do `hdLosTest`, rede dos carros, câmera) e deixar definir ou mudar pelo editor.
 7. **Paleta Ctrl+P:** falta a prévia de cada resultado e achar também os props originais de outras fases (hoje só objetos da fase e props do mod).
-8. **Capa da fase na seleção:** editor da foto da tela de seleção (`levelpics/<id>.png`), por exemplo uma captura da vista do editor recortada em 2:1.
 9. **Depois:** fase do zero como "base + geometria trocada" (mesmo relatório, seção 6).
    - Patch de fase acima de 1 MB: segunda arena na memória alta (`WOTM_HIGHRAM`). Contexto: `docs/investigacoes/2026-11-06/copia_profunda.md`.
 

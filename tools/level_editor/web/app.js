@@ -2780,6 +2780,22 @@ document.addEventListener('pointerdown', (e) => {   // a click anywhere else clo
 }, true);
 let ipData = null, ipTitle = '';
 const ipInput = Object.assign(document.createElement('input'), { type: 'file', accept: '.glb,model/gltf-binary' });
+// Stage picture: the view's middle 2:1 band, 512x256, into mods/<mod>/levelpics/ (the stage select's picture)
+$('picBtn').onclick = async () => {
+  if (!stageName) return;
+  if (!modNow) { msg('Choose a mod first: the picture is saved in it', { level: 'warn', toast: true }); return; }
+  renderer.render(scene, camera);          // the canvas keeps no frame between renders: read it right after one
+  const src = renderer.domElement, w = src.width, h = src.height, cw = Math.min(w, h * 2), ch = cw / 2;
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 256;
+  c.getContext('2d').drawImage(src, (w - cw) / 2, (h - ch) / 2, cw, ch, 0, 0, 512, 256);
+  const png = c.toDataURL('image/png').replace(/^data:[^,]*,/, '');
+  try {
+    const r = await api('/api/levelpic', { mod: modNow, name: stageName, png });
+    msg(`Saved the view as the stage picture: ${r.saved}`, { level: 'ok', toast: true });
+  } catch (e) { msg(cleanError(e).text, { level: 'err', toast: true }); }
+};
+
 // Ctrl+P palette: the stage's objects (select and frame) and the mod's props for this stage (add)
 let palIdx = 0, palRows = [];
 function palResults(q) {

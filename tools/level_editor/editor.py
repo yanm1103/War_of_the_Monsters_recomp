@@ -529,6 +529,34 @@ def points_root(cfg, name):
     return root
 
 
+# the stages whose select picture a mod's levelpics/<name>.png replaces (SHELL.TEX has none of them), and the custom stages' <id>
+LEVELPIC_BASE = {"TRAINING": "training", "VEGAS": "lakepowell", "TOKYODM": "tokyodeathmatch"}
+
+
+def save_levelpic(cfg, b):
+    """Stage picture…: mods/<mod>/levelpics/<name>.png from a PNG (base64) of the view, 2:1. Only for a custom stage (its id) and
+    the three game stages that have no picture of their own."""
+    mod, stage = (b.get("mod") or "").strip(), (b.get("name") or "").upper()
+    if bad_mod(mod):
+        raise ValueError(bad_mod_reason(mod))
+    c = custom_stages(cfg).get(stage)
+    pic = c["id"].lower() if c else LEVELPIC_BASE.get(stage)
+    if not pic:
+        raise ValueError("The select picture of %s comes from the game's own files: make a custom stage on it first (+)." % stage)
+    data = base64.b64decode(b.get("png") or "")
+    if data[:8] != b"\x89PNG\r\n\x1a\n" or len(data) > 8 << 20:
+        raise ValueError("Not a PNG picture (or over 8 MB).")
+    w, h = struct.unpack(">II", data[16:24])
+    if w != 2 * h:
+        raise ValueError("The picture must be 2:1 (it is %dx%d)." % (w, h))
+    path = os.path.join(cfg["mods"], mod, "levelpics", pic + ".png")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".tmp", "wb") as f:
+        f.write(data)
+    os.replace(path + ".tmp", path)
+    return {"saved": path, "size": [w, h]}
+
+
 def new_stage(cfg, b):
     """New stage…: mods/<mod>/stages/<id>/stage.json (id, name, base) and, with a patch, levels/<ID>.json. Returns the listing
     entry. The game reads its registry at boot, so it sees the stage after a restart (Test in game restarts it)."""
@@ -1046,6 +1074,11 @@ class Handler(BaseHTTPRequestHandler):
                 cfg.update({k: v for k, v in b.items() if k in ("disc", "mods", "game", "elf", "cwd", "iso", "theme", "mod")})
                 save_config(cfg)
                 return self.send(200, init_reply(cfg))
+            if self.path == "/api/levelpic":
+                try:
+                    return self.send(200, save_levelpic(cfg, b))
+                except ValueError as e:
+                    return self.send(400, {"error": str(e), "code": "levelpic"})
             if self.path == "/api/stage/new":
                 try:
                     return self.send(200, new_stage(cfg, b))
