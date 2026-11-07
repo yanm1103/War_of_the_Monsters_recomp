@@ -425,6 +425,11 @@ def read_glb(path, units, scale=None, height=None, warn=print):
         sidx = int(sm.group(1)) if sm else 0
         if sm:
             low = sm.group(2)
+        bucket = sidx
+        if low.startswith("debris_") and not low.startswith(("hull_", "coll_")):      # a chunk the state's change throws
+            if not sm or sidx < 1:
+                raise PropError("mesh %s: a debris chunk belongs to a broken state (name it state1_debris_...)" % name)
+            bucket = ("debris", sidx, name)
         if low.startswith("hull_"):          # a convex hull: its vertices, the planes come later (convex_planes)
             pts = []
             for prim in mesh.get("primitives", []):
@@ -470,7 +475,7 @@ def read_glb(path, units, scale=None, height=None, warn=print):
                 t = uv[v] if uv is not None else None
                 c = tuple(col[v]) + ((1.0,) if len(col[v]) == 3 else ()) if col is not None else None
                 return wp, n, t, c, factor
-            lst = raw.setdefault(sidx, {}).setdefault(key, [])
+            lst = raw.setdefault(bucket, {}).setdefault(key, [])
             for k in range(0, len(idx) - 2, 3):
                 tri = [corner(idx[k]), corner(idx[k + 1]), corner(idx[k + 2])]
                 if flip:
@@ -478,7 +483,7 @@ def read_glb(path, units, scale=None, height=None, warn=print):
                 lst.append(tri)
     if not any((raw.get(0) or {}).values()):
         raise PropError("%s: no triangles to draw%s" % (path, " in state 0 (the meshes with no state prefix)" if len(declared) > 1 else ""))
-    declared |= set(raw) | {x[0] for x in hull_raw} | {x[0] for x in coll_raw}
+    declared |= {b if isinstance(b, int) else b[1] for b in raw} | {x[0] for x in hull_raw} | {x[0] for x in coll_raw}
     if sorted(declared) != list(range(len(declared))):
         raise PropError("%s: the states are %s; they must be 0, 1, 2... with none missing" % (path, sorted(declared)))
     if len(declared) > MAX_STATES:
@@ -486,7 +491,7 @@ def read_glb(path, units, scale=None, height=None, warn=print):
 
     def game(p):                    # glTF Y up -> game Z up
         return (p[0], -p[2], p[1])
-    zs = [game(c[0])[2] for sd in raw.values() for tris in sd.values() for t in tris for c in t]
+    zs = [game(c[0])[2] for b, sd in raw.items() if isinstance(b, int) for tris in sd.values() for t in tris for c in t]
     if scale:
         s = scale
     elif height:
@@ -505,11 +510,12 @@ def read_glb(path, units, scale=None, height=None, warn=print):
         return (_f32(x), _f32(y), _f32(z + zlift))
     stats = {"degenerate": 0, "triangles": 0, "hulls": [], "colls": [], "lift": zlift, "declared": sorted(declared), "more": {}}
     per = {si: {"by_key": {}, "hulls": [], "colls": []} for si in sorted(declared)}
+    per.update({b: {"by_key": {}, "hulls": [], "colls": []} for b in raw if not isinstance(b, int)})
     for si, cname, cverts, ctris in coll_raw:
         per[si]["colls"].append((cname, [place(q) for q in cverts], ctris))
     for si, hname, hpts in hull_raw:
         per[si]["hulls"].append((hname, [place(q) for q in hpts]))
-    for si, sd in sorted(raw.items()):
+    for si, sd in sorted(raw.items(), key=lambda kv: (not isinstance(kv[0], int), str(kv[0]))):
         out = per[si]["by_key"]
         for key, tris in sd.items():
             for t in tris:
@@ -554,7 +560,18 @@ def read_glb(path, units, scale=None, height=None, warn=print):
                 stats["triangles"] += 1
     for si in per:
         per[si]["by_key"] = {k: v for k, v in per[si]["by_key"].items() if v}
-    stats["more"] = {si: per[si] for si in per if si}
+    stats["debris"] = {}            # state -> [{"name", "by_key" (around the chunk's own origin), "origin"}]
+    for b in sorted((b for b in per if not isinstance(b, int)), key=str):
+        bk = per[b]["by_key"]
+        pts = [c[0] for tris in bk.values() for t in tris for c in t]
+        if not pts:
+            continue
+        o = (_f32((min(p[0] for p in pts) + max(p[0] for p in pts)) / 2), _f32((min(p[1] for p in pts) + max(p[1] for p in pts)) / 2),
+             _f32(min(p[2] for p in pts)))                   # the middle of the footprint, on the chunk's lowest point: it lands on its foot
+        moved = {k: [tuple((tuple(_f32(c[0][i] - o[i]) for i in range(3)),) + tuple(c[1:]) for c in t) for t in tris]
+                 for k, tris in bk.items()}
+        stats["debris"].setdefault(b[1], []).append({"name": b[2], "by_key": moved, "origin": o})
+    stats["more"] = {si: per[si] for si in per if isinstance(si, int) and si}
     stats["hulls"], stats["colls"] = per[0]["hulls"], per[0]["colls"]
     return per[0]["by_key"], s, stats
 
@@ -722,6 +739,53 @@ def level_object(mb, header, batches, slot, light, ctx=None):
     return a, nverts, len(blob)
 
 
+DEBRIS_MASS = 15000.0           # Debris::Activate raises any lighter chunk to this
+DEBRIS_LIFE = 10                # seconds a chunk lives
+DEBRIS_RATE = 60.0              # timerGetUpdateRate(): Activate divides the throw by it
+MAX_CHUNKS = 16                 # chunks of one state (the game has 32 slots for all the debris at a time, 32 chunks to a slot)
+GRAVITY = 0.067                 # per field squared (Debris::update)
+
+
+def _s8(v):
+    return max(-127, min(127, int(round(v * 127)))) & 0xFF
+
+
+def debris_action(mb, chunks, hiers, lo, hi, log=print):
+    """An ActDebris (src/game/Debris.cpp: 0x10 bytes and 0x30 per chunk) for the chunks: each flies from its origin outward and
+    up and lands on its foot at the prop's base. Returns (address, the prop.json record)."""
+    n = len(chunks)
+    a = mb.alloc(0x10 + 0x30 * n, 16)
+    height = max(hi[2], 8.0)
+    cx, cy = (lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2
+    rise = max(1.0, min(4.0, math.sqrt(2 * GRAVITY * height * 1.2)))       # per field: the apex a little over the prop's height
+    up = 0.8
+    mb.u16(a, 3)                                                           # ACT_DEBRIS
+    mb.f(a + 4, 0.0)
+    mb.u32(a + 8, n)
+    mb.f(a + 0xC, rise / up * DEBRIS_MASS * DEBRIS_RATE)
+    rec = []
+    for k, (c, h) in enumerate(zip(chunks, hiers)):
+        b = a + 0x10 + 0x30 * k
+        ox, oy, oz = c["origin"]
+        hx, hy = ox - cx, oy - cy
+        hl = math.hypot(hx, hy)
+        out = (0.55 * hx / hl, 0.55 * hy / hl) if hl > 1e-6 else (0.0, 0.0)
+        mb.ptr_to(b, h, keep_high=False)
+        mb.f(b + 4, DEBRIS_MASS)
+        mb.f(b + 8, 0.01745329)                                            # the random spin of the stages' chunks
+        mb.u16(b + 0xC, DEBRIS_LIFE)
+        mb.u16(b + 0xE, 1)                                                 # kind 1: lands at the destructible's height
+        mb.f(b + 0x10, 0.3)
+        mb.f(b + 0x14, 0.0)
+        mb.u32(b + 0x18, _s8(out[0]) | _s8(out[1]) << 8 | _s8(up) << 16)
+        mb.u32(b + 0x1C, 127 << 24)                                        # start rotation: none
+        for q, v in enumerate((ox, oy, oz, 0.0)):
+            mb.f(b + 0x20 + 4 * q, v)
+        rec.append({"mesh": c["name"], "node": "0x%X" % h, "origin": [round(x, 4) for x in c["origin"]]})
+    log("debris: %d chunks, thrown %.2f units a field (apex %.1f)" % (n, rise, rise * rise / (2 * GRAVITY)))
+    return a, rec
+
+
 def _group(mb, flags, kids, pts):
     g = mb.alloc(0x20 + 4 * max(1, len(kids)), 16)
     mb.u32(g, OP_GROUP)
@@ -868,8 +932,8 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
     by_key0, s, gstats = read_glb(glb_path, units, scale, height, log)
     states = [(0, by_key0, gstats["hulls"], gstats["colls"])] + [
         (si, d["by_key"], d["hulls"], d["colls"]) for si, d in sorted(gstats["more"].items())]
-    by_key = {}                         # every state's triangles: the textures and images are shared
-    for _si, bk, _h, _c in states:
+    by_key = {}                         # every state's triangles (and the debris chunks'): the textures and images are shared
+    for bk in [x[1] for x in states] + [c["by_key"] for cl in gstats["debris"].values() for c in cl]:
         for k, v in bk.items():
             by_key.setdefault(k, []).extend(v)
     if len(states) > 1 and strength not in STRENGTH:
@@ -938,7 +1002,9 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
     roots, stats_obj, nkids = [], [], 0
     hulls, polys = [], []               # state 0's, as prop.json lists them
     all_pts, lo, hi = [], None, None
-    for si, bk, hl, cl in states:
+    def emit(bk, si):
+        """The OBJECTs of the triangles in bk: (addresses, their points)."""
+        nonlocal ntris, nverts, pbytes
         kids, spts = [], []
         for key in sorted(bk, key=lambda k: (korder[k[0]], k[1:])):
             tris = [tuple((tuple(_fbits(x) for x in c[0]), c[1], c[2], c[3]) for c in t) for t in bk[key]]
@@ -954,6 +1020,10 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
                 pbytes += nb
                 spts += _batch_points(grp)
             ntris += len(tris)
+        return kids, spts
+
+    for si, bk, hl, cl in states:
+        kids, spts = emit(bk, si)
         nkids += len(kids)
         slo = shi = None
         if spts:
@@ -966,12 +1036,12 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
             cv, hlo, hhi = hull_volume(mb, planes, hpts)
             hs.append({"mesh": hname, "node": "0x%X" % cv, "planes": len(planes),
                        "min": [round(x, 4) for x in hlo], "max": [round(x, 4) for x in hhi]})
-            log("collision hull %s%s: %d planes" % ("state%d_" % si if si else "", hname, len(planes)))
+            log("collision hull %s: %d planes" % (hname, len(planes)))
         for cname, cverts, ctris in cl:
             leaf, plo, phi = poly_coll(mb, cverts, ctris)
             ps.append({"mesh": cname, "node": "0x%X" % leaf, "triangles": len(ctris),
                        "min": [round(x, 4) for x in plo], "max": [round(x, 4) for x in phi]})
-            log("collision triangles %s%s: %d" % ("state%d_" % si if si else "", cname, len(ctris)))
+            log("collision triangles %s: %d" % (cname, len(ctris)))
         cvs = [int(h["node"], 16) for h in hs + ps]
         if si == 0:
             hulls, polys = hs, ps
@@ -982,6 +1052,16 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
         groups = kids + ([_group(mb, COLL_FLAGS, cvs, ([slo, shi] if slo else []) + shape)] if cvs else [])
         roots.append(_group(mb, ROOT_FLAGS, groups, sp))
     root = roots[0]
+    actions, debris_meta = [None] * len(roots), {}
+    for si, chunks in sorted(gstats["debris"].items()):
+        if len(chunks) > MAX_CHUNKS:
+            raise PropError("state%d: %d debris chunks, at most %d" % (si, len(chunks), MAX_CHUNKS))
+        hiers = []
+        for c in chunks:
+            kids, cpts = emit(c["by_key"], si)
+            nkids += len(kids)
+            hiers.append(kids[0] if len(kids) == 1 else _group(mb, ROOT_FLAGS, kids, cpts))
+        actions[si], debris_meta[si] = debris_action(mb, chunks, hiers, lo, hi, log)
     mb.u32(BASE, 1)
     mb.u32(BASE + 4, root)
     mb.d += bytes((-len(mb.d)) % 16)
@@ -1012,6 +1092,9 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
     if len(roots) > 1:
         meta["kind"] = "destructible"
         meta["destructible"] = {"class": strength, "states": ["0x%X" % r for r in roots]}
+        if debris_meta:
+            meta["destructible"]["actions"] = ["0x%X" % a if a else None for a in actions]
+            meta["destructible"]["debris"] = {str(k): v for k, v in debris_meta.items()}
     with open(os.path.join(out_dir, "prop.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=1)
         f.write("\n")
@@ -1040,8 +1123,10 @@ class Prop:
         self.root = struct.unpack_from("<I", ngp_bytes, 4)[0] - BASE
         if not 0 <= self.root < len(ngp_bytes):
             raise PropError("%s: root outside the image" % folder)
-        self.destructible = meta.get("destructible")        # {"class", "states": [root addresses]} or None
+        self.destructible = meta.get("destructible")        # {"class", "states": [root addresses], ...} or None
         self.states = [self.root]
+        self.actions = [None]                                # per state, the offset of its ActDebris (or None)
+        self.chunks = {}                                     # state -> the offsets of its debris chunks' nodes
         if self.destructible:
             try:
                 self.states = [int(x, 16) - BASE for x in self.destructible["states"]]
@@ -1052,6 +1137,14 @@ class Prop:
                 raise PropError("%s: prop.json \"destructible\": %d states (2 to %d, the first the root), class %r (1 to 5)" % (
                     folder, len(self.states), MAX_STATES, cls))
             self.strength = cls
+            try:
+                acts = self.destructible.get("actions") or [None] * len(self.states)
+                self.actions = [int(x, 16) - BASE if x else None for x in acts]
+                self.chunks = {int(k): [int(c["node"], 16) - BASE for c in v] for k, v in (self.destructible.get("debris") or {}).items()}
+            except (KeyError, TypeError, ValueError):
+                raise PropError("%s: prop.json \"destructible\": \"actions\" and \"debris\" are not as build writes them" % folder)
+            if len(self.actions) != len(self.states) or any(a is not None and not 0 <= a < len(ngp_bytes) for a in self.actions) or                     any(not 0 <= x < len(ngp_bytes) for v in self.chunks.values() for x in v):
+                raise PropError("%s: prop.json \"destructible\": an action or a chunk outside the image" % folder)
 
     @property
     def size(self):
@@ -1163,7 +1256,13 @@ def check(prop, at=ARENA, log=print):
     tris = verts = nobj = 0
     pts, hulls = [], []
     first = {n for n, _op in walk(img, root)}
-    for n, op in [x for r in prop.states for x in walk(img, at + r)]:
+    for si, a in enumerate(prop.actions):          # an ActDebris: type 3, one 0x30-byte chunk per node prop.json lists
+        if a is None:
+            continue
+        nodes = prop.chunks.get(si, [])
+        if not img.ok(at + a, 0x10 + 0x30 * len(nodes)) or img.u16(at + a) != 3 or img.u32(at + a + 8) != len(nodes) or                 [img.u32(at + a + 0x10 + 0x30 * k) for k in range(len(nodes))] != [at + x for x in nodes]:
+            raise PropError("state %d: the ActDebris at +0x%X does not match its chunks" % (si, a))
+    for n, op in [x for r in prop.states + [x for v in prop.chunks.values() for x in v] for x in walk(img, at + r)]:
         if op == OP_OBJECT:
             nobj += 1
             rp = _rigid_packet(img, n)

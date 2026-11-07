@@ -660,7 +660,10 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   does not touch the others. `hull_*`/`coll_*` meshes belong to their state (`state1_coll_stump`: what is left collides; a state with
   none does not collide). Health is the hit point class (`--strength 1..5`: 10, 50 (default), 100, 150 or 250 hit points; class 1 takes
   any damage, the others only over 5), and each hit that takes the health under (N - 1 - i) / N of the full moves one state on, at
-  most one per hit. A broken state has no debris or smoke of its own. Log: `props: DEST is destructible: 2 states, hit point class 2 (50 hit points)`. Each model takes its file size
+  most one per hit. **Debris:** meshes named `state1_debris_<name>` (up to 16 per state) are not part of any state's drawing: each is a
+  chunk thrown when the prop enters that state (`ActDebris`, the stages' own action). A chunk flies up and outward from where it sits
+  in the prop, spins, bounces and lands on its foot at the prop's base, and is gone after 10 seconds; its origin is the middle of its
+  footprint at its lowest point. A broken state has no smoke of its own. Log: `props: DEST is destructible: 2 states, hit point class 2 (50 hit points)`. Each model takes its file size
   of the arena once, and each entry 100 to 200 bytes more. Skipped with a line: a model missing or made for another stage, a texture
   the stage's `.TEX` does not have, an image larger than every texture bin of the stage, an entry whose box leaves the collision grid. The props are read from the folder at every load,
   so a prop rebuilt during a fight shows after a reload (F10). Log: `[fase]   props: TOWER x3 (1216 bytes); 1660 bytes da arena`,
