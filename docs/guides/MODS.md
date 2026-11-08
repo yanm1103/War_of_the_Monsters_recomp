@@ -637,6 +637,15 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   `csListArr`, which the game indexes by cell, so the disc's one is too short; 1 MB for the whole patch), lists every path
   again in the cells its box covers and points the image's root to it; it runs before the entries, so props and copies see it. A bad
   rectangle is skipped with a line (`[fase]   grid pulada: ...`) and the stage keeps the disc's grid. Log: `grid: 36 x 36 celulas (eram 18 x 16)...`.
+- `walls` (at the top beside `objects`): `"walls": "off"` turns the stage's invisible boundary walls off, so a monster can leave the
+  playable area. The walls are the grid's `POLY_COLL` paths flat in x or y (under 1 unit thick), at least 600 tall and 1500 long: CENTRAL
+  has four (x −1430 and 1355, y −1349 and 1250, 1400 tall, just past the outer buildings), VEGAS four and CAPITOL one; the other stages
+  have none (what stops a monster there is the end of the floor and the buildings). Each wall's leaf is left with no objects, so the
+  game's collision query finds nothing; the paths stay where they are. It does not move the floor: the disc's floor ends at the old
+  rectangle, where a monster falls and the game puts it back in the stage. To walk further, add a floor as a `coll_*` prop (a flat
+  quad of two triangles over the new `grid`) and give the patch the bigger `grid`; props placed out there collide, break and take
+  attacks as inside. There is no button for it in the editor yet: it is kept when the editor saves the file. Log: `walls: 4
+  paredes de borda desligadas (x=-1430, ...)`; Check counts it and refuses a stage with none.
 - `props` (at the top beside `objects`): new static objects made in Blender, placed in the stage.
   ```json
   "props": [{"id": "tower1", "model": "TOWER", "pos": [845.9, 1003.2, 0.5], "heading": 90, "name": "Water tower"}]

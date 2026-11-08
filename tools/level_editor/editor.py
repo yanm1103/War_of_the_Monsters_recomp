@@ -326,7 +326,8 @@ def stage_env(cfg, disc, name, mod=""):
 
 # lp.stats keys the summary names, in this order (the others are details of how the patch was laid out)
 STAT_WORDS = (("moved", "moved", "moved"), ("copies", "copy", "copies"), ("deleted", "deleted", "deleted"),
-              ("grid cells", "grid cell", "grid cells"), ("ped segments", "sidewalk", "sidewalks"),
+              ("grid cells", "grid cell", "grid cells"), ("boundary walls off", "boundary wall off", "boundary walls off"),
+              ("ped segments", "sidewalk", "sidewalks"),
               ("ped groups changed", "pedestrian group changed", "pedestrian groups changed"),
               ("ped groups added", "pedestrian group added", "pedestrian groups added"),
               ("ped groups deleted", "pedestrian group deleted", "pedestrian groups deleted"),
@@ -395,6 +396,10 @@ def check_patch(disc, name, patch, mod_dir=None, pts_root=None):
         m = re.match(r"grid skipped: (.*)$", line)
         if m:
             problems.append({"level": "err", "kind": "grid", "reason": m.group(1), "text": "The stage size was not applied: %s" % m.group(1)})
+            continue
+        m = re.match(r"walls skipped: (.*)$", line)
+        if m:
+            problems.append({"level": "err", "kind": "walls", "reason": m.group(1), "text": "The boundary walls were not turned off: %s" % m.group(1)})
             continue
         m = re.match(r"pedestrian group (\d+) skipped: (.*)$", line)
         if m:
