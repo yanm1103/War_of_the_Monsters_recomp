@@ -1,0 +1,50 @@
+{
+ "head": "bone1",
+ "spine": "bone9",
+ "pelvis": "bone30",
+ "arm": [
+  "bone7",
+  "bone6",
+  "bone5"
+ ],
+ "tip": "st_a01600",
+ "legs": [
+  [
+   "bone17",
+   "bone16",
+   "bone15",
+   "bone14"
+  ],
+  [
+   "bone21",
+   "bone20",
+   "bone19",
+   "bone18"
+  ],
+  [
+   "bone25",
+   "bone24",
+   "bone23",
+   "bone22"
+  ],
+  [
+   "bone29",
+   "bone28",
+   "bone27",
+   "bone26"
+  ]
+ ],
+ "mouth_node": "st_a00390",
+ "forward": [
+  0,
+  1,
+  0
+ ],
+ "crouch": 14,
+ "lean": 35,
+ "head_back": 12,
+ "wrist": true,
+ "arm_life": 0.25,
+ "body_life": 0.3,
+ "head_life": 0.25
+}

@@ -1,0 +1,13 @@
+{
+ "head": "bone0",
+ "spine": "bone11",
+ "pelvis": "bone21",
+ "arm": ["bone10", "bone9", "bone8", "bone7"],
+ "tip": "bone6",
+ "legs": [["bone15", "bone14", "bone13", "bone12"], ["bone19", "bone18", "bone17", "bone16"]],
+ "mouth": [0, 17, 92],
+ "forward": [0, 1, 0],
+ "crouch": 10,
+ "lean": 30,
+ "head_back": 12
+}

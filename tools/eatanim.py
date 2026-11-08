@@ -27,6 +27,9 @@ roles.json (nomes de nos do .glb; o `roles` escreve um palpite, confira):
   "lean" (graus do tronco ao pegar, padrao 40), "jaw_open" (25), "head_back" (14). tools/eatanim_togera.json e o do Togera.
   "hold_offset" ([para a frente, para o lado], em alcances do braco): onde a mao segura o civil. Sem ele, o build procura o par em que as
   pecas rigidas do braco (laminas) nao invadem a frente do rosto; "head_radius" ajusta a esfera da cabeca.
+  "wrist": true (o ultimo osso do braco tambem gira para levar a ponta ao alvo; foice do Preytor), "arm_life"/"body_life"/"head_life"
+  (0..1, padrao 1): quanto do balanco do idle fica no braco, no tronco/bacia e na cabeca (idle que balanca muito, como o do Preytor,
+  afasta a mao do civil). tools/eatanim_preytor.json e tools/eatanim_robo47.json sao os da Preytor e do Robo-47.
 Espaco do jogo: o que o no "WotM" guarda (Z para cima).
 Os ossos que as animacoes novas nao mexem ficam parados no primeiro quadro do idle (regra do import de animacao nova).
 """
@@ -284,7 +287,8 @@ def load_roles(g, rig, path):
     return dict(head=head, spine=spine, arm=arm, mouth=mouth, fwd=fwd / np.linalg.norm(fwd), jaw=need("jaw"), tip=need("tip"),
                 pelvis=need("pelvis"), legs=[[g.name[n] for n in leg] for leg in r.get("legs", [])], crouch=float(r.get("crouch", 0)),
                 lean=float(r.get("lean", 40)), jaw_open=float(r.get("jaw_open", 25)), head_back=float(r.get("head_back", 14)),
-                head_radius=float(r.get("head_radius", 0)), hold_offset=r.get("hold_offset"),
+                head_radius=float(r.get("head_radius", 0)), hold_offset=r.get("hold_offset"), wrist=bool(r.get("wrist", False)),
+                arm_life=float(r.get("arm_life", 1.0)), body_life=float(r.get("body_life", 1.0)), head_life=float(r.get("head_life", 1.0)),
                 )
 
 
@@ -324,7 +328,7 @@ def key_poses(g, rig, R, off=None):
             ccd(rig, pose, leg, ankle)
 
     def to(pose, target):
-        ccd(rig, pose, arm[:-1] if end != arm[-1] else arm, target, end=end)   # com ponta propria, o pulso (ultimo osso) fica como esta
+        ccd(rig, pose, arm[:-1] if end != arm[-1] and not R["wrist"] else arm, target, end=end)   # com ponta propria, o pulso (ultimo osso) fica como esta, salvo "wrist"
 
     P = {"rest": dict(rest)}
     p = dict(rest)   # agachado e inclinado, mao no chao a frente (o mais longe que o braco alcanca)
@@ -513,10 +517,11 @@ def conj(q):
     return np.array([-q[0], -q[1], -q[2], q[3]])
 
 
-def add_life(g, frames, fade_end, ramp=0):
+def add_life(g, frames, fade_end, ramp=0, damp=None):
     """Poe o balanco do idle (a090, em laco) por cima: os ossos que a animacao nao mexe seguem o idle (cauda, o outro braco, pernas,
     respiracao) e os que ela mexe ganham a variacao do idle em relacao ao primeiro quadro. No fim o efeito some (fade_end quadros) para
-    a volta ao idle do jogo nao dar salto; `ramp` quadros de entrada (a mao precisa chegar ao chao no pegar)."""
+    a volta ao idle do jogo nao dar salto; `ramp` quadros de entrada (a mao precisa chegar ao chao no pegar); `damp`: osso -> fator que
+    reduz a variacao do idle naquele osso (bracos que balancam muito no idle)."""
     try:
         first, idle_n = eval_pose(g, "a090", 0)
     except SystemExit:
@@ -534,19 +539,20 @@ def add_life(g, frames, fade_end, ramp=0):
         for i in frames[f]:
             if i not in ph:
                 continue
+            wi = w * (damp or {}).get(i, 1.0)
             if isinstance(i, tuple):
-                frames[f][i] = frames[f][i] + (ph[i] - first[i]) * w
+                frames[f][i] = frames[f][i] + (ph[i] - first[i]) * wi
             else:
-                d = slerp(np.array([0, 0, 0, 1.0]), qmul(ph[i], conj(first[i])), w)
+                d = slerp(np.array([0, 0, 0, 1.0]), qmul(ph[i], conj(first[i])), wi)
                 frames[f][i] = qnorm(qmul(d, frames[f][i]))
     return frames
 
 
-def add_animation(g, name, keys, wid, fade_end=0, ramp=0):
+def add_animation(g, name, keys, wid, fade_end=0, ramp=0, damp=None):
     n = keys[-1][0] + 1
     times = g.add(np.arange(n, dtype=float) / FPS)
     nodes = sorted(keys[0][1], key=lambda i: (isinstance(i, tuple), i[1] if isinstance(i, tuple) else i))
-    frames = add_life(g, [sample(keys, f) for f in range(n)], fade_end, ramp)
+    frames = add_life(g, [sample(keys, f) for f in range(n)], fade_end, ramp, damp)
     channels, samplers = [], []
     for i in nodes:
         out = g.add(np.array([frames[f][i] for f in range(n)]))
@@ -588,8 +594,13 @@ def cmd_build(argv):
     off, pen, nbl = hold_offset(g, rig, R)
     P = key_poses(g, rig, R, off)
     tl = timeline(P)
-    add_animation(g, "a%03d_once" % ids["--grab"], tl["grab"], ids["--grab"], ramp=60)
-    add_animation(g, "a%03d_once" % ids["--eat"], tl["eat"], ids["--eat"], fade_end=24)
+    damp = {n: R["arm_life"] for n in R["arm"]}   # o idle de alguns monstros balanca o braco demais para segurar o civil
+    for n in (R["spine"], R["pelvis"], R["jaw"]):
+        if n is not None:
+            damp[n] = R["body_life"]
+    damp[R["head"]] = R["head_life"]
+    add_animation(g, "a%03d_once" % ids["--grab"], tl["grab"], ids["--grab"], ramp=60, damp=damp)
+    add_animation(g, "a%03d_once" % ids["--eat"], tl["eat"], ids["--eat"], fade_end=24, damp=damp)
     g.write(out)
     print("%s: a%03d_once (pegar, %d quadros) e a%03d_once (comer, %d quadros)" % (out, ids["--grab"], tl["grab"][-1][0] + 1, ids["--eat"],
                                                                                 tl["eat"][-1][0] + 1))
