@@ -644,7 +644,7 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   game's collision query finds nothing; the paths stay where they are. It does not move the floor: the disc's floor ends at the old
   rectangle, where a monster falls and the game puts it back in the stage. To walk further, add a floor as a `coll_*` prop (a flat
   quad of two triangles over the new `grid`) and give the patch the bigger `grid`; props placed out there collide, break and take
-  attacks as inside. The editor sets it in the Stage size dialog (a checkbox, only for a stage that has walls). Log: `walls: 4
+  attacks as inside. The scenery the stage draws beyond its walls (VEGAS has some) has no collision: a monster walks through it. Cars and pedestrians keep to their own paths whatever is outside. The editor sets it in the Stage size dialog (a checkbox, only for a stage that has walls). Log: `walls: 4
   paredes de borda desligadas (x=-1430, ...)`; Check counts it and refuses a stage with none.
 - `props` (at the top beside `objects`): new static objects made in Blender, placed in the stage.
   ```json
