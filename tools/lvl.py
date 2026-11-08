@@ -1719,6 +1719,65 @@ class LevelPatch:
         self.stats["boundary walls off"] += len(walls)
         self.log.append("walls: %d boundary walls off (%s)" % (len(walls), ", ".join(names)))
 
+    # Nodes that put an object in a handle's care (a prop, a pickup, a destructible, an animated part): what hangs below one belongs to
+    # its entry in "objects", not to the stage's bare scenery.
+    CLEAR_COVER = frozenset((3, 4, 30, 6, 31, 39, 25, 17, 35, 38))
+
+    def scenery_plan(self):
+        """What `"clear": "scenery"` takes out of the stage: ([(parent, slot)] of the OBJECTs and PART_EMITTERs of the bare scenery,
+        [path] of its POLY_COLL and COLL_VOL leaves). Bare means no TRANSLATE, ROTATE, SCALE, SWITCH, DESTRUCTIBLE, INTERACTIVE,
+        CHAR_INSTANCE, ANIM_XFORM, SKEL_BONE or ANIM_SCALE above it and, for the drawing, outside the sky (a GROUP with id 2); a
+        node with an id word (the game finds it by id) stays. The camera triggers (COLL_TRIG) stay."""
+        st, img = self.st, self.img
+        slots, seen_slots, seen = [], set(), set()
+
+        def walk(n, sky):
+            if (n, sky) in seen:
+                return
+            seen.add((n, sky))
+            for s in child_slots(img, n):
+                c = img.u32(s) & MASK
+                if not c or not img.ok(c):
+                    continue
+                op = img.u32(c) & 63
+                if op in self.CLEAR_COVER:
+                    continue
+                if op in (0, 22) and not sky and not img.u32(c) >> 6 and s not in seen_slots:
+                    seen_slots.add(s)
+                    slots.append((n, s))
+                elif op not in (0, 22):
+                    walk(c, sky or (op == 1 and st.ident(c) == 2))
+        for r in sorted(st.roots):
+            if st.op(r) != 7 and st.op(r) not in self.CLEAR_COVER:
+                walk(r, st.op(r) == 1 and st.ident(r) == 2)
+        paths = []
+        for pa in sorted(self.cells):
+            p = Path(img, pa)
+            if self.op(p.leaf) in (10, 42) and not any(self.op(n) in self.CLEAR_COVER for n in p.nodes):
+                paths.append(pa)
+        return slots, paths
+
+    def apply_clear(self, spec):
+        """The patch's `"clear": "scenery"`: the stage's bare scenery stops being drawn and colliding. Each OBJECT and PART_EMITTER of it
+        (`scenery_plan`) is taken out of its parent: the slot points to one NULL node instead (nothing else is written to the node, so
+        a copy that shares it keeps it); each of its collision paths leaves every cell. Runs before "objects" and "props"."""
+        if spec != "scenery":
+            raise PatchError('"clear" is "scenery"')
+        slots, paths = self.scenery_plan()
+        if not slots and not paths:
+            raise PatchError("the stage has no bare scenery")
+        if slots:
+            null = self.alloc(0x10, 16)
+            self.w32(null, 9)
+            for _p, s in slots:
+                self.w32(s, null)
+        for pa in paths:
+            self.set_cells(pa, set())
+            self.cells.pop(pa, None)
+        self.stats["scenery cleared"] += len(slots)
+        self.stats["scenery paths removed"] += len(paths)
+        self.log.append("clear: %d OBJECTs and emitters of the bare scenery out, %d collision paths out" % (len(slots), len(paths)))
+
     def apply(self, patch):
         """Every entry: {"handle", "from": [x, y, z], and "pos"/"heading", "delete": true or "copies": [{"pos", "heading"}]}.
         An entry that does not match the image is skipped with a line in the log."""
@@ -1733,6 +1792,11 @@ class LevelPatch:
                 self.apply_walls(patch["walls"])
             except PatchError as err:
                 self.log.append("walls skipped: %s" % err)
+        if patch.get("clear") is not None:
+            try:
+                self.apply_clear(patch["clear"])
+            except PatchError as err:
+                self.log.append("clear skipped: %s" % err)
         for k, e in enumerate(patch.get("objects", [])):
             try:
                 hv = e.get("handle")

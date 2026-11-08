@@ -646,6 +646,16 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   quad of two triangles over the new `grid`) and give the patch the bigger `grid`; props placed out there collide, break and take
   attacks as inside. The scenery the stage draws beyond its walls (VEGAS has some) has no collision: a monster walks through it. Cars and pedestrians keep to their own paths whatever is outside. The editor sets it in the Stage size dialog (a checkbox, only for a stage that has walls). Log: `walls: 4
   paredes de borda desligadas (x=-1430, ...)`; Check counts it and refuses a stage with none.
+- `clear` (at the top beside `objects`): `"clear": "scenery"` takes the stage's bare scenery out, the base of a stage built from
+  scratch. Bare is what has no handle: the drawing and collision of the plain `GROUP` chains with no `TRANSLATE`, `ROTATE`, `SCALE`,
+  `SWITCH`, `DESTRUCTIBLE`, `INTERACTIVE`, `CHAR_INSTANCE`, `ANIM_XFORM`, `SKEL_BONE` or `ANIM_SCALE` above (the ground, the streets, the
+  invisible walls and the ceiling, scenery blocks, smoke emitters). Each `OBJECT` and `PART_EMITTER` of it leaves its parent (the slot
+  points to one `NULL` node; the node is not written, so a copy of another object that shares it keeps it) and each of its `POLY_COLL`
+  and `COLL_VOL` paths leaves every cell of the grid. Left alone: what has a handle (delete those with `objects`; `python tools/lvl.py
+  objects <FASE>` lists them), the animated and scripted parts (cranes, a boss's set), the sky, the lights, the camera triggers and a
+  node with an id. It runs first, so `objects`, `props` and `copies` still add what they bring. After it the stage has no floor: give
+  it one as a `coll_*` prop over a bigger `grid` ("Stage size", `Apply and add a floor over it`). A stage with nothing bare skips it
+  with a line. Log: `clear: 336 OBJECTs e emissores do cenario nu fora, 7 caminhos de colisao fora`.
 - `props` (at the top beside `objects`): new static objects made in Blender, placed in the stage.
   ```json
   "props": [{"id": "tower1", "model": "TOWER", "pos": [845.9, 1003.2, 0.5], "heading": 90, "name": "Water tower"}]
