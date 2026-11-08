@@ -2,24 +2,26 @@
   "$schema": "https://recomp.fyi/schema/v1.json",
   "game": "War of the Monsters",
   "system": "PS2",
-  "type": "decomp",
+  "type": "recomp",
   "status": "in-progress",
-  "targets": ["Windows"],
-  "toolchain": ["Splat", "ee-gcc 2.95.2"],
+  "targets": ["Windows", "Linux"],
+  "toolchain": ["PS2Recomp", "raylib", "Splat", "ee-gcc 2.95.2"],
   "original": {
     "region": "NTSC-U",
     "serial": "SCUS-97197",
     "sha1": "250e3544aa99a04a2fd45974ff7ea38c31d0fc31"
   },
   "project": "War of the Monsters recomp",
-  "approach": "Matching C++ decomp of the main executable; goal is a native, easy-to-mod PC port with little to no emulator code.",
-  "notes": "Functions are byte-matched where possible; the rest are kept as functionally equivalent C++ and marked NON_MATCHING. SDK and PS2 hardware code is skipped, since the port replaces it.",
-  "help": ["Matching C++ decomp", "Struct layouts", "PS2 hardware replacement"],
-  "tags": ["ps2", "monsters", "cpp", "matching"],
+  "approach": "Static recompilation of the main executable with PS2Recomp, plus a native layer that draws with the PC GPU and handles sound, FMVs and input instead of emulating the VU1, GS and IOP. A readable C++ decomp of the executable replaces, by hook, the parts that matter for modding.",
+  "notes": "The recompiled C++ is game code and is generated locally from your own disc, so it is not in the repo. Playable on Windows (releases ship with a mod kit), with a Linux x86-64 port in the tree. Mods (PNG textures, skins, custom monsters, custom stages) go in the mods folder, and there is a level editor. Decomp functions are byte-matched where cheap, the rest are kept as functionally equivalent C++ and marked NON_MATCHING. SDK and PS2 hardware code is skipped, since the port replaces it.",
+  "help": ["Native layer (rendering, sound, input)", "Linux port", "Mods and level editor", "Hooking decomp functions into the recompiled runtime", "Struct layouts"],
+  "tags": ["ps2", "monsters", "recomp", "cpp", "native-port", "mods"],
   "maintainers": [
     { "name": "Yan Moura", "link": "https://github.com/yanm1103" }
   ],
   "links": [
-    { "label": "Repository", "url": "https://github.com/yanm1103/War_of_the_Monsters_recomp" }
+    { "label": "Repository", "url": "https://github.com/yanm1103/War_of_the_Monsters_recomp" },
+    { "label": "Latest release", "url": "https://github.com/yanm1103/War_of_the_Monsters_recomp/releases/latest" },
+    { "label": "Model museum", "url": "https://yanm1103.github.io/wotm-model-museum/" }
   ]
 }
