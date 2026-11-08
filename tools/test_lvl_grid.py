@@ -47,6 +47,10 @@ def main():
     assert not any("skipped" in x for x in lp3.log) and lp3.stats["boundary walls off"] == 4, lp3.log
     assert all(lp3.img.u32(leaf + 4) == 0 for _, leaf in walls)
     assert len(lp3.boundary_walls()) == 4        # still the same paths (the box does not change)
+    # CAPITOL's west wall is 8 units thick: the rule finds it too (VEGAS four)
+    for stage, count in (("CAPITOL", 2), ("VEGAS", 4)):
+        lpw = lvl.LevelPatch(lvl.Stage(stage, editor.stage_root(cfg["disc"], stage)))
+        assert len(lpw.boundary_walls()) == count, (stage, [hex(p.addr) for p, _ in lpw.boundary_walls()])
     # another value, and a stage with no walls, are skipped with a line
     lp4 = lvl.LevelPatch(lvl.Stage("CENTRAL", disc))
     lp4.apply({"objects": [], "walls": True})

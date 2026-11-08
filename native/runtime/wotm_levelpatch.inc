@@ -1432,7 +1432,7 @@ struct Stage
                           lo[0], maxX, lo[1], maxY, cells.size(), stats["new list nodes"] - before));
     }
     // "walls": "off": as paredes invisiveis de borda deixam de colidir (lvl.py LevelPatch.apply_walls, mesma regra e mesma ordem): os caminhos
-    // POLY_COLL da grade achatados em x ou y (caixa de menos de 1 de espessura), com pelo menos 600 de altura e 1500 de comprimento; a folha
+    // POLY_COLL da grade achatados em x ou y (caixa de menos de 10 de espessura), com pelo menos 600 de altura e 1500 de comprimento; a folha
     // fica sem objetos (numObjs 0, o hdTestNode nao percorre nenhum)
     void applyWalls(const json::Value &spec)
     {
@@ -1444,9 +1444,9 @@ struct Stage
             const Path p = path(kv.first);
             if (p.nodes.empty() || op(p.nodes.back()) != POLY_COLL) continue;
             const double sx = p.box.mx.v[0] - p.box.mn.v[0], sy = p.box.mx.v[1] - p.box.mn.v[1], sz = p.box.mx.v[2] - p.box.mn.v[2];
-            if (std::min(sx, sy) >= 1.0 || sz < 600.0 || std::max(sx, sy) < 1500.0) continue;
+            if (std::min(sx, sy) >= 10.0 || sz < 600.0 || std::max(sx, sy) < 1500.0) continue;
             w32(p.nodes.back() + 4, 0);
-            names += fmt("%s%s=%.0f", n ? ", " : "", sx < 1.0 ? "x" : "y", sx < 1.0 ? p.box.mn.v[0] : p.box.mn.v[1]);
+            names += fmt("%s%s=%.0f", n ? ", " : "", sx < sy ? "x" : "y", sx < sy ? p.box.mn.v[0] : p.box.mn.v[1]);
             ++n;
         }
         if (!n) throw PatchError("a fase nao tem paredes de borda");

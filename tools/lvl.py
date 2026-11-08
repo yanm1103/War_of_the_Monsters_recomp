@@ -1690,16 +1690,16 @@ class LevelPatch:
         self.log.append("grid: %d x %d cells (was %d x %d), x [%.0f, %.0f] y [%.0f, %.0f]; %d paths listed again, %d new list nodes" % (
             cols, rows, g.cols, g.rows, lo[0], st.grid.max_x, lo[1], st.grid.max_y, len(self.cells), self.stats["new list nodes"] - before))
 
-    WALL_MIN_HEIGHT, WALL_MIN_LENGTH = 600.0, 1500.0
+    WALL_MIN_HEIGHT, WALL_MIN_LENGTH, WALL_MAX_THICK = 600.0, 1500.0, 10.0
 
     def boundary_walls(self):
-        """The stage's invisible boundary walls: the grid's POLY_COLL paths that are flat in x or y (a box under 1 unit thick), at
-        least 600 tall and 1500 long (CENTRAL has four, VEGAS four, CAPITOL one; the other stages none). [(path, leaf)]."""
+        """The stage's invisible boundary walls: the grid's POLY_COLL paths that are flat in x or y (a box under 10 units thick), at
+        least 600 tall and 1500 long (CENTRAL has four, VEGAS four, CAPITOL two; the other stages none). [(path, leaf)]."""
         out = []
         for pa in sorted(self.cells):
             p = Path(self.img, pa)
             sx, sy, sz = (p.max[i] - p.min[i] for i in range(3))
-            if self.op(p.leaf) == 42 and min(sx, sy) < 1.0 and sz >= self.WALL_MIN_HEIGHT and max(sx, sy) >= self.WALL_MIN_LENGTH:
+            if self.op(p.leaf) == 42 and min(sx, sy) < self.WALL_MAX_THICK and sz >= self.WALL_MIN_HEIGHT and max(sx, sy) >= self.WALL_MIN_LENGTH:
                 out.append((p, p.leaf))
         return out
 
@@ -1715,7 +1715,7 @@ class LevelPatch:
         for p, leaf in walls:
             self.w32(leaf + 4, 0)
             sx, sy = p.max[0] - p.min[0], p.max[1] - p.min[1]
-            names.append("%s=%.0f" % (("x", p.min[0]) if sx < 1.0 else ("y", p.min[1])))
+            names.append("%s=%.0f" % (("x", p.min[0]) if sx < sy else ("y", p.min[1])))
         self.stats["boundary walls off"] += len(walls)
         self.log.append("walls: %d boundary walls off (%s)" % (len(walls), ", ".join(names)))
 

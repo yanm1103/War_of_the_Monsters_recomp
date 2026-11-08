@@ -638,8 +638,8 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   again in the cells its box covers and points the image's root to it; it runs before the entries, so props and copies see it. A bad
   rectangle is skipped with a line (`[fase]   grid pulada: ...`) and the stage keeps the disc's grid. Log: `grid: 36 x 36 celulas (eram 18 x 16)...`.
 - `walls` (at the top beside `objects`): `"walls": "off"` turns the stage's invisible boundary walls off, so a monster can leave the
-  playable area. The walls are the grid's `POLY_COLL` paths flat in x or y (under 1 unit thick), at least 600 tall and 1500 long: CENTRAL
-  has four (x −1430 and 1355, y −1349 and 1250, 1400 tall, just past the outer buildings), VEGAS four and CAPITOL one; the other stages
+  playable area. The walls are the grid's `POLY_COLL` paths flat in x or y (under 10 units thick), at least 600 tall and 1500 long: CENTRAL
+  has four (x −1430 and 1355, y −1349 and 1250, 1400 tall, just past the outer buildings), VEGAS four and CAPITOL two (x −1199 and 1200); the other stages
   have none (what stops a monster there is the end of the floor and the buildings). Each wall's leaf is left with no objects, so the
   game's collision query finds nothing; the paths stay where they are. It does not move the floor: the disc's floor ends at the old
   rectangle, where a monster falls and the game puts it back in the stage. To walk further, add a floor as a `coll_*` prop (a flat
@@ -761,7 +761,7 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   it can only grow. Check reports a rectangle the game would skip. For a stage with boundary walls (CENTRAL, VEGAS, CAPITOL) the dialog also has
   a checkbox that sets `"walls": "off"`. "Apply and add a floor over it" also builds a prop `FL_<stage>` in the mod (a visible plate 0.6 under
   the stage's floor and a `coll_` slab of two triangles at z 0, both 50 units inside the rectangle) and places it at the rectangle's center as
-  the entry `floor`; doing it again after a size change builds it again. The slab is at z 0, as the stages' own floors are in CENTRAL.
+  the entry `floor`; doing it again after a size change builds it again. The slab is at z 0, where the floor's collision is in CENTRAL, VEGAS and CAPITOL (one flat path, its top at z 0); for the other stages check the height of their floor first.
 - **Stage picture:** the picture button (lower right of the view) saves the middle 2:1 band of the view, 512x256, as
   `mods/<mod>/levelpics/<name>.png` for a custom stage (`<id>`) and for Training, Lake Powell and Tokyo DM; the other game stages have
   their picture in `SHELL.TEX` (make a custom stage on one). The stage select picks it up the next time the game starts.
