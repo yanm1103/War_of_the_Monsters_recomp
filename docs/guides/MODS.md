@@ -551,7 +551,7 @@ with its own level patch:
 - **Patch:** `mods/<mod>/levels/<ID>.json` (`levels/MYCITY.json`), in the format of "Level patches" below, with the base's handles. A
   `levels/CENTRAL.json` does not apply to a CENTRAL-based custom stage, and the other way round.
 - **What comes from the base:** the geometry, `.TEX`/`.RTX`, the stage code (water, scripted events, sounds, music, load card, pause
-  menu) and the lock: a stage based on UFO stays locked until UFO is unlocked. The files are always the disc's: a mod that replaces
+  menu); the lock does not come along: a custom stage is always unlocked, even on a base the save has not opened (UFO, Capitol, Mini Baytown). The files are always the disc's: a mod that replaces
   `LVL/CENTRAL.NGP` does not change a CENTRAL-based custom stage.
 - **What the folder can bring:** points (`.SPT`, `.PUP`, `.FOP`, `.PED`, `.AIP`, any name; they enter as `PTS/<ID>.*`), the `.MRS` (as
   `RST/<ID>.MRS`) and PNG textures (`t0004.png` or `central_t0004.png`; the texIds are the base's). A PNG of the base from any mod

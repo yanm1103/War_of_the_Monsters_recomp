@@ -7,8 +7,8 @@
 // arquivos: o switch da foto, Shell+0x5D0, tem 24 filhos e o levelUnlocked a deixa aberta). O nome dela na tabela do
 // screenLevelSelect (GameLevelLongNames_006EEEF8) vira "Random". O resto e o codigo do jogo: cursor, trava, sons, confirmacao.
 // Com WOTM_HIGHRAM=0 a eliminacao (10 monstros carregados de uma vez) fica so com as fases do retail e a RANDOM.
-// Fases custom (mods/<mod>/stages/, wotm_stages.h): entram antes da RANDOM nas vagas 18..23, com o "name" delas na tabela, a trava e a
-// foto da base (levelUnlocked e o switch), e levelpics/<id>.png por cima quando houver. A de base METRO sem .AIP proprio fica fora
+// Fases custom (mods/<mod>/stages/, wotm_stages.h): entram antes da RANDOM nas vagas 18..23, com o "name" delas na tabela, sempre abertas
+// (o levelUnlocked do jogo devolve 1 para elas) e com a foto da base (o switch), e levelpics/<id>.png por cima quando houver. A de base METRO sem .AIP proprio fica fora
 // quando a tela abre com CPUs (a mesma regra da quarta entrada).
 // No changeScreen(8, 99) (wotm_padsel.inc) a RANDOM vira uma fase sorteada da lista, entre as destravadas (e sem a quarta entrada
 // quando o jogo a pula: modo 2 com 2+ CPUs, modo 3 com CPU; sem Training e Tokyo Deathmatch, fases de teste), antes da carga e sem
@@ -35,7 +35,7 @@ constexpr uint32_t kListLevels = kList + 0x10;
 constexpr uint32_t kLongNames = wotm::sym::GameLevelLongNames_006EEEF8;   // char[28][18] do screenLevelSelect
 constexpr uint32_t kRetail[] = {wotm::sym::PO_1PFreeForAll, wotm::sym::PO_MPFreeForAll, wotm::sym::PO_1PEndurance, wotm::sym::PO_MPElimination};
 
-static PS2Runtime::RecompiledFunction g_origLevelSelect = nullptr, g_origLevelUnlocked = nullptr;
+static PS2Runtime::RecompiledFunction g_origLevelSelect = nullptr;
 
 static uint32_t rd32(uint8_t *rdram, uint32_t a) { return FAST_READ32(a & 0x1FFFFFFFu); }
 static void wr32(uint8_t *rdram, uint32_t a, uint32_t v) { FAST_WRITE32(a & 0x1FFFFFFFu, v); }
@@ -54,11 +54,12 @@ static bool skipNoAip(uint8_t *rdram)
 // Custom de base METRO sem .AIP proprio: fora com CPUs, pela mesma razao
 static bool customNeedsAip(uint8_t *rdram, const wotm::mods::Stage *st) { return st->base->level == 4 && !st->ownAip && skipNoAip(rdram); }
 
-// levelUnlocked do jogo: 10, 11, 14 e 15 pela tabela de destrave (as 25 a 27 sao dos minigames, fora das listas); a custom, a da base
+// levelUnlocked do jogo: 10, 11, 14 e 15 pela tabela de destrave (as 25 a 27 sao dos minigames, fora das listas); a custom esta sempre
+// aberta (o levelUnlocked do jogo ja devolve 1 para as vagas 18..23)
 static bool unlocked(uint8_t *rdram, int level)
 {
-    if (const wotm::mods::Stage *st = customAt(level))
-        level = st->base->level;
+    if (customAt(level))
+        return true;
     uint32_t off = 0;
     switch (level)
     {
@@ -126,15 +127,6 @@ static void levelSelectHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runti
         if (const wotm::mods::Stage *st = customAt(*which))
             *which = uint8_t(st->base->level);
     }
-}
-
-// int levelUnlocked(int level): a vaga de uma custom vale o que vale a base (cadeado na tela 8, sem confirmar)
-static void levelUnlockedHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
-{
-    if (ctx->pc == wotm::fn::levelUnlocked__Fi)
-        if (const wotm::mods::Stage *st = customAt(int(getRegU32(ctx, 4))))
-            ctx->r[4] = _mm_set_epi64x(0, st->base->level);
-    g_origLevelUnlocked(rdram, ctx, runtime);
 }
 
 // Fase escolhida no cursor da tela 8 (levels[currentSelection[8]] da g_levelList); -1 fora da lista
@@ -468,6 +460,4 @@ void wotmLevelSelInstall(PS2Runtime &runtime)
     using namespace wotm_levelsel;
     if ((g_origLevelSelect = runtime.lookupFunction(wotm::fn::screenLevelSelect__Fv)))
         runtime.registerFunction(wotm::fn::screenLevelSelect__Fv, &levelSelectHook);
-    if (!wotm::mods::Registry::get().stages().empty() && (g_origLevelUnlocked = runtime.lookupFunction(wotm::fn::levelUnlocked__Fi)))
-        runtime.registerFunction(wotm::fn::levelUnlocked__Fi, &levelUnlockedHook);
 }

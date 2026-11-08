@@ -729,8 +729,8 @@ helicopters from `MON/ARMY.*` (below). The adventure keeps its own army untouche
   top of the screen); drawn after the game's text (`drawBadge`). On a custom stage the badge reads "CUSTOM", in blue.
 - **Custom stages** (`MODS.md`, "Custom stages"): the extended list takes the registry's slots (18..23) before RANDOM, with the same
   `WOTM_HIGHRAM=0` rule as stages 1 to 16, and the hook writes each `name` into `GameLevelLongNames_006EEEF8[slot]`. A METRO-based stage
-  without its own `.AIP` stays out when the screen opens with CPUs. A `levelUnlocked` hook answers for the slot what the base answers
-  (lock icon, no confirmation), and RANDOM checks the base too and skips the stages with `"random": false`. After the original
+  without its own `.AIP` stays out when the screen opens with CPUs. A custom stage is always unlocked (the game's
+  `levelUnlocked` answers 1 for the slots 18..23, whatever the base's lock), and RANDOM can draw it unless it has `"random": false`. After the original
   `screenLevelSelect`, a switch child that is a custom slot becomes the base's child (whose shape `picObject` knows); with
   `levelpics/<id>.png` the picture goes on top of the base's object (`nodeTexture` looks from the highest index down, so the slot wins
   over a base in `kOwn`). The cursor's stage comes from `levels[currentSelection[8]]`. At `changeScreen(8, 99)` the order is `restore`,
