@@ -766,6 +766,7 @@ function applyPatch(patch) {
   else if (pp) for (const [k, v] of Object.entries(pp)) if (!PEDS_KEYS.has(k)) keep.peds[k] = v;
   updateGridView();
   updateSkyView();
+  updateClearView();
   pedSel = null;     // the markers are made again
   peds.load(discPeds, keep.pedsRaw ? null : pp);
   applyPedsView();
@@ -2852,6 +2853,20 @@ document.addEventListener('pointerdown', (e) => {   // a click anywhere else clo
 }, true);
 let ipData = null, ipTitle = '';
 const ipInput = Object.assign(document.createElement('input'), { type: 'file', accept: '.glb,model/gltf-binary' });
+// The patch's "clear": the meshes the server tagged bare (the stage's scenery with no handle) leave the view
+function updateClearView() {
+  const off = keep.top.clear === 'scenery';
+  if (stageRoot) stageRoot.traverse((o) => { if (o.isMesh && o.userData && o.userData.bare) o.visible = !off; });
+}
+// Delete every original object (the dialog's button): one Undo step
+$('gdDelAll').onclick = () => {
+  const todo = recs.filter((r) => !r.deleted);
+  if (!todo.length) { gdErr('Every object is already deleted.'); return; }
+  snapshot('delete every object');
+  for (const r of todo) { r.deleted = true; r.item.node.visible = false; }
+  refreshList();
+  msg(`Deleted ${todo.length} objects. Save when the stage is as you want it`, { level: 'ok', toast: ['Undo', undo] });
+};
 // The collision grid's rectangle on the ground: the disc's in grey, the patch's bigger one in blue
 let gridView = null;
 function updateGridView() {
@@ -2894,6 +2909,7 @@ $('gridBtn').onclick = () => {
   $('gdWallsRow').hidden = !stageWalls;
   $('gdWallsTxt').textContent = `Turn off the ${stageWalls} invisible boundary wall${stageWalls === 1 ? '' : 's'}`;
   $('gdWalls').checked = keep.top.walls === 'off';
+  $('gdClear').checked = keep.top.clear === 'scenery';
   $('gdErr').hidden = true;
   $('gridDlg').showModal();
 };
@@ -2912,8 +2928,10 @@ function gdApply() {
   snapshot(same ? "stage size back to the disc's" : 'stage size');
   if (same) delete keep.top.grid; else keep.top.grid = { min: lo, max: hi };
   if (stageWalls && $('gdWalls').checked) keep.top.walls = 'off'; else if (keep.top.walls === 'off') delete keep.top.walls;
+  if ($('gdClear').checked) keep.top.clear = 'scenery'; else if (keep.top.clear === 'scenery') delete keep.top.clear;
   $('gridDlg').close();
   updateGridView();
+  updateClearView();
   refreshList();
   msg(same ? "The stage size is the disc's again" : `Stage size ${cols} × ${rows} cells. Check it, then Save`, { level: 'ok', toast: true });
   return true;
