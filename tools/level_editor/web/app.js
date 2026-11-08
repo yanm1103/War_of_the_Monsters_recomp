@@ -253,7 +253,7 @@ let skyViews = { dome: null, clouds: null };   // the models swapped into the sk
 let stageRoot = null, skyRoot = null, env = null;   // env: the stage's fog, background and lights (/api/stage, RST/<STAGE>.MRS)
 // pedestrians (web/peds.js): a layer shown with P; pedSel is the marker the gizmo holds (never together with an object)
 const peds = createPeds({ THREE, scene, toThree, toGame });
-let discPeds = null, pedSel = null, stageGrid = null;   // stageGrid: the disc's collision grid (/api/stage)
+let discPeds = null, pedSel = null, stageGrid = null, stageWalls = 0;   // stageGrid: the disc's collision grid (/api/stage)
 
 function resize() {
   const r = canvas.parentElement.getBoundingClientRect();
@@ -771,7 +771,7 @@ function applyPatch(patch) {
   applyPedsView();
   showPedCounts();
   return { entries: keep.objects.length + Object.keys(keep.names).length, props: keep.props.length,
-           keys: Object.keys(keep.top).filter((k) => k !== 'grid').concat(Object.keys(keep.peds).map((k) => 'peds.' + k)) };
+           keys: Object.keys(keep.top).filter((k) => k !== 'grid' && k !== 'walls').concat(Object.keys(keep.peds).map((k) => 'peds.' + k)) };
 }
 // the note over the view about what the file keeps that the editor does not show
 function showKeep(k) {
@@ -878,6 +878,7 @@ async function loadStage(name) {
     env = info.env || null;
     discPeds = info.peds || null;
     stageGrid = info.grid || null;
+    stageWalls = info.walls || 0;
     setLights(env && env.lights);
     skyRoot = setupDrawing(gltf);
     stageRoot = gltf.scene;
@@ -2890,6 +2891,9 @@ $('gridBtn').onclick = () => {
   $('gdText').textContent = `The disc's grid is x ${Math.round(g.min[0])} to ${Math.round(g.max[0])}, y ${Math.round(g.min[1])} to ${Math.round(g.max[1])} (${g.cols} × ${g.rows} cells). ` +
     'The game only collides, shoots and sees across what is inside it, so a prop or a copy placed outside needs a bigger one. It can only grow.';
   gdFill(gridNow());
+  $('gdWallsRow').hidden = !stageWalls;
+  $('gdWallsTxt').textContent = `Turn off the ${stageWalls} invisible boundary wall${stageWalls === 1 ? '' : 's'}`;
+  $('gdWalls').checked = keep.top.walls === 'off';
   $('gdErr').hidden = true;
   $('gridDlg').showModal();
 };
@@ -2905,6 +2909,7 @@ $('gdOk').onclick = () => {
   const same = lo[0] === Math.round(g.min[0]) && lo[1] === Math.round(g.min[1]) && hi[0] === Math.round(g.max[0]) && hi[1] === Math.round(g.max[1]);
   snapshot(same ? "stage size back to the disc's" : 'stage size');
   if (same) delete keep.top.grid; else keep.top.grid = { min: lo, max: hi };
+  if (stageWalls && $('gdWalls').checked) keep.top.walls = 'off'; else if (keep.top.walls === 'off') delete keep.top.walls;
   $('gridDlg').close();
   updateGridView();
   refreshList();

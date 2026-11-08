@@ -644,7 +644,7 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   game's collision query finds nothing; the paths stay where they are. It does not move the floor: the disc's floor ends at the old
   rectangle, where a monster falls and the game puts it back in the stage. To walk further, add a floor as a `coll_*` prop (a flat
   quad of two triangles over the new `grid`) and give the patch the bigger `grid`; props placed out there collide, break and take
-  attacks as inside. There is no button for it in the editor yet: it is kept when the editor saves the file. Log: `walls: 4
+  attacks as inside. The editor sets it in the Stage size dialog (a checkbox, only for a stage that has walls). Log: `walls: 4
   paredes de borda desligadas (x=-1430, ...)`; Check counts it and refuses a stage with none.
 - `props` (at the top beside `objects`): new static objects made in Blender, placed in the stage.
   ```json
@@ -758,7 +758,8 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
 - **Fight HUD and sky** (the monitor button): the pictures of the stage's fight HUD and of its sky (the OBJECTs under the nodes with id 2),
   each replaceable by a PNG in the mod (`<stage>_tNNNN.png`, "Textures as PNG"). A sky picture is the stage's own (never "apply to all").
 - **Stage size** (the expand button): the rectangle of the collision grid (`grid` in the patch), four numbers and "Grow every side by 1000"; the view draws the disc's rectangle in grey and the patch's in blue;
-  it can only grow. Check reports a rectangle the game would skip.
+  it can only grow. Check reports a rectangle the game would skip. For a stage with boundary walls (CENTRAL, VEGAS, CAPITOL) the dialog also has
+  a checkbox that sets `"walls": "off"`.
 - **Stage picture:** the picture button (lower right of the view) saves the middle 2:1 band of the view, 512x256, as
   `mods/<mod>/levelpics/<name>.png` for a custom stage (`<id>`) and for Training, Lake Powell and Tokyo DM; the other game stages have
   their picture in `SHELL.TEX` (make a custom stage on one). The stage select picks it up the next time the game starts.

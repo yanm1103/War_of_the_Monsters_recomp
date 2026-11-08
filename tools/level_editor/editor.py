@@ -187,6 +187,18 @@ class Stages:
                 self.info[key] = (st, objs, on)
             return self.info[key]
 
+    def walls(self, disc, name):
+        """How many invisible boundary walls the stage has (lvl.py LevelPatch.boundary_walls), on its own copy of the stage."""
+        key = (disc, name, "walls")
+        with self.lock:
+            if key in self.info:
+                return self.info[key]
+        with contextlib.redirect_stdout(io.StringIO()):
+            n = len(lvl.LevelPatch(lvl.Stage(name, stage_root(disc, name))).boundary_walls())
+        with self.lock:
+            self.info[key] = n
+        return n
+
     def facts(self, disc, name):
         """lvlnames.facts per object (signature, size, rule inputs), kept on disk next to the scene (1 to 10 s per stage)."""
         st, objs, on = self.objects(disc, name)
@@ -1074,6 +1086,7 @@ class Handler(BaseHTTPRequestHandler):
                                        "env": stage_env(cfg, cfg["disc"], base, mod),
                                        "grid": {"min": [st.grid.min_x, st.grid.min_y], "max": [st.grid.max_x, st.grid.max_y],
                                                 "cell": st.grid.cell, "cols": st.grid.cols, "rows": st.grid.rows} if st.grid else None,
+                                       "walls": STAGES.walls(cfg["disc"], base),
                                        "peds": pedsapi.stage_peds(st, points_root(cfg, q["name"]) or stage_root(cfg["disc"], base)),
                                        "have": have, "winner": winner, "others": [m for m in have if m != mod]})
             if u.path == "/api/props":          # the mod's props (props/*/prop.json)
