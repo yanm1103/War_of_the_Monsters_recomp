@@ -34,7 +34,7 @@ is ignored) draws with that stage texture; a material with no image is vertex co
 (baseColorTexture, PNG; JPEG and others need Pillow) is a texture of the prop's own: the image goes beside the files as
 `<NAME>_T<slot>.png` and into the image as a `.TEX` packet of a CT32 copy (power of two, at most 128 a side and the stage's largest
 texture bin: own_packet) with its own gsTexCtx (own_ctx, TEX1 of the stage); the loader gives it a texId past the loaded ones and a
-bin, and the PC draws the PNG in its place. UVs outside 0..1 are clamped (warning). A mesh named `hull_*` is collision (its convex hull becomes a COLL_VOL), `coll_*` too (its triangles become a POLY_COLL, at most 64);
+bin, and the PC draws the PNG in its place. UVs outside 0..1 are clamped (warning). A mesh named `hull_*` is collision (its convex hull becomes a COLL_VOL), `coll_*` too (its triangles become a POLY_COLL with a box tree, up to 16384 of them);
 without either, a box of the visual stands in. `state<N>_*` (destructible states) is refused. Only the standard library: it runs inside the level editor.
 """
 import json
@@ -63,7 +63,9 @@ DEFAULT_STRENGTH = 2
 COLL_MATID = 1                 # matId of the monsters' and 3-MILE's box hulls
 OP_OBJECT, OP_GROUP, OP_COLL_VOL, OP_POLY_COLL = 0, 1, 10, 42
 POLY_MATID = 0x010A            # matId of the stages' building faces (the same on every triangle of a coll_ mesh)
-MAX_COLL_TRIS = 64             # a coll_ mesh is one POLY_COLL object with no box tree (numBBoxes 0): the game walks every triangle
+MAX_COLL_TRIS = 16384          # triangles of one coll_ mesh (a POLY_COLL leaf of several objects, each with a box tree); the arena decides the rest
+POLY_OBJ_TRIS = 512            # triangles in one POLY_COLL object: the tree's first-child field has 9 bits
+POLY_LEAF_TRIS = 8             # triangles in a leaf of the box tree (the stages' have 1..8; the field holds up to 15)
 OWN_MAX_LOG = 7                # a texture of the prop's own: at most 128 texels a side in the game's copy (the PC draws the PNG)
 OWN_PREVIEW_ID = 1000          # the texIds the preview gives the prop's own textures (1000 + slot: past texInfo[1000])
 TEMPLATE_RULE = "first-object-roundtrip"
@@ -928,38 +930,150 @@ def _coll_mat(low, default):
     return int(m.group(1), 16) if m else default
 
 
+def _tri_groups(verts, tris):
+    """`tris` cut in pieces a POLY_COLL object can hold (at most POLY_OBJ_TRIS triangles and 256 distinct vertices each): halves
+    along the longest axis of the triangle centers until both limits hold, so each piece is a compact block of the mesh."""
+    used = {i for t in tris for i in t}
+    if len(tris) <= POLY_OBJ_TRIS and len(used) <= 256:
+        return [tris]
+    cen = [[sum(verts[i][c] for i in t) / 3.0 for c in range(3)] for t in tris]
+    ax = max(range(3), key=lambda c: max(q[c] for q in cen) - min(q[c] for q in cen))
+    order = sorted(range(len(tris)), key=lambda k: cen[k][ax])
+    h = len(order) // 2
+    if h == 0:
+        raise PropError("a coll_ triangle uses more than 256 vertices")
+    return _tri_groups(verts, [tris[k] for k in order[:h]]) + _tri_groups(verts, [tris[k] for k in order[h:]])
+
+
+def _poly_tree(pts, tris):
+    """The box tree of the game's POLY_COLL objects over `tris` (index triples into `pts`): (origin, scale, nodes, order). Leaves hold at
+    most POLY_LEAF_TRIS triangles, a node's two children are consecutive, `order` is the triangle order the leaves' ranges need, and a
+    node is [min xyz, max xyz, leaf?, first, count] in s16 units of (p - origin) * scale, rounded outward (the query rounds its own box
+    outward by one more). The origin is the middle of the vertices' box and the scale spreads its longest side over 32768, as the
+    stages' own trees do."""
+    lo = [min(q[c] for q in pts) for c in range(3)]
+    hi = [max(q[c] for q in pts) for c in range(3)]
+    org = [_f32(0.5 * (a + b)) for a, b in zip(lo, hi)]
+    scale = _f32(32768.0 / max(max(b - a for a, b in zip(lo, hi)), 1.0))
+    tb = [([min(pts[i][c] for i in t) for c in range(3)], [max(pts[i][c] for i in t) for c in range(3)]) for t in tris]
+    cen = [[0.5 * (a + b) for a, b in zip(*bb)] for bb in tb]
+
+    def quant(bb):
+        return ([max(-32768, math.floor((bb[0][c] - org[c]) * scale) - 1) for c in range(3)],
+                [min(32767, math.ceil((bb[1][c] - org[c]) * scale) + 1) for c in range(3)])
+    nodes, order, queue = [None], [], [(0, list(range(len(tris))))]
+    while queue:
+        n, ids = queue.pop(0)
+        bb = ([min(tb[k][0][c] for k in ids) for c in range(3)], [max(tb[k][1][c] for k in ids) for c in range(3)])
+        mn, mx = quant(bb)
+        if len(ids) <= POLY_LEAF_TRIS:
+            nodes[n] = [mn, mx, True, len(order), len(ids)]
+            order += ids
+            continue
+        ax = max(range(3), key=lambda c: max(cen[k][c] for k in ids) - min(cen[k][c] for k in ids))
+        ids = sorted(ids, key=lambda k: cen[k][ax])
+        h = len(ids) // 2
+        first = len(nodes)
+        nodes[n] = [mn, mx, False, first, 2]
+        nodes += [None, None]
+        queue += [(first, ids[:h]), (first + 1, ids[h:])]
+    if len(nodes) > 512:
+        raise PropError("a coll_ box tree of %d nodes (at most 512)" % len(nodes))
+    return org, scale, nodes, order
+
+
+def poly_tree_query(img, obj, qmin, qmax):
+    """The triangle indices the game's `hdSphereVsPolyCollis` would test for the swept box (qmin, qmax) in the object's local space
+    (the object at `obj` in `img`): the tree's leaves the box reaches, or every triangle when the object has no tree."""
+    npol, nb = img.u16(obj + 4), img.u16(obj + 6)
+    if not nb:
+        return list(range(npol))
+    org = [img.f32(obj + 8 + 4 * c) for c in range(3)]
+    sc = img.f32(obj + 0x14)
+    lo = [max(-32768, min(32767, int((qmin[c] - org[c]) * sc) - 1)) for c in range(3)]
+    hi = [max(-32768, min(32767, int((qmax[c] - org[c]) * sc) + 1)) for c in range(3)]
+    out, stack = [], [0]
+    while stack:
+        a = obj + 0x18 + 14 * stack.pop()
+        mn = [struct.unpack_from("<h", img.d, a + 2 * c - img.base)[0] for c in range(3)]
+        mx = [struct.unpack_from("<h", img.d, a + 6 + 2 * c - img.base)[0] for c in range(3)]
+        if any(hi[c] < mn[c] or mx[c] < lo[c] for c in range(3)):
+            continue
+        bits = img.u16(a + 12)
+        first = (bits >> 5) & 0x1FF
+        if bits & 1:
+            out += range(first, first + ((bits >> 1) & 0xF))
+        else:
+            stack += [first, first + 1]
+    return out
+
+
+def verify_poly_leaf(img, leaf):
+    """Raises PropError unless every triangle of the POLY_COLL leaf is among the ones `poly_tree_query` returns for the box of that
+    triangle alone (so no query that touches a triangle can miss it) and each tree leaf range is inside the object's triangles."""
+    for k in range(img.u32(leaf + 4)):
+        o = img.u32(leaf + 8 + 4 * k) & 0x0FFFFFFF
+        vp, npol, nb = img.u32(o) & 0x0FFFFFFF, img.u16(o + 4), img.u16(o + 6)
+        polys = o + 0x18 + 14 * nb
+        for n in range(nb):
+            bits = img.u16(o + 0x18 + 14 * n + 12)
+            first, cnt = (bits >> 5) & 0x1FF, (bits >> 1) & 0xF
+            if bits & 1 and (not cnt or first + cnt > npol) or not bits & 1 and first + 1 >= nb:
+                raise PropError("POLY_COLL object 0x%X: node %d points outside it" % (o, n))
+        for i in range(npol):
+            idx = [img.u8(polys + 8 * i + j) for j in range(3)]
+            pts = [tuple(img.f32(vp + 12 * v + 4 * c) for c in range(3)) for v in idx]
+            lo = [min(q[c] for q in pts) for c in range(3)]
+            hi = [max(q[c] for q in pts) for c in range(3)]
+            if i not in poly_tree_query(img, o, lo, hi):
+                raise PropError("POLY_COLL object 0x%X: triangle %d is not reached by its own box" % (o, i))
+
+
 def poly_coll(mb, verts, tris, matid=None):
-    """POLY_COLL (op 42) of one object with no box tree: `verts` (local floats, at most 256) and `tris` (index triples). The
-    triangle's bbox bits are the vertex indices of its extremes (`poly_bbox_bits`); matId POLY_MATID. Returns (leaf, lo, hi)."""
-    used = sorted({i for t in tris for i in t})
+    """POLY_COLL (op 42) of `verts` (local floats) and `tris` (index triples): one object per block of at most POLY_OBJ_TRIS triangles and
+    256 vertices, each with the box tree the game's query walks (`_poly_tree`; a block of POLY_LEAF_TRIS or fewer triangles has none,
+    the query then tests them all). The triangle's bbox bits are the vertex indices of its extremes (`poly_bbox_bits`); matId
+    POLY_MATID. Returns (leaf, lo, hi)."""
     if not tris:
         raise PropError("a coll_ mesh with no triangles")
     if len(tris) > MAX_COLL_TRIS:
         raise PropError("a coll_ mesh has %d triangles; at most %d (it is a collision shape: simplify it)" % (len(tris), MAX_COLL_TRIS))
-    if len(used) > 256:
-        raise PropError("a coll_ mesh uses %d vertices; at most 256" % len(used))
-    remap = {v: k for k, v in enumerate(used)}
-    pts = [verts[v] for v in used]
-    lo = [min(q[c] for q in pts) for c in range(3)]
-    hi = [max(q[c] for q in pts) for c in range(3)]
-    ctr = [0.5 * (a + b) for a, b in zip(lo, hi)]
-    pool = mb.alloc(12 * len(pts), 16)
-    for k, q in enumerate(pts):
-        mb.raw(pool + 12 * k, struct.pack("<3f", *q))
-    obj = mb.alloc(0x18 + 8 * len(tris), 16)
-    mb.ptr_to(obj, pool, keep_high=False)
-    mb.u16(obj + 4, len(tris))
-    mb.u16(obj + 6, 0)
-    for c in range(3):
-        mb.f(obj + 8 + 4 * c, ctr[c])
-    mb.f(obj + 0x14, max(math.dist(ctr, q) for q in pts))
-    for k, (a, b, c) in enumerate(tris):
-        mb.raw(obj + 0x18 + 8 * k, bytes((remap[a], remap[b], remap[c], 0)) + struct.pack("<HH", POLY_MATID if matid is None else matid, poly_bbox_bits([verts[a], verts[b], verts[c]])))
-    leaf = mb.alloc(0x10, 16)
+    mid = POLY_MATID if matid is None else matid
+    objs, allp = [], []
+    for g in _tri_groups(verts, tris):
+        used = sorted({i for t in g for i in t})
+        remap = {v: k for k, v in enumerate(used)}
+        pts = [verts[v] for v in used]
+        allp += pts
+        lt = [(remap[a], remap[b], remap[c]) for a, b, c in g]
+        if len(lt) > POLY_LEAF_TRIS:
+            org, scale, nodes, order = _poly_tree(pts, lt)
+        else:
+            org = [0.5 * (min(q[c] for q in pts) + max(q[c] for q in pts)) for c in range(3)]
+            scale, nodes, order = max(math.dist(org, q) for q in pts), [], list(range(len(lt)))
+        pool = mb.alloc(12 * len(pts), 16)
+        for k, q in enumerate(pts):
+            mb.raw(pool + 12 * k, struct.pack("<3f", *q))
+        obj = mb.alloc(0x18 + 14 * len(nodes) + 8 * len(lt), 16)
+        mb.ptr_to(obj, pool, keep_high=False)
+        mb.u16(obj + 4, len(lt))
+        mb.u16(obj + 6, len(nodes))
+        for c in range(3):
+            mb.f(obj + 8 + 4 * c, org[c])
+        mb.f(obj + 0x14, scale)
+        for k, (mn, mx, is_leaf, first, cnt) in enumerate(nodes):
+            mb.raw(obj + 0x18 + 14 * k, struct.pack("<3h3hH", *mn, *mx, (first << 5) | (cnt << 1) | (1 if is_leaf else 0)))
+        base = obj + 0x18 + 14 * len(nodes)
+        for k, ti in enumerate(order):
+            a, b, c = lt[ti]
+            mb.raw(base + 8 * k, bytes((a, b, c, 0)) + struct.pack("<HH", mid, poly_bbox_bits([pts[a], pts[b], pts[c]])))
+        objs.append(obj)
+    leaf = mb.alloc(8 + 4 * len(objs), 16)
     mb.u32(leaf, OP_POLY_COLL)
-    mb.u32(leaf + 4, 1)
-    mb.ptr_to(leaf + 8, obj, keep_high=False)
-    return leaf, lo, hi
+    mb.u32(leaf + 4, len(objs))
+    for k, obj in enumerate(objs):
+        mb.ptr_to(leaf + 8 + 4 * k, obj, keep_high=False)
+    return leaf, [min(q[c] for q in allp) for c in range(3)], [max(q[c] for q in allp) for c in range(3)]
 
 
 def box_hull(mb, lo, hi, matid=COLL_MATID):
@@ -1373,6 +1487,8 @@ def check(prop, at=ARENA, log=print):
             if n in first:
                 pts += [(v.x, v.y, v.z) for v in md.tris]
         elif op in (OP_COLL_VOL, OP_POLY_COLL) and n in first:
+            if op == OP_POLY_COLL:
+                verify_poly_leaf(img, n)
             hulls.append(lvl.aabb(lvl.leaf_points(img, n)))
     lo = [min(p[c] for p in pts) for c in range(3)]
     hi = [max(p[c] for p in pts) for c in range(3)]

@@ -662,7 +662,7 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   (its three parallel lights, as the cars do); a mesh with vertex colors keeps them as its light (bake the light in Blender), and
   `--light vertex|dir` forces one way for the whole prop. `pos` is where the model's origin goes; `heading` (degrees,
   default 0) turns it about Z. Each entry collides as the box of the model's bounds, or as the shapes the .glb names (a mesh `hull_*` is a convex hull, up to 64
-  vertices and 40 faces; a mesh `coll_*` is collision by triangles, up to 64 of them; one leaf per mesh, not drawn; `hull_m20c_wall` and
+  vertices and 40 faces; a mesh `coll_*` is collision by triangles, up to 16384 of them (the arena decides what fits; blocks of 512 triangles and 256 vertices each get a box tree, as the stages' collision does); one leaf per mesh, not drawn; `hull_m20c_wall` and
   `coll_m10a_floor` set the surface word (hex): kind in the high byte, 2 a wall the monsters climb, 1 a floor; the default is
   the stages' building face, 0x10A) (monsters stand on it
   and bump into it; vehicles and pedestrians are cut around it like around a moved building) and is drawn with no view culling.
