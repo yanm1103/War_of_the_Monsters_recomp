@@ -456,6 +456,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <div class="fl">Lower left (x, y)<span class="gd-pair"><input id="gdMinX" type="number" step="100"><input id="gdMinY" type="number" step="100"></span></div>
       <div class="fl">Upper right (x, y)<span class="gd-pair"><input id="gdMaxX" type="number" step="100"><input id="gdMaxY" type="number" step="100"></span></div>
       <div class="gd-btns"><button type="button" id="gdGrow">Grow every side by 1000</button><button type="button" id="gdReset">Back to the disc's</button></div>
+      <div class="gd-btns"><button type="button" id="gdFloor" title="Applies the size, then adds a flat floor over it as a prop of the mod (a plate to see and a collision slab to stand on)">Apply and add a floor over it</button></div>
       <div class="help" id="gdInfo"></div>
       <label class="fl" id="gdWallsRow" hidden><span><input type="checkbox" id="gdWalls"> <span id="gdWallsTxt"></span></span>
         <span class="help">Without it the walls just past the border buildings still stop the monster. The floor ends at the disc's rectangle: add a prop with a <b>coll_</b> floor to walk farther.</span></label>

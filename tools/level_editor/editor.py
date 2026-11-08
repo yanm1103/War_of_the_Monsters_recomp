@@ -743,6 +743,29 @@ def import_prop(cfg, b):
     return {"prop": entry, "lines": lines, "replaced": existed}
 
 
+FLOOR_MARGIN = 50.0     # the floor stops this far inside the grid's rectangle
+
+
+def floor_prop(cfg, b):
+    """A flat floor over the rectangle b["min"], b["max"] (the patch's grid) as a prop of the mod, named FL_<stage>: a visible plate and
+    a coll_ slab (lvlprop.floor_glb), built again each time. Returns import_prop's reply and "pos" (the rectangle's center)."""
+    stage = base_of(cfg, (b.get("stage") or "").upper()).upper()
+    lo, hi = b.get("min"), b.get("max")
+    try:
+        lo, hi = [float(v) for v in lo], [float(v) for v in hi]
+    except (TypeError, ValueError):
+        raise ValueError("The floor needs the rectangle's four numbers")
+    if len(lo) != 2 or len(hi) != 2 or hi[0] - lo[0] <= 2 * FLOOR_MARGIN or hi[1] - lo[1] <= 2 * FLOOR_MARGIN:
+        raise ValueError("The rectangle is too small for a floor")
+    body = {"mod": b.get("mod"), "stage": stage, "name": "FL_" + re.sub(r"[^A-Z0-9]", "", stage)[:5], "replace": True,
+            "title": "Floor", "units": "blender",
+            "data": base64.b64encode(lvlprop.floor_glb((hi[0] - lo[0]) / 2 - FLOOR_MARGIN, (hi[1] - lo[1]) / 2 - FLOOR_MARGIN)).decode()}
+    out = import_prop(cfg, body)
+    out["pos"] = [round((lo[0] + hi[0]) / 2, 1), round((lo[1] + hi[1]) / 2, 1), 0.0]
+    out["model"] = body["name"]
+    return out
+
+
 def edit_prop(cfg, b):
     """A model of the mod changed in place: `title` (prop.json "name", what the list shows; empty = the folder's name) and/or
     `height` (game units: built again from its source .glb, scaled about the origin, with the same units, light and template ABE;
@@ -1163,6 +1186,11 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/api/props/import":   # Import .glb: a new prop in the mod, built for the open stage
                 try:
                     return self.send(200, import_prop(cfg, b))
+                except (ValueError, lvlprop.PropError, lvlprop.ngpmesh.MeshError, lvlprop.vifpkt.FormatError) as e:
+                    return self.send(400, {"error": str(e), "code": "prop"})
+            if self.path == "/api/props/floor":    # a floor prop over the grid's rectangle
+                try:
+                    return self.send(200, floor_prop(cfg, b))
                 except (ValueError, lvlprop.PropError, lvlprop.ngpmesh.MeshError, lvlprop.vifpkt.FormatError) as e:
                     return self.send(400, {"error": str(e), "code": "prop"})
             if self.path == "/api/props/edit":     # a model's name in the list or its height (built again from its .glb)

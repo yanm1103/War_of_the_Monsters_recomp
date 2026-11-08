@@ -1480,6 +1480,40 @@ def preview(prop, st, disc, out, textures=False):
     g.write(out)
 
 
+# ---------------------------------------------------------------- generated floor
+
+FLOOR_DROP = 0.6      # the visible plate sits this far under the stage's own floor, so the two never fight for the pixel
+
+
+def floor_glb(half_x, half_y):
+    """A binary glTF of a flat floor centered on the origin, half sizes in game units (the file is in Blender meters, Y up, so a build
+    with units "blender" and no scale gives them back): a visible plate just under z 0 (mesh `vis`) and the same slab as collision
+    (mesh `coll_floor`, two triangles facing up)."""
+    hx, hy = half_x / UNITS_PER_METER, half_y / UNITS_PER_METER
+    quad = lambda y: [(-hx, y / UNITS_PER_METER, -hy), (hx, y / UNITS_PER_METER, -hy), (hx, y / UNITS_PER_METER, hy), (-hx, y / UNITS_PER_METER, hy)]
+    meshes = (("vis", quad(-FLOOR_DROP)), ("coll_floor", quad(0.0)))      # y in game units here
+    tris = [0, 2, 1, 0, 3, 2]
+    blob, views, accs, ms, nodes = b"", [], [], [], []
+    for name, pts in meshes:
+        for data, ctype, count, typ, target, mm in (
+                (struct.pack("<12f", *[c for p in pts for c in p]), 5126, 4, "VEC3", 34962,
+                 ([min(p[i] for p in pts) for i in range(3)], [max(p[i] for p in pts) for i in range(3)])),
+                (struct.pack("<6H", *tris), 5123, 6, "SCALAR", 34963, None)):
+            views.append({"buffer": 0, "byteOffset": len(blob), "byteLength": len(data), "target": target})
+            blob += data + bytes((-len(data)) % 4)
+            acc = {"bufferView": len(views) - 1, "componentType": ctype, "count": count, "type": typ}
+            if mm:
+                acc["min"], acc["max"] = mm
+            accs.append(acc)
+        ms.append({"primitives": [{"attributes": {"POSITION": len(accs) - 2}, "indices": len(accs) - 1}]})
+        nodes.append({"mesh": len(ms) - 1, "name": name})
+    js = json.dumps({"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": list(range(len(nodes)))}], "nodes": nodes,
+                     "meshes": ms, "accessors": accs, "bufferViews": views, "buffers": [{"byteLength": len(blob)}]}).encode()
+    js += b" " * ((-len(js)) % 4)
+    return (struct.pack("<4sII", b"glTF", 2, 12 + 8 + len(js) + 8 + len(blob)) + struct.pack("<I4s", len(js), b"JSON") + js
+            + struct.pack("<I4s", len(blob), b"BIN\0") + blob)
+
+
 # ---------------------------------------------------------------- command line
 
 def main(argv):

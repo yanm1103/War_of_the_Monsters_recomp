@@ -2900,12 +2900,14 @@ $('gridBtn').onclick = () => {
 for (const id of ['gdMinX', 'gdMinY', 'gdMaxX', 'gdMaxY']) $(id).oninput = () => { gdInfo(); $('gdErr').hidden = true; };
 $('gdGrow').onclick = () => { const [lo, hi] = gdVals(); gdFill({ min: lo.map((v) => v - 1000), max: hi.map((v) => v + 1000) }); };
 $('gdReset').onclick = () => gdFill(null);
-$('gdOk').onclick = () => {
-  const [lo, hi] = gdVals(), g = stageGrid, err = (t) => { $('gdErr').hidden = false; $('gdErr').querySelector('span').textContent = t; };
-  if (![...lo, ...hi].every(Number.isFinite)) { err('Type the four numbers.'); return; }
-  if (lo[0] > g.min[0] || lo[1] > g.min[1] || hi[0] < g.max[0] || hi[1] < g.max[1]) { err("The rectangle must hold the disc's grid (it can only grow)."); return; }
+const gdErr = (t) => { $('gdErr').hidden = false; $('gdErr').querySelector('span').textContent = t; };
+// Apply the dialog's numbers and the walls box to the patch. False (with the dialog's own error showing) when they are not good.
+function gdApply() {
+  const [lo, hi] = gdVals(), g = stageGrid, err = gdErr;
+  if (![...lo, ...hi].every(Number.isFinite)) { err('Type the four numbers.'); return false; }
+  if (lo[0] > g.min[0] || lo[1] > g.min[1] || hi[0] < g.max[0] || hi[1] < g.max[1]) { err("The rectangle must hold the disc's grid (it can only grow)."); return false; }
   const cols = Math.floor((hi[0] - lo[0]) / g.cell) + 1, rows = Math.floor((hi[1] - lo[1]) / g.cell) + 1;
-  if (cols * rows > 65536) { err(`${cols} × ${rows} cells is over the 65536 the game allows.`); return; }
+  if (cols * rows > 65536) { err(`${cols} × ${rows} cells is over the 65536 the game allows.`); return false; }
   const same = lo[0] === Math.round(g.min[0]) && lo[1] === Math.round(g.min[1]) && hi[0] === Math.round(g.max[0]) && hi[1] === Math.round(g.max[1]);
   snapshot(same ? "stage size back to the disc's" : 'stage size');
   if (same) delete keep.top.grid; else keep.top.grid = { min: lo, max: hi };
@@ -2914,6 +2916,24 @@ $('gdOk').onclick = () => {
   updateGridView();
   refreshList();
   msg(same ? "The stage size is the disc's again" : `Stage size ${cols} × ${rows} cells. Check it, then Save`, { level: 'ok', toast: true });
+  return true;
+}
+$('gdOk').onclick = gdApply;
+// A floor over the new rectangle: a prop of the mod (a visible plate and a coll_ slab), placed at the rectangle's center
+$('gdFloor').onclick = async () => {
+  if (!modNow) { gdErr('Choose a mod first: the floor is a prop saved in it.'); return; }
+  if (!gdApply()) return;
+  const g = gridNow();
+  if (!g) { msg("The stage size is the disc's: there is nothing to put a floor over", { level: 'warn', toast: true }); return; }
+  let res;
+  try { res = await api('/api/props/floor', { mod: modNow, stage: stageName, min: g.min, max: g.max }); }
+  catch (e) { msg(cleanError(e).text, { level: 'err', toast: true }); return; }
+  const p = JSON.parse(JSON.stringify(buildPatch()));
+  p.props = (p.props || []).filter((e) => propKey(e.model) !== propKey(res.model) && e.id !== 'floor');
+  p.props.push({ id: 'floor', model: res.model, pos: res.pos, name: 'Floor' });
+  await loadPropModels(modNow);
+  restoreTo(JSON.stringify(p));
+  msg(`Floor ${res.model} over the new size${res.prop?.error ? `, but ${res.prop.error}` : ''}. Check it, then Save`, { level: res.prop?.error ? 'warn' : 'ok', toast: true });
 };
 
 // Stage picture: the view's middle 2:1 band, 512x256, into mods/<mod>/levelpics/ (the stage select's picture)
