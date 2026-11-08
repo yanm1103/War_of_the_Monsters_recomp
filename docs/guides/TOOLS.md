@@ -42,6 +42,10 @@
   - `lvlnames.py <STAGE>`: names for the `lvl.py` objects (level editor): a content signature per object (vertices in the handle's
     frame and the decoded pixels of its textures, the same for the same model in any stage) and the rule names (special ids, pickup
     type, hit point class, size); model names by signature in `tools/level_editor/names.json`.
+  - `lvlorig.py <scene.glb> <handle> <out.glb>`: one original object (a `prop` or `destr`) of a stage's `lvlglb` scene as a standalone `.glb`
+    for `lvlprop.py build --units game`: its top node is the only root with its world matrix cleared, the broken states' meshes are named
+    `state<N>_*` (a destructible prop), the materials lose the name `tex<texId>` (the prop gets its own copy of each image), and only
+    what the object uses is written. The editor's palette calls it (`MODS.md`, "Palette").
   - `lvlprop.py build <in.glb> <prop dir> --stage <STAGE> [--units blender|game] [--scale S | --height H] [--name NAME] [--strength 1..5]`: a static (or, with `state1_*` meshes, destructible; `state1_debris_*` meshes are the chunks thrown when state 1 starts, `state1_smoke_*` empties its dust emitters)
     prop of one stage from a `.glb`, as a mini image prelinked at 0xA00000 (`<NAME>.NGP`, word 0 = 1, word 1 = the root) with a
     `<NAME>.PTR` in the monster layout (pointers; texIds and OBJECT GS contexts that hold the prop's texture slot until the loader

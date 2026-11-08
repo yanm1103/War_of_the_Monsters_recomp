@@ -2958,7 +2958,7 @@ function propThumb(pm) {
   if (pm.thumb !== undefined) return pm.thumb;
   pm.thumb = null;
   if (!pm.scene) return null;
-  const S = 96, sc = new THREE.Scene(), prev = renderer.getRenderTarget();
+  const S = 192, sc = new THREE.Scene(), prev = renderer.getRenderTarget();
   try {
     const obj = pm.scene.clone(true);
     sc.add(obj);
@@ -2983,59 +2983,316 @@ function propThumb(pm) {
   return pm.thumb;
 }
 
-// Ctrl+P palette: the stage's objects (select and frame) and the mod's props for this stage (add)
-let palIdx = 0, palRows = [];
+// The original models of the other stages (/api/originals, built by the server in the background): a search result makes the model a
+// prop of the mod (/api/props/original) and adds it. Their pictures load as the rows show (/api/origglb).
+let origIdx = null, origTimer = 0, origBy = new Map();   // origBy: "STAGE:kind:sig" -> the index entry (a stage's own object finds its picture by its model)
+const origPics = new Map();   // "STAGE:handle" -> {pic: data URL or null}
+async function origEnsure() {
+  clearTimeout(origTimer);
+  if (!$('palDlg').open || (origIdx && origIdx.ready)) return;
+  try { origIdx = await api('/api/originals'); } catch (e) { origIdx = { ready: true, items: [], done: 0, total: 0 }; return; }
+  origBy = new Map(origIdx.items.map((it) => [`${it.stage}:${it.kind}:${it.sig}`, it]));
+  fillPalStages();
+  if ($('palDlg').open) palRender();
+  if (!origIdx.ready) origTimer = setTimeout(origEnsure, 1500);
+}
+// A model's picture: the PNG the server kept from an earlier render; without one, the page renders the model (its .glb, a few at a
+// time) and sends the PNG to be kept, so each model is rendered once for good.
+const origQ = [];
+let origBusy = 0;
+function origPump() {
+  while (origBusy < 3 && origQ.length) { origBusy++; origQ.shift()().finally(() => { origBusy--; origPump(); }); }
+}
+function origPic(it) {
+  const key = `${it.stage}:${it.handle}`, q = `stage=${encodeURIComponent(it.stage)}&handle=${encodeURIComponent(it.handle)}`;
+  let e = origPics.get(key);
+  if (e) return e.pic;
+  origPics.set(key, e = { pic: null });
+  const done = () => { if (e.pic && $('palDlg').open) palRender(); };
+  origQ.push(() => new Promise((res) => {
+    const im = new Image();
+    im.onload = () => { e.pic = im.src; it.pic = true; done(); res(); };
+    im.onerror = () => origRender(it).then((p) => { e.pic = p; done(); }).finally(res);
+    im.src = `/api/origpic?${q}`;
+  }));
+  origPump();
+  return null;
+}
+// Renders one model (its .glb from the server) into a small picture, sends the PNG to be kept and returns it as a data URL (null on failure)
+function origRender(it) {
+  return new GLTFLoader().loadAsync(`/api/origglb?stage=${encodeURIComponent(it.stage)}&handle=${encodeURIComponent(it.handle)}`).then(async (gltf) => {
+    gltf.scene.traverse((o) => {
+      if (o.userData && o.userData.hidden) o.visible = false;
+      if (o.isMesh) for (const m of [].concat(o.material)) gsMaterial(m);
+    });
+    const pic = propThumb({ scene: gltf.scene });
+    if (pic) { it.pic = true; await api('/api/origpic', { stage: it.stage, handle: it.handle, png: pic.replace(/^data:[^,]*,/, '') }).catch(() => {}); }
+    gltf.scene.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); for (const m of [].concat(o.material)) { if (m.map) m.map.dispose(); m.dispose(); } } });
+    return pic;
+  }).catch(() => null);
+}
+// Renders the pictures that are not kept yet, every stage's, three at a time (the scene of a stage is read once for all its models);
+// ?bake=1 does it on load. Progress in the palette's footer.
+const bake = { on: false, done: 0, total: 0, failed: 0 };
+async function bakeOriginals() {
+  if (bake.on) return;
+  bake.on = true; bake.done = bake.total = bake.failed = 0;
+  try {
+    let idx = await api('/api/originals');
+    while (!idx.ready) { await sleep(1000); idx = await api('/api/originals'); }
+    const todo = idx.items.filter((i) => !i.pic).sort((a, b) => a.stage.localeCompare(b.stage) || a.handle.localeCompare(b.handle));
+    bake.total = todo.length;
+    document.title = `Baking pictures 0/${bake.total}`;
+    const worker = async () => {
+      for (let it = todo.shift(); it; it = todo.shift()) {
+        const p = await origRender(it);
+        bake.done++;
+        if (!p) bake.failed++;
+        if (bake.done % 10 === 0 || bake.done === bake.total) { document.title = `Baking pictures ${bake.done}/${bake.total}`; if ($('palDlg').open) palRender(); }
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    msg(`Rendered ${bake.done - bake.failed} of ${bake.total} pictures for the palette${bake.failed ? `, ${bake.failed} failed` : ''}`, { level: bake.failed ? 'warn' : 'ok', toast: true });
+    origIdx = null; origPics.clear();
+  } catch (e) { msg(`Rendering the pictures stopped: ${cleanError(e).text}`, { level: 'err', toast: true }); }
+  finally { bake.on = false; if ($('palDlg').open) origEnsure(); }
+}
+async function addOriginal(it) {
+  if (!modNow) { msg('Choose a mod first: the prop is built into it', { level: 'warn', toast: true }); return; }
+  msg(`Building ${it.name} from ${it.title}…`);
+  let res;
+  try { res = await api('/api/props/original', { mod: modNow, stage: stageName, from: it.stage, handle: it.handle }); }
+  catch (e) { msg(cleanError(e).text, { level: 'err', toast: true }); return; }
+  const m = res.prop || {};
+  if (!propModels.get(m.model)?.scene) {
+    const p = JSON.stringify(buildPatch());
+    await loadPropModels(modNow);
+    restoreTo(p);
+  }
+  if (!propModels.get(m.model)?.scene) { msg(`${m.model}: ${m.error || 'its preview does not load'}`, { level: 'warn', toast: true }); return; }
+  addProp(m.model);
+}
+
+// A copy of one of this stage's own models where the view looks (the stage's object is copied, as Copy does)
+function addStageModel(it) {
+  const rec = byHandle.get(normHandle(it.handle));
+  if (!rec) { msg(`${it.name}: this stage has no such object any more`, { level: 'warn', toast: true }); return; }
+  if (editMode !== 'objects') enterMode('objects');
+  snapshot('add ' + it.name);
+  const c = makeCopy(rec, viewPoint(), headingOf(rec.item));
+  msg(`Added a copy of ${it.name}`, { level: 'ok', toast: ['Undo', undo] });
+  select(c);
+}
+
+// Ctrl+P palette, two tabs. Add: cards of the mod's props for this stage and of every model of the game's stages (this stage's first):
+// a card of this stage's copies the object, one of another stage builds it as a prop of the mod (addOriginal) and adds it.
+// Find: the stage's objects, one card per model (select and frame).
+let palIdx = 0, palRows = [], palTab = 'add', palStageSel = '';
+let ORIG_ROWS = 16;        // models per page: the grid's columns (cards of at least PAL_CARD px, as the CSS lays them) times the rows that fit
+const PAL_CARD = 170;
+let palPropsOpen = true;   // the "This mod's props" group; kept between sessions
+try { palPropsOpen = localStorage.getItem('palProps') !== 'closed'; } catch (e) { /* no storage: open */ }
+function fitPage() {
+  const w = $('palList').clientWidth;
+  if (!w) return;
+  const cols = Math.max(2, Math.floor((w + 8) / (PAL_CARD + 8))), card = (w - 8 * (cols - 1)) / cols;
+  ORIG_ROWS = cols * Math.max(2, Math.floor((window.innerHeight - 260) / (card + 50)));
+}
+let origPage = 0, origTotal = 0;
+function origResults(q) {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  origTotal = 0;
+  if (palTab !== 'add' || !origIdx) return [];
+  const here = baseOf(stageName), isHere = (it) => baseOf(it.stage) === here;
+  const all = origIdx.items.filter((it) => !palStageSel || it.stage === palStageSel)
+    .filter((it) => { const t = `${it.name} ${it.title} ${it.stage} ${it.kind === 'destr' ? 'breakable destructible' : 'prop'}`.toLowerCase(); return words.every((w) => t.includes(w)); })
+    .sort((a, b) => isHere(b) - isHere(a) || a.stage.localeCompare(b.stage) || b.count - a.count || a.name.localeCompare(b.name));
+  origTotal = all.length;
+  origPage = Math.min(origPage, Math.max(0, Math.ceil(all.length / ORIG_ROWS) - 1));
+  return all.slice(origPage * ORIG_ROWS, (origPage + 1) * ORIG_ROWS)
+    .map((it) => ({ kind: 'orig', orig: it, label: it.name,
+                    meta: `${isHere(it) ? 'This stage' : it.title}${it.kind === 'destr' ? ' · breakable' : ''} · ${it.dims.map((x) => Math.round(x)).join('×')}`,
+                    run: () => (isHere(it) ? addStageModel(it) : addOriginal(it)) }));
+}
+function setPalTab(t) {
+  palTab = t;
+  palIdx = 0;
+  origPage = 0;
+  $('palTabAdd').setAttribute('aria-pressed', t === 'add');
+  $('palTabFind').setAttribute('aria-pressed', t === 'find');
+  $('palStage').hidden = t !== 'add';
+  $('palQ').placeholder = t === 'add' ? 'Search the models to add…' : 'Search this stage’s objects (name or handle)…';
+  palRender(true);
+  $('palQ').focus();
+}
+function fillPalStages() {            // the stages that have models, in the stage list's order
+  const sel = $('palStage'), have = new Set((origIdx ? origIdx.items : []).map((i) => i.stage)), keep = palStageSel;
+  sel.innerHTML = `<option value="">All stages</option>` + Object.keys(stageTitles).filter((n) => have.has(n))
+    .map((n) => `<option value="${n}">${stageTitles[n]}${n === stageName || n === baseOf(stageName) ? ' (this stage)' : ''}</option>`).join('');
+  sel.value = have.has(keep) ? keep : '';
+  palStageSel = sel.value;
+}
+function origGo(d) {
+  const pages = Math.max(1, Math.ceil(origTotal / ORIG_ROWS)), p = Math.max(0, Math.min(pages - 1, origPage + d));
+  if (p === origPage) return;
+  origPage = p;
+  palRender();                       // the new page's rows; the first of them gets the selection
+  palIdx = Math.max(0, palRows.findIndex((r) => r.kind === 'orig'));
+  palRender(true);
+}
 function palResults(q) {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean), fits = (t) => words.every((w) => t.toLowerCase().includes(w));
-  const props = [...propModels.values()].filter((pm) => pm.info.stage === baseOf(stageName) && pm.scene)
-    .map((pm) => ({ kind: 'prop', text: `${pm.info.name || pm.info.model} ${pm.info.model}`, label: `Add ${pm.info.name && pm.info.name.toUpperCase() !== pm.info.model ? pm.info.name + ' · ' : ''}${pm.info.model}`,
+  const props = palTab !== 'add' || palStageSel ? [] : [...propModels.values()].filter((pm) => pm.info.stage === baseOf(stageName) && pm.scene)
+    .map((pm) => ({ kind: 'prop', text: `${pm.info.name || pm.info.model} ${pm.info.model}`, label: `${pm.info.name && pm.info.name.toUpperCase() !== pm.info.model ? pm.info.name : pm.info.model}`,
                     meta: pm.info.triangles ? `${pm.info.triangles} triangles` : '', pm, run: () => addProp(pm.info.model) }))
     .filter((r) => fits(r.text));
-  const objs = items().filter((it) => !it.rec.deleted).map((it) => ({ it, name: it.copy ? it.iname || `Copy ${it.rec.copies.indexOf(it) + 1}` : nameOf(it) }))
-    .filter((o) => fits(`${o.name} ${o.it.rec.info.handle}`)).slice(0, 40)
-    .map((o) => ({ kind: 'obj', label: o.name, meta: o.it.rec.info.handle, run: () => { select(o.it); focusSelection(); } }));
-  return { props, objs };
+  // one card per model (name and signature): the first match is what it selects, with how many there are
+  const groups = new Map();
+  for (const it of palTab === 'find' ? items() : []) {
+    if (it.rec.deleted) continue;
+    const name = it.copy ? it.iname || `Copy ${it.rec.copies.indexOf(it) + 1}` : nameOf(it);
+    if (!fits(`${name} ${it.rec.info.handle}`)) continue;
+    const k = `${name}|${it.rec.info.sig || ''}`, g = groups.get(k);
+    if (g) g.n++; else groups.set(k, { it, name, n: 1 });
+  }
+  const objs = [...groups.values()].slice(0, 40)
+    .map((o) => ({ kind: 'obj', label: o.name, meta: o.n > 1 ? `${o.n} in this stage` : o.it.rec.info.handle,
+                   key: `${baseOf(stageName)}:${o.it.rec.info.kind}:${o.it.rec.info.sig}`, run: () => { select(o.it); focusSelection(); } }));
+  return { props, objs, origs: origResults(q) };
 }
-function palRender() {
-  const { props, objs } = palResults($('palQ').value);
-  palRows = [...props, ...objs];
+// follow: scroll to the selected row (a key, a page, a new search); a redraw for a picture that arrived keeps the list where it is
+function palRender(follow = false) {
+  fitPage();
+  const { props, objs, origs } = palResults($('palQ').value);
+  palRows = [...(palPropsOpen ? props : []), ...objs, ...origs];
   palIdx = Math.min(palIdx, Math.max(0, palRows.length - 1));
-  const list = $('palList');
+  const list = $('palList'), top = list.scrollTop;
   list.textContent = '';
-  const head = (t) => { const d = document.createElement('div'); d.className = 'pal-h'; d.textContent = t; list.appendChild(d); };
-  let n = 0;
+  const head = (t, pager, fold) => {
+    const d = document.createElement('div');
+    d.className = 'pal-h';
+    const s = document.createElement('span');
+    s.textContent = t;
+    d.append(s);
+    if (fold) {
+      d.classList.add('pal-fold');
+      d.setAttribute('role', 'button');
+      d.onmousedown = (e) => e.preventDefault();      // the search keeps the focus
+      d.onclick = fold;
+    }
+    if (pager) d.append(...pager);
+    list.appendChild(d);
+  };
+  let n = 0, grid = null;
+  const group = (t, pager, fold) => { head(t, pager, fold); grid = document.createElement('div'); grid.className = 'pal-grid'; list.appendChild(grid); return grid; };
   const add = (r) => {
     const i = n++, b = document.createElement('button');
-    b.type = 'button'; b.className = 'ghost'; b.setAttribute('role', 'option'); b.setAttribute('aria-selected', i === palIdx);
-    const pic = r.pm && propThumb(r.pm);
+    b.type = 'button'; b.className = 'ghost pal-card'; b.setAttribute('role', 'option'); b.setAttribute('aria-selected', i === palIdx);
+    b.title = `${r.label} · ${r.meta}`;
+    const pic = r.pm ? propThumb(r.pm) : r.orig ? origPic(r.orig) : r.key && origBy.get(r.key) ? origPic(origBy.get(r.key)) : null;
     if (pic) { const im = document.createElement('img'); im.src = pic; im.alt = ''; im.className = 'pal-pic'; b.append(im); }
-    else b.append(icon(r.kind === 'prop' ? 'shape-plus-outline' : 'cube-outline'));
+    else { const ph = document.createElement('span'); ph.className = 'pal-pic pal-nopic'; ph.append(icon(r.kind === 'obj' ? 'cube-outline' : 'shape-plus-outline')); b.append(ph); }
     const l = document.createElement('span'), m = document.createElement('span');
-    l.textContent = r.label; m.className = 'pal-meta'; m.textContent = r.meta;
+    l.className = 'pal-name'; l.textContent = r.label; m.className = 'pal-meta'; m.textContent = r.meta;
     b.append(l, m);
     b.onclick = () => palPick(r);
-    list.appendChild(b);
+    grid.appendChild(b);
   };
-  if (props.length) { head('Props'); props.forEach(add); }
-  if (objs.length) { head('Objects'); objs.forEach(add); }
-  if (!palRows.length) { const d = document.createElement('div'); d.className = 'pm-none'; d.textContent = 'Nothing matches.'; list.appendChild(d); }
-  list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+  if (props.length) {
+    const fold = () => {
+      palPropsOpen = !palPropsOpen;
+      try { localStorage.setItem('palProps', palPropsOpen ? 'open' : 'closed'); } catch (e) { /* ignore */ }
+      palIdx = 0;
+      palRender(true);
+    };
+    if (palPropsOpen) { group(`▾ This mod's props · ${props.length}`, null, fold); props.forEach(add); }
+    else head(`▸ This mod's props · ${props.length}`, null, fold);
+  }
+  if (objs.length) { group('Objects in this stage'); objs.forEach(add); }
+  if (origs.length) {
+    const pages = Math.ceil(origTotal / ORIG_ROWS), pg = (txt, d, off) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'ghost pal-pg'; b.textContent = txt; b.disabled = off; b.title = d < 0 ? 'Previous page (PageUp)' : 'Next page (PageDown)';
+      b.onmousedown = (e) => e.preventDefault();      // the search keeps the focus
+      b.onclick = () => origGo(d);
+      return b;
+    };
+    group(`Models from the game's stages · ${origPage * ORIG_ROWS + 1}–${origPage * ORIG_ROWS + origs.length} of ${origTotal}`,
+          pages > 1 ? [pg('‹', -1, origPage === 0), pg('›', 1, origPage >= pages - 1)] : null);
+    origs.forEach(add);
+  }
+  if (palTab === 'add' && origIdx && origIdx.ready) {         // pictures not rendered yet: all of them in one go, or as the rows show
+    const missing = origIdx.items.filter((i) => !i.pic).length;
+    if (bake.on || missing) {
+      const d = document.createElement('div');
+      d.className = 'pal-h';
+      const s = document.createElement('span');
+      s.textContent = bake.on ? `Rendering the pictures… ${bake.done} of ${bake.total}` : `${missing} pictures not rendered yet`;
+      d.append(s);
+      if (!bake.on) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'ghost pal-pg'; b.textContent = 'Render all'; b.style.width = 'auto'; b.style.padding = '0 8px';
+        b.title = 'Renders every model once and keeps the pictures (a few minutes)';
+        b.onmousedown = (e) => e.preventDefault();
+        b.onclick = () => { bakeOriginals(); palRender(); };
+        d.append(b);
+      }
+      list.appendChild(d);
+    }
+  }
+  if (palTab === 'add' && !(origIdx && origIdx.ready)) {
+    const d = document.createElement('div');
+    d.className = 'pm-none';
+    d.textContent = `Looking through the other stages' objects… ${origIdx ? origIdx.done + ' of ' + origIdx.total : ''}`;
+    list.appendChild(d);
+  }
+  if (!palRows.length && !(origIdx && !origIdx.ready)) { const d = document.createElement('div'); d.className = 'pm-none'; d.textContent = 'Nothing matches.'; list.appendChild(d); }
+  if (follow) list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+  else list.scrollTop = top;
 }
 function palPick(r) { $('palDlg').close(); r.run(); }
 function openPalette() {
   if (!stageName || document.querySelector('dialog[open]')) return;
-  palIdx = 0;
   $('palQ').value = '';
-  palRender();
+  palTab = 'add';
+  setPalTab('add');
+  fillPalStages();
   $('palDlg').showModal();
+  palRender(true);                      // again, now that the grid has a width: the page holds as many cards as fit
   $('palQ').focus();
+  origEnsure();
 }
-$('palQ').oninput = () => { palIdx = 0; palRender(); };
+window.addEventListener('resize', () => { if ($('palDlg').open) palRender(); });
+$('palTabAdd').onclick = () => setPalTab('add');
+$('palTabFind').onclick = () => setPalTab('find');
+$('palStage').onchange = () => { palStageSel = $('palStage').value; palIdx = 0; origPage = 0; palRender(true); $('palQ').focus(); };
+$('palQ').oninput = () => { palIdx = 0; origPage = 0; palRender(true); };
 $('palQ').onkeydown = (e) => {
+  const t = e.target, atEnd = t.selectionStart === t.selectionEnd && t.selectionStart === t.value.length, atStart = t.selectionStart === t.selectionEnd && t.selectionStart === 0;
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
-    palIdx = (palIdx + (e.key === 'ArrowDown' ? 1 : -1) + palRows.length) % Math.max(1, palRows.length);
-    palRender();
+    // the card nearest below or above, in the next row of the grid
+    const cards = [...$('palList').querySelectorAll('button[role="option"]')], cur = cards[palIdx];
+    if (!cur) return;
+    const c = cur.getBoundingClientRect(), cx = c.left + c.width / 2, cy = c.top + c.height / 2, dir = e.key === 'ArrowDown' ? 1 : -1;
+    let best = -1, bd = Infinity;
+    cards.forEach((b, i) => {
+      const r = b.getBoundingClientRect(), dy = (r.top + r.height / 2 - cy) * dir;
+      if (dy < 8) return;
+      const d = dy * 1000 + Math.abs(r.left + r.width / 2 - cx);        // the nearest row first, then the nearest column
+      if (d < bd) { bd = d; best = i; }
+    });
+    if (best >= 0) { palIdx = best; palRender(true); }
+  } else if ((e.key === 'ArrowRight' && atEnd) || (e.key === 'ArrowLeft' && atStart)) {
+    e.preventDefault();
+    palIdx = Math.max(0, Math.min(palRows.length - 1, palIdx + (e.key === 'ArrowRight' ? 1 : -1)));
+    palRender(true);
+  } else if (e.key === 'Tab') {
+    e.preventDefault();
+    setPalTab(palTab === 'add' ? 'find' : 'add');
+  } else if (e.key === 'PageDown' || e.key === 'PageUp') {
+    e.preventDefault();
+    origGo(e.key === 'PageDown' ? 1 : -1);
   } else if (e.key === 'Enter') { e.preventDefault(); if (palRows[palIdx]) palPick(palRows[palIdx]); }
 };
 
@@ -3405,4 +3662,5 @@ if (new URLSearchParams(location.search).has('debug')) {
                        get env() { return env; }, get skyRoot() { return skyRoot; }, get skyViews() { return skyViews; }, get stageRoot() { return stageRoot; } };
 }
 loop();
+if (new URLSearchParams(location.search).has('bake')) bakeOriginals();
 api('/api/init').then(init).catch((e) => msg(`Couldn't reach the editor program: ${cleanError(e).text}`, { level: 'err' }));

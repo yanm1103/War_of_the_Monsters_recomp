@@ -47,6 +47,7 @@ import modkit   # noqa: E402 - the disc as a folder or a .iso (disc_iso, disc_ca
 import hudapi   # noqa: E402 - the HUD panel (web/hud.js)
 import pedsapi  # noqa: E402 - the pedestrians (web/peds.js)
 import lvlprop  # noqa: E402 - new props from Blender (Import .glb)
+import lvlorig  # noqa: E402 - an original object of another stage as a prop (Ctrl+P)
 
 WEB = os.path.join(HERE, "web")
 CONFIG = os.path.join(os.path.expanduser("~"), ".wotm_level_editor.json")
@@ -677,7 +678,7 @@ def props_list(cfg, mod):
             pv = os.path.join(d, n, (m.get("files") or {}).get("preview", ""))
             e.update(name=m.get("name") or n, stage=(m.get("stage") or "").upper(), triangles=m.get("triangles", 0),
                      bounds=m.get("bounds"), light=prop_light(m), bytes=m.get("bytes"), units=m.get("units"),
-                     scale=m.get("scale"), preview=os.path.isfile(pv),
+                     scale=m.get("scale"), preview=os.path.isfile(pv), origin=m.get("origin"),
                      destructible=({"class": (m["destructible"] or {}).get("class"), "states": len((m["destructible"] or {}).get("states") or [])}
                                     if m.get("destructible") else None))
         except (OSError, ValueError, AttributeError) as err:
@@ -766,6 +767,151 @@ def floor_prop(cfg, b):
     return out
 
 
+ORIGINALS = {"lock": threading.Lock(), "key": None, "items": [], "done": 0, "total": 0}
+
+
+def originals_work(cfg, key):
+    """Fills ORIGINALS with the models (props and destructibles, one per signature) of every stage on the disc."""
+    disc = cfg["disc"]
+    names = load_names()
+    stages = [s["name"] for s in STAGES.list(disc)]
+    with ORIGINALS["lock"]:
+        ORIGINALS["total"] = len(stages)
+    for n in stages:
+        items = []
+        try:
+            st, objs, on = STAGES.objects(disc, n)
+            seen = {}
+            # the objects the scene draws: the others (a stage's hidden or never drawn ones) have nothing to take out
+            drawn = {(nd.get("extras") or {}).get("handle", "").upper().replace("0X", "0x")
+                     for nd in lvlorig.ngpmesh.Glb(STAGES.glb(disc, n)).nodes}
+            for d in describe(n, objs, on, STAGES.facts(disc, n), names):
+                if d["kind"] not in lvlorig.KINDS or not d["sig"] or not d["movable"] or d["handle"] not in drawn:
+                    continue
+                k = (d["sig"], d["kind"])
+                if k not in seen and any(x["handle"] == d["handle"] for x in items):      # one handle is one node: one model
+                    continue
+                if k in seen:
+                    seen[k]["count"] += 1
+                    continue
+                seen[k] = {"stage": n, "title": STAGE_TITLE.get(n, n), "handle": d["handle"], "kind": d["kind"], "name": d["name"],
+                           "sig": d["sig"], "dims": d["dims"], "states": d["states"], "count": 1}
+                items.append(seen[k])
+        except Exception:      # noqa: BLE001 - a stage that does not read has no entries
+            traceback.print_exc()
+        with ORIGINALS["lock"]:
+            if ORIGINALS["key"] != key:
+                return
+            ORIGINALS["items"] += items
+            ORIGINALS["done"] += 1
+
+
+def originals_index(cfg):
+    """The index of original models of every stage (built in the background on the first call): {"ready", "done", "total", "items"}."""
+    key = cfg["disc"]
+    with ORIGINALS["lock"]:
+        if ORIGINALS["key"] != key:
+            ORIGINALS.update(key=key, items=[], done=0, total=0)
+            threading.Thread(target=originals_work, args=(cfg, key), daemon=True).start()
+        items = list(ORIGINALS["items"])
+        out = {"ready": ORIGINALS["total"] > 0 and ORIGINALS["done"] >= ORIGINALS["total"], "done": ORIGINALS["done"],
+               "total": ORIGINALS["total"]}
+    names = {s["name"] for s in STAGES.list(cfg["disc"])}
+    out["items"] = [dict(it, pic=os.path.isfile(original_pic_path(cfg, it["stage"], it["handle"], names))) for it in items]   # pic: kept already
+    return out
+
+
+SCENE_GLB = {"lock": threading.Lock(), "key": None, "glb": None}
+
+
+def original_glb(cfg, stage, handle):
+    """The .glb of one original object (lvlorig.extract from the stage's scene), kept on disk next to the scene."""
+    base = base_of(cfg, stage)
+    if not re.fullmatch(r"0[xX][0-9A-Fa-f]{1,8}", handle or ""):
+        raise ValueError("Not an object handle: %r" % handle)
+    scene = STAGES.glb(cfg["disc"], base)
+    path = os.path.join(CACHE, "orig", "%s-%s-%X.glb" % (base, disc_key(cfg["disc"]), int(handle, 16)))
+    if not (os.path.isfile(path) and os.path.getmtime(path) >= os.path.getmtime(scene)
+            and os.path.getmtime(path) >= os.path.getmtime(lvlorig.__file__)):
+        with SCENE_GLB["lock"]:            # the last scene read stays: the objects of one stage come one after another
+            key = (scene, os.path.getmtime(scene))
+            if SCENE_GLB["key"] != key:
+                SCENE_GLB.update(key=None, glb=None)
+                SCENE_GLB.update(glb=lvlorig.ngpmesh.Glb(scene), key=key)
+            data = lvlorig.extract(SCENE_GLB["glb"], handle, STAGES.objects(cfg["disc"], base)[0])
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + ".tmp", "wb") as f:
+            f.write(data)
+        os.replace(path + ".tmp", path)
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def original_pic_path(cfg, stage, handle, stages=None):
+    """Where the picture (PNG) of an original model is kept: next to the scene's cache, one file per stage and handle."""
+    if not re.fullmatch(r"0[xX][0-9A-Fa-f]{1,8}", handle or "") or stage.upper() not in (stages or [s["name"] for s in STAGES.list(cfg["disc"])]):
+        raise ValueError("Not an original object: %s %s" % (stage, handle))
+    return os.path.join(CACHE, "origpic192", "%s-%s-%X.png" % (stage.upper(), disc_key(cfg["disc"]), int(handle, 16)))
+
+
+def save_original_pic(cfg, b):
+    """The palette's picture of an original model, rendered by the page (b: stage, handle, png as base64)."""
+    path = original_pic_path(cfg, b.get("stage") or "", b.get("handle") or "")
+    data = base64.b64decode(b.get("png") or "")
+    if data[:8] != b"\x89PNG\r\n\x1a\n" or len(data) > 300000:
+        raise ValueError("That is not a PNG of a small picture")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".tmp", "wb") as f:
+        f.write(data)
+    os.replace(path + ".tmp", path)
+    return {"ok": True}
+
+
+def original_prop(cfg, b):
+    """An original object of another stage as a prop of the mod, built for the open stage (lvlprop.build, units game): b has mod,
+    stage (the open one), from (the object's stage) and handle. The model is named from the stage and the object's signature; one
+    already made from the same object is reused. Returns import_prop's reply with "reused"."""
+    mod, src = (b.get("mod") or "").strip(), (b.get("from") or "").upper()
+    if bad_mod(mod):
+        raise ValueError(bad_mod_reason(mod))
+    if src not in [s["name"] for s in STAGES.list(cfg["disc"])]:
+        raise ValueError("%s is not a stage on the disc" % src)
+    raw = b.get("handle") or ""
+    handle = "0x%X" % int(raw, 16) if re.fullmatch(r"0[xX][0-9A-Fa-f]{1,8}", raw) else ""
+    st, objs, on = STAGES.objects(cfg["disc"], src)
+    found = next((d for d in describe(src, objs, on, STAGES.facts(cfg["disc"], src), load_names()) if d["handle"] == handle), None)
+    if not found or found["kind"] not in lvlorig.KINDS or not found["sig"]:
+        raise ValueError("%s has no object %s that can be a prop" % (src, handle or "?"))
+    origin = {"stage": src, "handle": handle, "sig": found["sig"]}
+    for p in props_list(cfg, mod):          # made before from the same model of that stage
+        o = p.get("origin") or {}
+        if o.get("stage") == src and o.get("sig") == found["sig"] and p.get("stage") == base_of(cfg, (b.get("stage") or "").upper()).upper():
+            return {"prop": p, "lines": [], "reused": True}
+    d = props_dir(cfg, mod)
+    name = None
+    for k in range(0, len(found["sig"]) - 3, 4):        # the first free name (a name from another model keeps its own)
+        cand = lvlorig.prop_name(src, found["sig"][k:])
+        if not d or not lvl._child_nocase(d, cand):
+            name = cand
+            break
+    if not name:
+        raise ValueError("No free model name for %s in mod %s" % (src, mod))
+    body = {"mod": mod, "stage": b.get("stage"), "name": name, "units": "game", "title": "%s (%s)" % (found["name"], STAGE_TITLE.get(src, src)),
+            "data": base64.b64encode(original_glb(cfg, src, handle)).decode()}
+    out = import_prop(cfg, body)
+    folder = os.path.join(props_dir(cfg, mod), name)
+    pj = os.path.join(folder, "prop.json")
+    with open(pj, encoding="utf-8") as f:
+        m = json.load(f)
+    m["origin"] = origin
+    with open(pj, "w", encoding="utf-8") as f:
+        json.dump(m, f, indent=1)
+        f.write("\n")
+    out["prop"] = next((e for e in props_list(cfg, mod) if e["model"] == name), out.get("prop"))
+    out["reused"] = False
+    return out
+
+
 def edit_prop(cfg, b):
     """A model of the mod changed in place: `title` (prop.json "name", what the list shows; empty = the folder's name) and/or
     `height` (game units: built again from its source .glb, scaled about the origin, with the same units, light and template ABE;
@@ -826,6 +972,13 @@ def edit_prop(cfg, b):
                           title if title is not None else m.get("name"), m.get("light") or "auto", stage_root(cfg["disc"], stage),
                           abe=(m.get("template") or {}).get("abe", 1),
                           strength=(m.get("destructible") or {}).get("class", lvlprop.DEFAULT_STRENGTH), log=lines.append)
+            if m.get("origin"):                 # build writes prop.json anew
+                with open(pj, encoding="utf-8") as f:
+                    nm = json.load(f)
+                nm["origin"] = m["origin"]
+                with open(pj, "w", encoding="utf-8") as f:
+                    json.dump(nm, f, indent=1)
+                    f.write("\n")
         except Exception:
             for n in os.listdir(folder):
                 if n not in backup and n.lower() != "source.glb":
@@ -1120,6 +1273,19 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(404, {"error": "not found"})
                 with open(path, "rb") as f:
                     return self.send(200, f.read(), "model/gltf-binary")
+            if u.path == "/api/originals":      # the models of every stage's original objects (Ctrl+P), built in the background
+                return self.send(200, originals_index(cfg))
+            if u.path == "/api/origglb":        # one of them as a .glb (its picture in Ctrl+P)
+                try:
+                    return self.send(200, original_glb(cfg, q.get("stage", ""), q.get("handle", "")), "model/gltf-binary")
+                except (ValueError, KeyError, lvlorig.OrigError, lvlorig.ngpmesh.MeshError) as e:
+                    return self.send(404, {"error": str(e)})
+            if u.path == "/api/origpic":        # the picture of one (rendered by the page once, then kept)
+                try:
+                    with open(original_pic_path(cfg, q.get("stage", ""), q.get("handle", "")), "rb") as f:
+                        return self.send(200, f.read(), "image/png")
+                except (OSError, ValueError):
+                    return self.send(404, {"error": "no picture yet"})
             if u.path == "/api/hud":
                 mod = q.get("mod", "").strip()
                 mods_dir, mod_arg, base, _sub, _c = hud_target(cfg, q["stage"], mod if mod and not bad_mod(mod) else "")
@@ -1187,6 +1353,16 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     return self.send(200, import_prop(cfg, b))
                 except (ValueError, lvlprop.PropError, lvlprop.ngpmesh.MeshError, lvlprop.vifpkt.FormatError) as e:
+                    return self.send(400, {"error": str(e), "code": "prop"})
+            if self.path == "/api/origpic":
+                try:
+                    return self.send(200, save_original_pic(cfg, b))
+                except ValueError as e:
+                    return self.send(400, {"error": str(e)})
+            if self.path == "/api/props/original":   # an original object of another stage as a prop of the mod
+                try:
+                    return self.send(200, original_prop(cfg, b))
+                except (ValueError, lvlorig.OrigError, lvlprop.PropError, lvlprop.ngpmesh.MeshError, lvlprop.vifpkt.FormatError) as e:
                     return self.send(400, {"error": str(e), "code": "prop"})
             if self.path == "/api/props/floor":    # a floor prop over the grid's rectangle
                 try:

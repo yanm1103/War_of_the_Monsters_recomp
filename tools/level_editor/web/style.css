@@ -361,6 +361,7 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 .facts dd.mono { font: 11px/18px var(--font-mono); }
 .facts a { color: var(--accent-text); text-decoration: none; cursor: pointer; }
 .facts a:hover { text-decoration: underline; }
+.facts dd > select { width: 100%; min-width: 0; text-overflow: ellipsis; }
 .facts .hfield { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
 /* nothing selected: what a click does, the stage, where the mod saves, how to start */
 #noSel { font-size: 12px; line-height: 18px; color: var(--fg-2); }
@@ -439,14 +440,24 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 .gd-pair { display: flex; gap: 8px; }
 .gd-pair input { flex: 1; min-width: 0; }
 .gd-btns { display: flex; gap: 8px; margin: 8px 0; }
-dialog.pal { width: min(560px, 92vw); }
+dialog.pal { width: min(96vw, 2400px); max-width: none; }
+#palList .pal-fold { cursor: pointer; }
+#palList .pal-fold:hover { color: var(--fg, inherit); }
 #palQ { width: 100%; box-sizing: border-box; }
-#palList { display: flex; flex-direction: column; gap: 2px; max-height: 50vh; overflow-y: auto; margin: 8px 0; }
-#palList button { height: auto; min-height: 36px; flex-direction: row; justify-content: flex-start; gap: 10px; text-align: left; }
-#palList button[aria-selected="true"] { background: var(--hover, rgba(128,128,128,.22)); }
-#palList .pal-pic { width: 40px; height: 40px; border-radius: 4px; flex: none; }
-#palList .pal-meta { margin-left: auto; color: var(--muted); font-size: 11px; }
-#palList .pal-h { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-top: 6px; }
+.pal-bar { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+.pal-bar .pal-tab { height: 30px; padding: 0 12px; }
+.pal-bar .pal-tab[aria-pressed="true"] { background: var(--hover, rgba(128,128,128,.22)); border-color: var(--accent, #4c8dff); }
+.pal-bar select { margin-left: auto; max-width: 240px; }
+#palList { display: flex; flex-direction: column; gap: 2px; max-height: calc(100vh - 260px); overflow-y: auto; margin: 8px 0; }
+#palList .pal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; margin-top: 4px; }
+#palList .pal-card { height: auto; min-height: 0; flex-direction: column; justify-content: flex-start; align-items: stretch; gap: 4px; padding: 6px; text-align: left; border: 1px solid transparent; }
+#palList .pal-card[aria-selected="true"] { background: var(--hover, rgba(128,128,128,.22)); border-color: var(--accent, #4c8dff); }
+#palList .pal-pic { width: 100%; aspect-ratio: 1; height: auto; border-radius: 4px; object-fit: contain; display: flex; align-items: center; justify-content: center; background: rgba(128,128,128,.12); }
+#palList .pal-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#palList .pal-meta { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#palList .pal-h { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-top: 6px; display: flex; align-items: center; gap: 4px; }
+#palList .pal-h span { margin-right: auto; }
+#palList .pal-h .pal-pg { min-height: 22px; height: 22px; width: 28px; padding: 0; justify-content: center; font-size: 15px; }
 #pmList { display: flex; flex-direction: column; gap: 2px; max-height: 50vh; overflow-y: auto; }
 #propMenu button.pm-row { height: auto; min-height: 40px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px;
   padding: 4px 8px; text-align: left; }

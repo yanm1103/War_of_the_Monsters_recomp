@@ -662,7 +662,9 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   (its three parallel lights, as the cars do); a mesh with vertex colors keeps them as its light (bake the light in Blender), and
   `--light vertex|dir` forces one way for the whole prop. `pos` is where the model's origin goes; `heading` (degrees,
   default 0) turns it about Z. Each entry collides as the box of the model's bounds, or as the shapes the .glb names (a mesh `hull_*` is a convex hull, up to 64
-  vertices and 40 faces; a mesh `coll_*` is collision by triangles, up to 64 of them; one leaf per mesh, not drawn) (monsters stand on it
+  vertices and 40 faces; a mesh `coll_*` is collision by triangles, up to 64 of them; one leaf per mesh, not drawn; `hull_m20c_wall` and
+  `coll_m10a_floor` set the surface word (hex): kind in the high byte, 2 a wall the monsters climb, 1 a floor; the default is
+  the stages' building face, 0x10A) (monsters stand on it
   and bump into it; vehicles and pedestrians are cut around it like around a moved building) and is drawn with no view culling.
   **Destructible props:** meshes named `state1_*` (up to `state3_*`; no prefix is state 0, the intact one; the states must be 0, 1, 2...
   with none missing; an empty node named `state1_none` is a state that draws nothing) make a prop that breaks. Each entry gets its own
@@ -753,8 +755,26 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   (`.SPT`, `.PED`...) in its folder shows those in the pedestrian panel and the check (the other kinds from the base). The Fight HUD
   panel of a custom stage saves its pictures in the stage's folder (`<BASE>_tNNNN.png`), so they apply to that stage only. `python
   tools/level_editor/test_custom_stages.py` is the integration test (needs the disc set in the editor).
-- **Palette (Ctrl+P):** a search over the stage's objects (name or handle; Enter selects and frames the first) and the mod's props for
-  this stage, each with a small picture of the model (Enter adds one where the view looks). It opens from anywhere, even in a text field.
+- **Palette (Ctrl+P):** cards, each with a picture of the model, as many to a row as the window holds (at least 170 px each: eight in
+  a 1600 px window); it opens from anywhere, even in a text field, and the arrows move over the cards. Two tabs (Tab switches):
+  **Add to the stage** has the mod's props for this stage (a group a click on its title folds, remembered) and every original
+  prop and breakable building of the game's stages (one card per model, a page holds what fits the window: the arrows in the group's header, or
+  PageUp and PageDown; a menu narrows it to one stage; the search takes name, stage and "breakable"); Enter or a click adds one where
+  the view looks. **Find in this stage** has the stage's objects (name or handle; one card per model with how many there are; Enter
+  selects and frames the first of them). Each picture is rendered by the
+  editor once and kept as a PNG in its cache folder (`origpic192`), so later searches show it at once; the palette's footer counts the
+  pictures not rendered yet and **Render all** makes them in one go (a few minutes; the editor's address with `?bake=1` does it on load,
+  in a browser window of its own). A card of the open stage's own models adds a copy of that object, as Copy does. Picking one of another
+  stage builds it as a prop of the mod for the open stage (`tools/lvlorig.py` takes the object out of
+  the stage's scene, `lvlprop.py` builds it with units `game`), named from the stage and the model's signature (`VEG_B533`), with
+  `origin` in its `prop.json`, and adds it like any prop; picking the same model again reuses the prop. The prop keeps its triangles,
+  vertex colors, textures (each as a CT32 copy of at most 128 a side; the PC draws the full PNG) and, for a building, its broken state
+  (hit point class 2; four `state<N>_smoke_*` emitters near the footprint's corners, low and sized to the building, throw the dust of
+  each break) and its own collision, state by state, with the original surface words (the climbable walls, the walkable rubble; an
+  object with no collision of its own collides as the box of its bounds). A part the stage drew without blending gets the GS's opaque vertex alpha,
+  since the prop draws with the template's blending, and a texture whose alpha passes 0x80 keeps the raw alpha in its PNG (the stage's
+  scale; the vertex alpha around 0x42 counts on it). The source stage's other blending,
+  pickups, vehicles and animated parts do not come along.
 - **Fight HUD and sky** (the monitor button): the pictures of the stage's fight HUD and of its sky (the OBJECTs under the nodes with id 2),
   each replaceable by a PNG in the mod (`<stage>_tNNNN.png`, "Textures as PNG"). A sky picture is the stage's own (never "apply to all").
 - **Stage size** (the expand button): the rectangle of the collision grid (`grid` in the patch), four numbers and "Grow every side by 1000"; the view draws the disc's rectangle in grey and the patch's in blue;

@@ -9,7 +9,6 @@ O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado s
 ## Editor de fase
 Rearranjar fases existentes (mover, girar, apagar, duplicar prédios e objetos, inclusive de outra fase) com um editor que grava o patch JSON por fase em `mods/<mod>/levels/` (`docs/guides/MODS.md`, "Level patches"; aplicado pelo `wotm_levelpatch.inc`). Fase nova do zero fica para depois.
 4. **Objetos novos vindos do Blender** (plano em `docs/investigacoes/2026-11-06/objetos_blender_plano.md`; conversor `tools/lvlprop.py`, diário `props_passo0_1.md`; a carga na fase, o editor e a imagem própria do material já existem, `MODS.md`, "props" e "New props"): faltam do passo 6 o LOD e a árvore de caixas (o custo por quadro não pede: 10 props de ~1000 triângulos não mudam o FPS) e o passo 8. Os passos 4 e 7 saíram com o pacote CT32 na arena e o texId dado na carga, sem `.TEX` no mod. Textura própria: UV fora de 0..1 é preso na borda (sem repetir).
-7. **Paleta Ctrl+P:** falta achar também os props originais de outras fases (hoje só objetos da fase e props do mod; a prévia dos props do mod existe).
 9. **Depois:** fase do zero como "base + geometria trocada" (mesmo relatório, seção 6).
    - Patch de fase acima de 1 MB: segunda arena na memória alta (`WOTM_HIGHRAM`). Contexto: `docs/investigacoes/2026-11-06/copia_profunda.md`.
 

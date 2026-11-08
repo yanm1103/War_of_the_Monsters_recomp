@@ -361,12 +361,12 @@ def resample(px, w, h, tw, th):
     return out
 
 
-def own_packet(tw, th, px):
+def own_packet(tw, th, px, hi=False):
     """A .TEX packet (docs/FORMATS.md, ".TEX and .RTX files") of a CT32 texture: descriptor (texId and bin 0: the loader
     writes them), DMA ret tag + VIF DIRECT, the sceGsLoadImage of sceGsSetDefLoadImage (DBP 0: texmActivateTexture writes
     the VRAM slot) and the texels. CT32 has no palette, so nothing goes to the .RTX."""
     import tex
-    pix = tex.encode(px, tex.CT32)
+    pix = tex.encode(px, tex.CT32, hi=hi)
     qwc = len(pix) // 16
     lw, lh = tw.bit_length() - 1, th.bit_length() - 1
     tbw = 1 if tw <= 64 else tw // 64
@@ -441,7 +441,7 @@ def read_glb(path, units, scale=None, height=None, warn=print):
             for prim in mesh.get("primitives", []):
                 for q in glb.accessor(prim["attributes"]["POSITION"]):
                     pts.append(tuple(m[r][0] * q[0] + m[r][1] * q[1] + m[r][2] * q[2] + m[r][3] for r in range(3)))
-            hull_raw.append((sidx, name, pts))
+            hull_raw.append((sidx, name, pts, _coll_mat(low, COLL_MATID)))
             continue
         if low.startswith("coll_"):          # collision by triangles: the mesh's own vertices and faces, no tree
             cv, ct = [], []
@@ -452,7 +452,7 @@ def read_glb(path, units, scale=None, height=None, warn=print):
                 cv += [tuple(m[r][0] * q[0] + m[r][1] * q[1] + m[r][2] * q[2] + m[r][3] for r in range(3)) for q in pos]
                 tr = [tuple(base + i for i in idx[k:k + 3]) for k in range(0, len(idx) - 2, 3)]
                 ct += [(b, a, c) if _det3(m) < 0 else (a, b, c) for a, b, c in tr]
-            coll_raw.append((sidx, name, cv, ct))
+            coll_raw.append((sidx, name, cv, ct, _coll_mat(low, POLY_MATID)))
             continue
         if "skin" in nd:
             raise PropError("mesh %s has a skin: a prop is static (apply the armature in Blender first)" % name)
@@ -462,6 +462,10 @@ def read_glb(path, units, scale=None, height=None, warn=print):
             if prim.get("mode", 4) != 4:
                 raise PropError("mesh %s: primitive mode %d (triangles only)" % (name, prim["mode"]))
             key, factor = _material_key(glb, prim, warn)
+            # a material the stage drew with no blending (tools/lvlglb.py: extras.gs.blend null) has a vertex alpha the GS ignored,
+            # and a prop draws with the template's ABE: the alpha goes to the GS's opaque (0x80) or the building shows through
+            gsx = ((glb.j.get("materials") or [{}])[prim["material"]].get("extras") or {}).get("gs") if "material" in prim else None
+            opaque_a = units == "game" and isinstance(gsx, dict) and gsx.get("blend") is None
             at = prim["attributes"]
             pos = glb.accessor(at["POSITION"])
             nrm = glb.accessor(at["NORMAL"]) if "NORMAL" in at else None
@@ -480,6 +484,8 @@ def read_glb(path, units, scale=None, height=None, warn=print):
                     n = tuple(nm[r][0] * q[0] + nm[r][1] * q[1] + nm[r][2] * q[2] for r in range(3))
                 t = uv[v] if uv is not None else None
                 c = tuple(col[v]) + ((1.0,) if len(col[v]) == 3 else ()) if col is not None else None
+                if c is not None and opaque_a:
+                    c = c[:3] + (0x80 / 255,)
                 return wp, n, t, c, factor
             lst = raw.setdefault(bucket, {}).setdefault(key, [])
             for k in range(0, len(idx) - 2, 3):
@@ -518,10 +524,10 @@ def read_glb(path, units, scale=None, height=None, warn=print):
     stats = {"degenerate": 0, "triangles": 0, "hulls": [], "colls": [], "lift": zlift, "declared": sorted(declared), "more": {}}
     per = {si: {"by_key": {}, "hulls": [], "colls": []} for si in sorted(declared)}
     per.update({b: {"by_key": {}, "hulls": [], "colls": []} for b in raw if not isinstance(b, int)})
-    for si, cname, cverts, ctris in coll_raw:
-        per[si]["colls"].append((cname, [place(q) for q in cverts], ctris))
-    for si, hname, hpts in hull_raw:
-        per[si]["hulls"].append((hname, [place(q) for q in hpts]))
+    for si, cname, cverts, ctris, cmat in coll_raw:
+        per[si]["colls"].append((cname, [place(q) for q in cverts], ctris, cmat))
+    for si, hname, hpts, hmat in hull_raw:
+        per[si]["hulls"].append((hname, [place(q) for q in hpts], hmat))
     for si, sd in sorted(raw.items(), key=lambda kv: (not isinstance(kv[0], int), str(kv[0]))):
         out = per[si]["by_key"]
         for key, tris in sd.items():
@@ -915,7 +921,14 @@ def poly_bbox_bits(tri):
     return bits
 
 
-def poly_coll(mb, verts, tris):
+def _coll_mat(low, default):
+    """The matId a collision mesh asks for in its name: hull_m20c_... or coll_m10a_... (hex; the surface word, kind in the high byte:
+    2 is a wall the monsters climb, 1 a floor), else `default`."""
+    m = re.match(r"(?:hull|coll)_m([0-9a-f]{1,4})(?:_|$)", low)
+    return int(m.group(1), 16) if m else default
+
+
+def poly_coll(mb, verts, tris, matid=None):
     """POLY_COLL (op 42) of one object with no box tree: `verts` (local floats, at most 256) and `tris` (index triples). The
     triangle's bbox bits are the vertex indices of its extremes (`poly_bbox_bits`); matId POLY_MATID. Returns (leaf, lo, hi)."""
     used = sorted({i for t in tris for i in t})
@@ -941,7 +954,7 @@ def poly_coll(mb, verts, tris):
         mb.f(obj + 8 + 4 * c, ctr[c])
     mb.f(obj + 0x14, max(math.dist(ctr, q) for q in pts))
     for k, (a, b, c) in enumerate(tris):
-        mb.raw(obj + 0x18 + 8 * k, bytes((remap[a], remap[b], remap[c], 0)) + struct.pack("<HH", POLY_MATID, poly_bbox_bits([verts[a], verts[b], verts[c]])))
+        mb.raw(obj + 0x18 + 8 * k, bytes((remap[a], remap[b], remap[c], 0)) + struct.pack("<HH", POLY_MATID if matid is None else matid, poly_bbox_bits([verts[a], verts[b], verts[c]])))
     leaf = mb.alloc(0x10, 16)
     mb.u32(leaf, OP_POLY_COLL)
     mb.u32(leaf + 4, 1)
@@ -1030,13 +1043,24 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
     imgs = sorted({k[1] for k in by_key if k[0] == "img"})
     if imgs:
         glb = ngpmesh.Glb(glb_path)
+        gsraw = bool((glb.j.get("asset", {}).get("extras") or {}).get("gsRaw"))
         max_bytes = max(sz for _n, sz in stage_tex_sizes(disc, stage))
         tex1 = stage_tex1(st.img, objs)
         for idx in imgs:
             data, mime, iname = glb_image(glb, idx)
             w, h, px, png = decode_image(data, mime)
+            hi = False
+            if gsraw:
+                # the image is a stage texture with the GS's raw alpha (tools/lvlglb.py). Past 0x80 (most of the game's: 0..0xFF, drawn
+                # with a vertex alpha around 0x42) it stays raw, and the PC reads the PNG raw because the CT32 copy passes 0x80
+                # too; up to 0x80 the PNG goes to the usual scale (255 = 0x80) that the PC reads and the CT32 copy comes back from
+                hi = any(c[3] > 0x80 for c in px)
+                if not hi:
+                    import tex
+                    px = [c[:3] + (255 if c[3] >= 128 else c[3] * 2,) for c in px]
+                    png = tex.png_bytes(w, h, px)
             tw, th = own_size(w, h, max_bytes)
-            pkt = own_packet(tw, th, resample(px, w, h, tw, th) if (tw, th) != (w, h) else px)
+            pkt = own_packet(tw, th, resample(px, w, h, tw, th) if (tw, th) != (w, h) else px, hi)
             at = mb.alloc(len(pkt), 0x80)
             mb.raw(at, pkt)
             slot = len(textures)
@@ -1086,15 +1110,15 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
         if si == 0:
             lo, hi = slo, shi
         hs, ps = [], []
-        for hname, hpts in hl:
+        for hname, hpts, hmat in hl:
             planes = convex_planes(hpts)
-            cv, hlo, hhi = hull_volume(mb, planes, hpts)
-            hs.append({"mesh": hname, "node": "0x%X" % cv, "planes": len(planes),
+            cv, hlo, hhi = hull_volume(mb, planes, hpts, hmat)
+            hs.append({"mesh": hname, "node": "0x%X" % cv, "planes": len(planes), "matId": hmat,
                        "min": [round(x, 4) for x in hlo], "max": [round(x, 4) for x in hhi]})
             log("collision hull %s: %d planes" % (hname, len(planes)))
-        for cname, cverts, ctris in cl:
-            leaf, plo, phi = poly_coll(mb, cverts, ctris)
-            ps.append({"mesh": cname, "node": "0x%X" % leaf, "triangles": len(ctris),
+        for cname, cverts, ctris, cmat in cl:
+            leaf, plo, phi = poly_coll(mb, cverts, ctris, cmat)
+            ps.append({"mesh": cname, "node": "0x%X" % leaf, "triangles": len(ctris), "matId": cmat,
                        "min": [round(x, 4) for x in plo], "max": [round(x, 4) for x in phi]})
             log("collision triangles %s: %d" % (cname, len(ctris)))
         cvs = [int(h["node"], 16) for h in hs + ps]

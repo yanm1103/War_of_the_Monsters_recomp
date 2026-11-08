@@ -468,10 +468,15 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
 <dialog id="palDlg" class="dlg pal" aria-label="Find an object or add a prop">
   <form method="dialog">
     <div class="dlg-body">
+      <div class="pal-bar">
+        <button type="button" id="palTabAdd" class="ghost pal-tab" aria-pressed="true">Add to the stage</button>
+        <button type="button" id="palTabFind" class="ghost pal-tab" aria-pressed="false">Find in this stage</button>
+        <select id="palStage" aria-label="Models from" title="Models from"></select>
+      </div>
       <input id="palQ" type="text" spellcheck="false" autocomplete="off" role="combobox" aria-controls="palList" aria-expanded="true"
-        placeholder="Find an object, or add a prop…" aria-label="Find an object, or add a prop">
+        placeholder="Search the models to add…" aria-label="Search">
       <div id="palList" role="listbox"></div>
-      <div class="help">Enter picks the first result, ↑ ↓ move, Esc closes. Ctrl+P opens this from anywhere.</div>
+      <div class="help">Enter picks the selected card, arrows move, Tab switches between Add and Find, PageUp and PageDown turn the pages, Esc closes. Ctrl+P opens this from anywhere.</div>
     </div>
   </form>
 </dialog>
