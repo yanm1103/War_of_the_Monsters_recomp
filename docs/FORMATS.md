@@ -190,7 +190,10 @@ Reader: `python tools/lvl.py collision <STAGE> [--check]` (`--check` redoes ever
   own paths; state 0 always collides, and the broken states of most buildings have none.
 - **Leaves:** `POLY_COLL` (op 42, `_hierpolycollisiongroup`: `numObjs` +4, objects +8; each object has `vertexPool` (+0, local),
   `u16 numPolys` (+4), `u16 numBBoxes` (+6), `bboxOrigin` (+8), `bboxScale` (+0x14), a box tree of 14-byte nodes (+0x18), then
-  8-byte triangles `{u8 idx[4] (3 read), u16 matId, bbox bits}`); `COLL_VOL` (op 10, convex hull: `s16 numPlanes` +4, `matId` +8,
+  8-byte triangles `{u8 idx[4] (3 read), u16 matId, bbox bits}`; the bits are, per axis, the index (0..2) of the triangle's vertex with the
+  smallest coordinate (bits 0..5, x y z) and of the one with the largest (bits 6..11), and `hdSphereVsPolyCollis` skips the triangle when the
+  swept box is outside those two vertices, so a wrong value hides the triangle from every query; an object with `numBBoxes` 0 has no box
+  tree and the query walks all its triangles); `COLL_VOL` (op 10, convex hull: `s16 numPlanes` +4, `matId` +8,
   local sphere +0x10, planes `{n, d}` from +0x20, inside when `n · p < d`); `COLL_TRIG` (op 11, camera trigger: a BSP of 0x20-byte
   nodes at +4, tested by `bspPointTest`). Leaves are read-only and may be shared by several paths.
 - **What a level patch updates:** moving or turning a handle means writing the node and then, for every path that passes through it,

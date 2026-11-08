@@ -124,6 +124,8 @@ def main():
         assert c["auto"] == "mesh" and c["poly"] == 1 and c["tris"] == 12 and c["hull"] == 0, c
         res = lvlprop.check(lvlprop.load_prop(out), log=lambda *_: None)
         assert res["triangles"] == 12, res
+        # the triangle bits the game's query rejects with: the vertex of the smallest and of the largest coordinate on each axis
+        assert lvlprop.poly_bbox_bits([(0, 0, 0), (2, 1, 0), (1, 3, 5)]) == (1 << 6) | (2 << 8) | (2 << 10), "bbox bits"
         mod = os.path.join(tmp, "mod")
         shutil.copytree(out, os.path.join(mod, "props", "WALL"))
         patch = {"objects": [], "props": [{"id": "w1", "model": "WALL", "pos": [800.0, 900.0, 0.5], "heading": 30}]}

@@ -903,9 +903,21 @@ def hull_volume(mb, planes, pts, matid=COLL_MATID):
     return cv, lo, hi
 
 
+def poly_bbox_bits(tri):
+    """The u16 of a POLY_COLL triangle that `hdSphereVsPolyCollis` rejects it with: per axis, the index (0..2) of the vertex with the
+    smallest coordinate (bits 0..5: x, y, z) and of the one with the largest (bits 6..11). The query skips the triangle when the
+    swept box is outside those two vertices' coordinates, so 0xFFFF (index 3 = the always-zero fourth index byte) would reject
+    every query that does not hold vertex 0."""
+    bits = 0
+    for c in range(3):
+        bits |= min(range(3), key=lambda i: tri[i][c]) << (2 * c)
+        bits |= max(range(3), key=lambda i: tri[i][c]) << (6 + 2 * c)
+    return bits
+
+
 def poly_coll(mb, verts, tris):
     """POLY_COLL (op 42) of one object with no box tree: `verts` (local floats, at most 256) and `tris` (index triples). The
-    triangle's bbox bits are all ones (the query never rejects one on them); matId POLY_MATID. Returns (leaf, lo, hi)."""
+    triangle's bbox bits are the vertex indices of its extremes (`poly_bbox_bits`); matId POLY_MATID. Returns (leaf, lo, hi)."""
     used = sorted({i for t in tris for i in t})
     if not tris:
         raise PropError("a coll_ mesh with no triangles")
@@ -929,7 +941,7 @@ def poly_coll(mb, verts, tris):
         mb.f(obj + 8 + 4 * c, ctr[c])
     mb.f(obj + 0x14, max(math.dist(ctr, q) for q in pts))
     for k, (a, b, c) in enumerate(tris):
-        mb.raw(obj + 0x18 + 8 * k, bytes((remap[a], remap[b], remap[c], 0)) + struct.pack("<HH", POLY_MATID, 0xFFFF))
+        mb.raw(obj + 0x18 + 8 * k, bytes((remap[a], remap[b], remap[c], 0)) + struct.pack("<HH", POLY_MATID, poly_bbox_bits([verts[a], verts[b], verts[c]])))
     leaf = mb.alloc(0x10, 16)
     mb.u32(leaf, OP_POLY_COLL)
     mb.u32(leaf + 4, 1)
