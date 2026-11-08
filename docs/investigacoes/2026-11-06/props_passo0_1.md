@@ -203,4 +203,9 @@ na rua em (760, -423, 0,5). Teste com `WOTM_MODS` numa pasta só com o PropTest 
 - O editor (passo 2) ainda não chama `apply_props` (é do outro agente: `editor.py` usa `LevelPatch` direto).
 - O pivô de um prop vindo do `lvlglb` (`--units game`) é o centro do objeto recortado: o CAR em z 0 fica meio enterrado (caixa z
   -9,4..9,4). Talvez o `build` deva pôr o pivô na base.
-- VU1CHECK (R1 no GS emulado), R12 (FPS com 10 props grandes) e R13 (lote CPU x CPU).
+- VU1CHECK (R1 no GS emulado).
+- **R12 e R13 (medidos em 2026-11-08)**: CENTRAL com 10 esferas de 1008 triângulos (59 KB cada, 60,5 KB da arena), `WOTM_FIELDLOG=1`, luta
+  IA x IA de 100 s com e sem o mod, mesmo monstro e mesma IA, quadros a partir do 600: 60 fps nos dois (0,1% dos quadros a 30 contra
+  0,0%), `host` mediana 16,60 ms nos dois e p90 17,60 contra 17,70 ms, captura nativa p90 0,24 contra 0,22 ms. Ou seja, custo não
+  medível. `tools\lote.ps1` com o mod em 4 combinações de 150 s (1 a 3 IAs): zero `CONGELOU`, zero `CRASH`, nenhuma saída antes da hora.
+  Não se olhou se a IA anda travada nos props (o `.AIP` não os conhece).
