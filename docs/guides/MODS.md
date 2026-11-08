@@ -686,8 +686,11 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   is a stage with no dome (CANYON1, MINISF). Log: `[fase]   sky: modelo SKYDOME (1 objetos) troca 1 domo (estilo do OBJECT 0fc8120)`.
   **Clouds:** `{"model": "SKYCLOUDS", "sky": "clouds"}` replaces the cloud layer the same way: the OBJECTs under the first `CHAR_INSTANCE`
   of a sky node, through its `ANIM_XFORM`, so the model gets whatever the stage's animation does to the layer (build it around its
-  origin; the stock layer is a bowl 22000 across and 3500 high, its z from 0 up). The model wears the stock
-  layer's style (its own blending) and the dome stays. 14 stages have a layer (every one but BIGSHOT, CANYON2, TOKYODM, TRAINING and UFO,
+  origin; the stock layer is a bowl 22000 across and 3500 high, its z from 0 up), and the game turns it: the model drifts around the
+  vertical axis as the stock layer does (the editor's view draws it still). Only the first `CHAR_INSTANCE` is the layer; the others a sky
+  node may hold (CAPITOL has six more, 40 vertices each, under a `SWITCH`) are separate sky objects and stay. The model wears the stock
+  layer's style (its own blending) and the dome stays. A sky model belongs to one stage like any prop (its textures are the stage's):
+  for another stage build the same `.glb` again with `--stage <FASE>` into a folder of its own (`CLOUDS_CAPITOL`). 14 stages have a layer (every one but BIGSHOT, CANYON2, TOKYODM, TRAINING and UFO,
   which are refused with a line). One model cannot be both the dome and the clouds (the second entry is skipped). Log: `sky: modelo
   SKYCLOUDS (1 objetos) troca 1 camada de nuvens (estilo do OBJECT 0fc7400)`; `lvl.py` and Check count it as a cloud layer replaced.
 - Check before playing: `python tools/lvl.py patch CENTRAL mods/<mod>/levels/CENTRAL.json` applies the patch to the disc's image, prints
