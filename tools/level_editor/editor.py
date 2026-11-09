@@ -1846,7 +1846,31 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         return json.loads(self.rfile.read(n) or b"{}")
 
+    def refused(self, post):
+        """Is this request one the editor's own page could not have sent? Answers 403 and says True then.
+        The server only listens on 127.0.0.1, but any page open in the same browser can still reach it: a form or a
+        no-cors fetch with a text/plain body needs no preflight, and DNS rebinding makes another name point here. So the
+        Host must be this server's own address, an Origin (when the browser sends one) must be this page's, and a POST
+        must say it is JSON (the editor's api() does; the page-close beacon, /api/bye, is exempt)."""
+        port = self.server.server_address[1]
+        hosts = ("127.0.0.1:%d" % port, "localhost:%d" % port)
+        why = ""
+        if self.headers.get("Host", "").lower() not in hosts:
+            why = "Host"
+        elif self.headers.get("Origin") not in (None, "") and self.headers.get("Origin").lower() not in ["http://" + h for h in hosts]:
+            why = "Origin"
+        elif self.headers.get("Sec-Fetch-Site", "same-origin") not in ("same-origin", "none"):
+            why = "Sec-Fetch-Site"
+        elif post and self.path != "/api/bye" and \
+                self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
+            why = "Content-Type"
+        if why:
+            self.send(403, {"error": "This request did not come from the editor's own page (%s)." % why, "code": "forbidden"})
+        return bool(why)
+
     def do_GET(self):
+        if self.refused(False):
+            return
         LIFE["seen"] = time.monotonic()
         u = urllib.parse.urlparse(self.path)
         q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
@@ -1961,6 +1985,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, f.read(), ctype + ("; charset=utf-8" if ctype.startswith("text") else ""))
 
     def do_POST(self):
+        if self.refused(True):
+            return
         LIFE["seen"] = time.monotonic()
         cfg = self.cfg
         try:
