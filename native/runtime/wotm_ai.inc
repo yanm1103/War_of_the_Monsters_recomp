@@ -3,6 +3,7 @@
 //   - "... <Classe> durou N fields": acao que termina depois de mais de 2 s.
 //   - "... counter acertou|falhou": fim de cada AiCounterReflex, pela vida do alvo no comeco e no fim.
 //   - "... oponentes: m<slot>... trava N": a cada 10 s por IA, a lista de oponentes dela e o *m_gate (0 = qualquer acao comeca).
+//   - "[ai] <field> m<slot> pos x,y,z": a cada 2 s por IA, onde ela esta.
 
 namespace wotm_ai
 {
@@ -78,7 +79,15 @@ void brainHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t ai = GPR_U32(ctx, 5) & 0x1FFFFFFFu;
         const int s = slotOf(rdram, ai), now = field(rdram);
-        static int s_last[16] = {};
+        static int s_last[16] = {}, s_lastPos[16] = {};
+        if (s >= 0 && s < 16 && now - s_lastPos[s] >= 120)
+        {
+            // posicao da IA a cada 2 s (cs + 0x10): serve para ver se ela anda pela rede .AIP
+            s_lastPos[s] = now;
+            const uint32_t cs = rd32(rdram, kSlots + kSlotStride * s + 0xC) & 0x1FFFFFFFu;
+            if (cs)
+                std::fprintf(stderr, "[ai] %d m%d pos %.0f,%.0f,%.0f\n", now, s, rdF(rdram, cs + 0x10), rdF(rdram, cs + 0x14), rdF(rdram, cs + 0x18));
+        }
         if (s >= 0 && s < 16 && now - s_last[s] >= 600)
         {
             s_last[s] = now;
