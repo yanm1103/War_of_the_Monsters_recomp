@@ -455,7 +455,7 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 #pedBar { display: contents; }
 /* Add prop: the mod's models for this stage, under the tool bar's button */
 #propBar { display: contents; }
-#propMenu { top: 48px; left: 8px; z-index: 4; flex-direction: column; align-items: stretch; gap: 2px; padding: 8px; width: 280px; }
+#propMenu { top: 48px; left: 8px; z-index: 4; flex-direction: column; align-items: stretch; gap: 2px; padding: 8px; width: 280px; max-height: calc(100vh - 64px); overflow-y: auto; }
 #propMenu .sec-title { margin: 0 2px 4px; }
 .gd-pair { display: flex; gap: 8px; }
 .gd-pair input { flex: 1; min-width: 0; }
@@ -499,6 +499,14 @@ dialog.pal { width: min(96vw, 2400px); max-width: none; }
 .pm-sky { display: flex; align-items: center; gap: 8px; margin: 6px 2px 0; padding-top: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 .pm-sky select { flex: 1; min-width: 0; }
 .pm-sky2 { margin-top: 4px; padding-top: 0; border-top: 0; }
+#pfList { display: flex; flex-direction: column; gap: 2px; max-height: 30vh; overflow-y: auto; }
+.pf-row { display: flex; align-items: stretch; gap: 2px; }
+.pf-row > .pm-row { flex: 1; min-width: 0; }
+.pf-row > .icon { align-self: center; }
+.pf-title { margin-top: 8px !important; padding-top: 8px; border-top: 1px solid var(--line); }
+.pf-tools { display: flex; align-items: center; gap: 6px; margin: 2px 2px 0; }
+.pf-tools .field { width: 104px; flex: none; }
+.pf-tools .field > input { padding-left: 38px; }
 #pmImport { margin-top: 4px; border-top: 1px solid var(--line); border-radius: 0; padding-top: 2px; }
 #propMenu .lbl { display: inline !important; }
 /* the Import a prop dialog */

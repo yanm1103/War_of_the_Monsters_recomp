@@ -114,6 +114,13 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <div class="sec-title">Props of <span id="pmMod"></span></div>
       <div id="pmList"></div>
       <div id="pmNone" class="pm-none"></div>
+      <div class="sec-title pf-title" title="A saved selection, put down again where the view looks (mods/&lt;mod&gt;/prefabs/)">Prefabs</div>
+      <div id="pfList"></div>
+      <div id="pfNone" class="pm-none"></div>
+      <div class="pf-tools">
+        <label class="field suf" title="Turn the prefab by this much about its middle when it is put down (counterclockwise seen from above)"><i class="pre">Turn</i><input id="pfTurn" type="number" step="15" min="-360" max="360" value="0" aria-label="Turn when pasting"><i class="post">°</i></label>
+        <button id="pfSave" type="button" class="ghost" title="Save the selected objects as a prefab: their places relative to their middle"><i class="ic" style="--ic:url(vendor/mdi/package-variant-closed.svg)"></i><span class="lbl">Save selection…</span></button>
+      </div>
       <label class="pm-sky" for="pmSky" title="Replaces the sky dome with one of this mod's models in the game, and in the view with Game look (faces turned inward, with a texture)"><span>Sky dome</span><select id="pmSky"></select></label>
       <label class="pm-sky pm-sky2" for="pmClouds" title="Replaces the layer of clouds with one of this mod's models, in the game and in the view with Game look (faces turned inward, with a texture, around the origin)"><span>Cloud layer</span><select id="pmClouds"></select></label>
       <button id="pmImport" type="button" class="ghost wide"><i class="ic" style="--ic:url(vendor/mdi/tray-arrow-up.svg)"></i><span class="lbl">Import .glb…</span></button>
@@ -602,6 +609,19 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <div class="callout err" id="ipErr" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-circle-outline.svg)"></i><span></span></div>
     </div>
     <div class="dlg-foot"><button type="button" data-close>Cancel</button><button id="ipOk" type="button" class="primary">Import</button></div>
+  </form>
+</dialog>
+<dialog id="pfDlg" class="dlg" aria-labelledby="pfTitle">
+  <form method="dialog">
+    <div class="dlg-head"><h2 id="pfTitle">Save as prefab</h2>
+      <button type="button" data-close class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+    <div class="dlg-body">
+      <p class="muted" id="pfIntro"></p>
+      <label class="fl">Name<input id="pfName" maxlength="40" spellcheck="false" autocomplete="off" placeholder="Gas station"></label>
+      <div class="help">Saved in <span id="pfWhere" class="mono"></span>, in the mod's prefabs folder: it can be put down in any stage built on the same game stage.</div>
+      <div class="callout err" id="pfErr" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-circle-outline.svg)"></i><span></span></div>
+    </div>
+    <div class="dlg-foot"><button type="button" data-close>Cancel</button><button id="pfOk" type="button" class="primary">Save</button></div>
   </form>
 </dialog>
 <dialog id="askDlg" class="dlg" aria-labelledby="askTitle" aria-describedby="askText">

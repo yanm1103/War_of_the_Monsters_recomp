@@ -13,6 +13,7 @@ import { initArrange } from './arrange.js';
 import { openTerrain } from './terrain.js';
 import { initColl } from './coll.js';
 import { propRows, propAngles as propAngles_ } from './tilt_math.js';
+import { toPrefabEntries, placeEntry } from './prefab_math.js';
 import { testBody, openTestOpts, loadTestOpts, testSummary } from './testopts.js';
 
 // The GS modulates and blends the bytes as they are: no color management (texture, vertex and interface colors stay raw).
@@ -3068,6 +3069,8 @@ function showPropMenu(open = $('propMenu').hidden) {
     : !here.length ? `No props for ${title(stageName)} yet.` + (other ? ` ${other} of this mod ${other === 1 ? 'is' : 'are'} for other stages.` : '') : '';
   $('pmNone').textContent = none;
   $('pmNone').hidden = !none;
+  renderPrefabs();
+  refreshPrefabs();
   for (const [id, cur] of [['pmSky', skyModel], ['pmClouds', cloudsModel]]) {     // the sky dome and the cloud layer: one of the models, or the stage's own
     const sky = $(id);
     sky.textContent = '';
@@ -3077,6 +3080,140 @@ function showPropMenu(open = $('propMenu').hidden) {
     sky.value = cur;
   }
   (list.querySelector('button:not(:disabled)') || $('pmImport')).focus();
+}
+// ------------------------------------------------------------------ prefabs
+// A prefab is a saved selection (mods/<mod>/prefabs/<name>.json, editor.py save_prefab): each object's place relative to the group's
+// middle (prefab_math.js), as a copy of a stage object (its handle) or a new prop (its model), for the stage it was made on and any
+// stage built on the same game stage. Pasting makes the copies and new props where the view looks and selects them.
+let prefabs = [];
+async function refreshPrefabs() {
+  if (!modNow) { prefabs = []; return; }
+  try { prefabs = (await api(`/api/prefabs?mod=${encodeURIComponent(modNow)}`)).prefabs || []; }
+  catch (e) { prefabs = []; msg(`Couldn't list the prefabs of mod "${modNow}": ${cleanError(e).text}`, { level: 'warn' }); }
+  if (!$('propMenu').hidden) renderPrefabs();
+}
+function renderPrefabs() {
+  const list = $('pfList'), here = prefabs.filter((p) => p.stage === baseOf(stageName)), other = prefabs.length - here.length;
+  list.textContent = '';
+  for (const p of here) {
+    const row = document.createElement('div'), b = document.createElement('button'), x = document.createElement('button');
+    row.className = 'pf-row';
+    b.type = 'button';
+    b.className = 'ghost pm-row';
+    b.setAttribute('role', 'menuitem');
+    b.innerHTML = '<span class="pm-name"></span><span class="pm-meta"></span>';
+    b.querySelector('.pm-name').textContent = p.name;
+    const props = p.entries.filter((e) => e.kind === 'prop').length;
+    b.querySelector('.pm-meta').textContent = `${p.entries.length} ${p.entries.length === 1 ? 'object' : 'objects'}` + (props ? `, ${props} new` : '');
+    b.title = `Put ${p.name} where the view looks`;
+    b.onclick = () => pastePrefab(p);
+    x.type = 'button';
+    x.className = 'icon ghost';
+    x.title = `Delete the prefab ${p.name} (its file in the mod)`;
+    x.setAttribute('aria-label', `Delete the prefab ${p.name}`);
+    x.innerHTML = '<i class="ic" style="--ic:url(vendor/mdi/delete-outline.svg)"></i>';
+    x.onclick = () => deletePrefab(p);
+    row.append(b, x);
+    list.appendChild(row);
+  }
+  const none = !modNow ? 'Choose a mod first: the prefabs live in its prefabs folder.'
+    : !here.length ? `No prefabs for ${title(stageName)} yet: select some objects and save them.` + (other ? ` ${other} of this mod ${other === 1 ? 'is' : 'are'} for other game stages.` : '') : '';
+  $('pfNone').textContent = none;
+  $('pfNone').hidden = !none;
+  $('pfSave').disabled = !modNow || !group.some((it) => it.node.visible && !isDeleted(it));
+}
+// The selection (and, with Move objects on top, what rests on it) as prefab entries: where each is, what it is and what it rests on
+function prefabItems() {
+  const items = group.filter((it) => it.node.visible && !isDeleted(it));
+  if ($('carry').checked) for (const it of [...items]) for (const a of it.attached) if (a.node.visible && !items.includes(a)) items.push(a);
+  return items.map((it) => {
+    const [pitch, roll] = tiltOf(it), e = { pos: posOf(it), heading: r1(headingOf(it)) };
+    if (it.rec.prop) Object.assign(e, { kind: 'prop', model: it.rec.prop.model }, pitch ? { pitch: r1(pitch) } : {}, roll ? { roll: r1(roll) } : {});
+    else Object.assign(e, { kind: 'object', handle: it.rec.info.handle, from: it.rec.p0 });
+    if (it.iname) e.name = it.iname;
+    const up = items.findIndex((o) => o !== it && o.attached.includes(it));
+    if (up >= 0) e.on = up;
+    return e;
+  });
+}
+function openPrefabSave() {
+  if (!modNow) { msg('Choose a mod first: the prefab is saved in its folder.', { level: 'warn', toast: true }); return; }
+  const items = prefabItems();
+  if (!items.length) { msg('Select the objects to save first.', { level: 'warn', toast: true }); return; }
+  showPropMenu(false);
+  $('pfIntro').textContent = `${items.length} ${items.length === 1 ? 'object' : 'objects'} of ${title(stageName)}, kept by where they stand relative to each other.`;
+  $('pfWhere').textContent = `mods/${modNow}/prefabs/`;
+  $('pfName').value = '';
+  $('pfErr').hidden = true;
+  $('pfDlg').showModal();
+  $('pfName').focus();
+}
+async function savePrefab(overwrite = false) {
+  const name = $('pfName').value.trim(), items = prefabItems();
+  const perr = (t) => { $('pfErr').hidden = !t; $('pfErr').querySelector('span').textContent = t || ''; };
+  if (!name) { perr('Give it a name.'); $('pfName').focus(); return; }
+  if (!items.length) { perr('Nothing is selected any more.'); return; }
+  let res;
+  try {
+    res = await api('/api/prefab', { mod: modNow, name, stage: baseOf(stageName), overwrite, entries: toPrefabEntries(items) });
+  } catch (e) {
+    if (e.code === 'exists') {
+      $('pfDlg').close();
+      ask('Replace the prefab?', `${name} is saved already in this mod.`, [['cancel', 'Keep it'], ['replace', 'Replace it', true]],
+          (v) => { if (v === 'replace') { $('pfName').value = name; savePrefab(true); } });
+      return;
+    }
+    perr(cleanError(e).text);
+    return;
+  }
+  if ($('pfDlg').open) $('pfDlg').close();
+  await refreshPrefabs();
+  msg(`Saved the prefab ${res.name}: ${res.entries.length} ${res.entries.length === 1 ? 'object' : 'objects'}, in mods/${modNow}/prefabs/`, { level: 'ok', toast: true });
+}
+$('pfOk').onclick = () => savePrefab(false);
+$('pfName').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); savePrefab(false); } };
+$('pfSave').onclick = openPrefabSave;
+function deletePrefab(p) {
+  ask('Delete the prefab?', `${p.name} (${p.entries.length} ${p.entries.length === 1 ? 'object' : 'objects'}) is deleted from the mod's prefabs folder.`,
+      [['cancel', 'Cancel'], ['delete', 'Delete', true]], async (v) => {
+        if (v !== 'delete') return;
+        try { await api('/api/prefab/delete', { mod: modNow, file: p.file }); } catch (e) { msg(cleanError(e).text, { level: 'warn', toast: true }); }
+        await refreshPrefabs();
+        showPropMenu(true);
+      });
+}
+// Puts the prefab where the view looks, turned by the Turn field. An entry whose object is not in this stage (another game stage's
+// handle, or the same handle somewhere else) or whose prop model is missing is left out and counted.
+function pastePrefab(p) {
+  if (p.stage !== baseOf(stageName)) { msg(`${p.name} was made for ${title(p.stage)}, not ${title(stageName)}.`, { level: 'warn', toast: true }); return; }
+  showPropMenu(false);
+  if (editMode !== 'objects') enterMode('objects');
+  const at = viewPoint(), turn = +$('pfTurn').value || 0;
+  snapshot('put ' + p.name);
+  const made = [], skipped = [];
+  p.entries.forEach((e, k) => {
+    const to = placeEntry(e, at, turn);
+    let it = null;
+    if (e.kind === 'object') {
+      const rec = byHandle.get(normHandle(e.handle));
+      if (rec && rec.p0.every((v, i) => Math.abs(v - e.from[i]) < 1)) it = makeCopy(rec, to.pos, to.heading, e.name || '');
+    } else {
+      it = makeProp({ id: newPropId(), model: e.model, pos: to.pos, heading: to.heading, pitch: e.pitch || 0, roll: e.roll || 0, name: e.name || '' });
+    }
+    made[k] = it;
+    if (!it) skipped.push(e);
+  });
+  p.entries.forEach((e, k) => { if (made[k] && e.on != null && made[e.on]) made[e.on].attached.push(made[k]); });   // what rests on what travels with it
+  const ok = made.filter(Boolean);
+  if (!ok.length) {
+    history.pop();
+    showUndo();
+    msg(`Nothing of ${p.name} fits this stage: ${skipped.length} ${skipped.length === 1 ? 'object is' : 'objects are'} not here (the stage or the mod's props changed).`, { level: 'warn', toast: true });
+    return;
+  }
+  selectMany(ok);
+  const sk = skipped.length ? `; ${skipped.length} left out (not in this stage or no model for them)` : '';
+  msg(`Put ${p.name}: ${countText(ok)}${sk}`, { level: skipped.length ? 'warn' : 'ok', toast: ['Undo', undo] });
 }
 // kind: 'dome' or 'clouds'
 function pickSky(kind, v) {

@@ -941,6 +941,139 @@ def props_list(cfg, mod):
     return out
 
 
+# ------------------------------------------------------------------ prefabs (a saved selection, mods/<mod>/prefabs/<name>.json)
+PREFAB_MAX = 500          # entries in one prefab (one paste makes that many objects)
+PREFAB_MAX_COORD = 100000
+
+
+class PrefabExists(ValueError):
+    pass
+
+
+def prefab_slug(name):
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40] or "prefab"
+
+
+def prefabs_dir(cfg, mod, create=False):
+    d = mod_folder(cfg, mod)
+    if not d or not os.path.isdir(d):
+        return None
+    p = os.path.join(d, "prefabs")
+    if create:
+        os.makedirs(p, exist_ok=True)
+    return p if os.path.isdir(p) else None
+
+
+def _prefab_num(v, what, lo=-PREFAB_MAX_COORD, hi=PREFAB_MAX_COORD):
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not lo <= v <= hi:
+        raise ValueError("%s must be a number from %g to %g." % (what, lo, hi))
+    return round(float(v), 1)
+
+
+def prefab_entries(raw):
+    """The prefab's entries, checked and rounded to 0.1. An entry: {"kind": "object", "handle", "from": [x, y, z]} (a copy of that
+    stage object) or {"kind": "prop", "model"} (a new prop), and "d" ([dx, dy, dz] from the group's middle and lowest point),
+    "heading", for a prop "pitch" and "roll", "name" and "on" (the index of the entry this one rests on, so that they travel
+    together)."""
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("A prefab needs at least one object.")
+    if len(raw) > PREFAB_MAX:
+        raise ValueError("A prefab holds at most %d objects (this one has %d)." % (PREFAB_MAX, len(raw)))
+    out = []
+    for k, e in enumerate(raw):
+        if not isinstance(e, dict):
+            raise ValueError("Entry %d is not an object." % (k + 1))
+        kind = e.get("kind")
+        d = e.get("d")
+        if not (isinstance(d, list) and len(d) == 3):
+            raise ValueError("Entry %d has no offset [dx, dy, dz]." % (k + 1))
+        o = {"kind": kind, "d": [_prefab_num(x, "The offset of entry %d" % (k + 1)) for x in d]}
+        if kind == "object":
+            h = str(e.get("handle") or "")
+            if not re.fullmatch(r"0[xX][0-9A-Fa-f]{1,8}", h):
+                raise ValueError("Entry %d has no handle like 0xB18310." % (k + 1))
+            fr = e.get("from")
+            if not (isinstance(fr, list) and len(fr) == 3):
+                raise ValueError("Entry %d has no \"from\" position." % (k + 1))
+            o["handle"] = "0x" + h[2:].upper()
+            o["from"] = [_prefab_num(x, "The position of entry %d" % (k + 1)) for x in fr]
+        elif kind == "prop":
+            m = str(e.get("model") or "")
+            if not re.fullmatch(r"[A-Za-z0-9_.\-]{1,40}", m):
+                raise ValueError("Entry %d has no model name." % (k + 1))
+            o["model"] = m.upper()
+            for key, lim in (("pitch", 180), ("roll", 89)):
+                if e.get(key) not in (None, 0):
+                    o[key] = _prefab_num(e[key], "The %s of entry %d" % (key, k + 1), -lim, lim)
+        else:
+            raise ValueError("Entry %d is neither an object nor a prop." % (k + 1))
+        o["heading"] = _prefab_num(e.get("heading") or 0, "The heading of entry %d" % (k + 1), -720, 720)
+        nm = e.get("name")
+        if nm:
+            o["name"] = str(nm)[:60]
+        on = e.get("on")
+        if on is not None:
+            if isinstance(on, bool) or not isinstance(on, int) or not 0 <= on < len(raw) or on == k:
+                raise ValueError("Entry %d rests on an entry that is not there." % (k + 1))
+            o["on"] = on
+        out.append(o)
+    return out
+
+
+def prefabs_list(cfg, mod):
+    """The mod's prefabs (prefabs/*.json): {"file", "name", "stage", "entries"}; a file that does not read is left out."""
+    d = prefabs_dir(cfg, mod)
+    out = []
+    if not d:
+        return out
+    for n in sorted(os.listdir(d), key=str.lower):
+        if not n.lower().endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(d, n), encoding="utf-8") as f:
+                j = json.load(f)
+            out.append({"file": n[:-5], "name": str(j.get("name") or n[:-5]), "stage": str(j.get("stage") or "").upper(),
+                        "entries": prefab_entries(j.get("entries"))})
+        except (OSError, ValueError, AttributeError):
+            continue
+    return out
+
+
+def save_prefab(cfg, b):
+    """Save as prefab…: writes mods/<mod>/prefabs/<slug of the name>.json. Another prefab with the same name is replaced only with
+    "overwrite" (PrefabExists says it is there). Returns the listing entry."""
+    mod = (b.get("mod") or "").strip()
+    d = prefabs_dir(cfg, mod, create=True) if mod_folder(cfg, mod) and os.path.isdir(mod_folder(cfg, mod)) else None
+    if not d:
+        raise ValueError("Choose a mod first: the prefab is saved in its folder.")
+    name = re.sub(r"\s+", " ", str(b.get("name") or "")).strip()
+    if not 1 <= len(name) <= 40 or any(ord(c) < 32 for c in name):
+        raise ValueError("The name is 1 to 40 characters.")
+    stage = str(b.get("stage") or "").strip().upper()
+    if stage not in CUSTOM_BASES:
+        raise ValueError("The stage must be one of %s." % ", ".join(CUSTOM_BASES))
+    entries = prefab_entries(b.get("entries"))
+    slug = prefab_slug(name)
+    path = os.path.join(d, slug + ".json")
+    if os.path.exists(path) and not b.get("overwrite"):
+        raise PrefabExists('There is a prefab called "%s" already.' % name)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"format": 1, "name": name, "stage": stage, "entries": entries}, f, indent=1)
+    return {"file": slug, "name": name, "stage": stage, "entries": entries}
+
+
+def delete_prefab(cfg, b):
+    d = prefabs_dir(cfg, b.get("mod"))
+    f = str(b.get("file") or "")
+    if not d or not re.fullmatch(r"[a-z0-9\-]{1,40}", f):
+        raise ValueError("No such prefab.")
+    path = os.path.join(d, f + ".json")
+    if not os.path.isfile(path):
+        raise ValueError("No such prefab.")
+    os.remove(path)
+    return {"ok": True}
+
+
 def prop_preview(cfg, mod, model):
     """Path of a model's <MODEL>.preview.glb (what the game draws), or None."""
     d = props_dir(cfg, mod)
@@ -1695,6 +1828,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(400, {"error": str(e)})
             if u.path == "/api/props":          # the mod's props (props/*/prop.json)
                 return self.send(200, {"props": props_list(cfg, q.get("mod", ""))})
+            if u.path == "/api/prefabs":        # the mod's prefabs (prefabs/*.json)
+                return self.send(200, {"prefabs": prefabs_list(cfg, q.get("mod", ""))})
             if u.path == "/api/propglb":        # a prop's preview (what the game draws)
                 path = prop_preview(cfg, q.get("mod", ""), q.get("model", ""))
                 if not path:
@@ -1775,6 +1910,18 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200, edit_stage(cfg, b))
                 except ValueError as e:
                     return self.send(400, {"error": str(e), "code": "editstage"})
+            if self.path == "/api/prefab":
+                try:
+                    return self.send(200, save_prefab(cfg, b))
+                except PrefabExists as e:
+                    return self.send(409, {"error": str(e), "code": "exists"})
+                except (ValueError, OSError) as e:
+                    return self.send(400, {"error": str(e), "code": "prefab"})
+            if self.path == "/api/prefab/delete":
+                try:
+                    return self.send(200, delete_prefab(cfg, b))
+                except (ValueError, OSError) as e:
+                    return self.send(400, {"error": str(e), "code": "prefab"})
             if self.path == "/api/names":
                 if not b.get("sig"):
                     return self.send(400, {"error": "this object has no mesh to name as a model"})
