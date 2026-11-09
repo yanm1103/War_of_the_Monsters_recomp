@@ -54,10 +54,10 @@ import lvlorig  # noqa: E402 - an original object of another stage as a prop (Ct
 import collview  # noqa: E402 - the stage's collision shapes for the Collision layer
 
 WEB = os.path.join(HERE, "web")
-CONFIG = os.path.join(os.path.expanduser("~"), ".wotm_level_editor.json")
+CONFIG = os.environ.get("WOTM_LEVEL_EDITOR_CONFIG") or os.path.join(os.path.expanduser("~"), ".wotm_level_editor.json")   # the variable: tests
 # model names (by content signature, tools/lvlnames.py): the repo's, and the user's over them
 REPO_NAMES = os.path.join(HERE, "names.json")
-USER_NAMES = os.path.join(os.path.expanduser("~"), ".wotm_level_editor_names.json")
+USER_NAMES = os.environ.get("WOTM_LEVEL_EDITOR_NAMES") or os.path.join(os.path.expanduser("~"), ".wotm_level_editor_names.json")
 CACHE = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), ".cache"),
                      "WotM" if os.environ.get("LOCALAPPDATA") else "", "level_editor")
 # m_levelNum of each stage file (GameLevelNames; native/runtime/wotm_save.inc kLevels): WOTM_MATCH=<monster>,<levelNum>

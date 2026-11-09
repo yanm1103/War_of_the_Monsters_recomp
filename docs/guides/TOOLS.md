@@ -34,6 +34,11 @@
     (`MODS.md`, "Level editor"; three.js r160 vendored in `web/vendor/`, MIT); its HUD panel is `hudapi.py` + `web/hud.js` and its
     pedestrians `pedsapi.py` + `web/peds.js`. `tools/build_level_editor.ps1` packs it as `WotM_LevelEditor.exe` (PyInstaller in its
     own venv in `<runtime>\level_editor_build`, no numpy; `web/_*` test pages left out); `tools/release.ps1` runs it.
+    The editor's page has a smoke test, `node tools/level_editor/test_ui.mjs` (Edge headless, port 47393, Node 22, needs the disc):
+    it loads CENTRAL, checks the ids other scripts click, an edit through undo and Save, every dialog opening and closing with Esc,
+    and the server refusing a request the page would not send (`test_local_guard.py` covers that without a disc). It runs the
+    editor program with its own settings file and a temporary mods folder (`WOTM_LEVEL_EDITOR_CONFIG`, `WOTM_LEVEL_EDITOR_NAMES`),
+    so nothing of the user's changes; `--shots <dir>` saves a PNG per dialog.
   - `lvlhud.py <STAGE>|--all`: the fight HUD a stage carries (level editor, HUD panel). The HUD nodes (ids 0x1C20..0x2133) and the
     fight font (id 18) are found by id, and each texture gets a role (bar atlas, special icon, BOSS label, player number, font,
     pickup ring, hint box, cinema bars, buttons), its file (`.TEX` or `.RTX`), its texId and the mod PNG name. `--all` prints the

@@ -871,6 +871,7 @@ function snapshot(label = 'change') {
 function staleCheck() { if (ui.check.state === 'ok' || ui.check.state === 'bad') ui.check.state = 'stale'; }
 const whatSel = () => (group.length > 1 ? `${group.length} objects` : sel ? nameOf(sel) : pedSel ? pedTitle(pedSel).toLowerCase() : 'objects');
 function restoreTo(p) {
+  lastNudge = -Infinity;      // an arrow after Undo is a new step, not the tail of the burst Undo just took back
   const again = group.filter((it) => !it.copy).map((it) => it.rec.item);
   resetAll();
   applyPatch(JSON.parse(p));
