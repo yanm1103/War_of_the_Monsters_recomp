@@ -246,6 +246,20 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <details class="psec fold" id="secArrange">
         <summary class="sec-title"><i class="ic chev"></i>Arrange</summary>
       </details>
+      <details class="psec fold" id="secBehavior" hidden>
+        <summary class="sec-title"><i class="ic chev"></i>Behavior</summary>
+        <label class="fl" id="hpRow" hidden>Hit points
+          <input id="pHp" type="number" min="1" max="32767" step="1" title="How much damage the building takes before it falls (1 to 32767). Blank: what the disc has">
+        </label>
+        <label class="fl" id="trafRow" hidden>Car
+          <select id="pTraffic" title="A car in the traffic drives the stage's streets (and runs into things); a parked one stays where it is until a monster picks it up">
+            <option value="">As the disc has it</option>
+            <option value="parked">Parked</option>
+            <option value="traffic">Drives in the traffic</option>
+          </select>
+        </label>
+        <div class="help" id="behNote"></div>
+      </details>
       <div id="pWarn" class="callout info" hidden><i class="ic" style="--ic:url(vendor/mdi/information-outline.svg)"></i><span>This object has no collision of its own.</span></div>
       <details class="psec fold" id="secName">
         <summary class="sec-title"><i class="ic chev"></i>Name</summary>

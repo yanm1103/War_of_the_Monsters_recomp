@@ -306,7 +306,9 @@ def describe(stage, objs, on, facts, names):
                     "movable": bool(o["handle"]),
                     "on": "0x%X" % on[o["handle"]] if o["handle"] in on else "",
                     "name": name, "nameSrc": src, "rule": lvlnames.rule_name(stage, o["kind"], f, names),
-                    "sig": f["sig"] or "", "dims": f["dims"], "ptype": f.get("ptype")})
+                    "sig": f["sig"] or "", "dims": f["dims"], "ptype": f.get("ptype"),
+                    # a building's hit points and whether a car pickup drives in the traffic, as the disc has them (None: not that kind)
+                    "hp": o.get("hp"), "traffic": o.get("traffic")})
     return out
 
 

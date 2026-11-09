@@ -335,7 +335,7 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 #tiltRow .field > input { padding-left: 22px; }
 .fl { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; margin-top: 8px; }
 .fl:first-of-type { margin-top: 0; }
-.fl > input { width: 100%; }
+.fl > input, .fl > select { width: 100%; }
 .fl > input:disabled { border-style: dashed; }
 .fl.chk { flex-direction: row; align-items: center; }
 .help { color: var(--muted); font-size: 11px; line-height: 16px; margin-top: 4px; }

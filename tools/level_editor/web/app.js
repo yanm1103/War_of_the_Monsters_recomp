@@ -634,11 +634,15 @@ function headingOf(item) {
   return wrapDeg(item.rec.h0 + THREE.MathUtils.radToDeg(2 * Math.atan2(q.y, q.w)));
 }
 
-function makeCopy(rec, pos, heading, iname = '') {
+// A building's hit points and a car pickup's type are the item's own (an original's or a copy's): null leaves what the disc has, and a
+// copy with null takes what its original says (lvl.py, "hp" and "traffic")
+const HP_MAX = 32767;
+const okHp = (v) => Number.isInteger(v) && v >= 1 && v <= HP_MAX;
+function makeCopy(rec, pos, heading, iname = '', own = {}) {
   const node = rec.node.clone(true);
   rec.node.parent.add(node);
   node.visible = true;
-  const item = { rec, node, copy: true, attached: [], iname };
+  const item = { rec, node, copy: true, attached: [], iname, hp: okHp(own.hp) ? own.hp : null, traffic: typeof own.traffic === 'boolean' ? own.traffic : null };
   itemOf.set(node, item);
   rec.copies.push(item);
   setWorld(node, pos, heading, rec);
@@ -735,7 +739,12 @@ function buildPatch() {
       if (Math.abs(wrapDeg(h - rec.h0)) > 0.05) e.heading = r1(h);
     }
     if (rec.copies.length) {
-      e.copies = rec.copies.map((c) => Object.assign({ pos: posOf(c).map(r1), heading: r1(headingOf(c)) }, c.iname ? { name: c.iname } : {}));
+      e.copies = rec.copies.map((c) => Object.assign({ pos: posOf(c).map(r1), heading: r1(headingOf(c)) }, c.iname ? { name: c.iname } : {},
+        c.hp != null ? { hp: c.hp } : {}, c.traffic != null ? { traffic: c.traffic } : {}));
+    }
+    if (!rec.deleted) {
+      if (rec.item.hp != null) e.hp = rec.item.hp;
+      if (rec.item.traffic != null) e.traffic = rec.item.traffic;
     }
     if (rec.extra) Object.assign(e, rec.extra);
     if (Object.keys(e).length > 2) objects.push(e);
@@ -768,6 +777,7 @@ function resetAll() {
   for (const rec of recs) {
     for (const c of [...rec.copies]) removeCopy(c);
     rec.item.iname = '';
+    rec.item.hp = rec.item.traffic = null;
     rec.deleted = false;
     rec.node.visible = true;
     setWorldMatrix(rec.node, rec.m0);
@@ -786,13 +796,16 @@ function applyPatch(patch) {
     if (e && typeof e === 'object' && e.sky === 'clouds' && typeof e.model === 'string' && e.model) { cloudsModel = propKey(e.model); continue; }
     if (!makeProp(e)) keep.props.push(e);
   }
-  for (const rec of recs) rec.extra = null;
+  for (const rec of recs) { rec.extra = null; rec.item.hp = rec.item.traffic = null; }
   for (const e of Array.isArray(patch.objects) ? patch.objects : []) {
     const rec = e && typeof e === 'object' ? byHandle.get(normHandle(e.handle)) : null;
     if (!rec) { keep.objects.push(e); continue; }
     const extra = Object.fromEntries(Object.entries(e).filter(([k]) => !ENTRY_KEYS.has(k)));
+    // "hp" and "traffic" the editor can show are the item's own; anything else under those keys stays as the file has it
+    if (okHp(extra.hp)) { rec.item.hp = extra.hp; delete extra.hp; }
+    if (typeof extra.traffic === 'boolean') { rec.item.traffic = extra.traffic; delete extra.traffic; }
     rec.extra = Object.keys(extra).length ? extra : null;
-    for (const c of e.copies || []) makeCopy(rec, c.pos, c.heading ?? rec.h0, c.name || '');
+    for (const c of e.copies || []) makeCopy(rec, c.pos, c.heading ?? rec.h0, c.name || '', c);
     if (e.delete) { rec.deleted = true; rec.node.visible = false; }
     else if (e.pos || e.heading !== undefined) setWorld(rec.node, e.pos || rec.pw, e.heading ?? rec.h0, rec);
   }
@@ -1037,7 +1050,7 @@ async function loadStage(name) {
         const q0 = new THREE.Quaternion(), s0 = new THREE.Vector3(), p = new THREE.Vector3();
         o.matrixWorld.decompose(p, q0, s0);
         const rec = { info: i, node: o, p0: i.pos, pw: toGame(p), m0: o.matrixWorld.clone(), h0: i.heading, q0, s0, copies: [], deleted: false };
-        rec.item = { rec, node: o, copy: false, attached: [], iname: '' };
+        rec.item = { rec, node: o, copy: false, attached: [], iname: '', hp: null, traffic: null };
         recs.push(rec);
         byHandle.set(normHandle(i.handle), rec);
         itemOf.set(o, rec.item);
@@ -1107,7 +1120,7 @@ function items() {
   return out;
 }
 function changed(rec) {
-  if (rec.prop || rec.deleted || rec.copies.length) return true;
+  if (rec.prop || rec.deleted || rec.copies.length || rec.item.hp != null || rec.item.traffic != null) return true;
   const p = posOf(rec.item);
   return Math.hypot(p[0] - rec.pw[0], p[1] - rec.pw[1], p[2] - rec.pw[2]) > 0.05 || Math.abs(wrapDeg(headingOf(rec.item) - rec.h0)) > 0.05;
 }
@@ -1333,6 +1346,7 @@ function showPropsPanel() {
   $('pHandle').hidden = multi || !!sel.rec.prop;
   $('pGroup').hidden = !multi;
   $('secName').hidden = $('secDetails').hidden = multi;
+  showBehavior();
   const badge = $('pBadge');
   if (multi) {
     $('pTitle').textContent = `${group.length} objects selected`;
@@ -1426,6 +1440,25 @@ function showPropsPanel() {
   $('pWarn').hidden = multi || !(i.paths === 0 && i.kind !== 'pickup');
   showActions();
   showProps();
+}
+// Behavior: a building's hit points and a car pickup's type (the patch's "hp" and "traffic"). A blank field is what the disc has; a copy
+// with a blank field takes what its original says
+function showBehavior() {
+  const i = sel.rec.info, hasHp = i.hp != null, hasCar = i.traffic != null;
+  $('secBehavior').hidden = group.length > 1 || !!sel.rec.prop || !(hasHp || hasCar);
+  $('hpRow').hidden = !hasHp;
+  $('trafRow').hidden = !hasCar;
+  const note = [];
+  if (hasHp) {
+    $('pHp').value = sel.hp ?? '';
+    $('pHp').placeholder = String(sel.copy ? sel.rec.item.hp ?? i.hp : i.hp);
+    note.push(`The disc gives it ${i.hp} hit points.${sel.copy ? ' A copy takes its original’s unless you set its own.' : ''}`);
+  }
+  if (hasCar) {
+    $('pTraffic').value = sel.traffic == null ? '' : sel.traffic ? 'traffic' : 'parked';
+    note.push(`On the disc it ${i.traffic ? 'drives in the traffic' : 'is parked'}.${sel.copy ? ' A copy takes its original’s unless you set its own.' : ''}`);
+  }
+  $('behNote').textContent = note.join(' ');
 }
 // the header's state: Copy, Moved, Turned, or how many copies it has
 function showBadge() {
@@ -2017,7 +2050,7 @@ function duplicate() {
 function cloneItem(it, place) {
   const [at, h] = place(posOf(it), headingOf(it)), [pitch, roll] = tiltOf(it);
   return it.rec.prop ? makeProp(Object.assign({ id: newPropId(), model: it.rec.prop.model, pos: at, heading: h, pitch, roll }, it.rec.extra || {}))
-    : makeCopy(it.rec, at, h);
+    : makeCopy(it.rec, at, h, '', it.copy ? it : {});     // a copy of a copy keeps the hit points and car type the copy was given
 }
 // The selection (and, with Move objects on top, what rests on it) copied once for each placer. made: the copies of the selected ones.
 function copyGroup(placers) {
@@ -2080,6 +2113,7 @@ function resetSel() {
   for (const r of rs) {
     if (r.prop) continue;   // a new prop has no disc place to go back to
     for (const c of [...r.copies]) removeCopy(c);
+    r.item.hp = r.item.traffic = null;
     r.deleted = false;
     r.node.visible = true;
     setWorldMatrix(r.node, r.m0);
@@ -2493,7 +2527,8 @@ async function stopGame() {
 // One [fase] line of the game's log (native/runtime/wotm_levelpatch.inc and wotm_levelreload.inc) in words:
 // {text, cls, stage, end, more, last}; end: the line settles what the editor waits for (applied, ignored or dropped), more: the
 // load's own lines follow it (up to "depois:", last). null: a line shown as it is.
-const STAT_WORDS = { moved: 'moved', copies: 'copies', deleted: 'deleted', skipped: 'not applied', 'ped segments': 'sidewalks',
+const STAT_WORDS = { moved: 'moved', copies: 'copies', deleted: 'deleted', skipped: 'not applied', 'hit points set': 'buildings with their own hit points',
+                     'traffic set': 'cars with their own type', 'ped segments': 'sidewalks',
                      'ped groups changed': 'pedestrian groups changed', 'ped groups added': 'pedestrian groups added',
                      'ped groups deleted': 'pedestrian groups deleted', 'ped groups off': 'pedestrian groups off' };
 function statsText(s) {
@@ -2795,8 +2830,8 @@ document.querySelectorAll('.kinds input').forEach((x) => (x.onchange = refreshLi
 $('modeObjects').onclick = () => setMode('objects');
 $('modePeds').onclick = () => setMode('peds');
 // Name and Details open or closed as last time
-for (const id of ['secName', 'secDetails']) {
-  $(id).open = store.get('fold.' + id, '0') === '1';
+for (const id of ['secName', 'secDetails', 'secBehavior']) {
+  $(id).open = store.get('fold.' + id, id === 'secBehavior' ? '1' : '0') === '1';
   $(id).addEventListener('toggle', () => store.set('fold.' + id, $(id).open ? '1' : '0'));
 }
 $('pHandle').onclick = async () => {
@@ -4452,6 +4487,24 @@ $('pName').onchange = () => {
   if (!sel) return;
   snapshot('rename ' + whatSel());
   sel.iname = $('pName').value.trim();
+  showSel();
+};
+$('pHp').onchange = () => {
+  if (!sel || sel.rec.prop) return;
+  const raw = $('pHp').value.trim();
+  let v = raw === '' ? null : Number(raw);
+  if (v !== null && !okHp(v)) { msg(`Hit points are a whole number from 1 to ${HP_MAX}`, { level: 'warn' }); showSel(); return; }
+  if (v === (sel.copy ? sel.rec.item.hp ?? sel.rec.info.hp : sel.rec.info.hp)) v = null;     // what it would have anyway: nothing to say
+  snapshot('hit points ' + whatSel());
+  sel.hp = v;
+  showSel();
+};
+$('pTraffic').onchange = () => {
+  if (!sel || sel.rec.prop) return;
+  let v = { parked: false, traffic: true }[$('pTraffic').value] ?? null;
+  if (v === (sel.copy ? sel.rec.item.traffic ?? sel.rec.info.traffic : sel.rec.info.traffic)) v = null;
+  snapshot('car type ' + whatSel());
+  sel.traffic = v;
   showSel();
 };
 // A new prop's model, changed in its folder (/api/props/edit): every entry of it in the stage is made again from the new files

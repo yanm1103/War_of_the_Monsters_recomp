@@ -398,6 +398,11 @@ class Stage:
                     break
         return out
 
+    def hit_points(self, d):
+        """The hit points a DESTRUCTIBLE starts with (Destructibles::AddDestruct: class 0 the node's own, 1 to 5 the table, 6 and over 3000)."""
+        cls = self.img.u16(d + 4)
+        return self.img.u16(d + 6) if cls == 0 else {1: 10, 2: 50, 3: 100, 4: 150, 5: 250}.get(cls, 3000)
+
     def _describe(self, node, kind, through, handle=None):
         img = self.img
         if handle is None:
@@ -413,6 +418,9 @@ class Stage:
              "nested": any(self.op(a) == 39 for a in self.chain(node)[:-1]),
              "parents": len(self.parents.get(node, [])), "chain": self.chain_str(self.chain(node))}
         o["states"] = img.u16((img.u32(node + 0xC) & MASK) + 0xA) if kind == "destr" else 0
+        o["hp"] = self.hit_points(img.u32(node + 0xC) & MASK) if kind == "destr" else None
+        # a pickup that can be a car in the traffic: {"traffic": whether id2 bit 0 is set}
+        o["traffic"] = bool((img.u32(node) >> 7) & 1) if kind == "pickup" and self.ident(node) - PICKUP_BASE in CAR_TYPES else None
         sub = self.subtree(node if (o["handle_shared"] or not handle) else handle)
         c = collections.Counter(self.op(x) for x in sub)
         o.update(n_nodes=len(sub), n_obj=c[0], n_emit=c[22], n_anim=c[25],
@@ -719,6 +727,10 @@ EXCLUDED_IDS = (0x7D0, 0x898)   # ids dbProcInteractive ignores
 KEEP_DESTR_IDS = (0x1A90, 0x1B58)   # DESTRUCTIBLE id1 here: never loses health (Destructible::takeHit)
 GLOBAL_ACTS = (2, 12, 14)       # ANIM, RUNSCRIPT, GENERICEVENT: they act on something fixed in the level, so a copy drops them
 DOMINO_OFF = 6                  # an action type DelayAction::doIt skips: what a DOMINO aimed at a deleted object becomes
+PICKUP_BASE = 0x1388            # a pickup's type is its id1 minus this (createPickup)
+CAR_TYPES = (2, 3, 15, 26)      # the pickup types whose id GROUP's id2 bit 0 makes a CarPickup (traffic) instead of a parked one
+HP_MAX = 32767                  # Destructible::takeHit computes (int)health * 65535, which overflows over this
+HP_MIN_DAMAGE = 5               # the minimum damage of hit point classes 2 to 6: a hit under it does nothing
 INTERACTIVES = 1024            # Interactives::s_dbInteractive, unchecked
 INTERACTIVE_SPARE = 32          # monsters, helicopters, bugs: what the budget keeps free besides slot 0
 
@@ -1085,6 +1097,69 @@ class LevelPatch:
             self.stats["paths removed"] += 1
         self.w32(h, (self.img.u32(h) & ~63) | 9)
         self.stats["deleted"] += 1
+
+    # --- hit points and pickup type (the entry's "hp" and "traffic")
+    def hp_targets(self, h):
+        """The DESTRUCTIBLEs under handle h that are the object's own: the walk stops at each one, so a destructible inside a state of
+        another (a sign on a roof that breaks on its own) keeps its hit points."""
+        out, seen, stack = [], set(), [h]
+        while stack:
+            x = stack.pop()
+            if x in seen:
+                continue
+            seen.add(x)
+            if self.op(x) == 31:
+                out.append(x)
+            else:
+                stack.extend(children(self.img, x))
+        return sorted(out)
+
+    def traffic_targets(self, h):
+        """The id GROUPs under handle h of a pickup that can be a car in the traffic (LevelPickups::createPickup: types 2, 3, 15, 26)."""
+        return sorted(x for x in self.st.subtree(h) if self.op(x) == 1 and self.st.ident(x) - PICKUP_BASE in CAR_TYPES)
+
+    def set_hp(self, h, hp):
+        """Hit point class 0 on every destructible of h: `hp` hit points, and the minimum damage it had (class 1 none, 2 and over 5, class 0
+        its own): only the number changes. Class 0 also leaves bit 3 of the Interactive's flags set (AddDestruct clears it for class 1), which
+        is what lets a thrown monster hurt it."""
+        for d in self.hp_targets(h):
+            cls = self.img.u16(d + 4)
+            self.w16(d + 8, self.img.u16(d + 8) if cls == 0 else 0 if cls == 1 else HP_MIN_DAMAGE)
+            self.w16(d + 4, 0)
+            self.w16(d + 6, hp)
+        self.stats["hit points set"] += len(self.hp_targets(h))
+
+    def set_traffic(self, h, traffic):
+        """Bit 0 of the id2 of the pickup's id GROUP (bit 7 of its first word): a car that drives in the traffic, or one parked."""
+        for g in self.traffic_targets(h):
+            self.w32(g, (self.img.u32(g) & ~0x80) | (0x80 if traffic else 0))
+        self.stats["traffic set"] += len(self.traffic_targets(h))
+
+    def set_extras(self, h, spec):
+        """The entry's (or copy's) "hp" and "traffic" on the object under h."""
+        if spec.get("hp") is not None:
+            self.set_hp(h, spec["hp"])
+        if spec.get("traffic") is not None:
+            self.set_traffic(h, spec["traffic"])
+
+    def extras_of(self, e, h, where="entry"):
+        """{"hp", "traffic"} of an entry or copy, checked against what is under h; PatchError before anything is written."""
+        out = {}
+        hp = e.get("hp")
+        if hp is not None:
+            if not (_number(hp) and not isinstance(hp, bool) and 1 <= hp <= HP_MAX and hp == int(hp)):
+                raise PatchError("%s: \"hp\" is a whole number from 1 to %d" % (where, HP_MAX))
+            if not self.hp_targets(h):
+                raise PatchError("%s: handle %07x has no destructible: \"hp\" is for buildings" % (where, h))
+            out["hp"] = int(hp)
+        tr = e.get("traffic")
+        if tr is not None:
+            if not isinstance(tr, bool):
+                raise PatchError("%s: \"traffic\" is true or false" % where)
+            if not self.traffic_targets(h):
+                raise PatchError("%s: handle %07x is not a car pickup (types 2, 3, 15, 26): \"traffic\" is for those" % (where, h))
+            out["traffic"] = tr
+        return out
 
     def reached(self):
         """The nodes dbsTraverse reaches from the roots it walks (dbProcInteractive registers only these)."""
@@ -1536,6 +1611,7 @@ class LevelPatch:
                 hc = twins[h]
             st.parents[hc] = [wrap]
             hc = self.place(hc, pl["pos"], pl.get("heading"))
+            self.set_extras(hc, pl)
             self.w32(wrap + 0x24 + 4 * i, hc)           # after place: a new ROTATE takes the TRANSLATE's place
             twins[h] = hc
             carry = ngp.mul(inv_affine(before), self.world(hc, False))
@@ -1826,6 +1902,7 @@ class LevelPatch:
                     self.log.append("entry %d: handle %07x holds %d objects; they all go" % (k, h, len(children(img, h))))
                 moving = not e.get("delete") and ("pos" in e or "heading" in e)
                 extra = self.move_cost(h, e.get("heading") is not None) if moving else 0
+                mine = {} if e.get("delete") else self.extras_of(e, h)      # "hp" and "traffic": checked before anything is written
                 cp = e.get("copies")
                 if isinstance(cp, list) and cp:
                     places = []         # all checked before copy(), as the hook does: a bad one leaves nothing behind
@@ -1834,14 +1911,18 @@ class LevelPatch:
                         if not (isinstance(p3, list) and len(p3) == 3 and all(_number(x) for x in p3)):
                             raise PatchError("a copy without \"pos\" [x, y, z]")
                         hd = c.get("heading")
-                        places.append({"pos": [float(x) for x in p3], "heading": float(hd) if _number(hd) else None})
+                        # a copy takes the entry's hit points and pickup type unless it names its own
+                        places.append({"pos": [float(x) for x in p3], "heading": float(hd) if _number(hd) else None,
+                                       **{**mine, **self.extras_of(c, h, "a copy")}})
                     self.copy(h, places, extra)
                 elif extra > self.arena_free():
                     raise PatchError("handle %07x: the move takes up to %d bytes, the arena has %d left" % (h, extra, self.arena_free()))
                 if e.get("delete"):
                     self.delete(h)
-                elif moving:
-                    self.move(h, e.get("pos") or pos, e.get("heading"))
+                else:
+                    self.set_extras(h, mine)
+                    if moving:
+                        self.move(h, e.get("pos") or pos, e.get("heading"))
             except (PatchError, KeyError, TypeError, ValueError) as err:
                 self.log.append("entry %d skipped: %s" % (k, err))
                 self.stats["skipped"] += 1

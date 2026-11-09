@@ -590,6 +590,18 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   turning is about the handle). `delete`: the object leaves the stage (drawing, collision, registration). `copies`: new copies, each with
   `pos` and an optional `heading`; each copy has its own copy of every part that changes when the object breaks (destructibles,
   switches, smoke emitters) and shares the meshes with the original, so it breaks and smokes on its own and gets its own collision.
+- `hp` (a whole number, 1 to 32767; on an entry and on each copy): the hit points of a building. Every destructible of the object
+  (not the ones inside one of its states) goes to hit point class 0 with that many, and keeps the minimum damage it had (a hit has
+  to be over it: none for the stages' class 1, 5 for classes 2 and over, its own for class 0), so only the number changes. A copy takes
+  its entry's `hp` unless it names its own. The classes of the disc are 10, 50, 100, 150, 250 and 3000 hit points (`python tools/lvl.py
+  objects <FASE>` does not print them; the editor shows the disc's value). Class 0 leaves bit 3 of the Interactive's flags set (the
+  game clears it for class 1, the stages' smallest objects), which is what lets a thrown monster hurt it, so a class 1 object given
+  an `hp` takes damage from one. Over 32767 the game's health fraction (`(int)health * 65535`) overflows, so the number is refused.
+  `WOTM_LEVELPATCH_HP=1` logs the health the game keeps for each one.
+- `traffic` (`true` or `false`; on an entry and on each copy): for a car pickup (types 2, 3, 15 and 26, the parked and the driving cars
+  of the disc; the editor lists them under Pickups), `true` makes it a car that drives the stage's `.FOP` streets and `false` leaves
+  it parked until a monster picks it up. It is bit 0 of the `id2` of the pickup's id group, which `LevelPickups::createPickup` reads
+  to build a `CarPickup` instead of a plain pickup. A copy takes its entry's value unless it names its own.
 - `names` (`{"<handle>": "Hotel"}`, at the top beside `objects`) and `name` in a copy: labels for the level editor; the game and
   `lvl.py` ignore them. A patch with names only still carries `"objects": []`.
 - Works on destructibles (buildings), pickups (cars, trees, rooftop objects) and props. Copies: buildings (with the destructibles
@@ -932,6 +944,11 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   along X, Y or Z; bottoms, middles or tops for Z) and **Spread evenly** (the two outermost stay, the others go between them with
   equal gaps or equal distances between their middles). Align needs two objects and Spread three. The copies are the new
   selection.
+- **Behavior** (below Arrange, open at first; one object at a time; a building and a car pickup have it, nothing else): **Hit
+  points** for a building and **Car** for a car pickup (As the disc has it, Parked or Drives in the traffic). A blank field is the
+  disc's value, which the note under it gives; typing the disc's own value blanks it again. A copy with a blank field takes its
+  original's (the placeholder shows it), and a copy of a copy keeps what the copy was given. They are the patch's `hp` and `traffic`
+  ("Level patches"); a changed one counts as a change in the list's Changed filter and Restore original clears it.
 - **Several objects:** Shift+click (or Ctrl+click, also in the list) adds or takes out one, Shift+left drag selects the ones whose
   middle falls in the box (only the kinds on in the list), **Ctrl+A** selects everything the list shows. The gizmo and the fields
   act on the last one picked (amber outline and row); the others (orange) follow it by the same move or turn, and Drop, Duplicate,

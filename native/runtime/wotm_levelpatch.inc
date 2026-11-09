@@ -57,7 +57,10 @@ const char *opName(uint32_t o)   // tools/ngp.py OPNAMES
 // ids de pickup (um por instancia), ignorados, e o "nao perde vida" do DESTRUCTIBLE
 bool animOp(uint32_t o) { return o == CHAR_INSTANCE || o == ANIM_XFORM || o == SKEL_BONE || o == ANIM_SCALE; }
 bool animStateOp(uint32_t o) { return o == ANIM_XFORM || o == ANIM_SCALE; }
-constexpr uint32_t kId2Max = 0x7FF;            // ActAnim::ids.anim e _hierhead::id2 tem 11 bits
+constexpr uint32_t kPickupBase = 0x1388;       // o tipo de um pickup e o id1 menos isto (createPickup)
+constexpr uint32_t kHpMax = 32767;             // Destructible::takeHit faz (int)vida * 65535, que estoura acima disto
+constexpr uint32_t kHpMinDamage = 5;           // dano minimo das classes de vida 2 a 6: um golpe abaixo dele nao faz nada
+constexpr uint32_t kId2Max = 0x7FF;           // ActAnim::ids.anim e _hierhead::id2 tem 11 bits
 constexpr uint16_t kActAnimMonster = 0x1800;   // ACTANIM_PLAYER | ACTANIM_AI: o alvo e um monstro
 bool cbOp(uint32_t o) { return o <= 4 || o == 6 || o == 11 || o == 17 || o == 30 || o == 40 || o == 41; }
 constexpr uint32_t kPickupLo = 0x12C0, kPickupHi = 0x13EC, kExclLo = 0x7D0, kExclHi = 0x898, kKeepLo = 0x1A90, kKeepHi = 0x1B58;
@@ -238,6 +241,7 @@ struct Stage
     uint32_t mgr = 0;                                    // raiz ANIM_MGR da fase (animationSetGlobal le a lista dela depois do gancho)
     std::map<uint32_t, std::set<uint32_t>> id2Used;      // id1 -> id2 das CHAR_INSTANCEs registradas e das clonadas
     std::vector<uint32_t> animAdded;                     // CHAR_INSTANCEs clonadas que ainda nao estao no ANIM_MGR
+    std::vector<uint32_t> hpNodes;                       // os DESTRUCTIBLEs que o "hp" mexeu (WOTM_LEVELPATCH_HP confere a vida deles no jogo)
 
     uint32_t u32(uint32_t a) const { uint32_t v; std::memcpy(&v, ram + (a & PS2_RAM_MASK), 4); return v; }
     uint16_t u16(uint32_t a) const { uint16_t v; std::memcpy(&v, ram + (a & PS2_RAM_MASK), 2); return v; }
@@ -781,7 +785,81 @@ struct Stage
                         ++stats["incoming dominoes cut"];
                     }
     }
-    struct Place { V3 pos; double heading; };
+    // "hp" e "traffic" da entrada ou da copia (lvl.py LevelPatch.extras_of/set_extras, mesma regra); -1: a entrada nao diz
+    struct Extras { int hp = -1, traffic = -1; };
+    struct Place { V3 pos; double heading; Extras ex; };
+    // Os DESTRUCTIBLEs do proprio objeto da alca h: a descida para em cada um, entao um destrutivel dentro de um estado de outro (uma
+    // placa no telhado que quebra sozinha) fica com os pontos de vida que tem
+    std::vector<uint32_t> hpTargets(uint32_t h) const
+    {
+        std::vector<uint32_t> out, stack{h};
+        std::unordered_set<uint32_t> seen;
+        while (!stack.empty())
+        {
+            const uint32_t x = stack.back();
+            stack.pop_back();
+            if (!seen.insert(x).second) continue;
+            if (op(x) == DESTRUCTIBLE) out.push_back(x);
+            else for (uint32_t c : children(x)) stack.push_back(c);
+        }
+        std::sort(out.begin(), out.end());
+        return out;
+    }
+    // Os GROUPs de id de pickup abaixo de h que podem virar carro no transito (createPickup: tipos 2, 3, 15 e 26)
+    std::vector<uint32_t> trafficTargets(uint32_t h) const
+    {
+        std::vector<uint32_t> out;
+        for (uint32_t x : subtree(h))
+        {
+            const uint32_t t = ident(x) - kPickupBase;
+            if (op(x) == GROUP && (t == 2 || t == 3 || t == 15 || t == 26)) out.push_back(x);
+        }
+        std::sort(out.begin(), out.end());
+        return out;
+    }
+    Extras extrasOf(const json::Value &e, uint32_t h, const char *where) const
+    {
+        Extras x;
+        if (const json::Value *v = e.get("hp"); v && v->type != json::Value::Null)
+        {
+            if (v->type != json::Value::Int || v->d != std::floor(v->d) || v->d < 1 || v->d > kHpMax)
+                throw PatchError(fmt("%s: \"hp\" e um inteiro de 1 a %u", where, kHpMax));
+            if (hpTargets(h).empty()) throw PatchError(fmt("%s: a alca %07x nao tem destrutivel: \"hp\" e para predios", where, h));
+            x.hp = int(v->d);
+        }
+        if (const json::Value *v = e.get("traffic"); v && v->type != json::Value::Null)
+        {
+            if (v->type != json::Value::Bool) throw PatchError(fmt("%s: \"traffic\" e true ou false", where));
+            if (trafficTargets(h).empty())
+                throw PatchError(fmt("%s: a alca %07x nao e um pickup de carro (tipos 2, 3, 15, 26): \"traffic\" e para esses", where, h));
+            x.traffic = v->b ? 1 : 0;
+        }
+        return x;
+    }
+    // Classe de vida 0 em cada destrutivel de h: `hp` pontos e o dano minimo que ele ja tinha (classe 1 nenhum, 2 e acima 5, classe 0 o
+    // seu): so o numero muda. A classe 0 deixa ligado o bit 3 das flags do Interactive (o AddDestruct o apaga na classe 1), que e o que
+    // deixa um monstro arremessado machucar o predio
+    void setExtras(uint32_t h, const Extras &x)
+    {
+        if (x.hp >= 0)
+        {
+            const std::vector<uint32_t> ds = hpTargets(h);
+            for (uint32_t d : ds)
+            {
+                const uint32_t cls = u16(d + 4);
+                w16(d + 8, uint16_t(cls == 0 ? u16(d + 8) : cls == 1 ? 0 : kHpMinDamage));
+                w16(d + 4, 0), w16(d + 6, uint16_t(x.hp));
+                hpNodes.push_back(d);
+            }
+            stats["hit points set"] += int(ds.size());
+        }
+        if (x.traffic >= 0)
+        {   // bit 0 do id2 do GROUP do id (bit 7 da primeira palavra): carro no transito ou estacionado
+            const std::vector<uint32_t> gs = trafficTargets(h);
+            for (uint32_t g : gs) w32(g, (u32(g) & ~0x80u) | (x.traffic ? 0x80u : 0u));
+            stats["traffic set"] += int(gs.size());
+        }
+    }
     // Copia de n e dos GROUP/SWITCH/TRANSLATE/ROTATE abaixo dele que nao tem outro pai; o que e compartilhado fica compartilhado
     uint32_t clonePrivate(uint32_t n, bool top)
     {
@@ -1339,6 +1417,7 @@ struct Stage
                 deepClone(order, twins), hc = twins[h];
             parents[hc] = {wrap};
             hc = place(hc, places[i].pos, places[i].heading);
+            setExtras(hc, places[i].ex);
             w32(wrap + 0x24 + 4 * uint32_t(i), hc);   // depois do place: o ROTATE novo toma o lugar do TRANSLATE
             twins[h] = hc;
             const M4 carry = carryFrom(before, hc);
@@ -1565,8 +1644,10 @@ struct Stage
                                              pos.v[1], pos.v[2], from.v[0], from.v[1], from.v[2]));
                 if (children(h).size() > 1) log.push_back(fmt("item %zu: a alca %07x segura %zu objetos; vao todos", k, h, children(h).size()));
                 const json::Value *del = e.get("delete");
-                const bool moving = !(del && del->asBool()) && (e.get("pos") || e.get("heading"));
+                const bool deleting = del && del->asBool();
+                const bool moving = !deleting && (e.get("pos") || e.get("heading"));
                 const int64_t extra = moving ? moveCost(h, !std::isnan(headingOf(e))) : 0;
+                const Extras mine = deleting ? Extras{} : extrasOf(e, h, "entrada");   // "hp" e "traffic": conferidos antes de escrever
                 if (const json::Value *cp = e.get("copies"); cp && cp->type == json::Value::Arr && !cp->arr.empty())
                 {
                     std::vector<Place> places;
@@ -1575,19 +1656,25 @@ struct Stage
                         Place pl;
                         if (!num3(c.get("pos"), pl.pos)) throw PatchError("copia sem \"pos\" [x, y, z]");
                         pl.heading = headingOf(c);
+                        const Extras own = extrasOf(c, h, "uma copia");   // a copia toma o que a entrada diz, salvo o que ela mesma diz
+                        pl.ex = {own.hp >= 0 ? own.hp : mine.hp, own.traffic >= 0 ? own.traffic : mine.traffic};
                         places.push_back(pl);
                     }
                     copy(h, places, extra);
                 }
                 else if (extra > int64_t(arenaFree()))
                     throw PatchError(fmt("alca %07x: o movimento leva ate %lld bytes, a arena tem %u livres", h, (long long)extra, arenaFree()));
-                if (del && del->asBool())
+                if (deleting)
                     erase(h);
-                else if (moving)
+                else
                 {
-                    V3 to = pos;
-                    if (e.get("pos") && !num3(e.get("pos"), to)) throw PatchError("\"pos\" nao e [x, y, z]");
-                    move(h, to, headingOf(e));
+                    setExtras(h, mine);
+                    if (moving)
+                    {
+                        V3 to = pos;
+                        if (e.get("pos") && !num3(e.get("pos"), to)) throw PatchError("\"pos\" nao e [x, y, z]");
+                        move(h, to, headingOf(e));
+                    }
                 }
             }
             catch (const PatchError &err)
@@ -1959,9 +2046,31 @@ void breakTick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         }
     }
 }
+// WOTM_LEVELPATCH_HP=1: no primeiro TheGame::Update depois da carga, a vida que o jogo guardou (Destructible: vida +0x14, maxima +0x18,
+// dano minimo +0x1C, classe +0x30, flags do Interactive +0x4) de cada DESTRUCTIBLE que o "hp" do patch mexeu
+std::vector<uint32_t> g_hpWatch;
+bool g_hpReport = false;   // o diagnostico esta ligado
+void hpTick(uint8_t *rdram)
+{
+    auto rd = [&](uint32_t a) { uint32_t v; std::memcpy(&v, rdram + (a & PS2_RAM_MASK), 4); return v; };
+    auto rf = [&](uint32_t a) { float v; std::memcpy(&v, rdram + (a & PS2_RAM_MASK), 4); return v; };
+    const std::unordered_set<uint32_t> want(g_hpWatch.begin(), g_hpWatch.end());
+    g_hpWatch.clear();
+    size_t found = 0;
+    for (uint32_t i = 1; i < kInteractives; ++i)
+    {
+        const uint32_t d = rd(kInteractivesTab + 4 * i) & kMask;
+        if (!d || rd(d) != 3 || !want.count(rd(d + 0x24) & kMask)) continue;
+        if (++found <= 40)
+            std::fprintf(stderr, "[fase] vida: destrutivel %07x classe %u vida %.0f de %.0f, dano minimo %.0f, flags %x\n", rd(d + 0x24) & kMask,
+                         rd(d + 0x30), rf(d + 0x14), rf(d + 0x18), rf(d + 0x1C), rd(d + 4) & 0xFFFFu);
+    }
+    std::fprintf(stderr, "[fase] vida: %zu de %zu destrutiveis do patch achados na tabela do jogo\n", found, want.size());
+}
 void updateHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
     if (ctx->pc == kTheGameUpdate && !g_breakWraps.empty()) breakTick(rdram, ctx, runtime);
+    if (ctx->pc == kTheGameUpdate && !g_hpWatch.empty()) hpTick(rdram);
     g_origUpdate(rdram, ctx, runtime);
 }
 
@@ -2064,6 +2173,7 @@ void applyFor(uint8_t *rdram)
         st.log.push_back(fmt("parou no meio: %s", e.what()));
     }
     breakArm(st.wraps);
+    if (g_hpReport) g_hpWatch = st.hpNodes;
     try
     {
         applyProps(st, rdram, v, f.host.parent_path().parent_path(), name);
@@ -2165,11 +2275,16 @@ void wotmLevelPatchInstall(PS2Runtime &runtime)
             }
             at = comma + 1;
         }
-        if (!g_breakSteps.empty() && (g_origUpdate = runtime.lookupFunction(kTheGameUpdate)))
-        {
-            runtime.registerFunction(kTheGameUpdate, &updateHook);
-            std::fprintf(stderr, "[fase] WOTM_LEVELPATCH_BREAK: %zu quebras marcadas\n", g_breakSteps.size());
-        }
+    }
+    if (const char *e = std::getenv("WOTM_LEVELPATCH_HP"); e && std::atoi(e) > 0)
+    {
+        g_hpReport = true;
+        std::fprintf(stderr, "[fase] WOTM_LEVELPATCH_HP=1: a vida dos destrutiveis com \"hp\" sai no primeiro quadro da luta\n");
+    }
+    if ((!g_breakSteps.empty() || g_hpReport) && (g_origUpdate = runtime.lookupFunction(kTheGameUpdate)))
+    {
+        runtime.registerFunction(kTheGameUpdate, &updateHook);
+        if (!g_breakSteps.empty()) std::fprintf(stderr, "[fase] WOTM_LEVELPATCH_BREAK: %zu quebras marcadas\n", g_breakSteps.size());
     }
     // o gancho fica mesmo sem patch no boot: o JSON e procurado a cada carga (findPatch)
     if (!(g_orig = runtime.lookupFunction(kDbInitDb)))
