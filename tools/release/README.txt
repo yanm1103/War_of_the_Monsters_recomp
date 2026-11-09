@@ -72,6 +72,7 @@ https://github.com/yanm1103/War_of_the_Monsters_recomp/blob/master/docs/guides/M
 WotM_LevelEditor.exe opens a stage of your ISO in 3D: move, turn, copy and delete buildings, cars
 and props, change the pedestrians, and save it into a mod. "Test in game" starts the fight on that
 stage, and the reload button applies what you saved without closing the game.
+The level editor is UNTESTED in this release: expect bugs, and keep a backup of your mods.
 
 
 Reporting a bug
