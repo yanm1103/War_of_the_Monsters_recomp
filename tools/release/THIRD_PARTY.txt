@@ -68,8 +68,13 @@ Game art in the bundled mods (mods\)
   War of the Monsters, rebuilt as a playable monster from the game's own files.
   mods\Goliath Prime\goliathprime.png: made from the game's 3D model, edited.
   mods\recompiled_logo\SHELL\*.png: the game's logo, edited.
+  mods\CJ and mods\Godzilla: custom monsters built on the game's own files (.NGP, .PTR, .TEX,
+  .RTX, .BNK, edited textures). CJ uses a model, animations and sounds from another game
+  (Grand Theft Auto: San Andreas, (c) Rockstar Games); Godzilla uses a model and sounds from
+  other games, and the character belongs to Toho Co., Ltd.
   These derive from the art of War of the Monsters ((c) 2003 Sony Computer Entertainment
-  America) and are not covered by the GPL. The monster.json files are part of the port.
+  America) or from the works named above and are not covered by the GPL. The monster.json
+  files are part of the port.
 
 War of the Monsters is (c) 2003 Sony Computer Entertainment America. This project is not
 affiliated with or endorsed by Sony or Incognito Entertainment. No other game data is included:

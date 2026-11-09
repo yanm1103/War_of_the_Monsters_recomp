@@ -61,8 +61,9 @@ F11 switches between window and fullscreen
 
 Mods
 ----
-Mods go in the mods\ folder. This package comes with four:
-- Goliath Prime, Cerebulon, Mecha: playable custom monsters
+Mods go in the mods\ folder. This package comes with six:
+- Goliath Prime, Cerebulon, Mecha, CJ, Godzilla: playable custom monsters (Godzilla has the
+  90s, 1954 and 2000 skins)
 - recompiled_logo: the title screen logo
 To make your own, open WotM_ModKit.exe: it reads your ISO (the one wotm.exe uses), extracts
 textures as PNG and sounds as WAV, and builds what you edited into a mod. It also creates skins and

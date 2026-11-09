@@ -94,7 +94,8 @@ Copy-Item (Join-Path $editorDist 'WotM_LevelEditor.exe') $stage
 # mods: os arquivos que o git rastreia em mods\ e os quatro do Mecha gerados do disco (tools/mechamon.py; no .gitignore)
 $mecha = 'mods/Mecha/monsters/mecha/files'
 $mechaFiles = 'MECHA.NGP', 'MECHA.PTR', 'MECHA.TEX', 'MECHA.RTX' | ForEach-Object { "$mecha/$_" }
-$modFiles = @(& $git -C $repo ls-files mods) + $mechaFiles
+# fora do zip: as pastas mods/_<nome>_src (rigs, scripts de conversao, WAVs de origem): so o repo precisa delas
+$modFiles = @(& $git -C $repo ls-files mods | Where-Object { $_ -notlike 'mods/_*' }) + $mechaFiles
 foreach ($m in $modFiles) {
     $src = Join-Path $repo $m
     if (-not (Test-Path $src)) { Fail "falta $m (o Mecha: python tools/mechamon.py mods/Mecha/monsters/mecha/files)" }
@@ -130,13 +131,17 @@ foreach ($d in $dlls.Keys) { if((Get-Content (Join-Path $stage 'THIRD_PARTY.txt'
 
 # --- nada do disco nem do PC de quem empacota ---------------------------------------------------------------------------------------
 $allowed = $mechaFiles | ForEach-Object { ($_ -replace '/', '\').ToLower() }
+# mods que o dono liberou a levar arquivos de jogo montados (.NGP, .PTR, .TEX, .RTX, .BNK): Mecha (arquivos acima), CJ e Godzilla
+$allowedDirs = 'mods\cj\', 'mods\godzilla\'
 $gameExt = '.ngp', '.ptr', '.tex', '.rtx', '.pss', '.snd', '.vb', '.vh', '.hd', '.bd', '.glb', '.irx', '.iso', '.elf', '.bin', '.ico'
 $bad = @()
 foreach ($f in Get-ChildItem $stage -Recurse -File) {
     $rel = $f.FullName.Substring($stage.Length + 1)
     $low = $rel.ToLower()
     if ($allowed -contains $low) { continue }
-    if ($f.Name -like 'SCUS_*' -or $f.Name -like 'BASCUS*' -or $gameExt -contains $f.Extension.ToLower()) { $bad += $rel }
+    $inAllowedMod = $false
+    foreach ($ad in $allowedDirs) { if ($low.StartsWith($ad)) { $inAllowedMod = $true } }
+    if ($f.Name -like 'SCUS_*' -or $f.Name -like 'BASCUS*' -or (-not $inAllowedMod -and $gameExt -contains $f.Extension.ToLower())) { $bad += $rel }
     if ($f.Name -in 'save.json', 'settings.ini', 'wotm.ini' -or $f.Extension -eq '.log') { $bad += $rel }
 }
 foreach ($dir in Get-ChildItem $stage -Recurse -Directory) {
