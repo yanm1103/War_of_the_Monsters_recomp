@@ -3582,8 +3582,19 @@ function updatePtView(kind) {
       g.add(line);
     }
   });
+  g.visible = overlayOn[kind === 'SPT' ? 'sptOn' : 'pupOn'] || ($('sptDlg').open && ptKind === kind);   // Display > Overlays; open in its dialog, always
   ptViews[kind] = g;
   scene.add(g);
+}
+// Display > Overlays: Start points, Power-ups and the AI net are drawn over the stage unless switched off (the dialog shows its own anyway)
+const overlayOn = { sptOn: store.get('sptOn', '1') === '1', pupOn: store.get('pupOn', '1') === '1', aipOn: store.get('aipOn', '1') === '1' };
+for (const id of Object.keys(overlayOn)) {
+  $(id).checked = overlayOn[id];
+  $(id).onchange = (e) => {
+    overlayOn[id] = e.target.checked;
+    store.set(id, overlayOn[id] ? '1' : '0');
+    if (id === 'aipOn') updateNetView('AIP'); else updatePtView(id === 'sptOn' ? 'SPT' : 'PUP');
+  };
 }
 function ptRows() {
   const kind = ptKind, d = pt[kind], box = $('sptList');
@@ -3657,6 +3668,7 @@ async function openPoints(kind) {
   ptRows();
   ptInfo();
   $('sptDlg').showModal();
+  updatePtView(kind);
 }
 $('sptBtn').onclick = () => openPoints('SPT');
 $('pupBtn').onclick = () => openPoints('PUP');
@@ -3702,7 +3714,7 @@ $('sptReset').onclick = () => {
         if (r) msg(`The stage's own ${PT_WORDS[kind][1]} are back (the mod's file is gone)`, { level: 'ok', toast: true });
       }, { icon: 'delete-outline' });
 };
-$('sptDlg').addEventListener('close', () => { if (ptKeep(ptKind) !== ptSaved[ptKind]) loadPoints(ptKind); });   // closed without saving: back to the file's points
+$('sptDlg').addEventListener('close', () => { if (ptKeep(ptKind) !== ptSaved[ptKind]) loadPoints(ptKind); else updatePtView(ptKind); });   // closed without saving: back to the file's points
 
 // ------------------------------------------------------------------ AI net (.AIP) and vehicle net (.FOP)
 // Both are graphs of nodes with directed links, edited in one dialog and kept as a file of the mod (editor.py kinds AIP and FOP; tools/lvl.py
@@ -3743,7 +3755,7 @@ function updateNetView(kind) {
   if (n.view) { scene.remove(n.view); n.view.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); }); n.view = null; }
   if (!n.points.length) return;
   n.view = new THREE.Group();
-  n.view.visible = kind === 'AIP' || fopOn || ($('netDlg').open && netKind === kind);
+  n.view.visible = (kind === 'AIP' ? overlayOn.aipOn : fopOn) || ($('netDlg').open && netKind === kind);
   const up = new THREE.Vector3(0, 6, 0), byColor = new Map();
   n.points.forEach((p, i) => p.links.forEach((l) => {
     if (netTwoWay(n, i, l.to) && l.to < i) return;
@@ -3849,6 +3861,7 @@ async function openNet(kind) {
   netRows();
   netInfo();
   $('netDlg').showModal();
+  updateNetView(kind);
   updateNetView(kind);       // after the dialog is open: that is what shows the vehicle net
 }
 $('aipBtn').onclick = () => openNet('AIP');
@@ -4925,7 +4938,7 @@ if (new URLSearchParams(location.search).has('debug')) {
                        boxCenter: (o) => new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()), setGrid, setTool, setSnap, showKeys, showHint,
                        focusSelection, HINTS, get hintKey() { return hint.key; }, get hoverCount() { return hover.n; },
                        get gridMinor() { return gridMinor; }, get gridMajor() { return gridMajor; },
-                       get ui() { return ui; }, get pt() { return pt; }, get ptSaved() { return ptSaved; }, get outTab() { return outTab; },
+                       get ui() { return ui; }, get pt() { return pt; }, get ptViews() { return ptViews; }, get ptSaved() { return ptSaved; }, get outTab() { return outTab; },
                        get history() { return history; }, get future() { return future; }, get dirty() { return dirty; },
                        get modNow() { return modNow; }, get keep() { return keep; }, get game() { return game; },
                        get gizmoObject() { return gizmo.object || null; }, get gizmoMode() { return gizmo.getMode(); },

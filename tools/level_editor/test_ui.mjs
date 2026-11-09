@@ -340,6 +340,29 @@ await check('Add lives at the top of the left panel: Browse models and the searc
   must(await ev(`document.getElementById('pedBar').hidden && !document.getElementById('propBar').hidden`), 'Objects mode does not bring Add back');
   await shot('left_head_objects');
 });
+await check('Display: game look, grid, minimap and the overlays are in one menu; start points, power-ups and the AI net can be switched off', async () => {
+  must(await ev(`!document.getElementById('overlay').querySelector('#look, #grid')`), 'look or grid is still on the bar');
+  await ev(`document.getElementById('layersBtn').click()`);
+  const have = await ev(`['look','grid','miniOn','pedsOn','collOn','sptOn','pupOn','aipOn','fopOn'].filter((i) => !document.getElementById('layersMenu').contains(document.getElementById(i)))`);
+  must(have.length === 0, 'not in the Display menu: ' + have.join(', '));
+  const vis = (e) => ev(e);
+  must(await vis(`window.wotmDebug.nets.AIP.view && window.wotmDebug.nets.AIP.view.visible`), 'the AI net is not drawn by default');
+  await ev(`(() => { const c = document.getElementById('aipOn'); c.click(); })()`);
+  must(await vis(`!window.wotmDebug.nets.AIP.view.visible`), 'the AI net stayed drawn with its switch off');
+  await ev(`document.getElementById('aipOn').click()`);
+  must(await vis(`window.wotmDebug.nets.AIP.view.visible`), 'the AI net did not come back');
+  must(await vis(`!!window.wotmDebug.ptViews.SPT && window.wotmDebug.ptViews.SPT.visible`), 'start points are not drawn by default');
+  await ev(`document.getElementById('sptOn').click()`);
+  must(await vis(`!window.wotmDebug.ptViews.SPT.visible`), 'start points stayed drawn');
+  await ev(`document.getElementById('sptBtn').click()`);     // its own dialog draws them, always
+  must(await until(`document.getElementById('sptDlg').open && window.wotmDebug.ptViews.SPT.visible`, 40), 'the dialog does not draw its start points');
+  await esc();
+  must(await until(`!document.getElementById('sptDlg').open && !window.wotmDebug.ptViews.SPT.visible`, 40), 'the start points stayed drawn after the dialog closed');
+  await ev(`document.getElementById('sptOn').click()`);
+  must(await vis(`window.wotmDebug.ptViews.SPT.visible`), 'start points did not come back');
+  await shot('display_menu');
+  await ev(`document.getElementById('layersBtn').click()`);
+});
 await check('menus: one open at a time, a click outside closes, arrows walk, Esc gives the focus back to the button', async () => {
   await ev(`document.getElementById('addProp').click()`);
   must(await ev(`!document.getElementById('propMenu').hidden`), 'Add prop did not open');

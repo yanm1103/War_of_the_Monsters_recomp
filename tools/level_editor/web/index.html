@@ -113,11 +113,9 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <label class="field suf small-num" title="Move step (units)"><input id="snapMove" type="number" min="0.1" step="5" aria-label="Move step"><i class="post">u</i></label>
       <label class="field suf small-num" title="Turn step (degrees)"><input id="snapTurn" type="number" min="0.1" step="5" aria-label="Turn step"><i class="post">°</i></label>
     </div>
-    <!-- the view: game look, grid, layers; fly or orbit; focus, frame all; the shortcuts are on the top bar (?) -->
+    <!-- the view: Display (game look, guides, overlays); fly or orbit; focus, frame all; the shortcuts are on the top bar (?) -->
     <div id="overlay" class="float" role="toolbar" aria-label="View">
-      <label class="tgl icon" title="Game look: the stage's fog, background and sky, as in the game (L)"><input type="checkbox" id="look" aria-label="Game look"><i class="ic" style="--ic:url(vendor/mdi/weather-fog.svg)"></i></label>
-      <label class="tgl icon" title="Grid: 100-unit lines (the snap step when it is smaller) and 1000-unit lines, at the base of the selection"><input type="checkbox" id="grid" aria-label="Grid"><i class="ic" style="--ic:url(vendor/mdi/grid.svg)"></i></label>
-      <button id="layersBtn" class="icon ghost" title="Layers" aria-label="Layers" aria-haspopup="true" aria-expanded="false"><i class="ic" style="--ic:url(vendor/mdi/layers-outline.svg)"></i></button>
+      <button id="layersBtn" class="ghost" title="Display: game look, the grid, the minimap, and what to draw over the stage (collision, pedestrians, start points, power-ups, nets)" aria-label="Display" aria-haspopup="true" aria-expanded="false"><i class="ic" style="--ic:url(vendor/mdi/layers-outline.svg)"></i><span class="lbl">Display</span><i class="ic chev" style="--ic:url(vendor/mdi/chevron-down.svg)"></i></button>
       <span class="fsep"></span>
       <div class="seg" role="group" aria-label="Camera">
         <button id="vFly" class="toggle" title="Fly: WASD to move, right-drag to look (V switches)"><i class="ic" style="--ic:url(vendor/mdi/airplane.svg)"></i><span class="lbl">Fly</span></button>
@@ -146,12 +144,19 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <button id="pmImport" type="button" class="ghost wide"><i class="ic" style="--ic:url(vendor/mdi/tray-arrow-up.svg)"></i><span class="lbl">Import .glb…</span></button>
       <button id="pmTerrain" type="button" class="ghost wide" title="Hills and ramps from a picture of heights (a PNG)"><i class="ic" style="--ic:url(vendor/mdi/terrain.svg)"></i><span class="lbl">Terrain from a heightmap…</span></button>
     </div>
-    <div id="layersMenu" class="float menu" hidden role="menu" aria-label="Layers">
-      <div class="sec-title">Layers</div>
+    <div id="layersMenu" class="float menu" hidden role="menu" aria-label="Display">
+      <div class="sec-title">View</div>
+      <label class="switch" title="Game look: the stage's fog, background and sky, as in the game (L)"><input type="checkbox" id="look"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/weather-fog.svg)"></i><span class="tx">Game look</span><kbd>L</kbd></label>
+      <div class="sec-title">Guides</div>
+      <label class="switch" title="Grid: 100-unit lines (the snap step when it is smaller) and 1000-unit lines, at the base of the selection"><input type="checkbox" id="grid"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/grid.svg)"></i><span class="tx">Grid</span></label>
+      <label class="switch" title="The stage seen from above in the corner of the view: a dot for each object, the selection in amber, the camera as an arrow. Click or drag on it to take the camera there."><input type="checkbox" id="miniOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/map-outline.svg)"></i><span class="tx">Minimap</span><kbd>N</kbd></label>
+      <div class="sec-title">Overlays</div>
       <label class="switch" title="Pedestrian groups (violet cones) and their sidewalks (cyan lanes), faint, while you edit objects (P). The Pedestrians mode edits them."><input type="checkbox" id="pedsOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/walk.svg)"></i><span class="tx">Pedestrians</span><kbd>P</kbd></label>
       <label class="switch" title="What the game collides with, with your changes applied: triangles green (buildings, a prop's coll_ meshes), convex hulls cyan (hull_ meshes), trigger volumes and animated parts as orange boxes; dimmer is a broken state of a building. What touches the selection stays bright."><input type="checkbox" id="collOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/cube-scan.svg)"></i><span class="tx">Collision</span><kbd>C</kbd></label>
       <div class="help" id="collInfo" hidden></div>
-      <label class="switch" title="The stage seen from above in the corner of the view: a dot for each object, the selection in amber, the camera as an arrow. Click or drag on it to take the camera there."><input type="checkbox" id="miniOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/map-outline.svg)"></i><span class="tx">Minimap</span><kbd>N</kbd></label>
+      <label class="switch" title="Start points: a cone for each place a monster appears, with a line for the way it faces"><input type="checkbox" id="sptOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/flag-outline.svg)"></i><span class="tx">Start points</span></label>
+      <label class="switch" title="Power-ups: a ball for each pickup lying in the stage"><input type="checkbox" id="pupOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/heart-plus-outline.svg)"></i><span class="tx">Power-ups</span></label>
+      <label class="switch" title="The AI net: the paths the computer monsters walk"><input type="checkbox" id="aipOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/graph-outline.svg)"></i><span class="tx">AI net</span></label>
       <label class="switch" title="The vehicle net drawn in the view, its roads colored by who drives them: yellow cars, green helicopters, pink flying saucers, orange tanks. The Vehicle net dialog shows it too."><input type="checkbox" id="fopOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/road-variant.svg)"></i><span class="tx">Vehicle net</span></label>
     </div>
     <div id="notes">
