@@ -767,8 +767,11 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
 - **Custom stages:** the stage list also shows the valid custom stages of every mod (`stages/<folder>/stage.json`, "Custom stages")
   as "MY CITY (custom, on CENTRAL)". One opens with its base's objects, scene and handles and saves its patch as
   `levels/<ID>.json`; Test in game opens it with `WOTM_MATCH=3,@<id>`. The **+** button next to the stage list (**New stage…**)
-  asks for an id, a name and a base among the nine the game allows, and writes `stages/<id>/stage.json`; "Start with the changes I
-  have now" also writes them as the new stage's patch when the open stage has that base. A stage with points of its own
+  asks for an id, a name, a base among the nine the game allows, the narrator and whether RANDOM can pick it, and writes
+  `stages/<id>/stage.json`; "Start with the changes I have now" also writes them as the new stage's patch when the open stage has
+  that base. The **pencil** button (**Edit stage…**, enabled on a custom stage) rewrites the name, base, narrator and RANDOM of
+  its `stage.json` (the id stays; other keys are kept). Changing the base keeps the patch and the points made for the old one, so
+  the editor reloads the stage on the new base and asks for a Check. A stage with points of its own
   (`.SPT`, `.PED`...) in its folder shows those in the pedestrian panel and the check (the other kinds from the base). The Fight HUD
   panel of a custom stage saves its pictures in the stage's folder (`<BASE>_tNNNN.png`), so they apply to that stage only. `python
   tools/level_editor/test_custom_stages.py` is the integration test (needs the disc set in the editor).

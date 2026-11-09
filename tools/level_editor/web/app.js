@@ -569,6 +569,7 @@ function showHint() {
 // rec: one object of the stage (handle). item: what can be selected, the object itself or one of its copies.
 // group: every selected item; sel: the one the gizmo and the fields act on (the last picked), the others follow it.
 let stageBases = {};     // a custom stage's name -> the game stage it is built on (its files, its handles, its props)
+let stageMeta = {};      // a custom stage's name -> its listing entry (id, title, base, mod, narrator, random)
 const baseOf = (n) => stageBases[n] || n;
 let cfg = {}, stageName = '', recs = [], byHandle = new Map(), itemOf = new Map(), sel = null, group = [], dirty = false;
 // undo and redo: {p: the patch as JSON before the change, label}; savedJson: the patch the mod's file holds
@@ -971,6 +972,7 @@ async function loadStage(name) {
     stageRoot = skyRoot = null;
     lightClose();
     stageName = name;
+    $('editStage').disabled = !stageMeta[name];
     ui.budget = null; budgetKey = '';
     coll.clear(); collKey = ''; collSeq++;
     $('keepNote').hidden = true;
@@ -3909,29 +3911,70 @@ $('palQ').onkeydown = (e) => {
 // New stage…
 const NS_BASES = ['CENTRAL', 'VEGAS', 'CANYON2', 'METRO', 'UFO', 'CAPITOL', 'CANYON1', 'MINISF', 'TOKYODM'];
 const nsErr = (t) => { $('nsErr').hidden = !t; $('nsErr').querySelector('span').textContent = t || ''; };
-const nsWhere = () => { $('nsWhere').textContent = modNow ? `mods/${modNow}/stages/${($('nsId').value.trim() || '<id>').toLowerCase()}/` : '(choose a mod first)'; };
-$('newStage').onclick = () => {
-  if (!stageName) return;
-  if (!modNow) { msg('Choose a mod first: the new stage is saved in it', { level: 'warn', toast: true }); return; }
+let nsEdit = '';         // the custom stage the dialog edits; empty = New stage
+const nsWhere = () => {
+  const m = nsEdit ? stageMeta[nsEdit] : null;
+  $('nsWhere').textContent = m ? `mods/${m.mod}/stages/` : modNow ? `mods/${modNow}/stages/${($('nsId').value.trim() || '<id>').toLowerCase()}/` : '(choose a mod first)';
+};
+function nsOpen(edit) {
+  nsEdit = edit;
+  const m = edit ? stageMeta[edit] : null;
+  $('nsTitle').textContent = m ? 'Edit stage' : 'New stage';
+  $('nsIntro').textContent = m ? 'The entry on the stage select. The id names the stage\'s patch and files, so it stays.'
+    : 'Another entry on the stage select, built on a game stage, with its own level patch.';
+  $('nsOk').textContent = m ? 'Save' : 'Create';
+  $('nsId').disabled = !!m;
+  $('nsCopyRow').hidden = !!m;
+  $('nsBaseNote').hidden = true;
   const b = $('nsBase');
   b.innerHTML = NS_BASES.filter((x) => stageTitles[x]).map((x) => `<option value="${x}">${stageTitles[x]} (${x})</option>`).join('');
-  b.value = NS_BASES.includes(baseOf(stageName)) ? baseOf(stageName) : (b.options[0] || {}).value;
-  $('nsId').value = $('nsName').value = '';
+  b.value = m ? m.base : NS_BASES.includes(baseOf(stageName)) ? baseOf(stageName) : (b.options[0] || {}).value;
+  $('nsId').value = m ? m.id : '';
+  $('nsName').value = m ? m.title : '';
+  $('nsNarr').value = m ? m.narrator || '' : '';
+  $('nsRandom').checked = m ? m.random !== false : true;
   $('nsCopy').checked = true;
   nsErr('');
   nsWhere();
   $('stageDlg').showModal();
-  $('nsId').focus();
+  (m ? $('nsName') : $('nsId')).focus();
+}
+$('newStage').onclick = () => {
+  if (!stageName) return;
+  if (!modNow) { msg('Choose a mod first: the new stage is saved in it', { level: 'warn', toast: true }); return; }
+  nsOpen('');
 };
+$('editStage').onclick = () => { if (stageMeta[stageName]) nsOpen(stageName); };
+$('nsBase').onchange = () => { $('nsBaseNote').hidden = !nsEdit || $('nsBase').value === stageMeta[nsEdit].base; };
 $('nsId').oninput = () => { nsWhere(); nsErr(''); };
+async function nsSave() {
+  const old = stageMeta[nsEdit], base = $('nsBase').value;
+  if (base !== old.base && dirty) { nsErr('Save or undo your changes first: the stage reloads on its new base.'); return; }
+  let res;
+  try {
+    res = await api('/api/stage/edit', { stage: nsEdit, name: $('nsName').value.trim(), base, narrator: $('nsNarr').value.trim(), random: $('nsRandom').checked });
+  } catch (e) { nsErr(cleanError(e).text); return; }
+  $('stageDlg').close();
+  const o = [...$('stage').options].find((x) => x.value === res.name);
+  if (o) o.textContent = `${res.title} (custom, on ${res.base})`;
+  stageTitles[res.name] = res.title;
+  stageBases[res.name] = res.base;
+  stageMeta[res.name] = res;
+  if (res.baseChanged) await loadStage(res.name);
+  msg(`Saved ${res.title}${res.baseChanged ? `, now on ${stageTitles[res.base] || res.base}: Check it` : ''}. The game reads its stages at start-up`, { level: res.baseChanged ? 'warn' : 'ok', toast: true });
+}
 $('nsOk').onclick = async () => {
+  if (nsEdit) { await nsSave(); return; }
   const id = $('nsId').value.trim();
   if (!/^[A-Za-z][A-Za-z0-9]{0,7}$/.test(id)) { nsErr('The id is 1 to 8 letters and digits, starting with a letter.'); $('nsId').focus(); return; }
   const base = $('nsBase').value;
   // the patch carries the base's handles: it comes along only when the open stage has that base
   const withPatch = $('nsCopy').checked && baseOf(stageName) === base;
   let res;
-  try { res = await api('/api/stage/new', { mod: modNow, id, name: $('nsName').value.trim(), base, patch: withPatch ? buildPatch() : null }); }
+  try {
+    res = await api('/api/stage/new', { mod: modNow, id, name: $('nsName').value.trim(), base, narrator: $('nsNarr').value.trim(),
+                                        random: $('nsRandom').checked, patch: withPatch ? buildPatch() : null });
+  }
   catch (e) { nsErr(cleanError(e).text); return; }
   $('stageDlg').close();
   cfg = Object.assign({}, cfg);
@@ -3941,6 +3984,7 @@ $('nsOk').onclick = async () => {
   $('stage').appendChild(o);
   stageTitles[res.name] = res.title;
   stageBases[res.name] = res.base;
+  stageMeta[res.name] = res;
   dirty = false;
   $('stage').value = res.name;
   await loadStage(res.name);
@@ -4290,6 +4334,7 @@ function init(r, load = true) {
   s.innerHTML = r.stages.map((x) => `<option value="${x.name}">${x.title}${x.custom ? ` (custom, on ${x.base})` : x.title.toUpperCase() === x.name ? '' : ` (${x.name})`}</option>`).join('');
   stageTitles = Object.fromEntries(r.stages.map((x) => [x.name, x.title]));
   stageBases = Object.fromEntries(r.stages.filter((x) => x.custom).map((x) => [x.name, x.base]));
+  stageMeta = Object.fromEntries(r.stages.filter((x) => x.custom).map((x) => [x.name, x]));
   game.stage = r.gameStage || '';
   setRunning(!!r.gameRunning);
   if (r.discError || !r.stages.length) {

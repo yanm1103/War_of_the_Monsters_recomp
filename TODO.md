@@ -13,7 +13,6 @@ Rearranjar fases existentes (mover, girar, apagar, duplicar prédios e objetos, 
 Ideias para facilitar a vida de quem faz mod (o que o editor ainda não tem; cada uma só no editor, salvo onde disser), na ordem sugerida:
 5. **Prefab e inclinação:** salvar a seleção como prefab (posições relativas ao centro, com a fase de origem de cada objeto) para colar em outra fase; girar props em X e Y (o patch só tem `heading`, então pede também o `wotm_levelpatch.inc`).
 6. **Teste no jogo com mais jogadores e outros modos:** o diálogo "Test options" escolhe monstro, CPUs e treino; faltam 2 a 4 jogadores e o modo (`WOTM_PLAYERS`, `WOTM_MODE`, eliminação e minigames, `NATIVE.md`), e um "Testar daqui" que também ponha as CPUs perto.
-7. **Editar o `stage.json` depois de criado:** nome, narrador, RANDOM, base.
 8. **Precisam do runtime:** pontos de vida das construções originais, tipo do pickup (carro estacionado para carro no trânsito, `id2` bit 0), escala por objeto.
 9. **Menores:** régua entre dois pontos, captura de tela, "Empacotar mod" em zip, minimapa; reabrir o diálogo de terreno com os números e o PNG que ficaram na pasta do prop (`terrain.json`, `heightmap.png`).
 

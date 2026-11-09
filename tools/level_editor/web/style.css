@@ -336,6 +336,7 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 .fl:first-of-type { margin-top: 0; }
 .fl > input { width: 100%; }
 .fl > input:disabled { border-style: dashed; }
+.fl.chk { flex-direction: row; align-items: center; }
 .help { color: var(--muted); font-size: 11px; line-height: 16px; margin-top: 4px; }
 /* actions: full-width buttons with their key on the right */
 /* Arrange: the mode picker, then one pane of rows for the mode */

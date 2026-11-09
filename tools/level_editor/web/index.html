@@ -21,6 +21,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
   <span class="sep"></span>
   <label class="field stage" title="The stage to edit"><i class="pre ic" style="--ic:url(vendor/mdi/map-outline.svg)"></i><select id="stage" aria-label="Stage"></select></label>
   <button id="newStage" class="icon ghost" title="New stage: a copy of a game stage with its own level patch, as another entry on the stage select" aria-label="New stage"><i class="ic" style="--ic:url(vendor/mdi/plus.svg)"></i></button>
+  <button id="editStage" class="icon ghost" title="Edit stage: the name, base, narrator and RANDOM of this custom stage" aria-label="Edit stage" disabled><i class="ic" style="--ic:url(vendor/mdi/pencil-outline.svg)"></i></button>
   <label class="field mod" title="The mod your changes are saved into (mods/&lt;mod&gt;/levels/)"><i class="pre ic" style="--ic:url(vendor/mdi/puzzle-outline.svg)"></i><select id="mod" aria-label="Mod"></select></label>
   <span class="sep"></span>
   <button id="undo" class="icon ghost" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><i class="ic" style="--ic:url(vendor/mdi/undo.svg)"></i></button>
@@ -549,13 +550,17 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
     <div class="dlg-head"><h2 id="nsTitle">New stage</h2>
       <button type="button" data-close class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
     <div class="dlg-body">
-      <p class="muted">Another entry on the stage select, built on a game stage, with its own level patch.</p>
+      <p class="muted" id="nsIntro">Another entry on the stage select, built on a game stage, with its own level patch.</p>
       <label class="fl">Id<input id="nsId" maxlength="8" spellcheck="false" autocomplete="off" placeholder="MYCITY"
         title="1 to 8 letters and digits, starting with a letter; it names the stage's patch"></label>
       <label class="fl">Name<input id="nsName" maxlength="17" spellcheck="false" autocomplete="off" placeholder="MY CITY"
         title="What the stage select shows, up to 17 ASCII characters"></label>
       <label class="fl">Based on<select id="nsBase"></select></label>
-      <label class="fl chk"><input id="nsCopy" type="checkbox" checked>Start with the changes I have now</label>
+      <label class="fl">Narrator<input id="nsNarr" maxlength="40" spellcheck="false" autocomplete="off" placeholder="mycity"
+        title="narrator/&lt;name&gt;.mp3, played when the stage is confirmed; empty is silence"></label>
+      <label class="fl chk"><input id="nsRandom" type="checkbox" checked>RANDOM can pick this stage</label>
+      <label class="fl chk" id="nsCopyRow"><input id="nsCopy" type="checkbox" checked>Start with the changes I have now</label>
+      <div class="help" id="nsBaseNote" hidden>A new base keeps the changes and the points made for the old one, and their handles may not fit: Check it.</div>
       <div class="help">Saved in <span id="nsWhere" class="mono"></span>. The game reads its stages at start-up: Test in game restarts it.</div>
       <div class="callout err" id="nsErr" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-circle-outline.svg)"></i><span></span></div>
     </div>

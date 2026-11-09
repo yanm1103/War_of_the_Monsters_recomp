@@ -78,6 +78,33 @@ def main():
                 assert e.code == 400
             else:
                 raise AssertionError("accepted " + repr(bad))
+        # Edit stage…: name, base, narrator and RANDOM are rewritten, the id and the unknown keys stay; defaults leave no key
+        path = os.path.join(mods, "m", "stages", "newone", "stage.json")
+        with open(path) as f:
+            j = json.load(f)
+        j["note"] = "kept"
+        with open(path, "w") as f:
+            json.dump(j, f)
+        r = post("/api/stage/edit", {"stage": "NEWONE", "name": "Renamed", "base": "CENTRAL", "narrator": "newone.mp3", "random": False})
+        assert r["title"] == "Renamed" and r["base"] == "CENTRAL" and r["baseChanged"] and r["narrator"] == "newone", r
+        with open(path) as f:
+            j = json.load(f)
+        assert j == {"id": "newone", "name": "Renamed", "base": "CENTRAL", "narrator": "newone", "random": False, "note": "kept"}, j
+        entry = [s for s in get("/api/init")["stages"] if s["name"] == "NEWONE"][0]
+        assert entry["base"] == "CENTRAL" and entry["narrator"] == "newone" and entry["random"] is False, entry
+        r = post("/api/stage/edit", {"stage": "NEWONE", "name": "", "base": "CENTRAL", "narrator": "", "random": True})
+        assert r["title"] == "NEWONE" and not r["baseChanged"], r
+        with open(path) as f:
+            j = json.load(f)
+        assert j == {"id": "newone", "name": "NEWONE", "base": "CENTRAL", "note": "kept"}, j
+        for bad in ({"stage": "CENTRAL", "base": "CENTRAL"}, {"stage": "NEWONE", "base": "TRAINING"},
+                    {"stage": "NEWONE", "base": "CENTRAL", "name": "x" * 18}, {"stage": "NEWONE", "base": "CENTRAL", "narrator": "a/b"}):
+            try:
+                post("/api/stage/edit", bad)
+            except urllib.error.HTTPError as e:
+                assert e.code == 400
+            else:
+                raise AssertionError("accepted " + repr(bad))
         # Stage size: /api/stage tells the disc's grid; a bigger "grid" in the patch passes the check, a smaller one is reported
         g = base_stage["grid"]
         assert g and g["cols"] > 1 and g["min"][0] < g["max"][0], g

@@ -615,6 +615,8 @@ def custom_stages(cfg, refused=False):
                     j = json.load(f)
                 sid, base = str(j.get("id") or ""), str(j.get("base") or "").upper()
                 name = str(j.get("name") or sid.upper())
+                narrator = j.get("narrator") if isinstance(j.get("narrator"), str) else ""
+                random_ok = bool(j["random"]) if "random" in j else True
             except (OSError, ValueError, AttributeError) as e:
                 out["?" + mod + "/" + folder] = {"id": folder, "mod": mod, "folder": folder, "reason": "stage.json: %s" % e}
                 continue
@@ -628,7 +630,8 @@ def custom_stages(cfg, refused=False):
             if reason and not refused:
                 continue
             out[sid.upper() or "?" + mod + "/" + folder] = {"id": sid, "name": name[:17], "base": base, "mod": mod,
-                                                         "folder": folder, "reason": reason}
+                                                         "folder": folder, "reason": reason, "narrator": narrator,
+                                                         "random": random_ok}
     return out
 
 
@@ -818,19 +821,64 @@ def new_stage(cfg, b):
         raise ValueError("A stage called %s exists already." % sid.upper())
     if base not in CUSTOM_BASES:
         raise ValueError("The base must be one of %s." % ", ".join(CUSTOM_BASES))
-    name = (b.get("name") or "").strip() or sid.upper()
-    if len(name) > 17 or not all(32 <= ord(c) < 127 for c in name):
-        raise ValueError("The name is up to 17 ASCII characters.")
+    name, narrator, rnd = stage_fields(b, sid)
     folder = os.path.join(cfg["mods"], mod, "stages", sid.lower())
     if os.path.exists(folder) or sid.upper() in custom_stages(cfg, refused=True):
         raise ValueError("A stage folder or id %s exists already (a refused one counts: see the game log)." % sid.upper())
     os.makedirs(folder)
+    j = {"id": sid, "name": name, "base": base}
+    if narrator:
+        j["narrator"] = narrator
+    if not rnd:
+        j["random"] = False
     with open(os.path.join(folder, "stage.json"), "w", encoding="utf-8") as f:
-        json.dump({"id": sid, "name": name, "base": base}, f, indent=1)
+        json.dump(j, f, indent=1)
     patch = b.get("patch")
     if isinstance(patch, dict):
         save_patch(cfg, mod, sid.upper(), patch)
-    return {"name": sid.upper(), "title": name, "level": LEVEL_NUM.get(base), "custom": True, "base": base, "mod": mod, "id": sid}
+    return {"name": sid.upper(), "title": name, "level": LEVEL_NUM.get(base), "custom": True, "base": base, "mod": mod, "id": sid,
+            "narrator": narrator, "random": rnd}
+
+
+def stage_fields(b, sid):
+    """The stage.json fields a dialog sets, checked: (name, narrator, random). The name defaults to the id in capitals."""
+    name = (b.get("name") or "").strip() or sid.upper()
+    if len(name) > 17 or not all(32 <= ord(c) < 127 for c in name):
+        raise ValueError("The name is up to 17 ASCII characters.")
+    narrator = (b.get("narrator") or "").strip()
+    if narrator.lower().endswith(".mp3"):
+        narrator = narrator[:-4]
+    if narrator and not re.fullmatch(r"[A-Za-z0-9_.\- ]{1,40}", narrator):
+        raise ValueError("The narrator is the name of a narrator/<name>.mp3 (letters, digits, _ - . and spaces, up to 40).")
+    return name, narrator, b.get("random") is not False
+
+
+def edit_stage(cfg, b):
+    """Edit stage…: rewrites the name, base, narrator and random of an existing custom stage's stage.json (the id, which names its
+    patch and its files, stays; keys the editor does not know are kept). A new base leaves the patch and the points made for the old
+    one; "baseChanged" says so. Returns the listing entry."""
+    c = custom_stages(cfg).get((b.get("stage") or "").upper())
+    if not c:
+        raise ValueError("%s is not a custom stage." % (b.get("stage") or "That"))
+    base = (b.get("base") or "").strip().upper()
+    if base not in CUSTOM_BASES:
+        raise ValueError("The base must be one of %s." % ", ".join(CUSTOM_BASES))
+    name, narrator, rnd = stage_fields(b, c["id"])
+    path = os.path.join(cfg["mods"], c["mod"], "stages", c["folder"], "stage.json")
+    with open(path, encoding="utf-8") as f:
+        j = json.load(f)
+    j["name"], j["base"] = name, base
+    for key, keep in (("narrator", bool(narrator)), ("random", not rnd)):
+        if not keep:
+            j.pop(key, None)
+    if narrator:
+        j["narrator"] = narrator
+    if not rnd:
+        j["random"] = False
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(j, f, indent=1)
+    return {"name": c["id"].upper(), "title": name, "level": LEVEL_NUM.get(base), "custom": True, "base": base, "mod": c["mod"],
+            "id": c["id"], "narrator": narrator, "random": rnd, "baseChanged": base != c["base"]}
 
 
 def stage_list(cfg):
@@ -844,7 +892,7 @@ def stage_list(cfg):
         if c["base"] not in names:
             continue
         base.append({"name": key, "title": c["name"], "level": LEVEL_NUM.get(c["base"]), "custom": True, "base": c["base"],
-                     "mod": c["mod"], "id": c["id"]})
+                     "mod": c["mod"], "id": c["id"], "narrator": c["narrator"], "random": c["random"]})
     return base
 
 
@@ -1696,6 +1744,11 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200, new_stage(cfg, b))
                 except ValueError as e:
                     return self.send(400, {"error": str(e), "code": "newstage"})
+            if self.path == "/api/stage/edit":
+                try:
+                    return self.send(200, edit_stage(cfg, b))
+                except ValueError as e:
+                    return self.send(400, {"error": str(e), "code": "editstage"})
             if self.path == "/api/names":
                 if not b.get("sig"):
                     return self.send(400, {"error": "this object has no mesh to name as a model"})
