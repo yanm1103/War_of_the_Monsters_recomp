@@ -8,7 +8,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { createPeds } from './peds.js';
 import { openHud, hudGameChanged } from './hud.js';
 import { openTex, texGameChanged } from './tex.js';
-import { openLight, lightGameChanged, lightLookChanged, lightClose } from './light.js';
+import { openLight, lightGameChanged, lightLookChanged, lightClose, lightDirty, lightSave } from './light.js';
 import { initArrange } from './arrange.js';
 import { openTerrain } from './terrain.js';
 import { initColl } from './coll.js';
@@ -905,7 +905,7 @@ function showUndo() {
   $('undo').title = u ? `Undo: ${u.label} (Ctrl+Z)` : 'Nothing to undo (Ctrl+Z)';
   $('redo').disabled = !r;
   $('redo').title = r ? `Redo: ${r.label} (Ctrl+Y)` : 'Nothing to redo (Ctrl+Y)';
-  $('save').classList.toggle('dirty', dirty);
+  $('save').classList.toggle('dirty', isDirty());
   showStatus();
   queueBudget();
   queueColl();
@@ -924,8 +924,8 @@ function stField(cls, text, state, title) {
 function showStatus(changedN) {
   if (changedN !== undefined) ui.changed = changedN;
   const where = modNow ? `mods/${modNow}/levels/${stageName}.json` : '';
-  stField('save', dirty ? 'Unsaved changes' : ui.savedAt ? `Saved ${hhmm(ui.savedAt)}` : 'No unsaved changes',
-          dirty ? 'dirty' : ui.savedAt ? 'saved' : '', where ? `Saves to ${where} (Ctrl+S)` : 'Choose a mod to save into (Mod, at the top)');
+  stField('save', isDirty() ? 'Unsaved changes' : ui.savedAt ? `Saved ${hhmm(ui.savedAt)}` : 'No unsaved changes',
+          isDirty() ? 'dirty' : ui.savedAt ? 'saved' : '', where ? `Saves to ${where} (Ctrl+S)` : 'Choose a mod to save into (Mod, at the top)');
   const c = ui.check;
   const ck = stField('check', c.state === 'ok' ? 'Check passed' : c.state === 'bad' ? `${c.n} ${c.n === 1 ? 'problem' : 'problems'}`
                      : c.state === 'stale' ? 'Not checked since the last change' : 'Not checked',
@@ -1290,8 +1290,8 @@ function refreshList() {
   const bp = buildPatch(), nChanged = bp.objects.length + (bp.props || []).length;
   $('count').textContent = (shown.length === all.length ? `${all.length} objects` : `${shown.length} of ${all.length} shown`) +
     ` · ${nChanged} changed` + (group.length ? ` · ${group.length} selected` : '');
-  document.title = `WotM Level Editor — ${stageName}${dirty ? ' *' : ''}`;
-  $('save').classList.toggle('dirty', dirty);
+  document.title = `WotM Level Editor — ${stageName}${isDirty() ? ' *' : ''}`;
+  $('save').classList.toggle('dirty', isDirty());
   showStatus(nChanged);
   showSummary(nChanged);
   syncMarks();
@@ -2436,6 +2436,7 @@ async function post(kind, save = true, extra = {}) {
     moveTo(m, false);
   }
   const mod = modNow;
+  if (writes && lightDirty()) await lightSave();       // the open Light and fog panel's file goes with the stage's
   const { here, ...rest } = extra;       // here: Test from here / Reload from here (the view's aim as the start point)
   const body = Object.assign({ name: stageName, mod, patch: buildPatch(), save }, testBody(here ? aimStart() : null), rest);
   const wasRunning = game.running;
@@ -2553,8 +2554,10 @@ function unsavedCount() {
   for (const h of A.keys()) if (!B.has(h)) n++;
   const rest = (p) => JSON.stringify(Object.assign({}, p, { objects: undefined }));
   if (rest(a) !== rest(b)) n++;
-  return Math.max(n, dirty ? 1 : 0);
+  return Math.max(n, dirty ? 1 : 0) + (lightDirty() ? 1 : 0);
 }
+// the stage's patch has changes, or the open Light and fog panel does (its file is saved with Save too)
+function isDirty() { return dirty || lightDirty(); }
 // unsaved changes in the way: Cancel, Discard, or save first (then gets 'cancel', 'discard' or 'save')
 function askUnsaved(text, saveLabel, then) {
   ask('Unsaved changes', text, [['cancel', 'Cancel'], ['discard', 'Discard'], ['save', saveLabel, true]], then,
@@ -2716,13 +2719,13 @@ function showGame() {
   test.classList.toggle('primary', s === 'closed');
   rl.disabled = s !== 'running';
   rl.classList.toggle('primary', s === 'running' || s === 'reloading');
-  const label = dirty ? 'Save & reload' : 'Reload in game';
+  const label = isDirty() ? 'Save & reload' : 'Reload in game';
   rl.querySelector('.lbl').textContent = label;
   rl.setAttribute('aria-label', label);
   rl.title = s === 'closed' ? 'Start the game with Test in game first'
     : s === 'starting' ? 'The game is starting'
     : s === 'reloading' ? 'The game is reloading this stage'
-    : (dirty ? 'Save your changes and reload' : 'Reload') + ' this stage in the open game (F10 in the game does the same)';
+    : (isDirty() ? 'Save your changes and reload' : 'Reload') + ' this stage in the open game (F10 in the game does the same)';
   $('stop').hidden = s === 'closed';
   const res = game.result;
   const [text, state] = s === 'closed' ? ['Game closed', 'idle']
@@ -2740,7 +2743,7 @@ setInterval(async () => noteGame(await gameLog()), 4000);
 $('stage').onchange = (e) => {
   const to = e.target.value;
   e.target.blur();
-  if (!dirty) { loadStage(to); return; }
+  if (!isDirty()) { loadStage(to); return; }
   e.target.value = stageName;      // until the answer
   askUnsaved(`${title(stageName)} has ${changesText(unsavedCount())}.`, 'Save and switch', async (v) => {
     if (v === 'cancel' || (v === 'save' && !(await post('save')))) return;
@@ -2807,7 +2810,7 @@ function switchMod(v) {
       done(modNow);
       return;
     }
-    if (!dirty) { setMod(v); loadStage(stageName); done(modNow); return; }
+    if (!isDirty()) { setMod(v); loadStage(stageName); done(modNow); return; }
     const n = unsavedCount();
     ask(`Switch to mod "${v}"?`,
         modNow ? `You have ${changesText(n)} for ${modNow}.` : `You have ${changesText(n)}, not saved in any mod yet.`,
@@ -3053,7 +3056,7 @@ function testGame(here) {
     return;
   }
   const ex = here ? { here: true } : {};
-  if (!dirty) { post('test', false, ex); return; }
+  if (!isDirty()) { post('test', false, ex); return; }
   const n = unsavedCount();
   ask('Save before testing?',
       `The game loads the saved file. Your last ${n === 1 ? 'change is' : `${n} changes are`} not saved yet.`,
@@ -3873,7 +3876,7 @@ $('packMod').onclick = async () => {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
-    msg(`Packed ${modNow}.zip` + (dirty ? '. The changes you have not saved are not in it' : ''), { level: dirty ? 'warn' : 'ok', toast: true });
+    msg(`Packed ${modNow}.zip` + (isDirty() ? '. The changes you have not saved are not in it' : ''), { level: isDirty() ? 'warn' : 'ok', toast: true });
   } catch (e) { msg(e.message || String(e), { level: 'err', toast: true }); }
 };
 $('netAdd').onclick = () => {
@@ -4380,7 +4383,7 @@ $('nsBase').onchange = () => { $('nsBaseNote').hidden = !nsEdit || $('nsBase').v
 $('nsId').oninput = () => { nsWhere(); nsErr(''); };
 async function nsSave() {
   const old = stageMeta[nsEdit], base = $('nsBase').value;
-  if (base !== old.base && dirty) { nsErr('Save or undo your changes first: the stage reloads on its new base.'); return; }
+  if (base !== old.base && isDirty()) { nsErr('Save or undo your changes first: the stage reloads on its new base.'); return; }
   let res;
   try {
     res = await api('/api/stage/edit', { stage: nsEdit, name: $('nsName').value.trim(), base, narrator: $('nsNarr').value.trim(), random: $('nsRandom').checked });
@@ -4401,7 +4404,7 @@ $('nsOk').onclick = async () => {
   const base = $('nsBase').value;
   // the patch carries the base's handles: it comes along only when the open stage has that base
   const withPatch = $('nsCopy').checked && baseOf(stageName) === base;
-  if (dirty && !withPatch) {
+  if (isDirty() && !withPatch) {
     // the open stage is replaced by the new one: its changes go nowhere unless they are saved first
     const v = await new Promise((r) => askUnsaved(`${title(stageName)} has ${changesText(unsavedCount())}, and the new stage does not take them.`, 'Save and create', r));
     if (v === 'cancel' || (v === 'save' && !(await post('save')))) return;
@@ -4557,7 +4560,7 @@ async function restoreEnv(name, mod) {   // the panel closed with numbers nobody
 $('lightBtn').onclick = () => {
   if (!stageName) return;
   const name = stageName;
-  openLight({ stage: name, title: title(name), mod: modNow, api, msg, ask, mods: () => modList, newMod: NEW_MOD, chooseMod,
+  openLight({ stage: name, title: title(name), mod: modNow, api, msg, ask, changed: showUndo, mods: () => modList, newMod: NEW_MOD, chooseMod,
               preview: previewEnv, restore: () => restoreEnv(name, modNow), look: () => gameLook, setLook,
               game: () => ({ running: game.state === 'running', dirty }), reload: reloadGame });
 };
@@ -4709,7 +4712,22 @@ document.querySelectorAll('#dlg .browse').forEach((b) => (b.onclick = async () =
 $('settings').onclick = () => openSettings();
 document.querySelectorAll('#sTheme input').forEach((r) => (r.onchange = () => applyTheme(r.value)));   // a preview; Cancel goes back
 // a Cancel or close button of a dialog (type="button", so that Enter takes the main one)
-document.querySelectorAll('dialog [data-close]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close('cancel')));
+// The dialogs that edit a draft of a mod file (points, nets): Esc and the close button ask before an unsaved draft is thrown away
+const draftGuard = {
+  sptDlg: { dirty: () => ptKeep(ptKind) !== ptSaved[ptKind], what: () => PT_WORDS[ptKind][1], save: () => $('sptSave').click() },
+  netDlg: { dirty: () => netKeep(nets[netKind]) !== nets[netKind].saved, what: () => NET_WORDS[netKind].noun, save: () => $('netSave').click() },
+};
+function askDraft(dlg) {
+  const g = draftGuard[dlg.id];
+  ask('Close with unsaved changes?', `You changed the ${g.what()} and did not save them. Closing throws the changes away.`,
+      [['keep', 'Keep editing'], ['discard', 'Discard'], ['save', 'Save to mod', true]],
+      (v) => { if (v === 'discard') dlg.close('cancel'); else if (v === 'save') g.save(); }, { icon: 'content-save-alert-outline' });
+}
+for (const id of Object.keys(draftGuard)) $(id).addEventListener('cancel', (e) => { if (draftGuard[id].dirty()) { e.preventDefault(); askDraft($(id)); } });
+document.querySelectorAll('dialog [data-close]').forEach((b) => b.addEventListener('click', () => {
+  const dlg = b.closest('dialog');
+  if (draftGuard[dlg.id] && draftGuard[dlg.id].dirty()) askDraft(dlg); else dlg.close('cancel');
+}));
 $('dlg').addEventListener('close', () => {
   if ($('dlg').returnValue !== 'ok') { applyTheme(cfg.theme || 'dark'); return; }
   const next = { theme: themePicked() };
@@ -4720,7 +4738,7 @@ $('dlg').addEventListener('close', () => {
     try { init(await api('/api/config', next), reload || !stageName); }
     catch (e) { applyTheme(cfg.theme || 'dark'); msg(`Couldn't keep the settings: ${cleanError(e).text}`, { level: 'err' }); }
   };
-  if (!reload || !dirty || !stageName) { apply(); return; }
+  if (!reload || !isDirty() || !stageName) { apply(); return; }
   askUnsaved(`${title(stageName)} opens again with the new ${next.disc !== (cfg.disc || '') ? 'game disc' : 'mods folder'}, and has ` +
              `${changesText(unsavedCount())}.`, 'Save and apply', async (v) => {
     if (v === 'cancel' || (v === 'save' && !(await post('save')))) { applyTheme(cfg.theme || 'dark'); msg('Settings not changed', { level: 'muted' }); return; }
@@ -4735,7 +4753,7 @@ window.addEventListener('keyup', (e) => { if (FLY_CODES[e.code]) fly.keys.delete
 window.addEventListener('keydown', (e) => {
   const k = (e.key || '').toLowerCase(), ctrl = e.ctrlKey || e.metaKey, field = typing(e.target);
   if (ctrl && !e.altKey && k === 'p') { e.preventDefault(); if (!$('askDlg').open) openPalette(); return; }   // the browser's print dialog never opens; a question is answered first
-  if (document.querySelector('dialog[open]')) {   // a dialog has the keys (Esc closes it, the selection stays)
+  if (document.querySelector('dialog:modal')) {   // a modal dialog has the keys (Esc closes it, the selection stays); the Light panel is not one
     if (ctrl && k === 's') e.preventDefault();
     return;
   }
@@ -4785,7 +4803,7 @@ window.addEventListener('keydown', (e) => {
   else if (k === '2') setMode('peds');
   else if (k === 'escape') { if (ruler.on) setRuler(false); else select(null); }
 });
-window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', (e) => { if (isDirty()) { e.preventDefault(); e.returnValue = ''; } });
 
 // /api/init or /api/config's reply. load: open the stage (again); Settings without a new disc or mods folder leaves the scene alone
 function init(r, load = true) {

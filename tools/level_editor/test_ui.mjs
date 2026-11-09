@@ -38,7 +38,7 @@ const DIALOGS = [['gridBtn', 'gridDlg'], ['sptBtn', 'sptDlg'], ['pupBtn', 'sptDl
   ['texBtn', 'texDlg'], ['lightBtn', 'lightDlg'], ['hud', 'hudDlg'], ['keysBtn', 'keysDlg'], ['settings', 'dlg'], ['testOpts', 'testDlg'],
   ['newStage', 'stageDlg']];
 // known to fail today (a step of the UX plan fixes each): reported, not failing
-const KNOWN = new Set(args.includes('--strict') ? [] : ['esc:lightDlg']);
+const KNOWN = new Set(args.includes('--strict') ? [] : []);
 
 const tmp = fs.mkdtempSync(path.join(tmpdir(), 'wotm_ui_'));
 const mods = path.join(tmp, 'mods');
@@ -183,6 +183,11 @@ await check('a click on the gizmo that moves nothing is not an edit', async () =
   must(await ev('window.wotmDebug.unsavedCount()') === 0 && await ev('window.wotmDebug.dirty') === false, 'the stage is marked as changed');
 });
 
+const answer = async (value) => {      // a button of the question
+  must(await until(`document.getElementById('askDlg').open`, 20), 'no question was asked');
+  await ev(`document.querySelector('#askBtns button[value=${JSON.stringify(value)}]').click()`);
+  must(await until(`!document.getElementById('askDlg').open`, 20), 'the question stayed open');
+};
 await check('Remove all nodes asks first; Esc keeps them; Ctrl+P waits for the answer; closing without Save puts them back', async () => {
   await ev(`document.getElementById('aipBtn').click()`);
   must(await until(`document.getElementById('netDlg').open`, 80), 'netDlg did not open');
@@ -201,9 +206,53 @@ await check('Remove all nodes asks first; Esc keeps them; Ctrl+P waits for the a
   must(await until(`document.getElementById('askDlg').open`, 20), 'no question the second time');
   await ev(`document.querySelector('#askBtns .primary, #askBtns button:last-child').click()`);
   must(await until(`window.wotmDebug.nets.AIP.points.length === 0`, 20), 'the nodes stayed after the answer');
-  await esc();                                         // the dialog closes without Save: the file's net comes back
+  await esc();                                         // the emptied net is an unsaved draft: closing asks first
+  await answer('discard');                             // ...and Discard puts the file's net back
   must(await until(`!document.getElementById('netDlg').open`, 20), 'netDlg did not close');
   must(await until(`window.wotmDebug.nets.AIP.points.length === ${n0}`, 40), 'the net did not come back: ' + await ev('window.wotmDebug.nets.AIP.points.length') + ' nodes');
+});
+
+await check('Light and fog: unsaved numbers count, Esc asks, Keep editing keeps, Discard closes and restores', async () => {
+  await ev(`document.getElementById('lightBtn').click()`);
+  must(await until(`document.getElementById('lightDlg') && document.getElementById('lightDlg').open`, 80), 'lightDlg did not open');
+  must(await ev('window.wotmDebug.unsavedCount()') === 0, 'a freshly opened panel counts as changed');
+  await ev(`(() => { const f = [...document.querySelectorAll('#lightDlg #ltMin, #lightDlg .lt-h')].find((x) => x.offsetParent); f.value = String((+f.value || 0) + 7); f.dispatchEvent(new Event('input')); })()`);
+  must(await ev('window.wotmDebug.unsavedCount()') === 1, 'the changed light is not counted: ' + await ev('window.wotmDebug.unsavedCount()'));
+  must(await ev(`document.getElementById('save').classList.contains('dirty')`), 'Save is not lit');
+  // the keys still work with the panel open (it is not modal): an edit and Ctrl+Z
+  await ev(`window.wotmDebug.select(window.wotmDebug.items().find((x) => x.rec.info.handle === ${JSON.stringify(first)} && !x.copy)); window.wotmDebug.nudge(0, 0, 1, false); document.activeElement.blur()`);
+  must(await ev('window.wotmDebug.buildPatch().objects.length') === 1, 'the nudge made no entry');
+  await key('z', 'KeyZ', 90, 2);
+  must(await until('window.wotmDebug.buildPatch().objects.length === 0', 20), 'Ctrl+Z did nothing with the Light panel open');
+  await ev(`window.wotmDebug.select(null); document.querySelector('#lightDlg #ltMin, #lightDlg [data-close]').focus()`);
+  await esc();
+  await answer('keep');
+  must(await ev(`document.getElementById('lightDlg').open`), 'Keep editing closed the panel');
+  await esc();
+  await answer('discard');
+  must(await until(`!document.getElementById('lightDlg').open`, 20), 'Discard did not close the panel');
+  must(await ev('window.wotmDebug.unsavedCount()') === 0, 'the discarded numbers still count');
+});
+await check('Start points: an unsaved point asks on Esc and Close; Discard drops it', async () => {
+  await ev(`document.getElementById('sptBtn').click()`);
+  must(await until(`document.getElementById('sptDlg').open`, 80), 'sptDlg did not open');
+  const rows = () => ev(`document.querySelectorAll('#sptList > *').length`);
+  const n0 = await rows();
+  await ev(`document.getElementById('sptAdd').click()`);
+  must(await until(`document.querySelectorAll('#sptList > *').length > ${n0}`, 20), 'no point was added');
+  await esc();
+  await answer('keep');
+  must(await ev(`document.getElementById('sptDlg').open`), 'Keep editing closed the dialog');
+  await ev(`document.querySelector('#sptDlg .dlg-foot [data-close]').click()`);
+  await answer('discard');
+  must(await until(`!document.getElementById('sptDlg').open`, 20), 'Discard did not close the dialog');
+  await ev(`document.getElementById('sptBtn').click()`);
+  must(await until(`document.getElementById('sptDlg').open`, 80), 'sptDlg did not open again');
+  const onServer = await ev(`fetch('/api/spt?name=${stage}&mod=smoke&kind=SPT').then((r) => r.json()).then((j) => j.points.length)`);
+  must(await until(`document.querySelectorAll('#sptList > *').length === ${n0}`, 40),
+    `the discarded point came back (${await rows()} rows, ${n0} before; the server has ${onServer} points; the draft says ${await ev("window.wotmDebug.ui && 'n/a'")})`);
+  await esc();
+  must(await until(`!document.getElementById('sptDlg').open`, 20), 'a clean dialog did not close on Esc');
 });
 
 await ev('window.wotmDebug.select(null)').catch(() => {});
@@ -216,8 +265,10 @@ for (const [btn, dlg] of DIALOGS) {
   await check(`esc:${dlg}`, async () => {
     await esc();
     if (!await until(`!document.getElementById(${JSON.stringify(dlg)}).open`, 12)) {
-      await ev(`document.getElementById(${JSON.stringify(dlg)}).close()`);       // do not leave it for the next case
-      throw new Error('Esc did not close it');
+      const why = await ev(`JSON.stringify({ focus: document.activeElement.id || document.activeElement.className || document.activeElement.tagName,
+        inside: document.getElementById(${JSON.stringify(dlg)}).contains(document.activeElement), ask: document.getElementById('askDlg').open })`);
+      await ev(`document.getElementById('askDlg').open && document.getElementById('askDlg').close(); document.getElementById(${JSON.stringify(dlg)}).close()`);   // do not leave it for the next case
+      throw new Error('Esc did not close it ' + why);
     }
   });
 }

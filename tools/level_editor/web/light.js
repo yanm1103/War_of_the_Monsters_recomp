@@ -75,7 +75,9 @@ function build() {
       <button type="button" class="lt-save primary">Save to mod</button></div>
   </form>`;
   document.body.append(dlg);
-  q('[data-close]').addEventListener('click', () => dlg.close('cancel'));
+  q('[data-close]').addEventListener('click', requestClose);
+  // not a modal dialog, so the browser does not turn Esc into a close: the panel does it, from inside it
+  dlg.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); e.stopPropagation(); requestClose(); } });
   q('.lt-reload').addEventListener('click', () => ctx.reload());
   q('.lt-save').addEventListener('click', save);
   q('.lt-reset').addEventListener('click', reset);
@@ -128,7 +130,16 @@ function lightRow(i) {
     el('label', {}, 'Strength %', pc), el('label', {}, 'Heading °', hd), el('label', {}, 'Pitch °', pt));
 }
 
-function changed() { ctx.preview(raw()); showFoot(); }
+function changed() { ctx.preview(raw()); showFoot(); if (ctx.changed) ctx.changed(); }
+
+// Close and Esc: with changes that are not saved, ask (they were thrown away without a word)
+async function requestClose() {
+  if (!cur || same()) { dlg.close('cancel'); return; }
+  const v = await new Promise((res) => ctx.ask('Close Light and fog?', 'You changed the light and did not save it. Closing puts the stage back as the file has it.',
+    [['keep', 'Keep editing'], ['discard', 'Discard'], ['save', 'Save to mod', true]], res, { icon: 'content-save-alert-outline' }));
+  if (v === 'discard') dlg.close('cancel');
+  else if (v === 'save') { await save(); if (same()) dlg.close('cancel'); }
+}
 
 function showLook() { q('.lt-look').hidden = ctx.look() || !(cur && (cur.fog || cur.bg)); }
 function showFoot() {
@@ -192,6 +203,7 @@ async function save() {
     for (const w of d.warnings || []) ctx.msg(w, { level: 'warn', toast: true });
     fill();
     ctx.preview(raw());
+    if (ctx.changed) ctx.changed();
   } catch (e) { ctx.msg(`Couldn't save the light: ${e.message}`, { level: 'err', toast: true }); }
 }
 
@@ -212,9 +224,14 @@ export async function openLight(opts) {
   ctx = { ...opts };
   try { await load(); } catch (e) { ctx.msg(`Couldn't open the light: ${e.message}`, { level: 'err' }); return; }
   if (!dlg.open) dlg.show();
-  q('#ltFogC').focus({ preventScroll: true });
+  // the first number to edit, or the close button when the stage has no fog. The focus must be inside for Esc to reach the panel,
+  // and a color field keeps the Esc for itself, so it is not the first stop
+  (q('#ltMin').offsetParent ? q('#ltMin') : q('[data-close]')).focus({ preventScroll: true });
 }
 // app.js calls these when the game starts or stops, when Game look changes and when the stage or mod changes
 export function lightGameChanged() { if (dlg && dlg.open && ctx) showFoot(); }
 export function lightLookChanged() { if (dlg && dlg.open && ctx && cur) showLook(); }
+// the panel is open with numbers that differ from the file's; app.js counts it among the unsaved changes and saves it with Save
+export function lightDirty() { return !!(dlg && dlg.open && cur && saved && !same()); }
+export async function lightSave() { if (lightDirty()) await save(); return !lightDirty(); }
 export function lightClose() { if (dlg && dlg.open) { cur = clone(saved); dlg.close('cancel'); } }   // no restore: the caller loads its own
