@@ -316,6 +316,30 @@ await check('the right panel has Selection and Stage tabs; the stage tools are r
   must(await ev(`document.getElementById('stageTab').hidden && !document.getElementById('selTab').hidden`), 'selecting did not bring the Selection tab back');
   await ev('window.wotmDebug.select(null)');
 });
+await check('Add lives at the top of the left panel: Browse models and the search button open the palette; terrain and import are in it; sky is on the Stage tab', async () => {
+  must(await ev(`document.getElementById('leftHead').contains(document.getElementById('addProp'))`), 'Add is not in the left panel');
+  must(await ev(`!document.getElementById('toolBar').querySelector('#addProp, #pedAddGroup')`), 'Add is still on the tool bar');
+  await ev(`document.getElementById('addProp').click()`);
+  must(await ev(`!document.getElementById('propMenu').hidden && document.getElementById('propMenu').parentElement === document.body`), 'the Add menu is not open in the body');
+  must(await ev(`['pmBrowse','pmImport','pmTerrain'].every((i) => document.getElementById('propMenu').contains(document.getElementById(i)))`), 'the menu lacks Browse, Import or Terrain');
+  must(await ev(`!document.getElementById('propMenu').querySelector('#pmSky, #pmClouds')`), 'sky and clouds are still in the Add menu');
+  await ev(`document.getElementById('pmBrowse').click()`);
+  must(await until(`document.getElementById('palDlg').open`, 40), 'Browse models did not open the palette');
+  must(await ev(`document.getElementById('propMenu').hidden`), 'the menu stayed open over the palette');
+  await esc();
+  await ev(`document.getElementById('pmFind').click()`);
+  must(await until(`document.getElementById('palDlg').open`, 40), 'the search button did not open the palette');
+  await esc();
+  await ev(`document.getElementById('tabStage').click()`);
+  must(await ev(`document.getElementById('stageTab').contains(document.getElementById('pmSky')) && document.getElementById('pmSky').options.length >= 1`), 'the sky select is not filled on the Stage tab');
+  await ev(`document.getElementById('tabSel').click()`);
+  await ev(`document.getElementById('modePeds').click()`);
+  must(await ev(`!document.getElementById('pedBar').hidden && document.getElementById('propBar').hidden && document.getElementById('leftHead').contains(document.getElementById('pedAddGroup'))`), 'Peds mode does not show Add group in the left head');
+  await shot('left_head_peds');
+  await ev(`document.getElementById('modeObjects').click()`);
+  must(await ev(`document.getElementById('pedBar').hidden && !document.getElementById('propBar').hidden`), 'Objects mode does not bring Add back');
+  await shot('left_head_objects');
+});
 await check('menus: one open at a time, a click outside closes, arrows walk, Esc gives the focus back to the button', async () => {
   await ev(`document.getElementById('addProp').click()`);
   must(await ev(`!document.getElementById('propMenu').hidden`), 'Add prop did not open');
@@ -346,9 +370,9 @@ await check('the bars over the view never cover each other or the menus, from 16
         const hit = (p, q) => p.left < q.right && q.left < p.right && p.top < q.bottom && q.top < p.bottom;
         document.getElementById('addProp').click(); const pm = R('propMenu'); document.getElementById('addProp').click();
         document.getElementById('layersBtn').click(); const lm = R('layersMenu'); document.getElementById('layersBtn').click();
-        return JSON.stringify({ bars: hit(a, b), propMenuUnder: pm.top >= a.bottom, layersUnder: lm.top >= b.bottom, inside: b.right <= v.right + 1 && a.left >= v.left - 1, vt: getComputedStyle(document.getElementById('view')).getPropertyValue('--vt') }); })()`));
+        return JSON.stringify({ bars: hit(a, b), propMenuUnder: pm.top >= R('addProp').bottom && pm.left >= 0 && pm.right <= innerWidth, layersUnder: lm.top >= b.bottom, inside: b.right <= v.right + 1 && a.left >= v.left - 1, vt: getComputedStyle(document.getElementById('view')).getPropertyValue('--vt') }); })()`));
       must(!r.bars, `${w}x${h}: the tool bar and the view bar overlap`);
-      must(r.propMenuUnder, `${w}x${h}: the Add prop menu opens over the tool bar`);
+      must(r.propMenuUnder, `${w}x${h}: the Add menu does not open under its button, inside the window`);
       must(r.layersUnder, `${w}x${h}: the Layers menu opens over the view bar`);
       must(r.inside, `${w}x${h}: a bar runs out of the view`);
       must(r.vt.trim() !== '', `${w}x${h}: --vt is not set`);

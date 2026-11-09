@@ -907,6 +907,7 @@ function showUndo() {
   $('redo').disabled = !r;
   $('redo').title = r ? `Redo: ${r.label} (Ctrl+Y)` : 'Nothing to redo (Ctrl+Y)';
   $('save').classList.toggle('dirty', isDirty());
+  if (!$('stageTab').hidden && stageName && !document.activeElement?.matches?.('#pmSky, #pmClouds')) fillSkySelects();
   showStatus();
   queueBudget();
   queueColl();
@@ -1378,6 +1379,7 @@ function showRightTab(name) {
     $(id).tabIndex = on ? 0 : -1;
   }
   store.set('rtab', name);
+  if (stage && typeof fillSkySelects === 'function' && stageName) fillSkySelects();
 }
 $('tabSel').onclick = () => showRightTab('selection');
 $('tabStage').onclick = () => showRightTab('stage');
@@ -3206,12 +3208,17 @@ $('pdDup').onclick = duplicate;
 $('pdDel').onclick = remove;
 
 // Add prop: the mod's models made for this stage, and Import .glb (lvlprop.py on the server; the model lands in mods/<mod>/props/)
+document.body.append($('propMenu'));        // out of the view: it opens from the left panel and floats over both
 const propPop = popover({ button: $('addProp'), menu: $('propMenu'), onOpen: fillPropMenu });
+$('pmFind').onclick = () => openPalette();
+$('pmBrowse').onclick = () => { showPropMenu(false); openPalette(); };
 function showPropMenu(open = !propPop.isOpen) { propPop.set(open); }
 function fillPropMenu() {
-  {   // under the button
-    const r = $("addProp").getBoundingClientRect(), pr = $("propMenu").offsetParent?.getBoundingClientRect();
-    if (pr) $("propMenu").style.left = `${Math.max(8, Math.round(r.left - pr.left))}px`;
+  {   // under the button, over the page (the menu lives in the body: the panel it opens from scrolls and clips)
+    const r = $('addProp').getBoundingClientRect(), m = $('propMenu');
+    m.style.left = `${Math.max(8, Math.round(r.left))}px`;
+    m.style.top = `${Math.round(r.bottom + 4)}px`;
+    m.style.maxHeight = `${Math.max(240, innerHeight - r.bottom - 40)}px`;
   }
   $('pmMod').textContent = modNow ? `mod "${modNow}"` : 'no mod';
   const list = $('pmList'), all = [...propModels.values()], here = all.filter((pm) => pm.info.stage === baseOf(stageName));
@@ -3238,7 +3245,12 @@ function fillPropMenu() {
   $('pmNone').hidden = !none;
   renderPrefabs();
   refreshPrefabs();
-  for (const [id, cur] of [['pmSky', skyModel], ['pmClouds', cloudsModel]]) {     // the sky dome and the cloud layer: one of the models, or the stage's own
+  (list.querySelector('button:not(:disabled)') || $('pmBrowse')).focus();
+}
+// the sky dome and the cloud layer (the Stage tab's Environment): one of the mod's models for this stage, or the stage's own
+function fillSkySelects() {
+  const here = [...propModels.values()].filter((pm) => pm.info.stage === baseOf(stageName));
+  for (const [id, cur] of [['pmSky', skyModel], ['pmClouds', cloudsModel]]) {
     const sky = $(id);
     sky.textContent = '';
     sky.append(new Option('The stage\'s own', ''));
@@ -3246,7 +3258,6 @@ function fillPropMenu() {
     if (cur && ![...sky.options].some((o) => o.value === cur)) sky.append(new Option(`${cur} (not in this mod)`, cur));
     sky.value = cur;
   }
-  (list.querySelector('button:not(:disabled)') || $('pmImport')).focus();
 }
 // ------------------------------------------------------------------ prefabs
 // A prefab is a saved selection (mods/<mod>/prefabs/<name>.json, editor.py save_prefab): each object's place relative to the group's

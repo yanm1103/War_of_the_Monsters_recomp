@@ -47,6 +47,16 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
     <button id="modePeds" class="mode" title="Pedestrians: the groups of people and the sidewalks they walk (2)" aria-label="Pedestrians"><i class="ic" style="--ic:url(vendor/mdi/walk.svg)"></i></button>
   </nav>
   <aside id="left">
+    <!-- what the mode adds: the Objects mode, a prop (a model of the mod, a prefab, a .glb from Blender) or a find in every model of the game;
+         the Pedestrians mode, a group or a sidewalk. Where the view looks. -->
+    <div id="leftHead">
+      <span id="propBar">
+        <button id="addProp" class="primary" aria-haspopup="true" aria-expanded="false" title="Add something where the view looks: a model of your mod, a prefab, a model from a file or from the game"><i class="ic" style="--ic:url(vendor/mdi/plus.svg)"></i><span class="lbl">Add</span><i class="ic chev" style="--ic:url(vendor/mdi/chevron-down.svg)"></i></button>
+        <button id="pmFind" class="icon" title="Find a model in the game or in your mod and add it (Ctrl+P)" aria-label="Find a model"><i class="ic" style="--ic:url(vendor/mdi/magnify.svg)"></i></button></span>
+      <span id="pedBar" hidden>
+        <button id="pedAddGroup"><i class="ic" style="--ic:url(vendor/mdi/account-multiple-plus.svg)"></i><span class="lbl">Add group</span></button>
+        <button id="pedAddSeg"><i class="ic" style="--ic:url(vendor/mdi/vector-polyline-plus.svg)"></i><span class="lbl">Add sidewalk</span></button></span>
+    </div>
     <!-- the Objects mode's search, chips and list (class obj); the Pedestrians mode's panel (#pedPanel) -->
     <div class="field search obj">
       <i class="pre ic" style="--ic:url(vendor/mdi/magnify.svg)"></i>
@@ -102,13 +112,6 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <label class="tgl" title="Snap the gizmo and the arrow keys to these steps"><input type="checkbox" id="snap"><i class="ic" style="--ic:url(vendor/mdi/magnet.svg)"></i><span class="lbl">Snap</span></label>
       <label class="field suf small-num" title="Move step (units)"><input id="snapMove" type="number" min="0.1" step="5" aria-label="Move step"><i class="post">u</i></label>
       <label class="field suf small-num" title="Turn step (degrees)"><input id="snapTurn" type="number" min="0.1" step="5" aria-label="Turn step"><i class="post">°</i></label>
-      <!-- the Pedestrians mode: a new group or sidewalk where the view looks -->
-      <span id="pedBar" hidden><span class="fsep"></span>
-        <button id="pedAddGroup" class="ghost"><i class="ic" style="--ic:url(vendor/mdi/account-multiple-plus.svg)"></i><span class="lbl">Add group</span></button>
-        <button id="pedAddSeg" class="ghost"><i class="ic" style="--ic:url(vendor/mdi/vector-polyline-plus.svg)"></i><span class="lbl">Add sidewalk</span></button></span>
-      <!-- the Objects mode: a new prop (a model of the mod's props/ folder, or a .glb from Blender) -->
-      <span id="propBar"><span class="fsep"></span>
-        <button id="addProp" class="ghost" aria-haspopup="true" aria-expanded="false" title="Add a new prop where the view looks: a model of your mod, or a .glb from Blender"><i class="ic" style="--ic:url(vendor/mdi/shape-plus-outline.svg)"></i><span class="lbl">Add prop</span></button></span>
     </div>
     <!-- the view: game look, grid, layers; fly or orbit; focus, frame all; the shortcuts are on the top bar (?) -->
     <div id="overlay" class="float" role="toolbar" aria-label="View">
@@ -127,7 +130,8 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <button id="shotBtn" class="icon ghost" title="Screenshot: download the view as a PNG (the gizmo stays out of it)" aria-label="Screenshot"><i class="ic" style="--ic:url(vendor/mdi/camera-outline.svg)"></i></button>
     </div>
     </div>
-    <div id="propMenu" class="float menu" hidden role="menu" aria-label="Add prop">
+    <div id="propMenu" class="float menu" hidden role="menu" aria-label="Add">
+      <button id="pmBrowse" type="button" class="ghost wide" title="Search every model of the game and of your mod (Ctrl+P)"><i class="ic" style="--ic:url(vendor/mdi/magnify.svg)"></i><span class="lbl">Browse models…</span><kbd>Ctrl+P</kbd></button>
       <div class="sec-title">Props of <span id="pmMod"></span></div>
       <div id="pmList"></div>
       <div id="pmNone" class="pm-none"></div>
@@ -138,8 +142,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
         <label class="field suf" title="Turn the prefab by this much about its middle when it is put down (counterclockwise seen from above)"><i class="pre">Turn</i><input id="pfTurn" type="number" step="15" min="-360" max="360" value="0" aria-label="Turn when pasting"><i class="post">°</i></label>
         <button id="pfSave" type="button" class="ghost" title="Save the selected objects as a prefab: their places relative to their middle"><i class="ic" style="--ic:url(vendor/mdi/package-up.svg)"></i><span class="lbl">Save selection…</span></button>
       </div>
-      <label class="pm-sky" for="pmSky" title="Replaces the sky dome with one of this mod's models in the game, and in the view with Game look (faces turned inward, with a texture)"><span>Sky dome</span><select id="pmSky"></select></label>
-      <label class="pm-sky pm-sky2" for="pmClouds" title="Replaces the layer of clouds with one of this mod's models, in the game and in the view with Game look (faces turned inward, with a texture, around the origin)"><span>Cloud layer</span><select id="pmClouds"></select></label>
+      <div class="sec-title pf-title">New model from a file</div>
       <button id="pmImport" type="button" class="ghost wide"><i class="ic" style="--ic:url(vendor/mdi/tray-arrow-up.svg)"></i><span class="lbl">Import .glb…</span></button>
       <button id="pmTerrain" type="button" class="ghost wide" title="Hills and ramps from a picture of heights (a PNG)"><i class="ic" style="--ic:url(vendor/mdi/terrain.svg)"></i><span class="lbl">Terrain from a heightmap…</span></button>
     </div>
@@ -180,6 +183,8 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <div class="sec-title">Size</div>
       <button id="gridBtn" class="srow" type="button" title="Stage size: the collision grid's rectangle (what the game collides, shoots and sees across); a bigger one lets objects go farther out"><i class="ic" style="--ic:url(vendor/mdi/arrow-expand-all.svg)"></i><span class="st"><b>Stage size</b><small>The area the game collides across</small></span><small class="how">Patch</small></button>
       <div class="sec-title">Environment</div>
+      <label class="pm-sky" for="pmSky" title="Replaces the sky dome with one of this mod's models in the game, and in the view with Game look (faces turned inward, with a texture)"><span>Sky dome</span><select id="pmSky"></select></label>
+      <label class="pm-sky pm-sky2" for="pmClouds" title="Replaces the layer of clouds with one of this mod's models, in the game and in the view with Game look (faces turned inward, with a texture, around the origin)"><span>Cloud layer</span><select id="pmClouds"></select></label>
       <button id="lightBtn" class="srow" type="button" title="Light and fog: the stage's fog, background color and three lights (RST/&lt;STAGE&gt;.MRS), written into your mod"><i class="ic" style="--ic:url(vendor/mdi/white-balance-sunny.svg)"></i><span class="st"><b>Light and fog</b><small>Fog, background and three lights</small></span><small class="how">File</small></button>
       <div class="sec-title">Pictures</div>
       <button id="texBtn" class="srow" type="button" title="Textures: replace any picture of this stage (buildings, ground, props, particles) with a PNG in your mod"><i class="ic" style="--ic:url(vendor/mdi/image-edit-outline.svg)"></i><span class="st"><b>Textures</b><small>Any picture of the stage, as a PNG</small></span><small class="how">Now</small></button>

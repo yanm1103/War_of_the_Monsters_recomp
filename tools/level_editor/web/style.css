@@ -474,7 +474,16 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 #pedBar { display: contents; }
 /* Add prop: the mod's models for this stage, under the tool bar's button */
 #propBar { display: contents; }
-#propMenu { top: calc(var(--vt, 36px) + 12px); left: 8px; z-index: 4; flex-direction: column; align-items: stretch; gap: 2px; padding: 8px; width: 280px; max-height: calc(100vh - 64px); overflow-y: auto; }
+/* the Add button: the top of the left panel; the menu floats over the page under it (the app moves it to the body) */
+#leftHead { display: flex; gap: 6px; }
+#leftHead > span { display: contents; }
+#leftHead #addProp { flex: 1; justify-content: flex-start; }
+#leftHead #addProp .chev { margin-left: auto; width: 16px; height: 16px; }
+#leftHead #addProp.on { background: var(--accent-press); border-color: var(--accent-press); }
+#leftHead #pedBar > button { flex: 1; }
+#leftHead #pedBar { display: flex; gap: 6px; flex: 1; }
+#propMenu { position: fixed; z-index: 30; flex-direction: column; align-items: stretch; gap: 2px; padding: 8px; width: 280px; overflow-y: auto; }
+#propMenu kbd { margin-left: auto; }
 #propMenu .sec-title { margin: 0 2px 4px; }
 .gd-pair { display: flex; gap: 8px; }
 .gd-pair input { flex: 1; min-width: 0; }
