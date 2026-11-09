@@ -13,6 +13,7 @@
 //    game/ShellFinished; as mesmas do RESET POSITIONS do treino, wotm_pausemenu.inc) e volta. O EvaluateGameStatus mostra o fundo
 //    de carga e zera o m_restart; o main recarrega a fase.
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <mutex>
 #include <sstream>
@@ -34,7 +35,9 @@ std::mutex &g_mu = *new std::mutex;
 std::string &g_fileStage = *new std::string;   // fase do ultimo pedido do arquivo (vazio: nenhum)
 // "Testar daqui" do editor: onde o jogador 1 nasce em vez de no ponto da fase (WOTM_SPAWN=x,y,z,heading na partida; no arquivo da
 // recarga "<FASE> <contador> x y z heading"; sem os quatro numeros, os pontos da fase). Heading em graus, 0 = +Y, anti-horario (o do .SPT).
-struct Spawn { bool on = false; float x = 0, y = 0, z = 0, heading = 0; };
+// Um quinto numero (ring, o raio) poe os outros monstros (jogadores 2 a 4 e IAs) numa roda de raio ring em volta do ponto, o primeiro
+// a frente, todos de frente para o jogador 1; 0 deixa cada um no seu ponto da fase.
+struct Spawn { bool on = false; float x = 0, y = 0, z = 0, heading = 0, ring = 0; };
 Spawn &g_spawn = *new Spawn;   // sob g_mu: a thread do arquivo grava, a do EE le
 unsigned g_fileLoads = 0;          // wotm_levelpatch::g_loads quando ele chegou
 int64_t g_fileMs = 0, g_keyMs = 0;   // quando cada pedido chegou (thread do EE)
@@ -173,9 +176,13 @@ void watch(std::filesystem::path file)
         {
             std::istringstream is(text);
             std::string s0, s1;
-            float v[4];
+            float v[5] = {0, 0, 0, 0, 0};
             is >> s0 >> s1;
-            if (is >> v[0] >> v[1] >> v[2] >> v[3]) sp = Spawn{true, v[0], v[1], v[2], v[3]};
+            if (is >> v[0] >> v[1] >> v[2] >> v[3])
+            {
+                is >> v[4];   // opcional (sem ele fica 0)
+                sp = Spawn{true, v[0], v[1], v[2], v[3], v[4] > 0.f ? v[4] : 0.f};
+            }
         }
         std::lock_guard<std::mutex> lk(g_mu);
         g_spawn = sp;
@@ -195,9 +202,25 @@ void placeAtSpawn(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32
         sp = g_spawn;
     }
     m &= PS2_RAM_MASK;
-    if (!sp.on || m < 0x1000u || (rd32(rdram, kGame + 0x120380) & PS2_RAM_MASK) != m) return;
+    if (!sp.on || m < 0x1000u) return;
+    int k = -1;   // indice em m_monsters: 0 a 3 os jogadores, 4 em diante as IAs
+    for (int i = 0; i < 16 && k < 0; ++i)
+        if ((rd32(rdram, kGame + 0x120380 + 4 * i) & PS2_RAM_MASK) == m) k = i;
+    if (k < 0 || (k > 0 && sp.ring <= 0.f)) return;
     const uint32_t cs = rd32(rdram, m + 0xC) & PS2_RAM_MASK;
     if (cs < 0x1000u) return;
+    if (k > 0)
+    {
+        // os outros numa roda em volta do jogador 1, o primeiro a frente dele, todos olhando para ele
+        const int players = int(rd32(rdram, kShell + 0x2BB4)), ais = int(rd32(rdram, kShell + 0x2BB8));
+        const int total = players - 1 + ais, t = k < 4 ? k - 1 : players - 1 + (k - 4);
+        if (t < 0 || t >= total) return;
+        const float a = (sp.heading + 360.f * float(t) / float(total)) * 0.017453292f;
+        const float x = sp.x + sp.ring * std::sin(a), y = sp.y + sp.ring * std::cos(a);
+        sp.heading = std::atan2(sp.x - x, sp.y - y) * 57.29578f;
+        sp.x = x;
+        sp.y = y;
+    }
     using wotm_coop::kVec;
     wotm_coop::wrF(rdram, kVec, sp.x);
     wotm_coop::wrF(rdram, kVec + 4, sp.y);
@@ -209,7 +232,8 @@ void placeAtSpawn(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32
     wotm_modes4::call(rdram, ctx, runtime, wotm::fn::setTrans__7MonsterR8_fvector, {m, kVec});
     wotm_coop::callF(rdram, ctx, runtime, wotm::fn::setRot__7Monsterfff, {m}, {sp.heading * 0.017453292f, 0.f, 0.f});
     wotm_modes4::call(rdram, ctx, runtime, wotm::fn::hdReparentCsGrid__FP3_cs, {cs});
-    std::fprintf(stderr, "[fase] largada pedida: jogador 1 em (%.0f, %.0f, %.0f), heading %.0f%s\n", sp.x, sp.y, z, sp.heading,
+    std::fprintf(stderr, "[fase] largada pedida: %s em (%.0f, %.0f, %.0f), heading %.0f%s\n",
+                 k == 0 ? "jogador 1" : k < 4 ? "jogador 2 a 4" : "IA", sp.x, sp.y, z, sp.heading,
                  d > 0.f && d < 2000.f ? "" : " (sem chao embaixo do ponto)");
 }
 } // namespace wotm_levelreload
@@ -221,16 +245,17 @@ void wotmLevelReloadInstall(PS2Runtime &runtime)
     {
         std::istringstream is(s);
         std::string tok;
-        float v[4];
+        float v[5] = {0, 0, 0, 0, 0};
         int n = 0;
-        while (n < 4 && std::getline(is, tok, ',')) v[n++] = float(std::atof(tok.c_str()));
-        if (n == 4)
+        while (n < 5 && std::getline(is, tok, ',')) v[n++] = float(std::atof(tok.c_str()));
+        if (n == 4 || n == 5)
         {
-            g_spawn = Spawn{true, v[0], v[1], v[2], v[3]};
-            std::fprintf(stderr, "[fase] largada do jogador 1 em (%.0f, %.0f, %.0f), heading %.0f (WOTM_SPAWN)\n", v[0], v[1], v[2], v[3]);
+            g_spawn = Spawn{true, v[0], v[1], v[2], v[3], v[4] > 0.f ? v[4] : 0.f};
+            std::fprintf(stderr, "[fase] largada do jogador 1 em (%.0f, %.0f, %.0f), heading %.0f%s (WOTM_SPAWN)\n", v[0], v[1], v[2], v[3],
+                         g_spawn.ring > 0.f ? ", os outros numa roda em volta" : "");
         }
         else
-            std::fprintf(stderr, "[fase] WOTM_SPAWN invalido (\"%s\"; use x,y,z,heading)\n", s);
+            std::fprintf(stderr, "[fase] WOTM_SPAWN invalido (\"%s\"; use x,y,z,heading[,raio])\n", s);
     }
     if (const char *e = std::getenv("WOTM_LEVELPATCH"); e && std::atoi(e) <= 0) return;
     if (!(g_origTime = runtime.lookupFunction(wotm::fn::rtTimeToReturnToShell__Fv)) || !(g_origDialog = runtime.lookupFunction(wotm::fn::displayDialog__Fi)))

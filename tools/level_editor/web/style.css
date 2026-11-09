@@ -765,6 +765,7 @@ button.small-btn { height: 22px; padding: 0 8px; font-size: 12px; flex: none; }
 #testDlg .to-row .to-lbl { color: var(--fg-2); margin: 0; }
 #testDlg .to-row select, #testDlg .to-row input[type=number] { min-width: 0; width: 100%; margin: 0; }
 #testDlg .to-row input[type=number] { width: 5em; }
+#testDlg .to-ring { display: flex; align-items: center; gap: 4px; margin-top: 8px; color: var(--fg-2); }
 #testDlg .to-here { margin-top: 12px; }
 #testDlg .dlg-foot { align-items: center; }
 

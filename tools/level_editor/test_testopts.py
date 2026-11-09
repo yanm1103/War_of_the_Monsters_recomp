@@ -69,7 +69,26 @@ def main():
         assert env == {"WOTM_MATCH": "cj:mine,2,@mycity"}, env
         # no CPUs in training: the dummy does not apply
         assert "WOTM_TRAINING_DUMMY" not in editor.test_env(cfg, "CENTRAL", True, {"monster": {"monster": "3"}, "cpus": [], "dummy": 2})
+        # players 2 to 4 come right after yours, then the CPUs; WOTM_PLAYERS counts them; elimination takes its continues
+        env = editor.test_env(cfg, "CENTRAL", False, {"monster": {"monster": "4"}, "players": [{"monster": "1"}, {"monster": "cj", "skin": "mine"}],
+                                                       "cpus": [{"monster": "2"}], "mode": "elimination", "continues": 5})
+        assert env == {"WOTM_MATCH": "4,1,cj:mine,2,1", "WOTM_PLAYERS": "3", "WOTM_MODE": "6:5"}, env
+        env = editor.test_env(cfg, "MYCITY", False, {"players": [{"monster": "2"}], "mode": "ffa"})
+        assert env == {"WOTM_MATCH": "3,2,@mycity", "WOTM_PLAYERS": "2"}, env
+        assert editor.test_env(cfg, "CENTRAL", False, {"players": [{"monster": "2"}], "mode": "elimination"})["WOTM_MODE"] == "6:2"   # the game's default
+        # 8 monsters in all: 4 players and 4 CPUs
+        env = editor.test_env(cfg, "CENTRAL", False, {"players": [{"monster": "1"}] * 3, "cpus": [{"monster": "2"}] * 4})
+        assert env["WOTM_MATCH"].count(",") == 8 and env["WOTM_PLAYERS"] == "4", env
+        # the start point with a ring for the others
+        assert editor.spawn_numbers([1, 2, 3, 90, 380]) == ["1.00", "2.00", "3.00", "90.00", "380.00"]
         # refused
+        for bad in ({"players": [{"monster": "1"}] * 4}, {"players": [{"monster": "6"}]}, {"players": "x"},
+                    {"players": [{"monster": "1"}] * 3, "cpus": [{"monster": "2"}] * 5}, {"cpus": [{"monster": "2"}] * 8},
+                    {"mode": "elimination"}, {"players": [{"monster": "1"}], "mode": "dodgeball"},
+                    {"players": [{"monster": "1"}], "mode": "elimination", "continues": 10},
+                    {"players": [{"monster": "1"}], "mode": "elimination", "continues": True},
+                    {"here": [1, 2, 3, 4, -1]}, {"here": [1, 2, 3, 4, 3001]}, {"here": [1, 2, 3, 4, 5, 6]}):
+            refused(editor.test_env, cfg, "CENTRAL", True, bad)
         for bad in ({"monster": {"monster": "6"}}, {"monster": {"monster": "12"}}, {"monster": {"monster": "nobody"}},
                     {"monster": {"monster": "3", "skin": "../x"}}, {"monster": {"monster": "3", "skin": "100"}},
                     {"cpus": [{"monster": "3"}] * 8}, {"cpus": ["3"]}, {"monster": {"monster": "3", "skin": "A;B"}},

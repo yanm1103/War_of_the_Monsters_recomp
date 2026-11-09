@@ -754,12 +754,18 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   `WOTM_MODS=<mods folder>`, windowed; with unsaved changes it asks **Save before testing?**, since the game loads the file, and
   offers to test without them; with the game already open it asks to reload the stage in it or to restart it). The **Test
   options** button (sliders) next to it chooses who plays: your monster and costume (the ten the game plays, and the custom
-  monsters and skins of every mod), 0 to 7 CPUs with theirs (only the custom monsters and skins marked `"ai": true`), training mode
-  and, in it, what the CPUs do (stand still, the game AI, always block, block after the first hit, jump); the choices stay in the
-  browser, and the server turns them into `WOTM_MATCH` (`<monster>[:<costume or skin>],<CPU>...,<stage>`), `WOTM_TRAINING`
-  and `WOTM_TRAINING_DUMMY`. **Test from here** (the pin, or in that dialog) starts you where the middle of the view meets the stage,
-  facing where the view looks (`WOTM_SPAWN`; a respawn goes there too); with the game already open, it asks to reload or restart, and a reload carries the
-  start point in the reload file, while a plain **Reload in game** goes back to the stage's own points. Only a restart applies a changed monster or CPUs. Next to these buttons, the game's state:
+  monsters and skins of every mod), 1 to 4 players (players 2 to 4 with their own monster and costume; each needs a controller, and
+  with none they stand still), the mode with 2 players or more (free for all, or elimination with 0 to 9 continues; the minigames
+  play in their own arenas, so they are not offered), 0 to 7 CPUs with theirs (only the custom monsters and skins marked
+  `"ai": true`; players and CPUs together are up to 8), training mode and, in it, what the CPUs do (stand still, the game AI, always
+  block, block after the first hit, jump); the choices stay in the browser, and the server turns them into `WOTM_MATCH`
+  (`<monster>[:<costume or skin>],<player 2..4>...,<CPU>...,<stage>`), `WOTM_PLAYERS`, `WOTM_MODE` (`6:<continues>`),
+  `WOTM_TRAINING` and `WOTM_TRAINING_DUMMY`. **Test from here** (the pin, or in that dialog) starts you where the middle of the view
+  meets the stage, facing where the view looks (`WOTM_SPAWN`; a respawn goes there too); "put the others around me" (on by
+  default, when there are other players or CPUs) starts them on a ring around you (radius 300 plus 40 per other monster), the
+  first one in front of you, all facing you, each dropped to the ground under its spot. With the game already open, it asks to
+  reload or restart, and a reload carries the start point (and the ring) in the reload file, while a plain **Reload in game** goes
+  back to the stage's own points. Only a restart applies a changed monster, player or CPU. Next to these buttons, the game's state:
   starting, then "Game running" and its stage. **Reload in game** (on while a game opened by Test runs; "Save & reload" with
   unsaved changes) saves and has that game load the stage again, as **F10** does there; with the game on another stage it offers a
   restart on this one. **Stop** (the square, while the game runs) closes the game the editor opened. In a window narrower than

@@ -1396,6 +1396,8 @@ TEST_MONSTERS = ((1, "Congar", "congar", "monkey"), (2, "Robo-47", "robo-47", "r
                  (8, "Magmo", "magmo", "lava"), (9, "Raptros", "raptros", "dragon"), (10, "Agamo", "agamo", "rock"),
                  (11, "Zorgulon", "zorgulon", "alien"))
 TEST_MAX_CPUS = 7
+TEST_MAX_MONSTERS = 8       # players and CPUs together (the game's limit)
+TEST_MODES = {"ffa": None, "elimination": 6}   # the modes a test of one stage can use: the minigames play in their own arenas
 TEST_ID = re.compile(r"^[a-z0-9_]{1,24}$")
 
 
@@ -1444,19 +1446,40 @@ def match_token(sel, what, customs):
 
 
 def test_env(cfg, name, training, opts):
-    """The environment variables the Test options make (WOTM_MATCH, WOTM_TRAINING, WOTM_TRAINING_DUMMY, WOTM_SPAWN). opts (all optional):
-    {"monster": sel, "cpus": [sel...] (up to 7), "dummy": 0..4 (the CPUs in training), "here": [x, y, z, heading] (where player 1
-    starts)}; none: Togera alone, as before."""
+    """The environment variables the Test options make (WOTM_MATCH, WOTM_PLAYERS, WOTM_MODE, WOTM_TRAINING, WOTM_TRAINING_DUMMY,
+    WOTM_SPAWN). opts (all optional): {"monster": sel (player 1), "players": [sel...] (players 2 to 4), "mode": "ffa" | "elimination"
+    (with 2 or more players), "continues": 0..9 (elimination), "cpus": [sel...] (players and CPUs up to 8), "dummy": 0..4 (the CPUs in
+    training), "here": [x, y, z, heading] or [x, y, z, heading, radius] (where player 1 starts; the radius puts the others on a ring
+    around it)}; none: Togera alone, as before."""
     opts = opts if isinstance(opts, dict) else {}
-    customs = {c["id"] for c in test_options(cfg)["customs"]} if (opts.get("monster") or opts.get("cpus")) else set()
+    others = opts.get("players") or []
     cpus = opts.get("cpus") or []
+    customs = {c["id"] for c in test_options(cfg)["customs"]} if (opts.get("monster") or others or cpus) else set()
+    if not isinstance(others, list) or len(others) > 3:
+        raise ValueError("A test has up to 4 players.")
     if not isinstance(cpus, list) or len(cpus) > TEST_MAX_CPUS:
         raise ValueError("A test has up to %d CPUs." % TEST_MAX_CPUS)
+    if 1 + len(others) + len(cpus) > TEST_MAX_MONSTERS:
+        raise ValueError("The game holds %d monsters: %d players leave room for %d CPUs." % (
+            TEST_MAX_MONSTERS, 1 + len(others), TEST_MAX_MONSTERS - 1 - len(others)))
+    mode = opts.get("mode") or "ffa"
+    if mode not in TEST_MODES:
+        raise ValueError("The mode is free for all or elimination.")
+    if TEST_MODES[mode] and not others:
+        raise ValueError("Elimination needs two players or more.")
     toks = [match_token(opts.get("monster") or {"monster": "3"}, "Your monster", customs)]
+    toks += [match_token(c, "Player %d" % (k + 2), customs) for k, c in enumerate(others)]
     toks += [match_token(c, "CPU %d" % (k + 1), customs) for k, c in enumerate(cpus)]
     custom = custom_stages(cfg).get(name.upper())
     toks.append("@" + custom["id"] if custom else str(LEVEL_NUM.get(name, 1)))
     env = {"WOTM_MATCH": ",".join(toks)}
+    if others:
+        env["WOTM_PLAYERS"] = str(1 + len(others))
+    if TEST_MODES[mode]:
+        continues = opts.get("continues", 2)
+        if not isinstance(continues, int) or isinstance(continues, bool) or not 0 <= continues <= 9:
+            raise ValueError("The continues are 0 to 9.")
+        env["WOTM_MODE"] = "%d:%d" % (TEST_MODES[mode], continues)
     if training:
         env["WOTM_TRAINING"] = "1"
         dummy = opts.get("dummy")
@@ -1471,10 +1494,13 @@ def test_env(cfg, name, training, opts):
 
 
 def spawn_numbers(here):
-    """["x", "y", "z", "heading"] for a start point [x, y, z, heading] (finite numbers), as the game's WOTM_SPAWN and the reload file take them."""
-    if not (isinstance(here, (list, tuple)) and len(here) == 4 and all(
+    """["x", "y", "z", "heading"] (and "radius") for a start point [x, y, z, heading] (and a radius from 0 to 3000: the ring the other
+    monsters start on; 0 or none leaves them on the stage's points), finite numbers, as the game's WOTM_SPAWN and the reload file take them."""
+    if not (isinstance(here, (list, tuple)) and len(here) in (4, 5) and all(
             isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in here)):
         raise ValueError("The start point is x, y, z and a heading.")
+    if len(here) == 5 and not 0 <= here[4] <= 3000:
+        raise ValueError("The ring around the start point is 0 to 3000 units.")
     return ["%.2f" % v for v in here]
 
 
@@ -1484,7 +1510,7 @@ def launch_game(cfg, name, training, opts=None):
     extra = test_env(cfg, name, training, opts)       # before anything starts: a bad option is refused first
     env = dict(os.environ)
     os.makedirs(CACHE, exist_ok=True)
-    for k in ("WOTM_TRAINING", "WOTM_TRAINING_DUMMY", "WOTM_SPAWN"):
+    for k in ("WOTM_TRAINING", "WOTM_TRAINING_DUMMY", "WOTM_SPAWN", "WOTM_PLAYERS", "WOTM_MODE"):
         env.pop(k, None)        # the editor's own shell may have them: the options decide
     env.update({"WOTM_MODS": os.path.abspath(cfg["mods"]), "WOTM_FULLSCREEN": "0", "WOTM_LEVELPATCH": "1", "WOTM_LEVELRELOAD": RELOAD_FILE})
     env.update(extra)
