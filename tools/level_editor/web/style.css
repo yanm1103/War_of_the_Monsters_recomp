@@ -218,7 +218,7 @@ kbd { font: 600 11px/1 var(--font-mono); padding: 2px 5px; border: 1px solid var
 }
 
 /* ------------------------------------------------------------------ panels */
-main { display: grid; grid-template-columns: 44px 272px minmax(0, 1fr) var(--right-w, 304px); min-height: 0; position: relative; }
+main { display: grid; grid-template-columns: 44px var(--left-w, 272px) minmax(0, 1fr) var(--right-w, 304px); min-height: 0; position: relative; }
 aside { background: var(--surface-1); padding: 12px; overflow: auto; min-height: 0; }
 #left { border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
 #right { border-left: 1px solid var(--line); overflow-x: hidden; }
@@ -889,3 +889,9 @@ dialog.dock .spt-row.net > :nth-child(2) { grid-column: 2 / 5; }
   .tgl:has(> input:checked), .chip:has(input:checked), .rtab.on, #rail > button.on, button.toggle.on, .seg > button.on { outline: 2px solid Highlight; outline-offset: -2px; }
   .switch input:checked + .track { outline: 2px solid Highlight; }
 }
+
+/* a side panel that is hidden keeps its column at 0 (display none would let the grid shift the others) */
+main.left-off #left, main.right-off #right { visibility: hidden; padding: 0; border: 0; overflow: hidden; }
+#toggleLeft { margin-top: auto; }
+#bar #toggleRight.on { color: var(--accent-text); }
+#toggleLeft[aria-pressed="false"] { color: var(--muted); }

@@ -1448,7 +1448,7 @@ $('rtabs').addEventListener('keydown', (e) => {
   $(to === 'stage' ? 'tabStage' : 'tabSel').focus();
 });
 function showSel() {
-  if (sel || pedSel) showRightTab('selection');
+  if (sel || pedSel) { showRightTab('selection'); if (rightOff) setRightOff(false); }     // what is selected is shown
   gizmo.detach();
   if (sel) pedSel = null;
   peds.highlight(pedSel);
@@ -4883,58 +4883,64 @@ function askDraft(dlg) {
 }
 for (const id of Object.keys(draftGuard)) $(id).addEventListener('cancel', (e) => { if (draftGuard[id].dirty()) { e.preventDefault(); askDraft($(id)); } });
 
-// ---- the right panel's width, and the tool panels (docks) that fill its place. A dock is a non-modal dialog: the view, the camera and
-// the objects stay in use while it is open (Aim takes the point the camera looks at now). It takes the right panel's width, widened to
-// DOCK_MIN while it is open and put back after, unless the user dragged the edge meanwhile.
-const RIGHT_DEFAULT = 304, RIGHT_MIN = 280, DOCK_MIN = 440;
+// ---- the two side panels: the right one's width is the user's (drag its edge, the arrows on it, double click puts it back), both can be
+// hidden (the rail's and the top bar's buttons), and the tool panels (docks) fill the right one's place. A dock is a non-modal dialog: the
+// view, the camera and the objects stay in use while it is open (Aim takes the point the camera looks at now). While one is open the
+// right panel is at least DOCK_MIN wide, shown even when hidden; the user's width and choice come back when it closes.
+const RIGHT_DEFAULT = 304, RIGHT_MIN = 280, DOCK_MIN = 440, LEFT_W = 272;
 const rightMax = () => Math.max(RIGHT_MIN, Math.min(720, Math.floor(innerWidth * 0.5)));
-let rightW = Math.round(+store.get('rightW', RIGHT_DEFAULT)) || RIGHT_DEFAULT, dockRestore;    // dockRestore: undefined none, null: the user chose
+const clampRight = (w) => Math.max(RIGHT_MIN, Math.min(rightMax(), Math.round(w) || RIGHT_DEFAULT));
+let rightW = clampRight(+store.get('rightW', RIGHT_DEFAULT));
+let rightOff = store.get('rightOff', '0') === '1';
+let leftOff = store.get('leftOff', innerWidth < 1100 ? '1' : '0') === '1';     // a small window starts with the list hidden
 function syncDockBox() {
   const r = $('right').getBoundingClientRect(), s = document.documentElement.style;
   s.setProperty('--dock-top', `${Math.round(r.top)}px`);
   s.setProperty('--dock-w', `${Math.round(r.width)}px`);
   s.setProperty('--dock-h', `${Math.round(r.height)}px`);
 }
-function applyRightW(w, keep = true) {
-  const v = Math.max(RIGHT_MIN, Math.min(rightMax(), Math.round(w)));
-  if (keep) { rightW = v; store.set('rightW', String(v)); }
-  document.documentElement.style.setProperty('--right-w', `${v}px`);
+function paintPanels() {
+  const dock = !!document.querySelector('dialog.dock[open]');
+  const right = dock ? Math.min(Math.max(rightW, DOCK_MIN), Math.max(RIGHT_MIN, innerWidth - 120)) : rightOff ? 0 : rightW;
+  const s = document.documentElement.style, main = document.querySelector('main');
+  s.setProperty('--right-w', `${right}px`);
+  s.setProperty('--left-w', `${leftOff ? 0 : LEFT_W}px`);
+  main.classList.toggle('left-off', leftOff);
+  main.classList.toggle('right-off', right === 0);
+  $('rightGrip').hidden = right === 0;
+  for (const [id, off] of [['toggleLeft', leftOff], ['toggleRight', right === 0]]) {
+    if (id === 'toggleRight') $(id).classList.toggle('on', !off);
+    $(id).setAttribute('aria-pressed', String(!off));
+  }
   syncDockBox();
 }
-function syncDockOpen() {
-  const any = !!document.querySelector('dialog.dock[open]');
-  if (any && dockRestore === undefined) { dockRestore = rightW; if (rightW < DOCK_MIN) applyRightW(DOCK_MIN, false); }
-  else if (!any && dockRestore !== undefined) { if (dockRestore !== null) applyRightW(dockRestore, false); dockRestore = undefined; }
-}
-new MutationObserver(syncDockOpen).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['open'] });
+const setRightW = (w) => { rightW = clampRight(w); store.set('rightW', String(rightW)); paintPanels(); };
+const setRightOff = (off) => { rightOff = off; store.set('rightOff', off ? '1' : '0'); paintPanels(); };
+const setLeftOff = (off) => { leftOff = off; store.set('leftOff', off ? '1' : '0'); paintPanels(); };
+$('toggleLeft').onclick = () => setLeftOff(!leftOff);
+$('toggleRight').onclick = () => { if (document.querySelector('dialog.dock[open]')) return; setRightOff(!rightOff); };
+new MutationObserver(paintPanels).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['open'] });
 new ResizeObserver(syncDockBox).observe($('right'));
-window.addEventListener('resize', () => applyRightW(dockRestore === undefined ? rightW : Math.max(rightW, DOCK_MIN), false));
+window.addEventListener('resize', paintPanels);
 {
   const grip = $('rightGrip');
-  const now = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--right-w')) || rightW;
   grip.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     grip.setPointerCapture(e.pointerId);
     grip.classList.add('drag');
   });
-  grip.addEventListener('pointermove', (e) => { if (grip.classList.contains('drag')) { applyRightW(innerWidth - e.clientX, false); } });
-  const end = () => {
-    if (!grip.classList.contains('drag')) return;
-    grip.classList.remove('drag');
-    rightW = Math.round(now()); store.set('rightW', String(rightW));
-    if (dockRestore !== undefined) dockRestore = null;     // the width is the user's now: it stays when the tool closes
-  };
+  grip.addEventListener('pointermove', (e) => { if (grip.classList.contains('drag')) { rightW = clampRight(innerWidth - e.clientX); paintPanels(); } });
+  const end = () => { if (grip.classList.contains('drag')) { grip.classList.remove('drag'); store.set('rightW', String(rightW)); } };
   grip.addEventListener('pointerup', end);
   grip.addEventListener('pointercancel', end);
-  grip.addEventListener('dblclick', () => { applyRightW(RIGHT_DEFAULT); if (dockRestore !== undefined) dockRestore = null; });
+  grip.addEventListener('dblclick', () => setRightW(RIGHT_DEFAULT));
   grip.addEventListener('keydown', (e) => {
     const step = e.shiftKey ? 64 : 16;
-    if (e.key === 'ArrowLeft') applyRightW(now() + step); else if (e.key === 'ArrowRight') applyRightW(now() - step);
-    else if (e.key === 'Home') applyRightW(RIGHT_DEFAULT); else return;
-    if (dockRestore !== undefined) dockRestore = null;
+    if (e.key === 'ArrowLeft') setRightW(rightW + step); else if (e.key === 'ArrowRight') setRightW(rightW - step);
+    else if (e.key === 'Home') setRightW(RIGHT_DEFAULT); else return;
     e.preventDefault();
   });
-  applyRightW(rightW, false);
+  paintPanels();
 }
 // Esc, and the close button, on a dock: an unsaved draft is asked about first
 function requestDockClose(dlg, then) {

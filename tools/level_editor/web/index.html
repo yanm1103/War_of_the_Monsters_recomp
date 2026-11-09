@@ -36,6 +36,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
   <button id="reload" disabled hidden aria-label="Reload in game"><i class="ic" style="--ic:url(vendor/mdi/refresh.svg)"></i><span class="lbl">Reload in game</span></button>
   <button id="stop" class="icon" title="Close the game the editor opened" aria-label="Stop game" hidden><i class="ic" style="--ic:url(vendor/mdi/stop.svg)"></i></button>
   <span class="sep"></span>
+  <button id="toggleRight" class="icon ghost on" aria-pressed="true" title="Show or hide the right panel (the selection and the stage)" aria-label="Show or hide the right panel"><i class="ic" style="--ic:url(vendor/mdi/page-layout-sidebar-right.svg)"></i></button>
   <button id="help" class="icon ghost" title="Keyboard shortcuts (? or F1)" aria-label="Keyboard shortcuts"><i class="ic" style="--ic:url(vendor/mdi/help-circle-outline.svg)"></i></button>
   <button id="settings" class="icon ghost" title="Settings" aria-label="Settings"><i class="ic" style="--ic:url(vendor/mdi/cog-outline.svg)"></i></button>
 </header>
@@ -54,6 +55,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
   <nav id="rail" aria-label="Modes">
     <button id="modeObjects" class="mode on" title="Objects: move, turn, copy and delete the stage's buildings, pickups and props (1)" aria-label="Objects"><i class="ic" style="--ic:url(vendor/mdi/cube-outline.svg)"></i></button>
     <button id="modePeds" class="mode" title="Pedestrians: the groups of people and the sidewalks they walk (2)" aria-label="Pedestrians"><i class="ic" style="--ic:url(vendor/mdi/walk.svg)"></i></button>
+    <button id="toggleLeft" aria-pressed="true" title="Show or hide the list of objects" aria-label="Show or hide the list"><i class="ic" style="--ic:url(vendor/mdi/page-layout-sidebar-left.svg)"></i></button>
   </nav>
   <aside id="left">
     <!-- what the mode adds: the Objects mode, a prop (a model of the mod, a prefab, a .glb from Blender) or a find in every model of the game;

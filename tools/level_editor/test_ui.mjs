@@ -405,6 +405,27 @@ await check('Enter in a field of New stage takes its main button (a bad id answe
   await esc();
   must(await until(`!document.getElementById('stageDlg').open`, 20), 'Esc did not close New stage');
 });
+await check('the side panels hide and come back: the view takes their place, a selection or a tool brings the right one back', async () => {
+  const W = (id) => ev(`Math.round(document.getElementById(${JSON.stringify(id)}).getBoundingClientRect().width)`);
+  const view0 = await W('view'), left0 = await W('left'), right0 = await W('right');
+  await ev(`document.getElementById('toggleRight').click()`);
+  must(await until(`Math.round(document.getElementById('right').getBoundingClientRect().width) === 0`, 20), 'the right panel did not hide: ' + await W('right'));
+  must(await W('view') >= view0 + right0 - 2, 'the view did not take the right panel\'s place');
+  must(await ev(`document.getElementById('toggleRight').getAttribute('aria-pressed')`) === 'false', 'the button does not say it is hidden');
+  await ev(`document.getElementById('sptBtn').click()`);                      // a tool needs the panel: it shows while the tool is open
+  must(await until(`document.getElementById('sptDlg').open && document.getElementById('right').getBoundingClientRect().width >= 439`, 40), 'the tool did not bring the panel');
+  await esc();
+  must(await until(`!document.getElementById('sptDlg').open && Math.round(document.getElementById('right').getBoundingClientRect().width) === 0`, 40), 'the panel did not hide again after the tool');
+  await ev(`window.wotmDebug.select(window.wotmDebug.items().find((x) => !x.copy))`);       // a selection brings it back
+  must(await until(`document.getElementById('right').getBoundingClientRect().width >= 200`, 20), 'a selection did not bring the right panel back');
+  await ev('window.wotmDebug.select(null)');
+  await ev(`document.getElementById('toggleLeft').click()`);
+  must(await until(`Math.round(document.getElementById('left').getBoundingClientRect().width) === 0`, 20), 'the left panel did not hide');
+  await shot('left_hidden');
+  await ev(`document.getElementById('toggleLeft').click()`);
+  must(await until(`Math.round(document.getElementById('left').getBoundingClientRect().width) === ${left0}`, 20), 'the left panel did not come back');
+  must(await until(`Math.round(document.getElementById('view').getBoundingClientRect().width) === ${view0}`, 20), 'the view is not as wide as before: ' + await W('view') + ' vs ' + view0);
+});
 await check('top bar: File menu holds the stage and mod commands; Test has a chevron for Test from here and Test options', async () => {
   must(await ev(`!document.getElementById('bar').querySelector('#newStage, #editStage, #packMod, #check, #testHere, #testOpts')`), 'a command is still loose on the bar');
   await ev(`document.getElementById('fileBtn').click()`);
