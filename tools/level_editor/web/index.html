@@ -114,6 +114,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <label class="pm-sky" for="pmSky" title="Replaces the sky dome with one of this mod's models in the game, and in the view with Game look (faces turned inward, with a texture)"><span>Sky dome</span><select id="pmSky"></select></label>
       <label class="pm-sky pm-sky2" for="pmClouds" title="Replaces the layer of clouds with one of this mod's models, in the game and in the view with Game look (faces turned inward, with a texture, around the origin)"><span>Cloud layer</span><select id="pmClouds"></select></label>
       <button id="pmImport" type="button" class="ghost wide"><i class="ic" style="--ic:url(vendor/mdi/tray-arrow-up.svg)"></i><span class="lbl">Import .glb…</span></button>
+      <button id="pmTerrain" type="button" class="ghost wide" title="Hills and ramps from a picture of heights (a PNG)"><i class="ic" style="--ic:url(vendor/mdi/terrain.svg)"></i><span class="lbl">Terrain from a heightmap…</span></button>
     </div>
     <!-- the view: game look, grid, layers; fly or orbit; focus, frame all; the shortcuts -->
     <div id="overlay" class="float" role="toolbar" aria-label="View">

@@ -499,6 +499,15 @@ dialog.pal { width: min(96vw, 2400px); max-width: none; }
 #propMenu .lbl { display: inline !important; }
 /* the Import a prop dialog */
 #propDlg { width: 460px; }
+/* New terrain */
+#terrainDlg { width: 480px; }
+#terrainDlg .tr-file { display: flex; align-items: center; gap: 10px; margin: 4px 0 8px; }
+#terrainDlg .tr-file .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#terrainDlg .tr-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: var(--r-sm); border: 1px solid var(--line-strong); image-rendering: pixelated; flex: none; }
+#terrainDlg .tr-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+#terrainDlg .tr-grid .fl { margin-top: 0; }
+#terrainDlg .tr-grid input[type=number] { width: 100%; }
+#terrainDlg .tr-info { margin: 6px 0; }
 .ip-file { display: flex; align-items: center; gap: 10px; margin: 4px 0 10px; }
 .ip-file #ipFile { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* notes over the view's upper left (under the tool bar): the mod that wins in the game, what the file keeps */

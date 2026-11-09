@@ -66,6 +66,7 @@
     dir> [--at ADDR]` relocates a prop (default the level arena, 0x3700000) and reads every node, packet and fixup back;
     `load_prop(folder)` returns the `Prop` (`ngp`, `ptr`, `root`, `textures`, `bounds`, `relocate(at)`, `resolve(at, ctx_of)`) the
     level patch uses, and `stage_ctx` the context a texId takes. `modkit.py level prop <mod> <in.glb> --stage <STAGE> [--name N]` builds the prop into `mods/<mod>/props/<NAME>/` (extracted disc folder). Standard library only.
+  - `lvlterrain.py <heights.png> <out.glb> --size X Y --height H [--cells N] [--colors colors.png] [--brightness P]`: a PNG of heights as a `.glb` for `lvlprop.py build` (units blender, no scale): a grid of at most 90 cells along the longer side, white = H, as the drawn mesh (vertex colors from a ramp or the colors PNG, shaded by the slope, 0.6 under) and the same triangles as a `coll_terrain` mesh; `terrain_glb(data, size_x, size_y, height, cells, colors, brightness)` returns (glb, info). The editor's New terrain dialog calls it (`MODS.md`).
   - `ngp.decode_mesh`: port of the native `decodeObject` (texture per section, ADC like the GS, sprites), used by `gltf.py`.
 - `.sh` scripts must be created by heredoc in bash; writing with Python on Windows leaves CRLF and the WSL `sh` breaks (`sed -i 's/\r$//'` fixes it).
 - The per-function state lives in `config/status.csv` (`python3 tools/progress.py`, ~12 s via WSL, needs `disc/`); the README has no progress block.

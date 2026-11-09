@@ -47,6 +47,7 @@ import modkit   # noqa: E402 - the disc as a folder or a .iso (disc_iso, disc_ca
 import hudapi   # noqa: E402 - the HUD panel (web/hud.js)
 import pedsapi  # noqa: E402 - the pedestrians (web/peds.js)
 import lvlprop  # noqa: E402 - new props from Blender (Import .glb)
+import lvlterrain  # noqa: E402 - a prop from a heightmap (New terrain)
 import lvlorig  # noqa: E402 - an original object of another stage as a prop (Ctrl+P)
 
 WEB = os.path.join(HERE, "web")
@@ -950,6 +951,51 @@ def floor_prop(cfg, b):
     return out
 
 
+def terrain_prop(cfg, b):
+    """New terrain: a PNG of heights (b["heights"], base64) becomes the prop b["name"] of the mod (lvlterrain.terrain_glb: a drawn mesh and
+    the same triangles as a coll_ mesh), b["size"] = [X, Y] units, b["height"] units for white, b["cells"] along the longer side, an
+    optional b["colors"] PNG, b["brightness"] in percent. The PNGs and the numbers stay in the prop's folder (heightmap.png, colors.png, terrain.json). Returns
+    import_prop's reply and "terrain" (the numbers)."""
+    try:
+        size = [float(v) for v in b.get("size")]
+        height, cells = float(b.get("height")), int(b.get("cells") or 64)
+        bright = float(b.get("brightness") or lvlterrain.DEFAULT_BRIGHTNESS)
+        assert len(size) == 2
+    except (TypeError, ValueError, AssertionError):
+        raise ValueError("The terrain needs its size (two numbers), its height and its resolution")
+    try:
+        hm = base64.b64decode(b.get("heights") or "")
+        cm = base64.b64decode(b["colors"]) if b.get("colors") else None
+    except ValueError:
+        raise ValueError("The heightmap did not arrive intact")
+    if not hm:
+        raise ValueError("Choose a heightmap (a PNG) first")
+    try:
+        glb, info = lvlterrain.terrain_glb(hm, size[0], size[1], height, cells, cm, bright)
+    except lvlterrain.TerrainError as e:
+        raise ValueError(str(e))
+    body = {"mod": b.get("mod"), "stage": b.get("stage"), "name": b.get("name"), "replace": bool(b.get("replace")),
+            "title": (b.get("title") or "").strip() or "Terrain", "units": "blender", "light": "auto",
+            "data": base64.b64encode(glb).decode()}
+    out = import_prop(cfg, body)
+    if out.get("exists"):
+        return out
+    pd = props_dir(cfg, body["mod"])
+    folder = lvl._child_nocase(pd, body["name"].strip().upper()) or os.path.join(pd, body["name"].strip().upper())
+    for fname, data in (("heightmap.png", hm), ("colors.png", cm)):
+        path = os.path.join(folder, fname)
+        if data:
+            with open(path, "wb") as f:
+                f.write(data)
+        elif os.path.isfile(path):
+            os.remove(path)
+    with open(os.path.join(folder, "terrain.json"), "w", encoding="utf-8") as f:
+        json.dump({"size": info["size"], "height": info["height"], "cells": info["cells"], "triangles": info["triangles"],
+                   "brightness": info["brightness"], "colors": bool(cm)}, f, indent=1)
+    out["terrain"] = info
+    return out
+
+
 ORIGINALS = {"lock": threading.Lock(), "key": None, "items": [], "done": 0, "total": 0}
 
 
@@ -1577,6 +1623,11 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/api/props/floor":    # a floor prop over the grid's rectangle
                 try:
                     return self.send(200, floor_prop(cfg, b))
+                except (ValueError, lvlprop.PropError, lvlprop.ngpmesh.MeshError, lvlprop.vifpkt.FormatError) as e:
+                    return self.send(400, {"error": str(e), "code": "prop"})
+            if self.path == "/api/props/terrain":  # a prop from a heightmap
+                try:
+                    return self.send(200, terrain_prop(cfg, b))
                 except (ValueError, lvlprop.PropError, lvlprop.ngpmesh.MeshError, lvlprop.vifpkt.FormatError) as e:
                     return self.send(400, {"error": str(e), "code": "prop"})
             if self.path == "/api/props/edit":     # a model's name in the list or its height (built again from its .glb)

@@ -939,7 +939,18 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   from its `.glb` (`source.glb`, or the `source` of `prop.json`) at that many game units, scaled about its origin with the same
   units and light; both change the model, so every entry of it takes them, and neither is undoable. A destructible model also has **Strength** (its hit point class; only `prop.json` changes, so it is not a rebuild). It sits in the list's **New props** section,
   and Check names the one the game would skip. Switching to a mod without its model keeps the entry in the file (the editor says
-  how many), where the game skips it. The same menu ends with **Sky dome** and **Cloud layer**: the stage's own, or one of the mod's
+  how many), where the game skips it. **Terrain from a heightmap…** (the same menu) turns a PNG of heights into a prop with
+  hills and ramps (`tools/lvlterrain.py`, which makes the `.glb`; the build is `lvlprop.py`'s): **Name**, **Width** and **Depth**
+  (game units; they start as the stage's rectangle when the patch has a `grid`), **Height** (what white is; black is the stage's
+  floor level, the picture's top is +Y; a gray PNG is exact, any color counts as its brightness, 8 or 16 bits), **Detail** (cells
+  along the longer side, at most 90: 16200 triangles, under the collision's 16384) and **Brightness** (percent, default 80; the
+  colors are a ramp from grass through earth to rock by height, shaded by the slope against a fixed sun, baked in the vertex colors
+  because the stages' own light is). An optional colors PNG laid over the same rectangle replaces the ramp. The mesh comes twice,
+  as the drawn model (0.6 units under the floor line so flat places do not fight with the stage's floor) and as a `coll_terrain`
+  mesh with the same triangles, which the monsters walk on. The PNGs and the numbers stay in the prop's folder (`heightmap.png`,
+  `colors.png`, `terrain.json`), and a name the mod already has asks before replacing. The new prop is placed at the middle of the
+  grid's rectangle, else where the view looks. `python tools/lvlterrain.py <heights.png> <out.glb> --size X Y --height H [--cells N]
+  [--colors colors.png] [--brightness P]` writes the `.glb` alone. The same menu ends with **Sky dome** and **Cloud layer**: the stage's own, or one of the mod's
   models for this stage (the `sky` entries of `props`, above; undoable, counted by Check as a replaced dome or cloud layer, and
   refused there for a stage with no such part); with Game look (**L**) the view draws the model in the place of the stage's own
   part (the scene tells them apart: the meshes under a `CHAR_INSTANCE` are the layer), both faces of it. The view draws the layer

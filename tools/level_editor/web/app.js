@@ -10,6 +10,7 @@ import { openHud, hudGameChanged } from './hud.js';
 import { openTex, texGameChanged } from './tex.js';
 import { openLight, lightGameChanged, lightLookChanged, lightClose } from './light.js';
 import { initArrange } from './arrange.js';
+import { openTerrain } from './terrain.js';
 
 // The GS modulates and blends the bytes as they are: no color management (texture, vertex and interface colors stay raw).
 THREE.ColorManagement.enabled = false;
@@ -681,12 +682,12 @@ function newPropId() {
   }
   return 'prop' + (n + 1);
 }
-function addProp(model) {
+function addProp(model, at = null) {   // at: where it goes (else where the view looks)
   if (!propModels.get(model)?.scene) return;
   showPropMenu(false);
   if (editMode !== 'objects') enterMode('objects');
   snapshot('add prop ' + model);
-  const p = viewPoint(), it = makeProp({ id: newPropId(), model, pos: p });
+  const p = at || viewPoint(), it = makeProp({ id: newPropId(), model, pos: p });
   msg(`Added ${nameOf(it)} (${model})`, { level: 'ok', toast: ['Undo', undo] });
   select(it);
 }
@@ -3886,6 +3887,29 @@ async function doImport(replace = false) {
   if (!res.replaced && !m.error) addProp(m.model || name);
 }
 $('ipOk').onclick = () => doImport(false);
+// New terrain (web/terrain.js): a prop built from a heightmap, placed at the middle of the stage's rectangle (the grid's, else where the view looks)
+async function openTerrainDlg() {
+  showPropMenu(false);
+  if (!stageName) return;
+  if (!modNow) {
+    const m = await pickMod('save', 'Choose');
+    if (!m) return;
+    moveTo(m, false);
+  }
+  const g = gridNow();
+  openTerrain({ stage: stageName, title: title(stageName), mod: modNow, api, ask, msg,
+                size: () => (g ? [g.max[0] - g.min[0] - 100, g.max[1] - g.min[1] - 100] : [2000, 2000]),
+                done: async (res, replaced) => {
+                  const p = JSON.stringify(buildPatch());
+                  await loadPropModels(modNow);
+                  restoreTo(p);
+                  const m2 = res.prop || {};
+                  msg(`${replaced ? 'Replaced' : 'Built'} ${m2.model}: ${res.terrain.cells[0]} × ${res.terrain.cells[1]} cells, ${m2.triangles} triangles` + (m2.error ? `, but ${m2.error}` : ''),
+                      { level: m2.error ? 'warn' : 'ok' });
+                  if (!replaced && !m2.error) addProp(m2.model, g ? [(g.min[0] + g.max[0]) / 2, (g.min[1] + g.max[1]) / 2, 0] : null);
+                } });
+}
+$('pmTerrain').onclick = openTerrainDlg;
 $('ipName').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); doImport(false); } };
 // the Fight HUD dialog (web/hud.js): it writes into the mod at once; its messages show as toasts over it
 function openHudDialog() {
@@ -4164,7 +4188,7 @@ if (new URLSearchParams(location.search).has('debug')) {
                        refreshPedList, setPedLive, slideInput, slideDone, showPed, pedOfEntry, openHudDialog, chooseMod,
                        get pedsLayer() { return pedsOn; },
                        ask, askUnsaved, unsavedCount, switchMod, setMod, moveTo, fillMods, pickMod, openSettings, checkPaths, showPaths,
-                       showWinner, winnerOf, checkFromServer, init, addProp, showPropMenu, openImport, doImport, ipRead, loadPropModels,
+                       showWinner, winnerOf, checkFromServer, init, addProp, showPropMenu, openImport, doImport, ipRead, loadPropModels, openTerrainDlg,
                        get propRecs() { return propRecs; }, get propModels() { return propModels; },
                        get stageHave() { return stageHave; }, set stageHave(v) { stageHave = v; },
                        get modList() { return modList; }, set modList(v) { modList = v; }, get savedJson() { return savedJson; },
