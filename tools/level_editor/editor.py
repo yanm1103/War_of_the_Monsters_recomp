@@ -563,6 +563,69 @@ def points_root(cfg, name):
     return root
 
 
+def spt_files(cfg, mod, name):
+    """Where a stage's start points live for this mod: (mod_file, custom): the file the mod keeps them in (the first .SPT of a custom
+    stage's folder, else <ID>.SPT there; a game stage's mods/<mod>/PTS/<NAME>.SPT) and the custom stage record or None. Raises
+    ValueError for a bad mod name (a custom stage keeps its own mod's)."""
+    name = (name or "").upper()
+    c = custom_stages(cfg).get(name)
+    if not c and bad_mod(mod):
+        raise ValueError(bad_mod_reason(mod))
+    if c:
+        folder = os.path.join(cfg["mods"], c["mod"], "stages", c["folder"])
+        have = sorted(f for f in os.listdir(folder) if f.upper().endswith(".SPT"))
+        return os.path.join(folder, have[0] if have else c["id"].upper() + ".SPT"), c
+    return os.path.join(cfg["mods"], mod, "PTS", name + ".SPT"), None
+
+
+def stage_spt(cfg, mod, name):
+    """The stage's start points as the game will read them with this mod: {"points", "caps", "lists", "source": "mod" | "disc",
+    "file"}. A custom stage reads its own folder's .SPT, else the base's; a game stage the mod's PTS/<NAME>.SPT, else the disc's."""
+    name = (name or "").upper()
+    caps = {"caps": list(lvl.SPT_CAPS), "lists": list(lvl.SPT_LISTS)}
+    c = custom_stages(cfg).get(name)
+    if c or not bad_mod(mod):
+        path, c = spt_files(cfg, mod, name)
+        if os.path.isfile(path):
+            return dict(caps, points=lvl.read_spt(path), source="mod", file=path)
+    base = c["base"] if c else name
+    disc = os.path.join(stage_root(cfg["disc"], base), "PTS", base + ".SPT")
+    if os.path.isfile(disc):
+        return dict(caps, points=lvl.read_spt(disc), source="disc", file="")
+    return dict(caps, points=[], source="disc", file="")
+
+
+def save_spt(cfg, b):
+    """Writes the start points ({"mod", "name", "points"}) into the mod, or takes the mod's file away with "reset": true (the disc's
+    points come back). Returns stage_spt's reply plus "warnings" (a list holding more points than the game keeps)."""
+    mod, name = (b.get("mod") or "").strip(), (b.get("name") or "").upper()
+    path, c = spt_files(cfg, mod, name)
+    if b.get("reset"):
+        if os.path.isfile(path):
+            os.remove(path)
+            try:
+                os.rmdir(os.path.dirname(path))     # the mod's PTS folder, when that was all it held (never a custom stage's)
+            except OSError:
+                pass
+        return dict(stage_spt(cfg, mod, name), warnings=[])
+    pts = b.get("points")
+    if not isinstance(pts, list):
+        raise ValueError("The start points are a list")
+    data = lvl.build_spt(pts)
+    warn = []
+    for k, cap in enumerate(lvl.SPT_CAPS):
+        n = sum(1 for p in pts if p.get("list") == k)
+        if n > cap:
+            warn.append("List %d (%s) has room for %d, you placed %d: each extra one overwrites the last." % (
+                k, lvl.SPT_LISTS[k], cap, n))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.replace(tmp, path)
+    return dict(stage_spt(cfg, mod, name), warnings=warn)
+
+
 # the stages whose select picture a mod's levelpics/<name>.png replaces (SHELL.TEX has none of them), and the custom stages' <id>
 LEVELPIC_BASE = {"TRAINING": "training", "VEGAS": "lakepowell", "TOKYODM": "tokyodeathmatch"}
 
@@ -1265,6 +1328,11 @@ class Handler(BaseHTTPRequestHandler):
                                        "walls": STAGES.walls(cfg["disc"], base),
                                        "peds": pedsapi.stage_peds(st, points_root(cfg, q["name"]) or stage_root(cfg["disc"], base)),
                                        "have": have, "winner": winner, "others": [m for m in have if m != mod]})
+            if u.path == "/api/spt":            # the stage's start points as the game reads them with this mod
+                try:
+                    return self.send(200, stage_spt(cfg, q.get("mod", ""), q.get("name", "")))
+                except (ValueError, OSError) as e:
+                    return self.send(400, {"error": str(e)})
             if u.path == "/api/props":          # the mod's props (props/*/prop.json)
                 return self.send(200, {"props": props_list(cfg, q.get("mod", ""))})
             if u.path == "/api/propglb":        # a prop's preview (what the game draws)
@@ -1364,6 +1432,11 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200, original_prop(cfg, b))
                 except (ValueError, lvlorig.OrigError, lvlprop.PropError, lvlprop.ngpmesh.MeshError, lvlprop.vifpkt.FormatError) as e:
                     return self.send(400, {"error": str(e), "code": "prop"})
+            if self.path == "/api/spt":            # write the start points into the mod (or "reset": back to the disc's)
+                try:
+                    return self.send(200, save_spt(cfg, b))
+                except (ValueError, OSError) as e:
+                    return self.send(400, {"error": str(e)})
             if self.path == "/api/props/floor":    # a floor prop over the grid's rectangle
                 try:
                     return self.send(200, floor_prop(cfg, b))

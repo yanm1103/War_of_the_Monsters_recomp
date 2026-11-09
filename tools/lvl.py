@@ -2379,6 +2379,47 @@ def read_points(path):
     return out
 
 
+SPT_CAPS = (1, 2, 20, 20)       # StartPoints::s_pointTypes: a point past the list's room overwrites its last one
+SPT_LISTS = ("story, first life of the player", "first life of the players", "first life of a CPU", "respawn")
+
+
+def spt_heading(b):
+    """The heading in degrees (-180..180] a .SPT angle byte stands for (`graus = b / (255 / 360)`, above 180 minus 360)."""
+    g = b * 360.0 / 255.0
+    return g - 360.0 if g > 180.0 else g
+
+
+def read_spt(path):
+    """A .SPT as the editor's start points: [{"list", "pos": [x, y, z], "heading", "snap", "w", "sel"}] (`w` and `sel`, the 0x3C byte,
+    are kept as the file had them; the game reads neither)."""
+    return [{"list": p["raw"][0x2C], "pos": [float(v) for v in p["pos"][:3]], "heading": spt_heading(p["raw"][0x2D]),
+             "snap": bool(p["raw"][0x2E]), "w": p["pos"][3], "sel": p["raw"][0x3C]} for p in read_points(path)]
+
+
+def build_spt(points):
+    """The bytes of a .SPT for those start points: version, count and one 64-byte record each (no links; the angle byte is
+    `heading · 255 / 360` rounded, so a heading keeps 1.41 degrees). ValueError for a bad point or more than 255."""
+    if len(points) > 255:
+        raise ValueError("a .SPT holds at most 255 start points (it has %d)" % len(points))
+    out = [struct.pack("<II", POINTS_MAGIC, len(points))]
+    for k, p in enumerate(points):
+        lst, pos, hd = p.get("list"), p.get("pos"), p.get("heading", 0.0)
+        if not isinstance(lst, int) or isinstance(lst, bool) or not 0 <= lst < len(SPT_CAPS):
+            raise ValueError("start point %d: the list is 0 to %d" % (k + 1, len(SPT_CAPS) - 1))
+        if not (isinstance(pos, (list, tuple)) and len(pos) == 3 and all(isinstance(v, (int, float)) and math.isfinite(v) for v in pos)):
+            raise ValueError("start point %d: the position is three numbers" % (k + 1))
+        if not (isinstance(hd, (int, float)) and math.isfinite(hd)):
+            raise ValueError("start point %d: the heading is a number" % (k + 1))
+        rec = bytearray(64)
+        struct.pack_into("<4f", rec, 0, pos[0], pos[1], pos[2], float(p.get("w") or 0.0))
+        rec[0x2C] = lst
+        rec[0x2D] = int(round((hd % 360.0) * 255.0 / 360.0)) & 0xFF
+        rec[0x2E] = 1 if p.get("snap") else 0
+        rec[0x3C] = int(p.get("sel") or 0) & 0xFF
+        out.append(bytes(rec))
+    return b"".join(out)
+
+
 def describe_point(ext, p):
     r, n = p["raw"], min(p["nlinks"], 6)
     if ext == "SPT":

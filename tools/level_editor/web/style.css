@@ -440,6 +440,14 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 .gd-pair { display: flex; gap: 8px; }
 .gd-pair input { flex: 1; min-width: 0; }
 .gd-btns { display: flex; gap: 8px; margin: 8px 0; }
+/* Start points: one row per point */
+dialog.spt { width: min(96vw, 860px); }
+#sptList { max-height: 46vh; overflow: auto; }
+.spt-row { display: grid; grid-template-columns: 2em minmax(0, 2.4fr) repeat(3, minmax(0, 1fr)) minmax(0, 1fr) 4em auto; gap: 6px; align-items: center; padding: 3px 4px; border-radius: 6px; cursor: pointer; }
+.spt-row.sel { outline: 1px solid var(--accent, #4aa3ff); }
+.spt-row input[type=number], .spt-row select { min-width: 0; width: 100%; }
+.spt-head { font-size: 12px; opacity: 0.7; cursor: default; }
+.spt-row button { padding: 2px 8px; }
 dialog.pal { width: min(96vw, 2400px); max-width: none; }
 #palList .pal-fold { cursor: pointer; }
 #palList .pal-fold:hover { color: var(--fg, inherit); }

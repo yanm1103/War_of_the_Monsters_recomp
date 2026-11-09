@@ -794,6 +794,13 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   the entry `floor`; doing it again after a size change builds it again. The slab is at z 0, where the floor's collision is in CENTRAL, VEGAS and CAPITOL (one flat path, its top at z 0); for the other stages check the height of their floor first.
   The dialog also has "Take out the stage's bare scenery" (`"clear": "scenery"`; the view hides the meshes the scene file tags `extras.bare`) and
   "Delete every object" (one Undo step: every original building, pickup and prop gets `delete`): with the size and the floor, the steps of an empty stage.
+- **Start points** (the people button): where the monsters appear, from the stage's `.SPT` (`FORMATS.md`, "Stage points"): four lists (0 story, first
+  life of the player; 1 first life of the players, room for 2; 2 first life of a CPU, 20; 3 respawn, 20), each point with x, y, z, a heading and
+  "Ground" (the point drops to the floor or roof under it when a monster appears). The dialog lists the points, adds one at the view's aim,
+  moves one to the aim ("Aim") and draws a cone for each point in the view (color by list) with a line for the way it faces. Save writes the
+  file into the mod (`mods/<mod>/PTS/<STAGE>.SPT` for a game stage; for a custom stage the `.SPT` in its folder, `<ID>.SPT` when it has none):
+  a game that loads the mod reads it in place of the disc's file; "Back to the disc's" deletes it. Points past a list's room overwrite the
+  list's last one (the dialog warns). The heading is kept to 1.41 degrees and is drawn as 0 = facing +Y, growing counter-clockwise.
 - **Stage picture:** the picture button (lower right of the view) saves the middle 2:1 band of the view, 512x256, as
   `mods/<mod>/levelpics/<name>.png` for a custom stage (`<id>`) and for Training, Lake Powell and Tokyo DM; the other game stages have
   their picture in `SHELL.TEX` (make a custom stage on one). The stage select picks it up the next time the game starts.

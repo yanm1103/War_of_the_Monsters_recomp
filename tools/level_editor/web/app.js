@@ -767,6 +767,7 @@ function applyPatch(patch) {
   updateGridView();
   updateSkyView();
   updateClearView();
+  loadSpt();
   pedSel = null;     // the markers are made again
   peds.load(discPeds, keep.pedsRaw ? null : pp);
   applyPedsView();
@@ -2446,6 +2447,7 @@ function setMod(v) {
   modNow = v;
   cfg.mod = v;
   winHidden = false;
+  loadSpt();      // each mod keeps its own start points file
   fillMods();
   showWinner();
   api('/api/config', { mod: v }).catch((err) => msg(`Couldn't keep the mod in the settings: ${cleanError(err).text}`, { level: 'err' }));
@@ -2937,6 +2939,136 @@ function gdApply() {
   return true;
 }
 $('gdOk').onclick = gdApply;
+// ------------------------------------------------------------------ start points (.SPT)
+// Where the monsters appear: four lists (story, the players', the CPUs', respawn; tools/lvl.py SPT_LISTS) in a file of the mod
+// (mods/<mod>/PTS/<STAGE>.SPT, or the custom stage's folder), not in the patch: the dialog's Save writes it. editor.py stage_spt/save_spt.
+const SPT_COLORS = [0xFFC233, 0x4AE08A, 0xF0605A, 0x36C5F0];
+let spt = { points: [], caps: [1, 2, 20, 20], lists: [], source: 'disc' };
+let sptView = null, sptSel = -1, sptLoadId = 0;
+const sptKeep = () => JSON.stringify(spt.points);
+let sptSaved = '[]';
+async function loadSpt() {
+  if (!stageName) return;
+  const id = ++sptLoadId;
+  try {
+    const r = await api(`/api/spt?name=${encodeURIComponent(stageName)}&mod=${encodeURIComponent(modNow || '')}`);
+    if (id !== sptLoadId) return;
+    spt = r;
+    sptSaved = sptKeep();
+    sptSel = -1;
+    updateSptView();
+  } catch (e) { if (id === sptLoadId) { spt = { points: [], caps: [1, 2, 20, 20], lists: [], source: 'disc' }; updateSptView(); } }
+}
+// A cone for each point (colored by list; amber when selected) with a line for the way the monster faces
+function updateSptView() {
+  if (sptView) { scene.remove(sptView); sptView.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); }); sptView = null; }
+  if (!spt.points.length) return;
+  sptView = new THREE.Group();
+  spt.points.forEach((p, k) => {
+    const col = k === sptSel ? 0xFFFFFF : SPT_COLORS[p.list] ?? 0xAAAAAA;
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(14, 50, 14), new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true, opacity: 0.9 }));
+    const base = toThree(p.pos);
+    cone.position.copy(base).add(new THREE.Vector3(0, 25, 0));
+    cone.renderOrder = 998;
+    cone.raycast = () => {};
+    const h = (p.heading * Math.PI) / 180, fwd = toThree([p.pos[0] - Math.sin(h) * 60, p.pos[1] + Math.cos(h) * 60, p.pos[2] + 25]);
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([base.clone().add(new THREE.Vector3(0, 25, 0)), fwd]),
+                                new THREE.LineBasicMaterial({ color: col, depthTest: false }));
+    line.renderOrder = 998;
+    line.raycast = () => {};
+    sptView.add(cone, line);
+  });
+  scene.add(sptView);
+}
+const sptNames = (k) => `${k + 1}`;
+function sptRows() {
+  const box = $('sptList');
+  box.textContent = '';
+  const mk = (tag, attrs = {}, text = '') => { const e = document.createElement(tag); Object.assign(e, attrs); if (text) e.textContent = text; return e; };
+  const head = mk('div', { className: 'spt-row spt-head' });
+  for (const t of ['#', 'List', 'x', 'y', 'z', 'Heading', 'Ground', '']) head.append(mk('span', {}, t));
+  box.append(head);
+  spt.points.forEach((p, k) => {
+    const row = mk('div', { className: 'spt-row' + (k === sptSel ? ' sel' : '') });
+    row.onclick = () => { sptSel = k; updateSptView(); sptRows(); };
+    const num = (v, set, step = 1) => {
+      const i = mk('input', { type: 'number', step, value: Math.round(v * 100) / 100 });
+      i.onclick = (e) => e.stopPropagation();
+      i.onchange = () => { const x = parseFloat(i.value); if (Number.isFinite(x)) { set(x); updateSptView(); sptInfo(); } };
+      return i;
+    };
+    const sel = mk('select');
+    spt.lists.forEach((n, li) => sel.append(new Option(`${li}: ${n}`, li)));
+    sel.value = p.list;
+    sel.onclick = (e) => e.stopPropagation();
+    sel.onchange = () => { p.list = parseInt(sel.value, 10); updateSptView(); sptInfo(); };
+    const snap = mk('input', { type: 'checkbox', checked: !!p.snap, title: 'Ground: the point drops to the floor (or roof) under it when a monster appears' });
+    snap.onclick = (e) => e.stopPropagation();
+    snap.onchange = () => { p.snap = snap.checked; };
+    const here = mk('button', { type: 'button', title: 'Move this point to where the middle of the view meets the stage' }, 'Aim');
+    here.onclick = (e) => { e.stopPropagation(); const v = viewPoint(); p.pos = v.map((x) => Math.round(x * 10) / 10); updateSptView(); sptRows(); sptInfo(); };
+    const del = mk('button', { type: 'button', title: 'Delete this point' }, '×');
+    del.onclick = (e) => { e.stopPropagation(); spt.points.splice(k, 1); sptSel = -1; updateSptView(); sptRows(); sptInfo(); };
+    row.append(mk('span', {}, sptNames(k)), sel, num(p.pos[0], (x) => { p.pos[0] = x; }), num(p.pos[1], (x) => { p.pos[1] = x; }),
+               num(p.pos[2], (x) => { p.pos[2] = x; }), num(p.heading, (x) => { p.heading = wrapDeg(x); }, 5), snap, mk('span', {}, ''));
+    row.lastChild.append(here, del);
+    box.append(row);
+  });
+}
+function sptInfo() {
+  const n = (k) => spt.points.filter((p) => p.list === k).length;
+  $('sptInfo').textContent = spt.lists.map((_n, k) => `${k}: ${n(k)} of ${spt.caps[k]}`).join(' · ') + ` · ${spt.points.length} of 255 points`;
+}
+const sptErr = (t) => { $('sptErr').hidden = !t; if (t) $('sptErr').querySelector('span').textContent = t; };
+$('sptBtn').onclick = async () => {
+  await loadSpt();
+  $('sptText').textContent = spt.source === 'mod'
+    ? `The points this mod keeps for ${title(stageName)}.`
+    : `${title(stageName)}'s own points; Save keeps your version in the mod.`;
+  const nl = $('sptNewList');
+  nl.textContent = '';
+  spt.lists.forEach((n, k) => nl.append(new Option(`${k}: ${n}`, k)));
+  nl.value = '2';
+  sptErr('');
+  sptRows();
+  sptInfo();
+  $('sptDlg').showModal();
+};
+$('sptAdd').onclick = () => {
+  if (spt.points.length >= 255) { sptErr('A stage holds at most 255 start points.'); return; }
+  const v = viewPoint();
+  spt.points.push({ list: parseInt($('sptNewList').value, 10), pos: v.map((x) => Math.round(x * 10) / 10), heading: 0, snap: true, w: 0, sel: 0 });
+  sptSel = spt.points.length - 1;
+  sptErr('');
+  updateSptView();
+  sptRows();
+  sptInfo();
+};
+async function sptPost(body) {
+  sptErr('');
+  try {
+    const r = await api('/api/spt', Object.assign({ mod: modNow || '', name: stageName }, body));
+    spt = r;
+    sptSaved = sptKeep();
+    sptSel = -1;
+    updateSptView();
+    sptRows();
+    sptInfo();
+    return r;
+  } catch (e) { sptErr(cleanError(e).text); return null; }
+}
+$('sptSave').onclick = async () => {
+  const r = await sptPost({ points: spt.points });
+  if (!r) return;
+  $('sptDlg').close();
+  msg(`Saved ${r.points.length} start points in the mod` + (r.warnings.length ? '. ' + r.warnings.join(' ') : '. Restart the stage to see them'),
+      { level: r.warnings.length ? 'warn' : 'ok', toast: true });
+};
+$('sptReset').onclick = async () => {
+  const r = await sptPost({ reset: true });
+  if (r) msg("The stage's own start points are back (the mod's file is gone)", { level: 'ok', toast: true });
+};
+$('sptDlg').addEventListener('close', () => { if (sptKeep() !== sptSaved) loadSpt(); });   // closed without saving: back to the file's points
 // A floor over the new rectangle: a prop of the mod (a visible plate and a coll_ slab), placed at the rectangle's center
 $('gdFloor').onclick = async () => {
   if (!modNow) { gdErr('Choose a mod first: the floor is a prop saved in it.'); return; }
