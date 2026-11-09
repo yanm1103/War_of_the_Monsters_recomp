@@ -2041,6 +2041,8 @@ function showPedCounts() {
   const live = $('pedLive');
   live.checked = peds.live();
   live.disabled = !have || (!peds.live() && !peds.hasDiscGroups());
+  $('pedClearGroups').disabled = !have || !c.groups;
+  $('pedClearAll').disabled = !have || !(c.groups || c.segments);
   const ag = $('pedAddGroup'), as = $('pedAddSeg');
   const noNet = have && !peds.items().some((it) => it.kind === 'seg');
   ag.disabled = !have || c.groups >= c.maxGroups || noNet;
@@ -2206,6 +2208,23 @@ function setPedLive(on) {
   showSel();
   msg(on ? `The disc's pedestrian groups are back in ${title(stageName)}` : `No pedestrians in ${title(stageName)}: every group is out`,
       { level: 'ok', toast: on ? true : ['Undo', undo] });
+}
+// Clear groups / Clear all (groups and sidewalks): asks first, one undo step. Sidewalks never go alone: a group with no sidewalk walks nowhere.
+function clearPeds(withSidewalks) {
+  if (!discPeds) return;
+  const c = peds.counts();
+  if (!c.groups && !(withSidewalks && c.segments)) return;
+  const what = withSidewalks
+    ? [c.groups && `${c.groups} group${c.groups > 1 ? 's' : ''}`, c.segments && `${c.segments} sidewalk${c.segments > 1 ? 's' : ''}`].filter(Boolean).join(' and ')
+    : `${c.groups} group${c.groups > 1 ? 's' : ''}`;
+  ask(`Remove ${what}?`, `${title(stageName)} is left without ${withSidewalks ? 'pedestrians' : 'groups of people'} in the view. The mod's patch changes only when you save, and Ctrl+Z brings ${withSidewalks ? 'them' : 'the groups'} back.`,
+      [['cancel', 'Cancel'], ['go', 'Remove them', true]], (v) => {
+        if (v !== 'go') return;
+        pedEdit(() => { peds.setLive(false); if (withSidewalks) peds.clearSegments(); }, withSidewalks ? 'clear the pedestrians' : 'clear the pedestrian groups');
+        pedSel = null;
+        showSel();
+        msg(withSidewalks ? `${title(stageName)}: no groups and no sidewalks` : `${title(stageName)}: no pedestrian groups`, { level: 'ok', toast: ['Undo', undo] });
+      }, { icon: 'delete-outline' });
 }
 function pedFromInputs() {
   if (!pedSel) return;
@@ -3482,6 +3501,8 @@ $('pdCountR').oninput = () => slideInput('count');
 $('pdWidthR').oninput = () => slideInput('width');
 $('pdCountR').onchange = $('pdWidthR').onchange = slideDone;
 $('pedLive').onchange = (e) => setPedLive(e.target.checked);
+$('pedClearGroups').onclick = () => clearPeds(false);
+$('pedClearAll').onclick = () => clearPeds(true);
 $('pdDrop').onclick = dropToGround;
 $('pdDup').onclick = duplicate;
 $('pdDel').onclick = remove;
@@ -4360,7 +4381,7 @@ function nudgeMarker(v) {          // v: a scene vector; the burst's undo step w
   layerChanged(kind);
 }
 
-// ---- Save, Back to the disc's, Revert, Clear net
+// ---- Save, Back to the disc's, Revert, Clear all
 async function layerPost(kind, body, keepSel = false) {
   try {
     const r = await api('/api/spt', Object.assign({ mod: modNow || '', name: stageName, kind }, body));
@@ -4403,8 +4424,10 @@ function revertLayer(kind) {
   mkErrSet('');
   loadLayer(kind);
 }
-function clearNet(kind) {
+// Clear all: every marker of the layer out (start points, power-ups, nodes of a net); one undo step, the file stays until Save
+function clearLayer(kind) {
   const L = lay(kind), w = LAYERS[kind];
+  if (!L.points.length) return;
   const clear = () => {
     const before = JSON.stringify(L.points), sel0 = L.sel;
     L.points = [];
@@ -4413,9 +4436,10 @@ function clearNet(kind) {
     mkErrSet('');
     layerChanged(kind);
     showSel();
+    msg(`${w.title}: all ${w.many} are out of the view. Save to keep it in the mod`, { level: 'ok', toast: ['Undo', undo] });
   };
-  if (!L.points.length) { clear(); return; }
-  ask(`Remove all ${L.points.length} nodes?`, `The ${w.noun} in the view is emptied. The mod's file stays as it is until you save, and Ctrl+Z brings the nodes back.`,
+  ask(`Remove all ${L.points.length} ${L.net ? 'nodes' : w.many}?`,
+      `The ${w.noun} in the view is emptied. The mod's file stays as it is until you save, and Ctrl+Z brings ${L.net ? 'the nodes' : 'them'} back.`,
       [['cancel', 'Cancel'], ['go', 'Remove them', true]], (v) => { if (v === 'go') clear(); }, { icon: 'delete-outline' });
 }
 
@@ -4465,7 +4489,7 @@ function mkFoot(kind) {
   $('mkSrc').title = L.d.file || '';
   $('mkReset').disabled = L.source !== 'mod';
   $('mkRevert').hidden = !dirty;
-  $('mkClear').hidden = !L.net;
+  $('mkClear').disabled = !L.points.length;
   $('mkSave').classList.toggle('primary', dirty);
 }
 const NONE_TEXT = {
@@ -4732,7 +4756,7 @@ $('mkAdd').onclick = addMarker;
 $('mkSave').onclick = () => { const k = layerOf(); if (k && requireMod('the file is saved in it')) saveLayer(k); };
 $('mkReset').onclick = () => { const k = layerOf(); if (k && requireMod('the file is in it')) resetLayer(k); };
 $('mkRevert').onclick = () => { const k = layerOf(); if (k) revertLayer(k); };
-$('mkClear').onclick = () => { const k = layerOf(); if (k) clearNet(k); };
+$('mkClear').onclick = () => { const k = layerOf(); if (k) clearLayer(k); };
 for (const [id, key] of [['mkWidth', 'width'], ['mkDropN', 'drop']]) $(id).oninput = () => { const k = layerOf(); if (k && netDefaults[k]) netDefaults[k][key] = clamp255($(id).value); };
 $('mkDrop').onclick = dropMarker;
 $('mkDup').onclick = duplicateMarker;

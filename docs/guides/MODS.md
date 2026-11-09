@@ -906,7 +906,7 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
     one show their type too). The selected node is bigger and ringed, its links are amber and the other links dimmer, its neighbours are
     bigger, and a one-way link has an arrow pointing the way it goes. A row under the pointer in the list outlines its node in the view. Limits: 255 nodes, 6 links per node and 450 paths (a two-way link is one path; the game ignores the
     rest). A stage without its own net gives the CPUs nowhere to go: CAPITOL and TRAINING have 2 nodes, METRO none (a METRO-based custom
-    stage leaves the CPU lists unless it brings its own). **Clear net** asks first and **Ctrl+Z** brings the nodes back.
+    stage leaves the CPU lists unless it brings its own). **Clear all** (in the foot of every marker mode: start points, power-ups, nodes) asks first and **Ctrl+Z** brings the markers back.
   - **Vehicle net** (`.FOP`): the roads and flight paths of the cars, helicopters, flying saucers and tanks (`FORMATS.md`, "Path nets"). The
     node type is a list (0 car street, 1 helicopter, 2 flying saucer, 3 tank and truck, which only VEGAS has) and each link has a width and
     a drop (how far below the path a helicopter may fly when it chases a target, times 10; the disc's car streets all have 0, its helicopters'
@@ -1026,7 +1026,8 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   sidewalks (`PTS/<STAGE>.PED`) as cyan lanes as wide as the walking lane, with a white ball at each end; the selection is amber.
   The left panel has two meters (groups out of 20, sidewalks out of 127, amber past 90 % and red at the limit), the people of all
   groups added up, the **Pedestrians in this stage** switch (off takes every group out, the patch's `"off"`; on brings the disc's
-  back) and a list of **Groups** (people per group; a red mark when it walks nothing) and **Sidewalks** (length), numbered by their
+  back), **Clear groups** and **Clear all** (every group and every sidewalk, so the stage's pedestrians can be drawn from scratch; both ask
+  first and are one Undo step; sidewalks never go alone, a group with no sidewalk walks nowhere) and a list of **Groups** (people per group; a red mark when it walks nothing) and **Sidewalks** (length), numbered by their
   place in the list. A click, in the view or the list, picks a cone, a lane or an end (the stage's objects are scenery here); the
   gizmo, the arrows, **End** and the position fields only move them, Turn is off. The right panel says what a group walks
   ("Walks on sidewalk 2 (492 units long)", with **Show** to select that sidewalk) or a sidewalk's length and lane, and has

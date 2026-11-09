@@ -112,6 +112,10 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
         <i class="ic" style="--ic:url(vendor/mdi/walk.svg)"></i>
         <div>This stage has no pedestrian data</div>
       </div>
+      <div class="mk-btns ped-btns">
+        <button type="button" id="pedClearGroups" class="ghost" title="Take every group of people out of this stage (Ctrl+Z brings them back)">Clear groups</button>
+        <button type="button" id="pedClearAll" class="ghost" title="Take every group and every sidewalk out, to draw the stage's pedestrians from scratch (Ctrl+Z brings them back)">Clear all</button>
+      </div>
       <div id="pedCounts" class="muted num"></div>
     </div>
     <div id="mkPanel">
@@ -141,7 +145,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
         <div class="mk-btns">
           <button type="button" id="mkReset" class="ghost" title="Takes the mod's file away: the stage's own comes back">Back to the disc's</button>
           <button type="button" id="mkRevert" class="ghost" title="Throw away the changes you have not saved: the file's markers come back">Revert</button>
-          <button type="button" id="mkClear" class="ghost" title="Take every node away (a net of your own from scratch)">Clear net</button>
+          <button type="button" id="mkClear" class="ghost" title="Take every marker away (Ctrl+Z brings them back)">Clear all</button>
         </div>
         <button type="button" id="mkSave" class="primary wide" title="Write this layer into the mod. Save (Ctrl+S) writes it too">Save to mod</button>
       </div>

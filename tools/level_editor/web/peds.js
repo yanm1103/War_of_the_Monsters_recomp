@@ -10,6 +10,7 @@
 //   peds.moved(item)             after the gizmo moved item.node (ends follow a segment, a segment follows its ends)
 //   peds.addGroup(pos), peds.addSegment(pos), peds.remove(item), peds.setCount(item, n), peds.setWidth(item, w)
 //   peds.setLive(on)             every group out of the stage (off), or the disc's groups back (on)
+//   peds.clearSegments()         every sidewalk out (app.js takes the groups out with them: they would have nowhere to walk)
 //   peds.label(item), peds.info(item)   "Group 3", "Sidewalk 12"; what the group walks, or the segment's length and lane
 //   peds.binding(item)           {nodes: [i, k], seg, no, len}: the segment a group walks (the nearest node and its link 0), or null
 //   peds.counts()                {groups, segments, maxGroups, maxSegments, people}
@@ -280,6 +281,13 @@ export function createPeds({ THREE, scene, toThree, toGame }) {
     }
     placeAll();
   }
+  // every sidewalk out (a net of your own from scratch); the groups are not touched here: the caller takes them out too
+  function clearSegments() {
+    for (const s of segs) dropSeg(s);
+    segs = [];
+    if (selItem && selItem.kind !== 'group') selItem = null;
+    placeAll();
+  }
   const live = () => groups.some((g) => !g.deleted);
   const hasDiscGroups = () => groups.some((g) => g.handle != null);
   function setCount(item, n) { item.group.count = Math.max(1, Math.min(255, Math.round(n) || 1)); }
@@ -355,6 +363,6 @@ export function createPeds({ THREE, scene, toThree, toGame }) {
     placeAll();
   }
 
-  return { load, patch, items, entries, moved, addGroup, addSegment, remove, setLive, live, hasDiscGroups, setCount, setWidth,
+  return { load, patch, items, entries, moved, addGroup, addSegment, remove, setLive, clearSegments, live, hasDiscGroups, setCount, setWidth,
            label, info, binding, counts, setVisible, setDim, highlight, drop, root, mats, defaultNet: DEFAULT_NET };
 }

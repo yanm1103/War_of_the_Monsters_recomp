@@ -210,7 +210,7 @@ const goMode = async (m) => {
   await ev(`${D}.setMode(${JSON.stringify(m)})`);
   must(await until(`${D}.mode === ${JSON.stringify(m)}`, 20), 'the mode did not open: ' + m);
 };
-await check('AI net mode: Clear net asks first; Esc keeps the nodes; Ctrl+P waits for the answer; Ctrl+Z and Revert bring them back', async () => {
+await check('AI net mode: Clear all asks first; Esc keeps the nodes; Ctrl+P waits for the answer; Ctrl+Z and Revert bring them back', async () => {
   await key('5', 'Digit5', 53);
   must(await until(`${D}.mode === 'aip'`, 20), 'key 5 did not open the AI net mode');
   must(await until(`${D}.lay('AIP').points.length > 0`, 80), 'the stage has no AI net to try this on');
@@ -241,6 +241,52 @@ await check('AI net mode: Clear net asks first; Esc keeps the nodes; Ctrl+P wait
   must(await until(`${D}.lay('AIP').points.length === ${n0} && ${D}.unsavedCount() === 0`, 40), 'Revert did not bring the net back: ' + await layerN('AIP') + ' nodes');
   await key('1', 'Digit1', 49);
   must(await until(`${D}.mode === 'objects'`, 20), 'key 1 did not go back to the Objects mode');
+});
+
+const answerYes = () => ev(`document.querySelector('#askBtns .primary, #askBtns button:last-child').click()`);
+await check('Power-ups and Start points modes: Clear all is there, asks first, empties the layer, Ctrl+Z brings it back', async () => {
+  for (const [m, kind] of [['pup', 'PUP'], ['spt', 'SPT']]) {
+    await goMode(m);
+    const n0 = await layerN(kind);
+    if (!n0) continue;
+    must(await ev(`!document.getElementById('mkClear').hidden && !document.getElementById('mkClear').disabled`), `${kind}: no usable Clear all`);
+    await ev(`document.getElementById('mkClear').click()`);
+    must(await until(`document.getElementById('askDlg').open`, 20), `${kind}: no question`);
+    await answerYes();
+    must(await until(`${D}.lay(${JSON.stringify(kind)}).points.length === 0`, 20), `${kind}: the markers stayed`);
+    must(await ev(`document.getElementById('mkClear').disabled`), `${kind}: Clear all is still on with nothing to clear`);
+    await ev('document.activeElement.blur()');
+    await key('z', 'KeyZ', 90, 2);
+    must(await until(`${D}.lay(${JSON.stringify(kind)}).points.length === ${n0}`, 20), `${kind}: Ctrl+Z did not bring them back`);
+    await ev(`document.getElementById('mkRevert').click()`);
+  }
+  await goMode('objects');
+});
+await check('Pedestrians mode: Clear groups and Clear all ask first and undo as one step', async () => {
+  await goMode('peds');
+  const c = () => ev(`${D}.peds.counts()`);
+  const c0 = await c();
+  if (!c0.groups && !c0.segments) return;
+  await ev(`document.getElementById('pedClearGroups').click()`);
+  must(await until(`document.getElementById('askDlg').open`, 20), 'Clear groups asked nothing');
+  await esc();
+  must((await c()).groups === c0.groups, 'Esc on the question removed the groups');
+  await ev(`document.getElementById('pedClearGroups').click()`);
+  await answerYes();
+  must(await until(`${D}.peds.counts().groups === 0`, 20), 'Clear groups left groups');
+  must((await c()).segments === c0.segments, 'Clear groups touched the sidewalks');
+  await ev('document.activeElement.blur()');
+  await ev(`${D}.undo()`);
+  must(await until(`${D}.peds.counts().groups === ${c0.groups}`, 20), 'Undo did not bring the groups back');
+  await ev(`document.getElementById('pedClearAll').click()`);
+  await answerYes();
+  must(await until(`${D}.peds.counts().groups === 0 && ${D}.peds.counts().segments === 0`, 20), 'Clear all left something: ' + JSON.stringify(await c()));
+  must(await ev(`document.getElementById('pedClearAll').disabled`), 'Clear all is on with nothing left');
+  const p = await ev(`JSON.stringify(${D}.buildPatch().peds || null)`);
+  must(p && p.includes('"segments":[]'), 'the patch does not carry the emptied sidewalks: ' + p);
+  await ev(`${D}.undo()`);
+  must(await until(`${D}.peds.counts().groups === ${c0.groups} && ${D}.peds.counts().segments === ${c0.segments}`, 20), 'Undo did not bring it all back in one step');
+  await goMode('objects');
 });
 
 await check('Light and fog: unsaved numbers count, Esc asks, Keep editing keeps, Discard closes and restores', async () => {
