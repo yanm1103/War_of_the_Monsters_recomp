@@ -332,6 +332,7 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 .heading-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 .heading-row .lbl { color: var(--muted); width: 58px; flex: none; }
 .heading-row .field { flex: 1; }
+#tiltRow .field > input { padding-left: 22px; }
 .fl { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; margin-top: 8px; }
 .fl:first-of-type { margin-top: 0; }
 .fl > input { width: 100%; }

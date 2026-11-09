@@ -12,6 +12,7 @@ import { openLight, lightGameChanged, lightLookChanged, lightClose } from './lig
 import { initArrange } from './arrange.js';
 import { openTerrain } from './terrain.js';
 import { initColl } from './coll.js';
+import { propRows, propAngles as propAngles_ } from './tilt_math.js';
 import { testBody, openTestOpts, loadTestOpts, testSummary } from './testopts.js';
 
 // The GS modulates and blends the bytes as they are: no color management (texture, vertex and interface colors stay raw).
@@ -580,7 +581,7 @@ let modNow = '', stageTitles = {};   // modNow: the mod the scene was loaded wit
 // props whose model the mod does not have for this stage
 const ENTRY_KEYS = new Set(['handle', 'from', 'pos', 'heading', 'delete', 'copies']);
 const PEDS_KEYS = new Set(['off', 'segments', 'groups']);
-const PROP_KEYS = new Set(['id', 'model', 'pos', 'heading', 'name']);
+const PROP_KEYS = new Set(['id', 'model', 'pos', 'heading', 'pitch', 'roll', 'name']);
 let keep = { top: {}, objects: [], names: {}, peds: {}, pedsRaw: null, props: [] };
 let skyModel = '', cloudsModel = '';   // the models that replace the sky dome and the cloud layer: the patch's props entries {model, sky: true} and {model, sky: "clouds"} (MODS.md, "Sky"); the view draws them with Game look (updateSkyView)
 // New props (the patch's "props", MODS.md): the models of the mod's props/ folder (tools/lvlprop.py), drawn from their preview with
@@ -589,8 +590,29 @@ let skyModel = '', cloudsModel = '';   // the models that replace the sky dome a
 let propModels = new Map();   // MODEL -> {info: the /api/props entry, scene: the preview's scene, or null}
 let propRecs = [], propRoot = null, stageTex = new Map();   // stageTex: texId -> the stage's texture
 
-function setWorld(node, posGame, heading, rec) {
-  const qWorld = new THREE.Quaternion().setFromAxisAngle(Y, THREE.MathUtils.degToRad(heading - rec.h0)).multiply(rec.q0);
+// A new prop's turn is pitch, roll and heading (tilt_math.js: the game's matrix, which lvl.py and the hook write too). The view's
+// quaternion maps the view's axes: its X is the game's X, its Y the game's Z and its Z the game's -Y, so the columns are where those
+// land, which row j of the matrix says (model axis j lands there).
+function propQuat(heading, pitch, roll) {
+  const [ex, ey, ez] = propRows(heading, pitch, roll);
+  return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(toThree(ex), toThree(ez), toThree(ey).negate()));
+}
+// {h, p, r} (degrees) of a rotation made by propQuat
+function propAngles(q) {
+  return propAngles_([[1, 0, 0], [0, 1, 0], [0, 0, 1]].map((axis) => toGame(toThree(axis).applyQuaternion(q))));
+}
+const tiltOf = (item) => {
+  if (!item.rec.prop) return [0, 0];
+  const a = propAngles(item.node.getWorldQuaternion(new THREE.Quaternion()));
+  return [Math.abs(a.p) < 0.005 ? 0 : a.p, Math.abs(a.r) < 0.005 ? 0 : a.r];
+};
+// tilt: [pitch, roll] of a new prop; left out, the node keeps the tilt it has
+function setWorld(node, posGame, heading, rec, tilt) {
+  let qWorld;
+  if (rec.prop) {
+    const t = tilt || (() => { const a = propAngles(node.getWorldQuaternion(new THREE.Quaternion())); return [a.p, a.r]; })();
+    qWorld = propQuat(heading, t[0], Math.max(-89, Math.min(89, t[1])));
+  } else qWorld = new THREE.Quaternion().setFromAxisAngle(Y, THREE.MathUtils.degToRad(heading - rec.h0)).multiply(rec.q0);
   const m = new THREE.Matrix4().compose(toThree(posGame), qWorld, rec.s0);
   setWorldMatrix(node, m);
 }
@@ -602,6 +624,7 @@ function setWorldMatrix(node, m) {
 }
 function posOf(item) { return toGame(item.node.getWorldPosition(new THREE.Vector3())); }
 function headingOf(item) {
+  if (item.rec.prop) return wrapDeg(propAngles(item.node.getWorldQuaternion(new THREE.Quaternion())).h);
   const q = item.node.getWorldQuaternion(new THREE.Quaternion()).multiply(item.rec.q0.clone().invert());
   return wrapDeg(item.rec.h0 + THREE.MathUtils.radToDeg(2 * Math.atan2(q.y, q.w)));
 }
@@ -668,7 +691,7 @@ function makeProp(e) {
   rec.item = { rec, node, copy: false, attached: [], iname: e.name ? String(e.name) : '' };
   itemOf.set(node, rec.item);
   propRecs.push(rec);
-  setWorld(node, pos, +e.heading || 0, rec);
+  setWorld(node, pos, +e.heading || 0, rec, [+e.pitch || 0, +e.roll || 0]);
   return rec.item;
 }
 function removeProp(rec) {
@@ -720,6 +743,9 @@ function buildPatch() {
   const props = propRecs.map((r) => {
     const e = { id: r.prop.id, model: r.prop.model, pos: posOf(r.item).map(r1) }, h = headingOf(r.item);
     if (Math.abs(h) > 0.05) e.heading = r1(h);
+    const [pitch, roll] = tiltOf(r.item);
+    if (Math.abs(pitch) > 0.05) e.pitch = r1(pitch);
+    if (Math.abs(roll) > 0.05) e.roll = r1(roll);
     if (r.item.iname) e.name = r.item.iname;
     return Object.assign(e, r.extra || {});
   }).concat(keep.props);
@@ -1577,7 +1603,11 @@ function showProps() {
   if (!sel || isDeleted(sel)) return;
   const p = posOf(sel), h = headingOf(sel);
   $('px').value = r1(p[0]); $('py').value = r1(p[1]); $('pz').value = r1(p[2]); $('ph').value = r1(h);
+  $('tiltRow').hidden = !sel.rec.prop;      // only a new prop tilts (the patch's "pitch" and "roll")
+  if (sel.rec.prop) { const [pitch, roll] = tiltOf(sel); $('pp').value = r1(pitch); $('pr').value = r1(roll); }
 }
+// the tilt the fields hold, for setWorld (a new prop only; the others keep the turn they have)
+const tiltFromInputs = () => (sel && sel.rec.prop ? [+$('pp').value || 0, +$('pr').value || 0] : undefined);
 
 // ------------------------------------------------------------------ the modes: Objects (1) and Pedestrians (2)
 // Objects: a click picks the stage's objects; the Pedestrians layer (P, or the Layers menu) shows the markers faint, not clickable.
@@ -1904,8 +1934,9 @@ function editFromInputs() {
   if (!sel || isDeleted(sel)) return;
   snapshot('edit ' + whatSel());
   const start = startMove();
-  setWorld(sel.node, [+$('px').value, +$('py').value, +$('pz').value], +$('ph').value, sel.rec);
+  setWorld(sel.node, [+$('px').value, +$('py').value, +$('pz').value], +$('ph').value, sel.rec, tiltFromInputs());
   carry(start);
+  showProps();
   refreshList();
 }
 
@@ -1978,8 +2009,8 @@ function duplicate() {
 }
 // One copy of an item, placed by `place`: ([x, y, z], heading) -> [[x, y, z], heading] (a new prop for a new prop, else a copy of the object)
 function cloneItem(it, place) {
-  const [at, h] = place(posOf(it), headingOf(it));
-  return it.rec.prop ? makeProp(Object.assign({ id: newPropId(), model: it.rec.prop.model, pos: at, heading: h }, it.rec.extra || {}))
+  const [at, h] = place(posOf(it), headingOf(it)), [pitch, roll] = tiltOf(it);
+  return it.rec.prop ? makeProp(Object.assign({ id: newPropId(), model: it.rec.prop.model, pos: at, heading: h, pitch, roll }, it.rec.extra || {}))
     : makeCopy(it.rec, at, h);
 }
 // The selection (and, with Move objects on top, what rests on it) copied once for each placer. made: the copies of the selected ones.
@@ -2859,7 +2890,7 @@ function scrubField(inp, o = {}) {
   let start = null;
   const live = () => {
     if (!start || !sel || isDeleted(sel)) return;
-    setWorld(sel.node, [+$('px').value, +$('py').value, +$('pz').value], +$('ph').value, sel.rec);
+    setWorld(sel.node, [+$('px').value, +$('py').value, +$('pz').value], +$('ph').value, sel.rec, tiltFromInputs());
     carry(start);
   };
   const hooks = (turn) => ({
@@ -2870,7 +2901,17 @@ function scrubField(inp, o = {}) {
   });
   for (const id of ['px', 'py', 'pz']) scrubField($(id), hooks(false));
   scrubField($('ph'), hooks(true));
+  for (const id of ['pp', 'pr']) scrubField($(id), hooks(true));
 }
+$('tiltOff').onclick = () => {
+  if (!sel || isDeleted(sel) || !sel.rec.prop) return;
+  snapshot('level ' + whatSel());
+  const start = startMove();
+  setWorld(sel.node, posOf(sel), headingOf(sel), sel.rec, [0, 0]);
+  carry(start);
+  showProps();
+  refreshList();
+};
 // a pedestrian group's or segment's fields: People and Width through their sliders, X, Y, Z moving the marker
 scrubField($('pdCount'), { live: () => { $('pdCountR').value = $('pdCount').value; slideInput('count'); }, end: slideDone });
 scrubField($('pdWidth'), { live: () => { $('pdWidthR').value = $('pdWidth').value; slideInput('width'); }, end: slideDone });
@@ -4134,7 +4175,7 @@ $('drop').onclick = dropToGround;
 $('dup').onclick = duplicate;
 $('del').onclick = remove;
 $('reset').onclick = resetSel;
-for (const id of ['px', 'py', 'pz', 'ph']) $(id).onchange = editFromInputs;
+for (const id of ['px', 'py', 'pz', 'ph', 'pp', 'pr']) $(id).onchange = editFromInputs;
 $('pName').onchange = () => {
   if (!sel) return;
   snapshot('rename ' + whatSel());

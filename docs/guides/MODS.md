@@ -658,7 +658,8 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   with a line. Log: `clear: 336 OBJECTs e emissores do cenario nu fora, 7 caminhos de colisao fora`.
 - `props` (at the top beside `objects`): new static objects made in Blender, placed in the stage.
   ```json
-  "props": [{"id": "tower1", "model": "TOWER", "pos": [845.9, 1003.2, 0.5], "heading": 90, "name": "Water tower"}]
+  "props": [{"id": "tower1", "model": "TOWER", "pos": [845.9, 1003.2, 0.5], "heading": 90, "name": "Water tower"},
+            {"id": "ramp1", "model": "RAMP", "pos": [600, 400, 0], "heading": 30, "pitch": 20, "roll": -10}]
   ```
   `model` is a folder `mods/<mod>/props/<MODEL>/` of the same mod as the JSON (any case), written by `python tools/lvlprop.py build
   <in.glb> mods/<mod>/props/<MODEL> --stage <FASE>` (`TOOLS.md`): `<MODEL>.NGP`, `<MODEL>.PTR`, `<MODEL>.preview.glb` (what the game
@@ -671,7 +672,10 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   clamped to the image (no tiling). A mesh with no vertex colors takes the stage's sun
   (its three parallel lights, as the cars do); a mesh with vertex colors keeps them as its light (bake the light in Blender), and
   `--light vertex|dir` forces one way for the whole prop. `pos` is where the model's origin goes; `heading` (degrees,
-  default 0) turns it about Z. Each entry collides as the box of the model's bounds, or as the shapes the .glb names (a mesh `hull_*` is a convex hull, up to 64
+  default 0) turns it about Z. `pitch` and `roll` (degrees, default 0) tip it first, about its own origin: pitch about its X axis (its
+  +Y end goes up for a positive value), roll about its Y axis (its top, +Z, leans toward +X for a positive value); the heading then
+  turns the tipped model about the vertical (the entry's `ROTATE` matrix is Rx(pitch) · Ry(roll) · Rz(heading), `lvl.prop_matrix`).
+  The box the game files the entry under is the box of the turned model's corners, so a tilted entry covers more cells. Each entry collides as the box of the model's bounds, or as the shapes the .glb names (a mesh `hull_*` is a convex hull, up to 64
   vertices and 40 faces; a mesh `coll_*` is collision by triangles, up to 16384 of them (the arena decides what fits; blocks of 512 triangles and 256 vertices each get a box tree, as the stages' collision does); one leaf per mesh, not drawn; `hull_m20c_wall` and
   `coll_m10a_floor` set the surface word (hex): kind in the high byte, 2 a wall the monsters climb, 1 a floor; the default is
   the stages' building face, 0x10A) (monsters stand on it
@@ -901,7 +905,9 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   follow the drag, which is one undo step; the new prop's Height builds once, on release. **Transform**: **X**, **Y** and **Z**
   (the height) in the gizmo's colors, also dragged by their letter (a snap step, or 1 unit, per step), and the gizmo's blue arrow
   points to -Y.
-  **Heading**, with buttons that turn 90° either way. **Actions**: **Drop** (**End**: down or up onto the first surface
+  **Heading**, with buttons that turn 90° either way. A new prop also has **Tilt**: **P**itch (-180 to 180) and **R**oll (-89 to 89),
+  dragged like the other numbers, and a button that stands it up straight again; Turn and the heading field turn it about the vertical
+  whatever its tilt, and Duplicate and Arrange keep the tilt. **Actions**: **Drop** (**End**: down or up onto the first surface
   under the object's middle, another object's roof included), **Duplicate**, **Restore original** (back to the disc's place,
   copies removed; off when there is nothing to restore) and **Delete**, which says how many objects go. **Name** (closed at first)
   holds the object's name and the model's; **Details** (closed at first) the size, the model id, the damage states, the collision

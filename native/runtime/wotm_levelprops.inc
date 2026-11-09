@@ -361,7 +361,7 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
     if (const std::string al = Registry::get().aliasOf("LVL/" + stageName + ".NGP"); al.size() > 8 && al.rfind("LVL/", 0) == 0)
         base = al.substr(4, al.size() - 8);
     const uint32_t start = st.arenaTop;
-    struct Ent { size_t k; const json::Value *e; V3 pos; double hd; };
+    struct Ent { size_t k; const json::Value *e; V3 pos; double hd, pitch, roll; };
     std::map<std::string, std::vector<Ent>> models;
     std::vector<std::string> order;
     for (size_t k = 0; k < props->arr.size(); ++k)
@@ -373,10 +373,12 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
             std::string name;
             if (const json::Value *m = e.get("model"); m && m->type == json::Value::Str) name = m->s;
             for (char &c : name) c = char(std::toupper(static_cast<unsigned char>(c)));
-            Ent en{k, &e, {}, 0.0};
+            Ent en{k, &e, {}, 0.0, 0.0, 0.0};
             if (!skyKind(e) && !Stage::num3(e.get("pos"), en.pos))   // a entrada do ceu nao tem lugar
                 throw PatchError("sem \"pos\" [x, y, z]");
             if (const json::Value *h = e.get("heading"); h && h->isInt()) en.hd = h->asNum();
+            if (const json::Value *h = e.get("pitch"); h && h->isInt()) en.pitch = h->asNum();
+            if (const json::Value *h = e.get("roll"); h && h->isInt()) en.roll = h->asNum();
             if (!models.count(name)) order.push_back(name);
             models[name].push_back(en);
         }
@@ -516,7 +518,8 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
                     continue;
                 }
                 const uint32_t tTop = st.arenaTop;
-                const bool turn = std::fabs(std::remainder(en.hd, 360.0)) > 1e-6;
+                const bool turn = std::fabs(std::remainder(en.hd, 360.0)) > 1e-6 || std::fabs(std::remainder(en.pitch, 360.0)) > 1e-6 ||
+                                  std::fabs(std::remainder(en.roll, 360.0)) > 1e-6;
                 const uint32_t t = st.alloc(turn ? 0x54 : 0x20, 16);
                 uint32_t ist = 0, destr = 0;
                 std::vector<uint32_t> instRoots = sroots;
@@ -571,8 +574,18 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
                 const uint32_t below = ist ? ist : root;
                 if (turn)
                 {
+                    // Rx(pitch) * Ry(roll) * Rz(heading), em linhas (lvl.py prop_matrix)
+                    const double cp = std::cos(en.pitch * kPi / 180.0), sp = std::sin(en.pitch * kPi / 180.0);
+                    const double cr = std::cos(en.roll * kPi / 180.0), sr = std::sin(en.roll * kPi / 180.0);
                     const double cs = std::cos(en.hd * kPi / 180.0), sn = std::sin(en.hd * kPi / 180.0);
-                    const double rows[4][4] = {{cs, sn, 0, 0}, {-sn, cs, 0, 0}, {0, 0, 1, 0}, {en.pos.v[0], en.pos.v[1], en.pos.v[2], 1}};
+                    const double tilt[3][3] = {{cr, 0, -sr}, {sp * sr, cp, sp * cr}, {cp * sr, -sp, cp * cr}};
+                    double rows[4][4] = {{0, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}, {en.pos.v[0], en.pos.v[1], en.pos.v[2], 1}};
+                    for (int r = 0; r < 3; ++r)
+                    {
+                        rows[r][0] = tilt[r][0] * cs - tilt[r][1] * sn;
+                        rows[r][1] = tilt[r][0] * sn + tilt[r][1] * cs;
+                        rows[r][2] = tilt[r][2];
+                    }
                     st.w32(t, ROTATE);
                     st.w32(t + 8, 1);
                     for (int r = 0; r < 4; ++r)

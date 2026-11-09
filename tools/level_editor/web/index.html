@@ -213,6 +213,12 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
           <button id="rotL" class="icon" title="Turn 90° counterclockwise, seen from above" aria-label="Turn 90° counterclockwise"><i class="ic" style="--ic:url(vendor/mdi/rotate-left.svg)"></i></button>
           <button id="rotR" class="icon" title="Turn 90° clockwise, seen from above" aria-label="Turn 90° clockwise"><i class="ic" style="--ic:url(vendor/mdi/rotate-right.svg)"></i></button>
         </div>
+        <div class="heading-row" id="tiltRow" hidden>
+          <span class="lbl">Tilt</span>
+          <label class="field suf" title="Pitch: the nose up (+) or down (-), in degrees, about the prop's own X. The heading turns it about the vertical afterwards"><i class="pre">P</i><input id="pp" type="number" step="5" min="-180" max="180" aria-label="Pitch"><i class="post">°</i></label>
+          <label class="field suf" title="Roll: leaning toward +X (+) or the other way (-), in degrees, about the prop's own Y (-89 to 89)"><i class="pre">R</i><input id="pr" type="number" step="5" min="-89" max="89" aria-label="Roll"><i class="post">°</i></label>
+          <button id="tiltOff" class="icon" title="Stand it up straight again (pitch and roll 0)" aria-label="Level the prop"><i class="ic" style="--ic:url(vendor/mdi/restore.svg)"></i></button>
+        </div>
       </section>
       <section class="psec">
         <div class="sec-title">Actions</div>

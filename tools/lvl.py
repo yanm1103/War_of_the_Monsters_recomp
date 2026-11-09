@@ -794,6 +794,19 @@ def _number(x):
     return isinstance(x, (int, float))
 
 
+def prop_matrix(pos, heading=0.0, pitch=0.0, roll=0.0):
+    """The ROTATE matrix (4 rows of 4, the game's row vectors) of a prop at `pos`: Rx(pitch) * Ry(roll) * Rz(heading), degrees.
+    The model is tipped first (pitch: its nose, +Y, up for +; roll: its top, +Z, toward +X for +), then turned about the vertical by
+    the heading; with pitch and roll 0 it is the plain heading matrix. The hook (wotm_levelprops.inc) writes the same numbers."""
+    cp, sp = math.cos(math.radians(pitch)), math.sin(math.radians(pitch))
+    cr, sr = math.cos(math.radians(roll)), math.sin(math.radians(roll))
+    ch, sh = math.cos(math.radians(heading)), math.sin(math.radians(heading))
+    t = ((cr, 0.0, -sr), (sp * sr, cp, sp * cr), (cp * sr, -sp, cp * cr))      # Rx(pitch) * Ry(roll)
+    rows = [(r[0] * ch - r[1] * sh, r[0] * sh + r[1] * ch, r[2]) for r in t]      # ... * Rz(heading)
+    return ((rows[0][0], rows[0][1], rows[0][2], 0.0), (rows[1][0], rows[1][1], rows[1][2], 0.0),
+            (rows[2][0], rows[2][1], rows[2][2], 0.0), (pos[0], pos[1], pos[2], 1.0))
+
+
 def _child_nocase(d, name):
     """The entry of directory d named `name` without regard to case (the hook's childNoCase), or None."""
     try:
@@ -1992,10 +2005,13 @@ class LevelPatch:
                     raise PatchError("without \"pos\" [x, y, z]")
                 hd = e.get("heading")
                 hd = float(hd) if _number(hd) else 0.0
+                pt, rl = e.get("pitch"), e.get("roll")
+                pt = float(pt) if _number(pt) else 0.0
+                rl = float(rl) if _number(rl) else 0.0
                 if name not in models:
                     models[name] = []
                     order.append(name)
-                models[name].append((k, e, [float(x) for x in p3], hd))
+                models[name].append((k, e, [float(x) for x in p3], (hd, pt, rl)))
             except PatchError as err:
                 self.log.append("prop %d skipped: %s" % (k, err))
                 self.stats["skipped"] += 1
@@ -2071,7 +2087,7 @@ class LevelPatch:
                             self.stats["skipped"] += 1
                         continue
                     t_top = self.arena_top()
-                    turn = abs(math.remainder(hd, 360.0)) > 1e-6
+                    turn = any(abs(math.remainder(a, 360.0)) > 1e-6 for a in hd)       # hd: (heading, pitch, roll)
                     t = self.alloc(0x54 if turn else 0x20, 16)
                     ist = destr = 0
                     inst_roots, inst_chains = sroots, chains
@@ -2109,10 +2125,9 @@ class LevelPatch:
                                 self.w32(destr + 0xC + 12 * i + 4, at + prop.actions[i])
                     below = ist or root
                     if turn:
-                        cs, sn = math.cos(math.radians(hd)), math.sin(math.radians(hd))
                         self.w32(t, 4)
                         self.w32(t + 8, 1)
-                        for r, row in enumerate(((cs, sn, 0, 0), (-sn, cs, 0, 0), (0, 0, 1, 0), (pos[0], pos[1], pos[2], 1))):
+                        for r, row in enumerate(prop_matrix(pos, *hd)):
                             for c in range(4):
                                 self.wf32(t + 0x10 + 16 * r + 4 * c, row[c])
                         self.w32(t + 0x50, below)
