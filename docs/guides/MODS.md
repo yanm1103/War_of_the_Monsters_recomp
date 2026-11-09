@@ -865,42 +865,55 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   the entry `floor`; doing it again after a size change builds it again. The slab is at z 0, where the floor's collision is in CENTRAL, VEGAS and CAPITOL (one flat path, its top at z 0); for the other stages check the height of their floor first.
   The dialog also has "Take out the stage's bare scenery" (`"clear": "scenery"`; the view hides the meshes the scene file tags `extras.bare`) and
   "Delete every object" (one Undo step: every original building, pickup and prop gets `delete`): with the size and the floor, the steps of an empty stage.
-- **Start points** (Stage tab ▸ Gameplay; a panel docked at the right, not modal: the camera and the objects stay in use, so **Aim** takes the point the view looks at now, and a click near a marker in the view selects it and the gizmo moves it): where the monsters appear, from the stage's `.SPT` (`FORMATS.md`, "Stage points"): four lists (0 story, first
-  life of the player; 1 first life of the players, room for 2; 2 first life of a CPU, 20; 3 respawn, 20), each point with x, y, z, a heading and
-  "Ground" (the point drops to the floor or roof under it when a monster appears). The dialog lists the points, adds one at the view's aim,
-  moves one to the aim ("Aim") and draws a cone for each point in the view (color by list) with a line for the way it faces. Save writes the
-  file into the mod (`mods/<mod>/PTS/<STAGE>.SPT` for a game stage; for a custom stage the `.SPT` in its folder, `<ID>.SPT` when it has none):
-  a game that loads the mod reads it in place of the disc's file; "Back to the disc's" deletes it. Points past a list's room overwrite the
-  list's last one (the dialog warns). The heading is kept to 1.41 degrees and is drawn as 0 = facing +Y, growing clockwise seen from above (90 faces +X, as in the game).
-  The **Power-ups** row next to it opens the same dialog for the stage's **power-ups** (`.PUP`): the 20 types (health 25/50/100, stamina 25/50/100,
-  health 10, stamina 10, special weapon, cloak, story items 10 to 19, which only appear in story mode), a position (z is the height the
-  power-up rests at; the rotation is random in the game) and a Shadow box. The game keeps 100 at a time (the dialog warns past that).
-  Same file rules: `mods/<mod>/PTS/<STAGE>.PUP`, or `<ID>.PUP` in a custom stage's folder.
-  The **AI net** row opens the **AI net** (`.AIP`): the paths the computer monsters walk. Each node has a position and a type (0 for nearly
-  all; the AI only follows paths of the type it stands on, so a type splits the net into sub-nets), each link a width (the lane is
-  width x 10 to each side; the disc's are 12 to 24). The dialog lists the nodes with their links (a number alone is a two-way link, an arrow
-  a one-way link), adds a node at the view's aim linked both ways to the selected one (so a path is a few clicks), links and unlinks two
-  nodes by number, moves a node to the aim and clears the net. The view draws the links (amber around the selected node). Limits shown in
-  the dialog: 255 nodes, 6 links per node and 450 paths (a two-way link is one path; the game ignores the rest). A stage without its own
-  net gives the CPUs nowhere to go: CAPITOL and TRAINING have 2 nodes, METRO none (a METRO-based custom stage leaves the CPU lists unless
-  it brings its own).
-  The **Vehicle net** row next to it opens the same dialog for the **vehicle net** (`.FOP`): the roads and flight paths of the cars, helicopters,
-  flying saucers and tanks (`FORMATS.md`, "Path nets"). The node type is a list (0 car street, 1 helicopter, 2 flying saucer, 3 tank and
-  truck, which only VEGAS has) and each link has a width and a drop (how far below the path a helicopter may fly when it chases a target,
-  times 10; the disc's car streets all have 0, its helicopters' links 0 to 26 and its saucers' up to 101; the widths run 5 to 12 for cars,
-  7 to 29 for helicopters and 8 to 111 for saucers). A road is two-way when both ends link to each other, and Link
-  rewrites the width and the drop on both ends. Limits shown: 255 nodes and 6 links per node. The view draws the net only while the dialog is
-  open, or all the time with **Display ▸ Vehicle net** (yellow cars, green helicopters, pink saucers, orange tanks). File rules as for the
-  AI net (`PTS/<STAGE>.FOP`); a net of one node gives the vehicles nowhere to drive, and none at all brings back the game's 2 default nodes.
+- **Start points, Power-ups, AI net and Vehicle net** are four modes of the rail (**3** to **6**), like Pedestrians. In its mode a layer has
+  its **Add** bar at the top of the left panel (a type, and Add at the view's aim: with a node selected in a net, the new node is linked to
+  it both ways), its meters, its list in sections (click a row and the camera goes to it), and a foot with the file's state, **Revert**
+  (throws away what is not saved), **Back to the disc's** (deletes the mod's file, the stage's own comes back) and **Save to mod**. The
+  right panel's Selection tab holds the selected marker: its list or type, X, Y and Z, and what is particular to the layer; Aim, Drop
+  (**End**), Duplicate (**Ctrl+D**) and Delete (**Del**) act on it. In the view a marker is picked by a click near it (a ring shows the
+  one under the pointer), the gizmo moves it, the arrows and **PageUp** and **PageDown** nudge it, **Esc** lets go of it; the objects are
+  scenery in these modes, so a click on nothing picks nothing. In the other modes the layers are drawn faint, unless their switch under
+  **Display ▸ Overlays** is off (the layer of the open mode is drawn in full whatever the switch says); a layer is picked only in its own mode.
+  A layer is a draft of its own file: it is not in the patch, **Ctrl+Z** and **Ctrl+Y** (and the top bar's buttons) undo and redo the draft of
+  the layer whose mode is open, the patch's Undo leaves it alone, and the rail button shows a dot while the layer has changes that are not saved.
+  The draft counts as an unsaved change: switching stage or mod, Test in game, Pack mod and closing the page ask first, **Save** (top bar,
+  **Ctrl+S**) writes the patch and every changed layer, and "Move my changes to mod" keeps a draft as one that is in no mod yet. Each layer
+  saves to `mods/<mod>/PTS/<STAGE>.<ext>` (for a custom stage the file of that extension in its folder, `<ID>.<ext>` when it has none); a
+  game that loads the mod reads it in place of the disc's file.
+  - **Start points** (`.SPT`, `FORMATS.md`, "Stage points"): where the monsters appear, in four lists (0 story, first life of the player;
+    1 first life of the players, room for 2; 2 first life of a CPU, 20; 3 respawn, 20), shown as Story, Player, CPU and Respawn. Each point
+    has x, y, z, a heading and "Drop to the floor when a monster appears" (`Ground`: the point falls to the floor or roof under it). A cone
+    in the view for each point (color by list) with a line for the way it faces. Each list's header says how many points it holds of its
+    room, and a point past the room is marked: the game overwrites the list's last one with it. The heading is kept to 1.41 degrees and
+    counts 0 = facing +Y, growing clockwise seen from above (90 faces +X, as in the game).
+  - **Power-ups** (`.PUP`): the 20 types (health 25/50/100, stamina 25/50/100, health 10, stamina 10, special weapon, cloak, story items 10
+    to 19, which only appear in story mode), shown in groups; a position (z is the height the power-up rests at; the rotation is random in
+    the game) and a Shadow switch. The game keeps 100 at a time (the meter and the file's warning go red past that); the file holds 255.
+  - **AI net** (`.AIP`): the paths the computer monsters walk. Each node has a position and a type (0 for nearly all; the AI only follows
+    paths of the type it stands on, so a type splits the net into sub-nets), each link a width (the lane is width x 10 to each side; the
+    disc's are 12 to 24). The right panel lists the selected node's links, each with its width, a **Two-way** switch (adds or takes away the
+    link back) and a cut (both directions); the one-way links that end at the node are listed with a button to link back, and "To" plus
+    **Link** joins the node and the number typed both ways with the width under **New links** in the left panel. The view draws the links
+    (amber around the selected node). Limits: 255 nodes, 6 links per node and 450 paths (a two-way link is one path; the game ignores the
+    rest). A stage without its own net gives the CPUs nowhere to go: CAPITOL and TRAINING have 2 nodes, METRO none (a METRO-based custom
+    stage leaves the CPU lists unless it brings its own). **Clear net** asks first and **Ctrl+Z** brings the nodes back.
+  - **Vehicle net** (`.FOP`): the roads and flight paths of the cars, helicopters, flying saucers and tanks (`FORMATS.md`, "Path nets"). The
+    node type is a list (0 car street, 1 helicopter, 2 flying saucer, 3 tank and truck, which only VEGAS has) and each link has a width and
+    a drop (how far below the path a helicopter may fly when it chases a target, times 10; the disc's car streets all have 0, its helicopters'
+    links 0 to 26 and its saucers' up to 101; the widths run 5 to 12 for cars, 7 to 29 for helicopters and 8 to 111 for saucers). A road is
+    two-way when both ends link to each other. Limits: 255 nodes and 6 links per node. The view colors the roads by who drives them (yellow
+    cars, green helicopters, pink saucers, orange tanks) and draws them faint in the other modes only with **Display ▸ Vehicle net** on.
+    A net of one node gives the vehicles nowhere to drive, and none at all brings back the game's 2 default nodes.
 - **Stage picture:** Stage tab ▸ Pictures ▸ Stage picture saves the middle 2:1 band of the view, 512x256, as
   `mods/<mod>/levelpics/<name>.png` for a custom stage (`<id>`) and for Training, Lake Powell and Tokyo DM; the other game stages have
   their picture in `SHELL.TEX` (make a custom stage on one). The stage select picks it up the next time the game starts.
 - **Winning mod:** the game loads, for each stage, the `levels/<STAGE>.json` of the last mod in name order that has one. When
   another mod than the chosen one wins for this stage, a note under the top bar names it when the stage loads (and after a save),
   since the game does not use the chosen mod's file; its X hides it until the next stage or mod.
-- **Mode rail** (the narrow column on the left): **Objects** (the cube, or **1**) and **Pedestrians** (the walking figure, or
-  **2**) switch what the editor works on: the left list, the right panel and what a click in the view picks; the editor remembers
-  the mode. **Light and fog** (the sun icon), **Textures** (the picture icon) and **Fight HUD** (the screen icon) open their panels (below).
+- **Mode rail** (the narrow column on the left): **Objects** (the cube, or **1**), **Pedestrians** (the walking figure, or **2**),
+  **Start points** (the flag, **3**), **Power-ups** (the heart, **4**), **AI net** (the graph, **5**) and **Vehicle net** (the road, **6**)
+  switch what the editor works on: the left list, the right panel and what a click in the view picks; the editor remembers the mode, and
+  a button with a dot has a layer with changes that are not saved. **Light and fog** (the sun icon), **Textures** (the picture icon) and **Fight HUD** (the screen icon) open their panels (below).
 - **Status bar and Output:** the bar at the bottom shows the last message, whether the stage has unsaved changes (or when it was
   saved), the last check (passed, how many problems, or not checked since the last change), the game (closed, starting, running,
   patch applied or ignored), the **room meter** and how many objects the mod changes. The room meter reads "348/1024 slots · arena 3 KB":
@@ -926,7 +939,7 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   **Snap** with its steps (10 units and 15 degrees by default; they also set the arrow keys' step); the two bars share one row and
   wrap onto a second when the view is narrow. On the top right: **Display** (**Game look** (**L**); **Grid**, a line every 100 units,
   or every snap step when it is smaller, and a stronger one every 1000, at the base of the selection, and the **Minimap**;
-  overlays: Pedestrians, Collision, Start points, Power-ups, AI net and Vehicle net), the cameras, Focus, Frame all, the **Ruler**
+  overlays: Pedestrians, Collision, Start points, Power-ups, AI net and Vehicle net; the layers are faint unless their mode is open), the cameras, Focus, Frame all, the **Ruler**
   and the **Screenshot**; the shortcuts are on the top bar (**?**). The ruler (**M**) takes two clicks on the
   stage's surface and writes the distance, the flat distance, the height and the heading (0 faces +Y, 90 faces +X) over the line; a
   third click starts again, **Esc** or **M** stops it, and while it is on the clicks select nothing. The screenshot downloads the
@@ -939,14 +952,13 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   selected; with **Changed** on, every deleted one does (a click on the box selects it), and a green box marks each changed object.
 - **Panels:** the left panel holds **Add** (props, prefabs, models from a file or from the game, terrain; the lens next to it is the
   palette) and the list of objects (arrows, Home, End and Enter work on it). The right panel has two tabs: **Selection** (what is
-  selected) and **Stage** (the stage's name, mod and file, and its tools as labeled rows: Stage size, Light and fog, Sky dome,
-  Cloud layer, Textures, Fight HUD and sky, Stage picture, Start points, Power-ups, AI net, Vehicle net; each row says how it
-  saves: **Patch** goes in Save and has Undo, **File** is its own file of the mod with its own Save, **Now** is written when you
-  confirm). Both panels hide (the button at the rail's foot, and the one on the top bar), and the right one's width is the user's:
-  drag its edge, use the arrows on it, or double click to put it back. The tools that need the view (the points, the nets, Stage
-  size, Light and fog) open as a panel in the right panel's place, not as a modal dialog, so the camera, the objects and the keys
-  stay in use; the right panel is at least 440 px wide while one is open, one tool at a time, and Esc or Close asks before an
-  unsaved draft is thrown away. A **File** or **Now** row never goes through Undo.
+  selected) and **Stage** (the stage's name, mod and file, and its tools as labeled rows: Stage size, Sky dome, Cloud layer, Light and
+  fog, Textures, Fight HUD and sky, Stage picture; each row says how it saves: **Patch** goes in Save and has Undo, **File** is its own file
+  of the mod that Save writes too, **Now** is written when you confirm). Both panels hide (the button at the rail's foot, and the one on the top bar), and the right one's width is the user's:
+  drag its edge, use the arrows on it, or double click to put it back. The tools that need the view (Stage size, Light and
+  fog) open as a panel in the right panel's place, not as a modal dialog, so the camera, the objects and the keys stay in use; the
+  right panel is at least 440 px wide while one is open, one tool at a time, and Esc or Close asks before an unsaved draft is thrown
+  away. A **File** or **Now** row never goes through the patch's Undo.
 - **Unsaved work:** the patch not yet saved is copied to the browser's storage a moment after each change (the patch only, at most
   200 KB, the three newest drafts) and offered back (**Restore** or **Discard**) when that stage opens again in that mod; a Save
   removes it. Save sends the stamp of the mod's file that the page read, and the server answers 409 when the file changed on disk

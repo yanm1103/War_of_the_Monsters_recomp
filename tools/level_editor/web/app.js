@@ -18,6 +18,8 @@ import { toPrefabEntries, placeEntry } from './prefab_math.js';
 import { testBody, openTestOpts, loadTestOpts, testSummary } from './testopts.js';
 import { createRuler } from './ruler.js';
 import { createMinimap } from './minimap.js';
+import { KINDS, isNet, LAYERS, KIND_OF_MODE, FILE_MAX, SPT_SHORT, sptOver, PUP_GROUPS, markerColor, hexColor, sections as mkSections,
+         markerName, netTwoWay, netPaths, removeNode, linkBoth, unlink, oneWayIn } from './markers.js';
 
 // The GS modulates and blends the bytes as they are: no color management (texture, vertex and interface colors stay raw).
 THREE.ColorManagement.enabled = false;
@@ -633,12 +635,15 @@ const HINTS = {
   peds: 'Click a group or a sidewalk · Add them from the toolbar',
   pedSeg: 'Drag an end to stretch it · Drag the middle to move it',
   pedGroup: 'Drag the arrows to move it · End to drop · Ctrl+D to copy · Del to delete',
+  mk: 'Click a marker to select it · Add puts a new one where the view looks · The other layers are faint',
+  mkSel: 'Drag the arrows to move it · End to drop · Ctrl+D to copy · Del to delete · Ctrl+Z to undo · Esc to deselect',
 };
 const hint = { key: '', timer: 0 };
 function hintKey() {
   if (band && !$('band').hidden) return 'band';
   if (gizmo.dragging) return 'gizmo';
   if (editMode === 'peds') return pedSel ? (pedSel.kind === 'group' ? 'pedGroup' : 'pedSeg') : 'peds';
+  if (layerOf()) return lay(layerOf()).sel >= 0 ? 'mkSel' : 'mk';
   if (isDeleted(sel)) return 'deleted';
   if (group.length > 1) return 'many';
   if (sel) return gizmo.getMode() === 'rotate' ? 'turn' : 'one';
@@ -661,6 +666,37 @@ let stageBases = {};     // a custom stage's name -> the game stage it is built 
 let stageMeta = {};      // a custom stage's name -> its listing entry (id, title, base, mod, narrator, random)
 const baseOf = (n) => stageBases[n] || n;
 let marker = { on: false };     // the gizmo is on a start point, a power-up or a net node (markerProxy), not on an object
+// The four marker layers' drafts (the block "the marker layers" further down edits them): what the server's /api/spt gave, edited in place
+// by the page and saved by the mode's Save. pt: start points and power-ups; nets: the AI net and the vehicle net (they keep their view,
+// selection and saved copy inside). A draft is outside the patch and its Undo; layHist is each layer's own.
+const ptEmpty = (kind) => ({ points: [], caps: kind === 'SPT' ? [1, 2, 20, 20] : [100], lists: [], source: 'disc', file: '' });
+const pt = { SPT: ptEmpty('SPT'), PUP: ptEmpty('PUP') };
+const ptSaved = { SPT: '[]', PUP: '[]' };      // the points as JSON when they were last read or saved (null: not in this mod yet)
+const ptSelOf = { SPT: -1, PUP: -1 };
+const ptViews = { SPT: null, PUP: null };
+const newNet = (caps) => ({ points: [], caps, source: 'disc', file: '', lists: [], saved: '[]', sel: -1, view: null });
+const nets = { AIP: newNet([255, 450, 6]), FOP: newNet([255, 0, 6]) };
+const layLoadId = { SPT: 0, PUP: 0, AIP: 0, FOP: 0 };
+const layHist = Object.fromEntries(KINDS.map((k) => [k, { past: [], future: [] }]));
+// Display > Overlays: a layer is drawn faint over the stage while another mode is open, unless its switch is off (the layer's own mode draws it full, always)
+const OVERLAY_ID = { SPT: 'sptOn', PUP: 'pupOn', AIP: 'aipOn', FOP: 'fopOn' };
+const OVERLAY_KEY = { SPT: 'sptOn', PUP: 'pupOn', AIP: 'aipOn', FOP: 'fop' };
+const overlayOn = Object.fromEntries(KINDS.map((k) => [k, store.get(OVERLAY_KEY[k], k === 'FOP' ? '0' : '1') === '1']));
+// one face for the four layers: lay('SPT').points, .sel, .saved, .dirty ... (take it fresh each time: a load replaces the object under it)
+function lay(kind) {
+  const net = isNet(kind), d = net ? nets[kind] : pt[kind];
+  return {
+    kind, net, d,
+    get points() { return d.points; }, set points(v) { d.points = v; },
+    get lists() { return d.lists; }, get caps() { return d.caps; }, get source() { return d.source; },
+    get sel() { return net ? d.sel : ptSelOf[kind]; }, set sel(v) { if (net) d.sel = v; else ptSelOf[kind] = v; },
+    get saved() { return net ? d.saved : ptSaved[kind]; }, set saved(v) { if (net) d.saved = v; else ptSaved[kind] = v; },
+    get view() { return net ? d.view : ptViews[kind]; }, set view(v) { if (net) d.view = v; else ptViews[kind] = v; },
+    get dirty() { return this.saved === null || JSON.stringify(d.points) !== this.saved; },
+  };
+}
+const dirtyLayers = () => KINDS.filter((k) => lay(k).dirty);
+const layersDirty = () => KINDS.some((k) => lay(k).dirty);
 let fileStamp = 0;     // when the mod's file for this stage last changed, as the server told (Save sends it back: a file that changed meanwhile is asked about)
 let cfg = {}, stageName = '', recs = [], byHandle = new Map(), itemOf = new Map(), sel = null, group = [], dirty = false;
 // undo and redo: {p: the patch as JSON before the change, label}; savedJson: the patch the mod's file holds
@@ -926,10 +962,9 @@ function applyPatch(patch) {
   updateGridView();
   updateSkyView();
   updateClearView();
-  loadSpt();
   pedSel = null;     // the markers are made again
   peds.load(discPeds, keep.pedsRaw ? null : pp);
-  applyPedsView();
+  applyModeView();
   showPedCounts();
   return { entries: keep.objects.length + Object.keys(keep.names).length, props: keep.props.length,
            keys: Object.keys(keep.top).filter((k) => k !== 'grid' && k !== 'walls').concat(Object.keys(keep.peds).map((k) => 'peds.' + k)) };
@@ -972,23 +1007,31 @@ function restoreTo(p) {
   showUndo();
 }
 function undo() {
+  if (layerOf()) { layerUndo(); return; }      // in a marker mode Undo is that layer's own
   if (!history.length) return;
   const h = history.pop();
   future.push({ p: JSON.stringify(buildPatch()), label: h.label });
   restoreTo(h.p);
 }
 function redo() {
+  if (layerOf()) { layerRedo(); return; }
   if (!future.length) return;
   const f = future.pop();
   history.push({ p: JSON.stringify(buildPatch()), label: f.label });
   restoreTo(f.p);
 }
-function showUndo() {
-  const u = history[history.length - 1], r = future[future.length - 1];
+// the top bar's Undo and Redo: the patch's history, or in a marker mode the layer's own
+function showUndoButtons() {
+  const lk = layerOf(), lh = lk ? layHist[lk] : null;
+  const u = lh ? lh.past[lh.past.length - 1] : history[history.length - 1], r = lh ? lh.future[lh.future.length - 1] : future[future.length - 1];
+  const of = lk ? ` in ${LAYERS[lk].noun}` : '';
   $('undo').disabled = !u;
-  $('undo').title = u ? `Undo: ${u.label} (Ctrl+Z)` : 'Nothing to undo (Ctrl+Z)';
+  $('undo').title = u ? `Undo${of}: ${u.label} (Ctrl+Z)` : `Nothing to undo${of} (Ctrl+Z)`;
   $('redo').disabled = !r;
-  $('redo').title = r ? `Redo: ${r.label} (Ctrl+Y)` : 'Nothing to redo (Ctrl+Y)';
+  $('redo').title = r ? `Redo${of}: ${r.label} (Ctrl+Y)` : `Nothing to redo${of} (Ctrl+Y)`;
+}
+function showUndo() {
+  showUndoButtons();
   $('save').classList.toggle('dirty', isDirty());
   refreshSkySelects();
   queueDraft();
@@ -1130,6 +1173,7 @@ async function loadStage(name) {
     for (const r of [stageRoot, skyRoot]) if (r) { scene.remove(r); r.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); }
     stageRoot = skyRoot = null;
     lightClose();
+    resetLayers();       // the old stage's markers and drafts go; the new stage's files load after its patch
     if (ruler.on) setRuler(false);       // its points were on the old stage
     stageName = name;
     $('editStage').disabled = !stageMeta[name];
@@ -1188,6 +1232,7 @@ async function loadStage(name) {
     stageRoot.add(propRoot);
     await loadPropModels(mod);
     const kept = applyPatch(info.patch);
+    loadSpt();      // the stage's four marker files, for the mod in use (not part of the patch: Undo and Redo leave them alone)
     savedJson = JSON.stringify(buildPatch());
     dirty = false;
     ui.savedAt = 0;
@@ -1239,7 +1284,10 @@ function frameAll() {
 function focus(item) {
   const box = new THREE.Box3().setFromObject(item.node);
   if (box.isEmpty()) return;
-  const c = box.getCenter(new THREE.Vector3()), r = Math.max(150, box.getSize(new THREE.Vector3()).length());
+  focusAt(box.getCenter(new THREE.Vector3()), Math.max(150, box.getSize(new THREE.Vector3()).length()));
+}
+// the camera looks at c (a scene point) from r * 1.4 away, along the line it already had
+function focusAt(c, r) {
   const dir = fly.on ? camera.getWorldDirection(new THREE.Vector3()).negate() : camera.position.clone().sub(orbit.target).normalize();
   orbit.target.copy(c);
   camera.position.copy(c).addScaledVector(dir, r * 1.4);
@@ -1417,6 +1465,7 @@ function refreshList() {
   syncMarks();
   if (sel && !isDeleted(sel) && !$('props').hidden) { showBadge(); showActions(); }
   if (editMode === 'peds') refreshPedList();
+  else if (layerOf()) refreshMk();
 }
 // the right panel with nothing selected: the stage, how many objects the mod changes, where Save writes
 function showSummary(nChanged) {
@@ -1438,7 +1487,7 @@ function showSummary(nChanged) {
 const isDeleted = (it) => !!it && !it.copy && it.rec.deleted;
 function select(item, mode = 'set') {
   if (item && !item.node.visible && !isDeleted(item)) item = null;
-  if (item && editMode === 'peds') enterMode('objects');   // an object (from a Check problem, Resting on) takes the Objects mode
+  if (item && editMode !== 'objects') enterMode('objects');   // an object (from a Check problem, Resting on) takes the Objects mode
   if (isDeleted(item) || isDeleted(sel)) mode = 'set';   // a deleted original is selected alone (its panel offers Restore)
   if (mode === 'set' || item) pedSel = null;
   if (mode === 'set') group = item ? [item] : [];
@@ -1452,7 +1501,7 @@ function select(item, mode = 'set') {
 }
 function selectMany(list, add = false) {
   const vis = list.filter((it) => it.node.visible);
-  if (vis.length && editMode === 'peds') enterMode('objects');
+  if (vis.length && editMode !== 'objects') enterMode('objects');
   pedSel = null;
   group = add ? [...group, ...vis.filter((it) => !group.includes(it))] : vis;
   sel = group[group.length - 1] || null;
@@ -1481,8 +1530,9 @@ $('rtabs').addEventListener('keydown', (e) => {
   $(to === 'stage' ? 'tabStage' : 'tabSel').focus();
 });
 function showSel() {
-  marker.on = false;     // (showSel detaches the gizmo below; an object or a pedestrian marker takes it)
-  if (sel || pedSel) { showRightTab('selection'); if (rightOff) setRightOff(false); }     // what is selected is shown
+  marker.on = false;     // (showSel detaches the gizmo below; an object, a pedestrian marker or a start point / power-up / net node takes it)
+  const lk = layerOf(), mkPoint = lk ? lay(lk).points[lay(lk).sel] : null;
+  if (sel || pedSel || mkPoint) { showRightTab('selection'); if (rightOff) setRightOff(false); }     // what is selected is shown
   gizmo.detach();
   if (sel) pedSel = null;
   peds.highlight(pedSel);
@@ -1490,8 +1540,11 @@ function showSel() {
   $('props').hidden = !sel || gone;
   $('delProps').hidden = !gone;
   $('pedProps').hidden = !pedSel;
-  $('noSel').hidden = pm || !!sel;
+  $('noSel').hidden = pm || !!lk || !!sel;
   $('pedNoSel').hidden = !pm || !!pedSel;
+  $('mkNoSel').hidden = !lk || !!mkPoint;
+  $('mkProps').hidden = !mkPoint;
+  if (lk) { if (mkPoint) showMarker(); else showMarkerLegend(lk); }
   if (pedSel) {
     if (gizmo.getMode() !== 'translate') setTool('translate');
     gizmo.attach(pedSel.node);
@@ -1506,18 +1559,20 @@ function showSel() {
     gizmo.attach(sel.node);
     showPropsPanel();
   }
-  $('focusSel').disabled = !sel && !pedSel;
-  $('tTurn').disabled = pm;   // pedestrian markers only move
-  $('tTurn').title = pm ? 'Pedestrian markers only move' : 'Turn tool (R)';
+  $('focusSel').disabled = !sel && !pedSel && !mkPoint;
+  $('tTurn').disabled = pm || !!lk;   // pedestrian markers and the point layers' markers only move
+  $('tTurn').title = pm ? 'Pedestrian markers only move' : lk ? 'Markers only move (a start point\'s heading is a field of the right panel)' : 'Turn tool (R)';
   syncBoxes();
   if (collOn) collHighlight();
   refreshList();
+  syncMarkerGizmo();
+  showUndoButtons();
   showHint();
   hover.dirty = true;
-  const shown = sel || pedSel;
+  const shown = sel || pedSel || mkPoint;
   if (shown !== lastScrolled) {   // a pick in the view shows its row (a list click is in view already)
     lastScrolled = shown;
-    $(pm ? 'pedList' : 'list').querySelector('li.it.sel')?.scrollIntoView({ block: 'nearest' });
+    $(pm ? 'pedList' : lk ? 'mkList' : 'list').querySelector('li.it.sel')?.scrollIntoView({ block: 'nearest' });
   }
 }
 let lastScrolled = null;
@@ -1797,10 +1852,11 @@ function deletedHit(ray, far = Infinity) {
 // Hover: what a click would pick, outlined in white, and the pointer as a hand over it. At most 30 raycasts a second, from the
 // render loop, and none while a button is down (drag, look, band, gizmo) or the gizmo has the pointer.
 const hover = { at: null, last: 0, item: null, n: 0, dirty: false };
-canvas.addEventListener('pointermove', (e) => { hover.at = ndc(e); hover.dirty = true; hover.buttons = e.buttons; });
+canvas.addEventListener('pointermove', (e) => { hover.at = ndc(e); hover.client = [e.clientX, e.clientY]; hover.dirty = true; hover.buttons = e.buttons; });
 canvas.addEventListener('pointerleave', () => { hover.at = null; hover.dirty = true; });
 // what is under the pointer at p (NDC): {item} an object, {ped} a pedestrian marker, {deleted} a dashed box, or null
 function pickAt(p, add = false) {
+  if (layerOf()) return null;   // the markers of a layer are picked by their screen place (pickMarker); the objects are scenery
   const ray = new THREE.Raycaster();
   ray.setFromCamera(p, camera);
   const hits = stageRoot ? ray.intersectObject(stageRoot, true).filter((h) => visibleChain(h.object)) : [];
@@ -1821,17 +1877,22 @@ function hoverStep() {
   const busy = hover.buttons || gizmo.dragging || look || band || !stageRoot;
   hover.dirty = false;
   hover.last = now;
-  let it = null;
+  let it = null, mk = -1;
   if (!busy && hover.at && gizmo.axis === null) {
     hover.n++;
-    const h = pickAt(hover.at);
-    it = h ? h.item || h.deleted || h.ped || null : null;
+    if (layerOf()) { if (hover.client) mk = pickMarker({ clientX: hover.client[0], clientY: hover.client[1] }); }
+    else {
+      const h = pickAt(hover.at);
+      it = h ? h.item || h.deleted || h.ped || null : null;
+    }
   }
   hover.item = it;
+  hover.marker = mk;
+  showMarkerRing(mk);
   const obj = it && !it.kind ? it : null;   // an object or a deleted original (pedestrian markers have a kind)
   hoverBox.visible = !!obj && obj.node.visible && !group.includes(obj);
   if (hoverBox.visible) hoverBox.setFromObject(obj.node);
-  canvas.style.cursor = gizmo.axis !== null && !busy ? 'move' : it ? 'pointer' : '';
+  canvas.style.cursor = gizmo.axis !== null && !busy ? 'move' : it || mk >= 0 ? 'pointer' : '';
 }
 function showProps() {
   if (!sel || isDeleted(sel)) return;
@@ -1843,28 +1904,37 @@ function showProps() {
 // the tilt the fields hold, for setWorld (a new prop only; the others keep the turn they have)
 const tiltFromInputs = () => (sel && sel.rec.prop ? [+$('pp').value || 0, +$('pr').value || 0] : undefined);
 
-// ------------------------------------------------------------------ the modes: Objects (1) and Pedestrians (2)
+// ------------------------------------------------------------------ the modes: Objects (1), Pedestrians (2), Start points (3), Power-ups (4), AI net (5), Vehicle net (6)
 // Objects: a click picks the stage's objects; the Pedestrians layer (P, or the Layers menu) shows the markers faint, not clickable.
 // Pedestrians: the left panel lists the groups and the sidewalks, a click picks a marker, the objects are scenery.
-let editMode = store.get('mode', 'objects') === 'peds' ? 'peds' : 'objects';
-let pedsOn = store.get('peds', '0') === '1';   // the Pedestrians layer, for the Objects mode
+// Start points, Power-ups, AI net, Vehicle net: one file each (the "layers"), a list on the left, a click picks a marker, the right panel holds
+// its numbers; the objects are scenery and the other layers are faint (Display > Overlays).
+const MODE_NAMES = ['objects', 'peds', ...KINDS.map((k) => LAYERS[k].mode)];
+const MODE_BUTTON = { objects: 'modeObjects', peds: 'modePeds', spt: 'modeSpt', pup: 'modePup', aip: 'modeAip', fop: 'modeFop' };
+let editMode = MODE_NAMES.includes(store.get('mode', 'objects')) ? store.get('mode', 'objects') : 'objects';
+let pedsOn = store.get('peds', '0') === '1';   // the Pedestrians layer, for the other modes
 const modeNow = () => editMode;
-function applyPedsView() {
-  const pm = editMode === 'peds';
+const layerOf = (m = editMode) => KIND_OF_MODE[m] || null;     // the kind of a marker mode, or null in Objects and Pedestrians
+function applyModeView() {
+  const pm = editMode === 'peds', lk = layerOf();
   peds.setVisible(pm || pedsOn);
   peds.setDim(!pm);
   $('pedsOn').checked = pm || pedsOn;
   $('pedsOn').disabled = pm;
   $('pedsOn').closest('.switch').classList.toggle('none', pm);
   $('pedBar').hidden = !pm;
-  $('propBar').hidden = pm;
-  if (pm) showPropMenu(false);
+  $('propBar').hidden = pm || !!lk;
+  $('mkBar').hidden = !lk;
+  if (pm || lk) showPropMenu(false);
   document.body.dataset.mode = editMode;
+  document.body.dataset.kind = lk || '';
+  syncLayerVisibility();
 }
-function setPeds(on) {   // the layer
+// the Pedestrians layer switch (P): the Objects mode and the marker modes
+function setPeds(on) {
   pedsOn = on;
   store.set('peds', on ? '1' : '0');
-  applyPedsView();
+  applyModeView();
   showHint();
   hover.dirty = true;
 }
@@ -1873,16 +1943,25 @@ function enterMode(m) {
   if (m === editMode) return false;
   editMode = m;
   store.set('mode', m);
-  if (m === 'peds') { group = []; sel = null; } else pedSel = null;
-  if (m === 'peds' && gizmo.getMode() === 'rotate') setTool('translate');
-  applyPedsView();
+  group = []; sel = null; pedSel = null;
+  for (const k of KINDS) lay(k).sel = -1;
+  if ((m === 'peds' || layerOf(m)) && gizmo.getMode() === 'rotate') setTool('translate');
+  applyModeView();
+  updateLayerViews();          // the active layer is drawn full, the others faint
+  syncRailDots();
+  mkFillBar();
   showMode();
+  showUndoButtons();
   hover.dirty = true;
   return true;
 }
-function setMode(m) { if (enterMode(m)) showSel(); }
+// the rail's and the keys' way in: a marker mode needs its list, which lives in the left panel
+function setMode(m) {
+  if (layerOf(m) && leftOff) setLeftOff(false);
+  if (enterMode(m)) showSel();
+}
 function showMode() {
-  for (const [id, m] of [['modeObjects', 'objects'], ['modePeds', 'peds']]) {
+  for (const [m, id] of Object.entries(MODE_BUTTON)) {
     $(id).classList.toggle('on', editMode === m);
     $(id).setAttribute('aria-pressed', editMode === m);
   }
@@ -2121,6 +2200,7 @@ gizmo.addEventListener('dragging-changed', (e) => {
   orbit.enabled = !e.value && !fly.on;
   if (e.value) dragged = true;
   showHint();
+  if (marker.on) { if (e.value) layerSnap(layerOf(), 'move ' + markerLabel()); else markerDragEnd(); return; }
   if (e.value && (pedSel || sel)) dragPre = { dirty, future, check: ui.check.state };   // what a click that moves nothing puts back
   if (e.value && pedSel) snapshot('move ' + pedTitle(pedSel).toLowerCase());
   else if (e.value && sel) {
@@ -2147,7 +2227,7 @@ gizmo.addEventListener('objectChange', () => {
 });
 
 function setTool(mode) {
-  if ((pedSel || editMode === 'peds') && mode === 'rotate') return;   // pedestrian markers only move
+  if ((pedSel || editMode === 'peds' || layerOf()) && mode === 'rotate') return;   // pedestrian markers and the layers' markers only move
   gizmo.setMode(mode);
   gizmo.showX = gizmo.showZ = mode !== 'rotate';
   gizmo.showY = true;
@@ -2168,6 +2248,7 @@ function setSnap() {
 }
 // F and the view bar's button: look at the selection (an object, or a pedestrian marker)
 function focusSelection() {
+  if (layerOf()) { const p = markerSel(); if (p) focusAt(toThree(p.pos), 220); return; }
   if (sel) focus(sel);   // a deleted one too: where it was
   else if (pedSel) focus({ node: pedSel.kind === 'seg' ? pedSel.lane : pedSel.node });
 }
@@ -2187,15 +2268,19 @@ function editFromInputs() {
 // arrows: along the world axis nearest to where the camera looks (Shift ×10); PageUp/PageDown: up and down
 let lastNudge = -Infinity;
 function nudge(fwd, side, up, big) {
-  if (!pedSel && (!sel || isDeleted(sel))) return;
+  if (layerOf()) { if (!markerSel()) return; }
+  else if (!pedSel && (!sel || isDeleted(sel))) return;
   const now = performance.now();
-  if (now - lastNudge > 700) snapshot('nudge ' + whatSel());   // one undo step per burst of key repeats
+  if (now - lastNudge > 700) {      // one undo step per burst of key repeats
+    if (layerOf()) layerSnap(layerOf(), 'nudge ' + markerLabel()); else snapshot('nudge ' + whatSel());
+  }
   lastNudge = now;
   const d = camera.getWorldDirection(new THREE.Vector3());
   const f = Math.abs(d.x) > Math.abs(d.z) ? new THREE.Vector3(Math.sign(d.x), 0, 0) : new THREE.Vector3(0, 0, Math.sign(d.z) || -1);
   const right = new THREE.Vector3(-f.z, 0, f.x);
   const step = ($('snap').checked ? snapMove() : 10) * (big ? 10 : 1);
   const v = f.multiplyScalar(fwd).addScaledVector(right, side).add(new THREE.Vector3(0, up, 0)).multiplyScalar(step);
+  if (layerOf()) { nudgeMarker(v); return; }
   if (pedSel) { nudgePed(v); return; }
   const start = startMove();
   setWorldMatrix(sel.node, new THREE.Matrix4().makeTranslation(v.x, v.y, v.z).multiply(sel.node.matrixWorld));
@@ -2208,6 +2293,7 @@ function visibleChain(o) { for (; o; o = o.parent) if (!o.visible) return false;
 
 // End: each selected item down (or up) onto the first surface under its middle, its own meshes and what it carries aside
 function dropToGround() {
+  if (layerOf()) { dropMarker(); return; }
   if (pedSel) { const it = pedSel; pedEdit(() => peds.drop(it, groundAt), 'drop ' + pedTitle(it).toLowerCase()); return; }
   if (!group.length || !stageRoot || isDeleted(sel)) return;
   snapshot('drop ' + whatSel());
@@ -2237,6 +2323,7 @@ function dropToGround() {
 }
 
 function duplicate() {
+  if (layerOf()) { duplicateMarker(); return; }
   if (pedSel && pedSel.kind === 'group') {
     const g = pedSel.group, it = pedEdit(() => peds.addGroup([g.pos[0] + 60, g.pos[1], g.pos[2]], g.count), 'copy a pedestrian group');
     if (it) selectPed(it);
@@ -2285,6 +2372,7 @@ function hideRec(it) {
   else { it.rec.deleted = true; it.node.visible = false; }
 }
 function remove() {
+  if (layerOf()) { removeMarker(); return; }
   if (pedSel) {
     const it = pedSel;
     pedSel = null;
@@ -2443,11 +2531,13 @@ canvas.addEventListener('pointerup', (e) => {
   }
   if (!down || moved > 4 || gizmo.dragging || dragged || e.button !== 0) return;
   if (ruler.on) { if (!ruler.click(ndc(e))) toast('Nothing there to measure: click the stage.', 'info'); return; }   // the ruler takes the clicks
-  // with a panel of markers open (start points, power-ups, a net): the marker near the pointer is selected; nothing near lets go of it
-  if (markerCtx() && !e.shiftKey && !e.ctrlKey) {
-    const m = pickMarker(e), cur = markerCtx();
-    if (m >= 0) { selectMarker(m); return; }
-    if (cur.sel >= 0) { cur.sel = -1; refreshMarkers(cur); }
+  // in a marker mode (start points, power-ups, a net): the marker near the pointer is selected; nothing near lets go of it. The objects
+  // are scenery there, so the click never falls through to them.
+  if (layerOf()) {
+    if (e.shiftKey || e.ctrlKey) return;
+    const m = pickMarker(e);
+    if (m >= 0) selectMarker(m); else if (lay(layerOf()).sel >= 0) deselectMarker();
+    return;
   }
   // the first visible thing under the pointer: an object, a pedestrian marker, a deleted one's dashed box; ground or a road: nothing
   const add = e.shiftKey || e.ctrlKey, h = pickAt(ndc(e), add);
@@ -2603,6 +2693,7 @@ async function postNow(kind, save, extra) {
   }
   const mod = modNow;
   if (writes && lightDirty()) await lightSave();       // the open Light and fog panel's file goes with the stage's
+  if (writes && layersDirty()) await saveLayers();     // so do the marker layers' (start points, power-ups, the nets): an error in one shows in its panel and the patch still saves
   const { here, ...rest } = extra;       // here: Test from here / Reload from here (the view's aim as the start point)
   const body = Object.assign({ name: stageName, mod, patch: buildPatch(), save, since: writes ? fileStamp : undefined }, testBody(here ? aimStart() : null), rest);
   const wasRunning = game.running;
@@ -2683,8 +2774,10 @@ async function postNow(kind, save, extra) {
 
 // a question: a title, a text and buttons [value, label, primary]; o.icon (an MDI name, amber), o.note (an amber line under the
 // text). then(value) runs once: on a button's click, or when the dialog closes otherwise (Esc, the close button: 'cancel').
+let askPrev = null;       // ends the question the dialog held last, if it is still waiting for its close event
 function ask(head, text, buttons, then, o = {}) {
   const dlg = $('askDlg');
+  if (askPrev) askPrev();       // (a question closed by Esc answers 'cancel' when its close event comes: that event must not answer for this one)
   if (dlg.open) dlg.close();
   $('askTitle').textContent = head;
   $('askText').textContent = text;
@@ -2712,6 +2805,7 @@ function ask(head, text, buttons, then, o = {}) {
   }
   dlg.returnValue = '';
   dlg.addEventListener('close', onClose);
+  askPrev = () => finish('cancel');
   dlg.showModal();
   (main || $('askBtns').lastElementChild)?.focus();
 }
@@ -2734,10 +2828,10 @@ function unsavedCount() {
   for (const h of A.keys()) if (!B.has(h)) n++;
   const rest = (p) => JSON.stringify(Object.assign({}, p, { objects: undefined }));
   if (rest(a) !== rest(b)) n++;
-  return Math.max(n, dirty ? 1 : 0) + (lightDirty() ? 1 : 0);
+  return Math.max(n, dirty ? 1 : 0) + (lightDirty() ? 1 : 0) + dirtyLayers().length;
 }
-// the stage's patch has changes, or the open Light and fog panel does (its file is saved with Save too)
-function isDirty() { return dirty || lightDirty(); }
+// the stage's patch has changes, or the open Light and fog panel does, or a marker layer has a draft (their files are saved with Save too)
+function isDirty() { return dirty || lightDirty() || layersDirty(); }
 // unsaved changes in the way: Cancel, Discard, or save first (then gets 'cancel', 'discard' or 'save')
 function askUnsaved(text, saveLabel, then) {
   ask('Unsaved changes', text, [['cancel', 'Cancel'], ['discard', 'Discard'], ['save', saveLabel, true]], then,
@@ -2953,12 +3047,13 @@ function fillMods() {
   f.classList.toggle('none', !modNow);
   f.title = modNow ? `Your changes are saved into mods/${modNow}/levels/` : 'Choose the mod your changes are saved into, or make a new one';
 }
-// the mod in use from now on (the config keeps it); the scene is not loaded again here
-function setMod(v) {
+// the mod in use from now on (the config keeps it); the scene is not loaded again here. keepDrafts: the marker layers with unsaved changes
+// keep them (moveTo); the others read the new mod's files
+function setMod(v, keepDrafts = false) {
   modNow = v;
   cfg.mod = v;
   winHidden = false;
-  loadSpt();      // each mod keeps its own start points file
+  loadSpt(keepDrafts);      // each mod keeps its own marker files
   fillMods();
   showWinner();
   api('/api/config', { mod: v }).catch((err) => msg(`Couldn't keep the mod in the settings: ${cleanError(err).text}`, { level: 'err' }));
@@ -2966,7 +3061,7 @@ function setMod(v) {
 // the scene's changes go into mod v without loading its file: unsaved until Save writes them there
 function moveTo(v, say = true) {
   const p = JSON.stringify(buildPatch());
-  setMod(v);
+  setMod(v, true);
   // the new props draw from the new mod's models; an entry whose model it lacks stays in the file, unseen
   loadPropModels(v).then(() => {
     if (!propRecs.length && !keep.props.length) return;
@@ -3078,8 +3173,6 @@ $('clearFilters').onclick = () => {
   refreshList();
 };
 document.querySelectorAll('.kinds input').forEach((x) => (x.onchange = refreshList));
-$('modeObjects').onclick = () => setMode('objects');
-$('modePeds').onclick = () => setMode('peds');
 // Name and Details open or closed as last time
 for (const id of ['secName', 'secDetails', 'secBehavior']) {
   $(id).open = store.get('fold.' + id, id === 'secBehavior' ? '1' : '0') === '1';
@@ -3675,270 +3768,192 @@ function gdApply() {
   return true;
 }
 $('gdOk').onclick = gdApply;
-// ------------------------------------------------------------------ start points (.SPT) and power-ups (.PUP)
-// Two point files of the stage, edited in one dialog (the kind picks the columns) and kept in the mod, not in the patch: Save writes
-// mods/<mod>/PTS/<STAGE>.<ext> (or the custom stage's folder). SPT: where the monsters appear, four lists (tools/lvl.py SPT_LISTS);
-// PUP: the health, stamina and other pickups (PUP_TYPES), each at its rest height. editor.py stage_spt/save_spt, kind SPT | PUP.
-const PT_COLORS = { SPT: [0xFFC233, 0x4AE08A, 0xF0605A, 0x36C5F0], PUP: [0xF0605A, 0x4AE08A, 0x36C5F0] };
-const PT_WORDS = { SPT: ['start point', 'start points'], PUP: ['power-up', 'power-ups'] };
-const ptEmpty = (kind) => ({ points: [], caps: kind === 'SPT' ? [1, 2, 20, 20] : [100], lists: [], source: 'disc' });
-const pt = { SPT: ptEmpty('SPT'), PUP: ptEmpty('PUP') };     // what the files hold (edited in place by the dialog)
-const ptSaved = { SPT: '[]', PUP: '[]' };
-const ptViews = { SPT: null, PUP: null };
-const ptLoadId = { SPT: 0, PUP: 0 };
-let ptKind = 'SPT', ptSel = -1;
-const ptKeep = (kind) => JSON.stringify(pt[kind].points);
-// the color of a point: SPT by list, PUP by what it gives (health red, stamina green, the rest blue)
-const ptColor = (kind, p) => PT_COLORS[kind][kind === 'SPT' ? p.list : p.type < 3 || p.type === 6 ? 0 : p.type < 6 || p.type === 7 ? 1 : 2] ?? 0xAAAAAA;
-// A load that a newer one overtakes waits for the newer one (its caller draws the list when it returns: with the old numbers it would
-// draw a list the newer load never redraws)
-const ptLoading = {};
-function loadPoints(kind) { return (ptLoading[kind] = loadPointsNow(kind)); }
-async function loadPointsNow(kind) {
+// ------------------------------------------------------------------ the marker layers: start points, power-ups, AI net, vehicle net
+// Four files of the stage, each a mode of the rail (3 to 6) like Pedestrians: the left panel lists the markers and holds Add and the file's
+// Save, the right panel holds the selected marker's numbers, a click in the view picks one (only in its own mode: elsewhere the layers are
+// faint scenery) and the gizmo moves it. Each layer is a draft in memory (pt, nets) saved as mods/<mod>/PTS/<STAGE>.<ext> (editor.py
+// stage_spt / save_spt, kinds SPT, PUP, AIP, FOP; tools/lvl.py has the codecs): by the mode's Save, or by Save (Ctrl+S) with the patch.
+// The drafts count as unsaved changes (isDirty), stay when Undo or Redo touches the patch, and have an Undo of their own while the mode is open.
+//   SPT: where the monsters appear, four lists (lvl.SPT_LISTS), each with its room; a cone and a line for the way it faces.
+//   PUP: the health, stamina and other pickups (lvl.PUP_TYPES), each at its rest height; a ball.
+//   AIP: the paths the computer monsters walk; a node type splits the net into sub-nets, a link's width is the lane (times 10 each side).
+//   FOP: the roads of the cars, helicopters, flying saucers and tanks; the node type says who drives there, a link has a width and a drop
+//        (how far below the path a helicopter may fly, times 10).
+const MARKER_LIFT = { SPT: 25, PUP: 14, AIP: 6, FOP: 6 };       // where the cone, the ball and the road end are drawn above the point
+const markerProxy = new THREE.Object3D();
+scene.add(markerProxy);
+const netDefaults = { AIP: { width: 20, drop: 0 }, FOP: { width: 10, drop: 0 } };     // the numbers a new link takes
+const netAttrs = (kind) => (kind === 'FOP' ? { width: netDefaults.FOP.width, drop: netDefaults.FOP.drop } : { width: netDefaults[kind].width });
+const clamp255 = (v) => Math.max(0, Math.min(255, Math.round(+v) || 0));
+
+// ---- loading
+// a load that a newer one overtakes waits for the newer one (its caller draws with the newer numbers); one that a reset or a kept draft
+// overtook (no newer load) just ends. layLoadOf: the id of the load whose promise layLoading holds.
+const layLoading = {}, layLoadOf = {};
+function loadLayer(kind) {
+  const p = loadLayerNow(kind);
+  layLoadOf[kind] = layLoadId[kind];
+  return (layLoading[kind] = p);
+}
+const laterLoad = (kind, id) => (layLoadOf[kind] !== id ? layLoading[kind] : undefined);
+async function loadLayerNow(kind) {
   if (!stageName) return;
-  const id = ++ptLoadId[kind];
+  const id = ++layLoadId[kind];
   try {
     const r = await api(`/api/spt?name=${encodeURIComponent(stageName)}&mod=${encodeURIComponent(modNow || '')}&kind=${kind}`);
-    if (id !== ptLoadId[kind]) return ptLoading[kind];
-    pt[kind] = r;
-    ptSaved[kind] = ptKeep(kind);
-    if (kind === ptKind) ptSel = -1;
-  } catch (e) { if (id === ptLoadId[kind]) pt[kind] = ptEmpty(kind); }
-  updatePtView(kind);
+    if (id !== layLoadId[kind]) return laterLoad(kind, id);
+    layerTake(kind, r);
+  } catch (e) {
+    if (id !== layLoadId[kind]) return laterLoad(kind, id);
+    const L = lay(kind);
+    layerTake(kind, { points: [], caps: L.caps, source: 'disc', file: '', lists: L.lists });
+  }
+  layHist[kind] = { past: [], future: [] };
+  layerLoaded(kind);
 }
-const loadSpt = () => { loadPoints('SPT'); loadPoints('PUP'); loadNet('AIP'); loadNet('FOP'); };
-// A cone for each point (colored; white when selected); a start point has a line for the way the monster faces, a power-up is a ball on its rest height
-function updatePtViewNow(kind) {
-  const old = ptViews[kind];
-  if (old) { scene.remove(old); old.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); }); ptViews[kind] = null; }
-  if (!pt[kind].points.length) return;
-  const g = new THREE.Group();
-  pt[kind].points.forEach((p, k) => {
-    const col = kind === ptKind && k === ptSel ? 0xFFFFFF : ptColor(kind, p);
-    const mat = new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true, opacity: 0.9 });
+// a server reply becomes the layer's draft and its saved copy
+function layerTake(kind, r, keepSel = false) {
+  const sel = lay(kind).sel, d = { points: r.points, caps: r.caps, source: r.source, file: r.file || '', lists: r.lists || [] };
+  if (isNet(kind)) Object.assign(nets[kind], d, { saved: JSON.stringify(r.points), sel: -1 });
+  else { pt[kind] = d; ptSaved[kind] = JSON.stringify(r.points); ptSelOf[kind] = -1; }
+  if (keepSel && lay(kind).points[sel]) lay(kind).sel = sel;
+}
+function loadSpt(keepDrafts = false) {
+  for (const k of KINDS) {
+    if (keepDrafts && lay(k).dirty) keepDraft(k); else loadLayer(k);
+  }
+}
+// a draft that goes to another mod: it stays, and it is not in that mod yet. Whether the mod has its own file is asked for the panel's foot.
+function keepDraft(kind) {
+  ++layLoadId[kind];          // a load under way would put the old file over it
+  lay(kind).saved = null;
+  layerLoaded(kind);
+  api(`/api/spt?name=${encodeURIComponent(stageName)}&mod=${encodeURIComponent(modNow || '')}&kind=${kind}`).then((r) => {
+    const L = lay(kind);
+    if (L.saved !== null) return;
+    Object.assign(L.d, { source: r.source, file: r.file || '' });
+    if (layerOf() === kind) mkFoot(kind);
+  }).catch(() => {});
+}
+// the old stage's markers and drafts go (loadStage); the new stage's files load after its patch
+function resetLayers() {
+  for (const k of KINDS) {
+    ++layLoadId[k];
+    const L = lay(k);
+    if (L.net) Object.assign(L.d, { points: [], saved: '[]', sel: -1, source: 'disc', file: '' });
+    else { pt[k] = Object.assign(ptEmpty(k), { caps: L.caps, lists: L.lists }); ptSaved[k] = '[]'; ptSelOf[k] = -1; }
+    layHist[k] = { past: [], future: [] };
+    updateLayerView(k);
+  }
+  syncRailDots();
+  mkErrSet('');
+  if (layerOf()) refreshMk();
+}
+function layerLoaded(kind) {
+  updateLayerView(kind);
+  syncRailDots();
+  $('save').classList.toggle('dirty', isDirty());
+  showStatus();
+  if (layerOf() === kind) { mkFillBar(); showSel(); }
+}
+
+// ---- the views: a cone for each start point (a line for the way it faces), a ball for a power-up, balls and lines for a net. The layer of the
+// open mode is full, the others faint; the selected marker is white, and a selected node's links amber.
+function disposeView(g) {
+  if (!g) return;
+  scene.remove(g);
+  g.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); });
+}
+function updateLayerView(kind) {
+  const L = lay(kind);
+  disposeView(L.view);
+  L.view = L.points.length ? (L.net ? netGroup(kind, L) : pointGroup(kind, L)) : null;
+  if (L.view) { L.view.visible = layerOf() === kind || overlayOn[kind]; scene.add(L.view); }
+}
+const updateLayerViews = () => KINDS.forEach(updateLayerView);
+function syncLayerVisibility() {
+  for (const k of KINDS) {
+    const v = lay(k).view, on = layerOf() === k, c = $(OVERLAY_ID[k]);
+    if (v) v.visible = on || overlayOn[k];
+    c.checked = on || overlayOn[k];
+    c.disabled = on;
+    c.closest('.switch').classList.toggle('none', on);
+  }
+}
+function pointGroup(kind, L) {
+  const g = new THREE.Group(), on = layerOf() === kind, opacity = on ? 0.9 : 0.4;
+  L.points.forEach((p, k) => {
+    const col = on && k === L.sel ? 0xFFFFFF : markerColor(kind, p);
+    const mat = new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true, opacity });
     const base = toThree(p.pos);
     const mesh = new THREE.Mesh(kind === 'SPT' ? new THREE.ConeGeometry(14, 50, 14) : new THREE.SphereGeometry(10, 12, 8), mat);
-    mesh.position.copy(base).add(new THREE.Vector3(0, kind === 'SPT' ? 25 : 14, 0));
+    mesh.position.copy(base).add(new THREE.Vector3(0, MARKER_LIFT[kind], 0));
     mesh.renderOrder = 998;
     mesh.raycast = () => {};
     g.add(mesh);
     if (kind === 'SPT') {
       const h = (p.heading * Math.PI) / 180, fwd = toThree([p.pos[0] + Math.sin(h) * 60, p.pos[1] + Math.cos(h) * 60, p.pos[2] + 25]);
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([base.clone().add(new THREE.Vector3(0, 25, 0)), fwd]),
-                                  new THREE.LineBasicMaterial({ color: col, depthTest: false }));
+                                  new THREE.LineBasicMaterial({ color: col, depthTest: false, transparent: true, opacity }));
       line.renderOrder = 998;
       line.raycast = () => {};
       g.add(line);
     }
   });
-  g.visible = overlayOn[kind === 'SPT' ? 'sptOn' : 'pupOn'] || ($('sptDlg').open && ptKind === kind);   // Display > Overlays; open in its dialog, always
-  ptViews[kind] = g;
-  scene.add(g);
+  return g;
 }
-// Display > Overlays: Start points, Power-ups and the AI net are drawn over the stage unless switched off (the dialog shows its own anyway)
-const overlayOn = { sptOn: store.get('sptOn', '1') === '1', pupOn: store.get('pupOn', '1') === '1', aipOn: store.get('aipOn', '1') === '1' };
-for (const id of Object.keys(overlayOn)) {
-  $(id).checked = overlayOn[id];
-  $(id).onchange = (e) => {
-    overlayOn[id] = e.target.checked;
-    store.set(id, overlayOn[id] ? '1' : '0');
-    if (id === 'aipOn') updateNetView('AIP'); else updatePtView(id === 'sptOn' ? 'SPT' : 'PUP');
-  };
-}
-function ptRows() {
-  const kind = ptKind, d = pt[kind], box = $('sptList');
-  box.textContent = '';
-  box.dataset.kind = kind;
-  const mk = (tag, attrs = {}, text = '') => { const e = document.createElement(tag); Object.assign(e, attrs); if (text) e.textContent = text; return e; };
-  const head = mk('div', { className: 'spt-row spt-head ' + kind.toLowerCase() });
-  for (const t of kind === 'SPT' ? ['#', 'List', 'x', 'y', 'z', 'Heading', 'Ground', ''] : ['#', 'Type', 'x', 'y', 'z (rest)', 'Shadow', '']) head.append(mk('span', {}, t));
-  box.append(head);
-  const redraw = () => { updatePtView(kind); ptInfo(); };
-  d.points.forEach((p, k) => {
-    const row = mk('div', { className: 'spt-row ' + kind.toLowerCase() + (k === ptSel ? ' sel' : '') });
-    row.onclick = () => { ptSel = k; updatePtView(kind); ptRows(); };
-    const num = (v, set, step = 1) => {
-      const i = mk('input', { type: 'number', step, value: Math.round(v * 100) / 100 });
-      i.onclick = (e) => e.stopPropagation();
-      i.onchange = () => { const x = parseFloat(i.value); if (Number.isFinite(x)) { set(x); redraw(); } };
-      return i;
-    };
-    const key = kind === 'SPT' ? 'list' : 'type';
-    const sel = mk('select');
-    d.lists.forEach((n, li) => sel.append(new Option(`${li}: ${n}`, li)));
-    sel.value = p[key];
-    sel.onclick = (e) => e.stopPropagation();
-    sel.onchange = () => { p[key] = parseInt(sel.value, 10); redraw(); };
-    const flag = mk('input', { type: 'checkbox' });
-    if (kind === 'SPT') {
-      flag.checked = !!p.snap;
-      flag.title = 'Ground: the point drops to the floor (or roof) under it when a monster appears';
-      flag.onchange = () => { p.snap = flag.checked; };
-    } else {
-      flag.checked = (p.flags & 1) !== 0;
-      flag.title = 'Shadow under the power-up (the game then keeps it on the floor)';
-      flag.onchange = () => { p.flags = flag.checked ? (p.flags & 7 ? p.flags : 7) : 0; };
-    }
-    flag.onclick = (e) => e.stopPropagation();
-    const here = mk('button', { type: 'button', title: 'Move this point to where the middle of the view meets the stage' }, 'Aim');
-    here.onclick = (e) => { e.stopPropagation(); p.pos = viewPoint().map((x) => Math.round(x * 10) / 10); ptRows(); redraw(); };
-    const del = mk('button', { type: 'button', title: 'Delete this point' }, '×');
-    del.onclick = (e) => { e.stopPropagation(); d.points.splice(k, 1); ptSel = -1; ptRows(); redraw(); };
-    const cells = [mk('span', {}, `${k + 1}`), sel, num(p.pos[0], (x) => { p.pos[0] = x; }), num(p.pos[1], (x) => { p.pos[1] = x; }),
-                   num(p.pos[2], (x) => { p.pos[2] = x; })];
-    if (kind === 'SPT') cells.push(num(p.heading, (x) => { p.heading = wrapDeg(x); }, 5));
-    cells.push(flag, mk('span', {}, ''));
-    cells[cells.length - 1].append(here, del);
-    row.append(...cells);
-    box.append(row);
-  });
-}
-function ptInfo() {
-  const d = pt[ptKind], n = (k) => d.points.filter((p) => p[ptKind === 'SPT' ? 'list' : 'type'] === k).length;
-  $('sptInfo').textContent = ptKind === 'SPT'
-    ? d.lists.map((_n, k) => `${k}: ${n(k)} of ${d.caps[k]}`).join(' · ') + ` · ${d.points.length} of 255 points`
-    : `${d.points.length} power-ups (the game keeps ${d.caps[0]} at a time; the file holds 255)`;
-}
-const ptErr = (t) => { $('sptErr').hidden = !t; if (t) $('sptErr').querySelector('span').textContent = t; };
-async function openPoints(kind) {
-  ptKind = kind;
-  ptSel = -1;
-  await loadPoints(kind);
-  const d = pt[kind], w = PT_WORDS[kind][1];
-  $('sptTitle').textContent = kind === 'SPT' ? 'Start points' : 'Power-ups';
-  $('sptText').textContent = d.source === 'mod' ? `The ${w} this mod keeps for ${title(stageName)}.`
-                                                : `${title(stageName)}'s own ${w}; Save keeps your version in the mod.`;
-  const nl = $('sptNewList');
-  nl.textContent = '';
-  d.lists.forEach((n, k) => nl.append(new Option(`${k}: ${n}`, k)));
-  nl.value = kind === 'SPT' ? '2' : '0';
-  $('sptDlg').dataset.kind = kind;
-  ptErr('');
-  ptRows();
-  ptInfo();
-  $('sptDlg').show();
-  updatePtView(kind);
-}
-$('sptBtn').onclick = () => openTool(() => openPoints('SPT'));
-$('pupBtn').onclick = () => openTool(() => openPoints('PUP'));
-$('sptAdd').onclick = () => {
-  const kind = ptKind, d = pt[kind];
-  if (d.points.length >= 255) { ptErr(`A stage holds at most 255 ${PT_WORDS[kind][1]}.`); return; }
-  const pos = viewPoint().map((x) => Math.round(x * 10) / 10), v = parseInt($('sptNewList').value, 10);
-  d.points.push(kind === 'SPT' ? { list: v, pos, heading: 0, snap: true, w: 0, sel: 0 } : { type: v, pos, flags: 7, w: 0, sel: 0 });
-  ptSel = d.points.length - 1;
-  ptErr('');
-  updatePtView(kind);
-  ptRows();
-  ptInfo();
-};
-async function ptPost(body) {
-  const kind = ptKind;
-  ptErr('');
-  try {
-    const r = await api('/api/spt', Object.assign({ mod: modNow || '', name: stageName, kind }, body));
-    pt[kind] = r;
-    ptSaved[kind] = ptKeep(kind);
-    ptSel = -1;
-    updatePtView(kind);
-    ptRows();
-    ptInfo();
-    return r;
-  } catch (e) { ptErr(cleanError(e).text); return null; }
-}
-$('sptSave').onclick = async () => {
-  const kind = ptKind, r = await ptPost({ points: pt[kind].points });
-  if (!r) return;
-  $('sptDlg').close();
-  msg(`Saved ${r.points.length} ${PT_WORDS[kind][1]} in the mod` + (r.warnings.length ? '. ' + r.warnings.join(' ') : '. Restart the stage to see them'),
-      { level: r.warnings.length ? 'warn' : 'ok', toast: true });
-};
-$('sptReset').onclick = () => {
-  const kind = ptKind;
-  ask(`Take the mod's ${PT_WORDS[kind][1]} out?`,
-      `This deletes the ${PT_WORDS[kind][1]} file ${title(stageName)} has in mod "${modNow}" and puts the stage's own back. It can't be undone.`,
-      [['cancel', 'Cancel'], ['go', 'Delete the file', true]], async (v) => {
-        if (v !== 'go') return;
-        const r = await ptPost({ reset: true });
-        if (r) msg(`The stage's own ${PT_WORDS[kind][1]} are back (the mod's file is gone)`, { level: 'ok', toast: true });
-      }, { icon: 'delete-outline' });
-};
-$('sptDlg').addEventListener('close', () => { if (ptKeep(ptKind) !== ptSaved[ptKind]) loadPoints(ptKind); else updatePtView(ptKind); });   // closed without saving: back to the file's points
-
-// ------------------------------------------------------------------ AI net (.AIP) and vehicle net (.FOP)
-// Both are graphs of nodes with directed links, edited in one dialog and kept as a file of the mod (editor.py kinds AIP and FOP; tools/lvl.py
-// read_aip/build_aip and read_fop/build_fop). AIP: the paths the computer monsters walk; a node type splits the net into sub-nets and a
-// link's width is the lane (width * 10 to each side). FOP: the roads of the cars, helicopters, flying saucers and tanks; the node type says
-// who drives there and a link has a width and a drop (how far below the path a helicopter may fly, times 10).
-const NET_WORDS = {
-  AIP: { title: 'AI net', noun: 'AI net', width: 20 },
-  FOP: { title: 'Vehicle net', noun: 'vehicle net', width: 10 },
-};
-const FOP_COLORS = [0xFFD24A, 0x5EE0A0, 0xFF6FB5, 0xFF8A3D];      // car street, helicopter, flying saucer, tank and truck
-const netColor = (kind, type) => (kind === 'AIP' ? (type ? 0x36C5F0 : 0xB57BFF) : (FOP_COLORS[type] ?? 0xFFFFFF));
-const newNet = (caps) => ({ points: [], caps, source: 'disc', lists: [], saved: '[]', sel: -1, view: null, loadId: 0 });
-const nets = { AIP: newNet([255, 450, 6]), FOP: newNet([255, 0, 6]) };
-let netKind = 'AIP', fopOn = store.get('fop', '0') === '1';
-const netKeep = (n) => JSON.stringify(n.points);
-const netTake = (n, r) => Object.assign(n, { points: r.points, caps: r.caps, source: r.source, lists: r.lists || [], saved: JSON.stringify(r.points), sel: -1 });
-const netLoading = {};     // as loadPoints: an overtaken load waits for the newer one
-function loadNet(kind) { return (netLoading[kind] = loadNetNow(kind)); }
-async function loadNetNow(kind) {
-  if (!stageName) return;
-  const n = nets[kind], id = ++n.loadId;
-  try {
-    const r = await api(`/api/spt?name=${encodeURIComponent(stageName)}&mod=${encodeURIComponent(modNow || '')}&kind=${kind}`);
-    if (id !== n.loadId) return netLoading[kind];
-    netTake(n, r);
-  } catch (e) { if (id === n.loadId) netTake(n, { points: [], caps: n.caps, source: 'disc', lists: n.lists }); }
-  updateNetView(kind);
-}
-const netTwoWay = (n, a, b) => n.points[a].links.some((l) => l.to === b) && n.points[b].links.some((l) => l.to === a);
-function netPaths(n) {   // as the game counts them: a two-way link is one path
-  const seen = new Set();
-  n.points.forEach((p, i) => p.links.forEach((l) => seen.add(netTwoWay(n, i, l.to) ? `${Math.min(i, l.to)}-${Math.max(i, l.to)}` : `${i}>${l.to}`)));
-  return seen.size;
-}
-function updateNetViewNow(kind) {
-  const n = nets[kind];
-  if (n.view) { scene.remove(n.view); n.view.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); }); n.view = null; }
-  if (!n.points.length) return;
-  n.view = new THREE.Group();
-  n.view.visible = (kind === 'AIP' ? overlayOn.aipOn : fopOn) || ($('netDlg').open && netKind === kind);
-  const up = new THREE.Vector3(0, 6, 0), byColor = new Map();
-  n.points.forEach((p, i) => p.links.forEach((l) => {
-    if (netTwoWay(n, i, l.to) && l.to < i) return;
-    const c = i === n.sel || l.to === n.sel ? 0xFFC233 : netColor(kind, p.type);
+function netGroup(kind, L) {
+  const g = new THREE.Group(), on = layerOf() === kind, opacity = on ? 1 : 0.4, up = new THREE.Vector3(0, MARKER_LIFT[kind], 0), byColor = new Map();
+  const sel = on ? L.sel : -1;
+  L.points.forEach((p, i) => p.links.forEach((l) => {
+    if (netTwoWay(L.points, i, l.to) && l.to < i) return;
+    const c = i === sel || l.to === sel ? 0xFFC233 : markerColor(kind, p);
     if (!byColor.has(c)) byColor.set(c, []);
-    byColor.get(c).push(toThree(p.pos).add(up), toThree(n.points[l.to].pos).add(up));
+    byColor.get(c).push(toThree(p.pos).add(up), toThree(L.points[l.to].pos).add(up));
   }));
   for (const [color, pts] of byColor) {
-    const o = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color, depthTest: false }));
+    const o = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true, opacity }));
     o.renderOrder = 997;
     o.raycast = () => {};
-    n.view.add(o);
+    g.add(o);
   }
-  n.points.forEach((p, i) => {
-    const m = new THREE.Mesh(new THREE.SphereGeometry(i === n.sel ? 11 : 7, 10, 8), new THREE.MeshBasicMaterial({ color: i === n.sel ? 0xFFFFFF : netColor(kind, p.type), depthTest: false }));
+  L.points.forEach((p, i) => {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(i === sel ? 11 : 7, 10, 8),
+                             new THREE.MeshBasicMaterial({ color: i === sel ? 0xFFFFFF : markerColor(kind, p), depthTest: false, transparent: true, opacity }));
     m.position.copy(toThree(p.pos)).add(up);
     m.renderOrder = 998;
     m.raycast = () => {};
-    n.view.add(m);
+    g.add(m);
   });
-  scene.add(n.view);
+  return g;
+}
+// the ring over the marker the pointer is on (a marker mode): it faces the camera and keeps about the same size on the screen
+const mkRing = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 32 }, (_, a) => new THREE.Vector3(Math.cos(a / 32 * Math.PI * 2), Math.sin(a / 32 * Math.PI * 2), 0))),
+                                  new THREE.LineBasicMaterial({ color: 0xFFFFFF, depthTest: false, transparent: true, opacity: 0.9 }));
+mkRing.renderOrder = 999;
+mkRing.visible = false;
+mkRing.raycast = () => {};
+scene.add(mkRing);
+function showMarkerRing(i) {
+  const k = layerOf(), p = k && i >= 0 ? lay(k).points[i] : null;
+  mkRing.visible = !!p;
+  if (!p) return;
+  mkRing.position.copy(toThree(p.pos));
+  mkRing.position.y += MARKER_LIFT[k];
+  mkRing.quaternion.copy(camera.quaternion);
+  mkRing.scale.setScalar(Math.max(8, camera.position.distanceTo(mkRing.position) * 0.03));
 }
 
-// ------------------------------------------------------------------ markers in the view: start points, power-ups and net nodes
-// With the tool's panel open, a click near a marker selects it (its row too) and the gizmo moves it, as for an object; a click on nothing
-// lets go. They are drafts of the file the panel keeps (its Save), outside Undo, like the rows' numbers.
-const markerProxy = new THREE.Object3D();
-scene.add(markerProxy);
-const MARKER_LIFT = { SPT: 25, PUP: 14, AIP: 6, FOP: 6 };       // where the cone, the ball and the road end are drawn above the point
+// ---- picking, the gizmo
+const markerSel = () => { const k = layerOf(); if (!k) return null; const L = lay(k); return L.points[L.sel] || null; };
+// the layer of the open mode as {kind, pts, sel}, or null (what the tests and scripts read)
 function markerCtx() {
-  if ($('sptDlg').open) return { kind: ptKind, pts: pt[ptKind].points, get sel() { return ptSel; }, set sel(v) { ptSel = v; } };
-  if ($('netDlg').open) { const n = nets[netKind]; return { kind: netKind, pts: n.points, get sel() { return n.sel; }, set sel(v) { n.sel = v; } }; }
-  return null;
+  const kind = layerOf();
+  if (!kind) return null;
+  const L = lay(kind);
+  return { kind, pts: L.points, get sel() { return L.sel; }, set sel(v) { L.sel = v; } };
 }
+const markerLabel = () => { const k = layerOf(), L = k && lay(k); return L && L.points[L.sel] ? markerName(k, L.points, L.sel, L.lists).toLowerCase() : 'marker'; };
 // the screen place of a marker, in client pixels (null behind the camera)
 function markerScreen(kind, p) {
   const v = toThree(p.pos);
@@ -3948,41 +3963,36 @@ function markerScreen(kind, p) {
   const r = canvas.getBoundingClientRect();
   return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height];
 }
-// the marker under the pointer: the nearest one within 18 px, or -1
+// the marker of the open layer under the pointer: the nearest one within 18 px, or -1
 function pickMarker(e) {
-  const cur = markerCtx();
-  if (!cur) return -1;
+  const kind = layerOf();
+  if (!kind) return -1;
   let best = -1, bd = 18;
-  cur.pts.forEach((p, i) => {
-    const s = markerScreen(cur.kind, p);
+  lay(kind).points.forEach((p, i) => {
+    const s = markerScreen(kind, p);
     if (!s) return;
     const d = Math.hypot(s[0] - e.clientX, s[1] - e.clientY);
     if (d < bd) { bd = d; best = i; }
   });
   return best;
 }
-function refreshMarkers(cur) {
-  if (cur.kind === 'SPT' || cur.kind === 'PUP') { updatePtViewNow(cur.kind); ptRows(); ptInfo(); }
-  else { updateNetViewNow(cur.kind); netRows(); netInfo(); }
-  syncMarkerGizmo();
-}
 function selectMarker(i) {
-  const cur = markerCtx();
-  if (!cur) return;
-  if (sel || pedSel) select(null);
-  cur.sel = i;
-  refreshMarkers(cur);
-  document.querySelector('#sptList .spt-row.sel, #netList .spt-row.sel')?.scrollIntoView({ block: 'nearest' });
+  const kind = layerOf();
+  if (!kind) return;
+  lay(kind).sel = i;
+  updateLayerView(kind);
+  showSel();
 }
-// the gizmo follows the selected marker while a panel with markers is open (and nothing else is selected)
+function deselectMarker() { selectMarker(-1); }
+// the gizmo follows the selected marker (its place, and a move of the marker by anything else puts it there)
 function syncMarkerGizmo() {
-  const cur = markerCtx();
-  if (!cur || cur.sel < 0 || !cur.pts[cur.sel] || sel || pedSel) {
+  const p = markerSel();
+  if (!p || sel || pedSel) {
     if (marker.on) { gizmo.detach(); marker.on = false; }
     return;
   }
   if (gizmo.dragging) return;
-  markerProxy.position.copy(toThree(cur.pts[cur.sel].pos));
+  markerProxy.position.copy(toThree(p.pos));
   markerProxy.updateMatrixWorld(true);
   if (!marker.on || gizmo.object !== markerProxy) {
     if (gizmo.getMode() !== 'translate') setTool('translate');
@@ -3990,104 +4000,557 @@ function syncMarkerGizmo() {
     marker.on = true;
   }
 }
+// the gizmo moves the marker: only the view follows while it drags (the list and the numbers are redrawn when it lets go)
 function moveMarker() {
-  const cur = markerCtx();
-  if (!cur || cur.sel < 0 || !cur.pts[cur.sel]) return;
-  cur.pts[cur.sel].pos = toGame(markerProxy.position).map((x) => Math.round(x * 10) / 10);
-  refreshMarkers(cur);
+  const kind = layerOf(), p = markerSel();
+  if (!p) return;
+  p.pos = toGame(markerProxy.position).map(r1);
+  updateLayerView(kind);
+  fillMarkerFields();
+  if (!gizmo.dragging) layerChanged(kind);       // not a drag (a script moved it): nothing else will say it changed
 }
-function updatePtView(kind) { updatePtViewNow(kind); syncMarkerGizmo(); }
-function updateNetView(kind) { updateNetViewNow(kind); syncMarkerGizmo(); }
-const netErr = (t) => { $('netErr').hidden = !t; if (t) $('netErr').querySelector('span').textContent = t; };
-function netInfo() {
-  const n = nets[netKind], cap = n.caps;
-  $('netInfo').textContent = netKind === 'AIP'
-    ? `${n.points.length} of ${cap[0]} nodes · ${netPaths(n)} of ${cap[1]} paths (a two-way link is one path) · ${cap[2]} links at most per node`
-    : `${n.points.length} of ${cap[0]} nodes · ${cap[2]} links at most per node · a road is two-way when both ends link to each other`;
+function markerDragEnd() {
+  const kind = layerOf();
+  if (!kind) return;
+  const h = layHist[kind], top = h.past[h.past.length - 1];
+  if (top && top.p === JSON.stringify(lay(kind).points)) h.past.pop();       // a click on the gizmo that moved nothing is not an edit
+  layerChanged(kind);
+  showMarker();
 }
-function netRows() {
-  const kind = netKind, n = nets[kind], box = $('netList');
-  box.textContent = '';
-  const mk = (tag, attrs = {}, text = '') => { const e = document.createElement(tag); Object.assign(e, attrs); if (text) e.textContent = text; return e; };
-  const head = mk('div', { className: 'spt-row spt-head net ' + kind });
-  for (const t of ['#', 'Type', 'x', 'y', 'z', 'Links to', '']) head.append(mk('span', {}, t));
-  box.append(head);
-  const redraw = () => { updateNetView(kind); netInfo(); };
-  n.points.forEach((p, k) => {
-    const row = mk('div', { className: 'spt-row net ' + kind + (k === n.sel ? ' sel' : '') });
-    row.onclick = () => { n.sel = k; netRows(); updateNetView(kind); };
-    const num = (v, set, step = 1) => {
-      const i = mk('input', { type: 'number', step, value: Math.round(v * 100) / 100 });
-      i.onclick = (e) => e.stopPropagation();
-      i.onchange = () => { const x = parseFloat(i.value); if (Number.isFinite(x)) { set(x); redraw(); } };
-      return i;
-    };
-    const typeCell = kind === 'AIP' ? num(p.type, (x) => { p.type = Math.max(0, Math.min(255, Math.round(x))); }) : (() => {
-      const s = mk('select', {});
-      n.lists.forEach((name, t) => s.append(mk('option', { value: t, selected: t === p.type }, `${t}: ${name}`)));
-      s.onclick = (e) => e.stopPropagation();
-      s.onchange = () => { p.type = parseInt(s.value, 10); redraw(); };
-      return s;
-    })();
-    const links = p.links.map((l) => `${l.to + 1}${netTwoWay(n, k, l.to) ? '' : '→'}(w${l.width}${kind === 'FOP' && l.drop ? ` d${l.drop}` : ''})`).join('  ');
-    const here = mk('button', { type: 'button', title: 'Move this node to where the middle of the view meets the stage' }, 'Aim');
-    here.onclick = (e) => { e.stopPropagation(); p.pos = viewPoint().map((x) => Math.round(x * 10) / 10); netRows(); redraw(); };
-    const del = mk('button', { type: 'button', title: 'Delete this node and its links' }, '×');
-    del.onclick = (e) => {
-      e.stopPropagation();
-      n.points.splice(k, 1);
-      for (const m of n.points) m.links = m.links.filter((l) => l.to !== k).map((l) => Object.assign({}, l, { to: l.to > k ? l.to - 1 : l.to }));
-      n.sel = -1;
-      netRows();
-      redraw();
-    };
-    const cells = [mk('span', {}, `${k + 1}`), typeCell,
-                   num(p.pos[0], (x) => { p.pos[0] = x; }), num(p.pos[1], (x) => { p.pos[1] = x; }), num(p.pos[2], (x) => { p.pos[2] = x; }),
-                   mk('span', { title: 'A number alone is a two-way link; an arrow marks a one-way link out of this node' }, links), mk('span', {}, '')];
-    cells[cells.length - 1].append(here, del);
-    row.append(...cells);
-    box.append(row);
-  });
+
+// ---- a layer's history: JSON copies of its points (at most 255, 100 steps), outside the patch's
+const LAYER_HIST_MAX = 100;
+function layerPush(kind, before, sel0, label) {
+  const h = layHist[kind];
+  h.past.push({ p: before, sel: sel0, label });
+  if (h.past.length > LAYER_HIST_MAX) h.past.shift();
+  h.future = [];
+  showUndoButtons();
 }
-// the numbers a new link takes from the dialog: AIP a width; FOP a width and a drop
-const netWidth = () => Math.max(0, Math.min(255, parseInt($('netWidth').value, 10) || 0));
-const netDrop = () => Math.max(0, Math.min(255, parseInt($('netDrop').value, 10) || 0));
-const netLinkAttrs = () => (netKind === 'FOP' ? { width: netWidth(), drop: netDrop() } : { width: netWidth() });
-function netLinkBoth(n, a, b) {
-  const attrs = netLinkAttrs();
-  const add = (x, y) => {
-    const ex = n.points[x].links.find((l) => l.to === y);
-    if (ex) { Object.assign(ex, attrs); return true; }
-    if (n.points[x].links.length >= n.caps[2]) return false;
-    n.points[x].links.push(Object.assign({ to: y }, attrs));
-    return true;
+const layerSnap = (kind, label) => layerPush(kind, JSON.stringify(lay(kind).points), lay(kind).sel, label);
+function layerStep(from, to) {
+  const kind = layerOf();
+  if (!kind) return;
+  const h = layHist[kind], L = lay(kind), s = h[from].pop();
+  if (!s) return;
+  h[to].push({ p: JSON.stringify(L.points), sel: L.sel, label: s.label });
+  L.points = JSON.parse(s.p);
+  L.sel = L.points[s.sel] ? s.sel : -1;
+  layerChanged(kind);
+  showSel();
+}
+const layerUndo = () => layerStep('past', 'future');
+const layerRedo = () => layerStep('future', 'past');
+
+// ---- edits: one undo step around fn(point, layer), only when it changed something
+function markerEdit(label, fn) {
+  const kind = layerOf(), L = kind && lay(kind), p = L && L.points[L.sel];
+  if (!p) return false;
+  const before = JSON.stringify(L.points), sel0 = L.sel;
+  fn(p, L);
+  if (JSON.stringify(L.points) === before) return false;
+  layerPush(kind, before, sel0, label);
+  layerChanged(kind);
+  showMarker();
+  syncMarkerGizmo();
+  return true;
+}
+// something about the layer changed: its view, the rail's dot, Save, the status, the list and meters of the open mode
+function layerChanged(kind) {
+  updateLayerView(kind);
+  syncRailDots();
+  document.title = `WotM Level Editor — ${stageName}${isDirty() ? ' *' : ''}`;
+  $('save').classList.toggle('dirty', isDirty());
+  showStatus();
+  showUndoButtons();
+  if (layerOf() === kind) refreshMk();
+}
+function syncRailDots() {
+  for (const k of KINDS) {
+    const b = $(MODE_BUTTON[LAYERS[k].mode]), d = lay(k).dirty;
+    b.classList.toggle('dirty', d);
+    b.title = b.dataset.title ??= b.title;
+    if (d) b.title += ' · unsaved changes';
+    b.setAttribute('aria-label', LAYERS[k].title + (d ? ', unsaved changes' : ''));
+  }
+}
+function addMarker() {
+  const kind = layerOf();
+  if (!kind) return;
+  const L = lay(kind), w = LAYERS[kind];
+  if (L.points.length >= FILE_MAX) { mkErrSet(`A stage holds at most ${FILE_MAX} ${w.many}.`); return; }
+  const a = aimStart(), pos = a.slice(0, 3);
+  const v = kind === 'AIP' ? clamp255($('mkNewNum').value) : (parseInt($('mkNewType').value, 10) || 0);
+  const before = JSON.stringify(L.points), sel0 = L.sel;
+  const p = kind === 'SPT' ? { list: v, pos, heading: a[3], snap: true, w: 0, sel: 0 }
+    : kind === 'PUP' ? { type: v, pos, flags: 7, w: 0, sel: 0 }
+    : { pos, type: v, links: [], w: 0, sel: 0, tail: '' };
+  L.points.push(p);
+  const k = L.points.length - 1;
+  if (L.net && sel0 >= 0 && sel0 < k && !linkBoth(L.points, sel0, k, netAttrs(kind), L.caps[2])) {
+    L.points.pop();
+    mkErrSet(`Node ${sel0 + 1} already has ${L.caps[2]} links.`);
+    return;
+  }
+  layerPush(kind, before, sel0, `add a ${w.one}`);
+  L.sel = k;
+  mkErrSet('');
+  layerChanged(kind);
+  showSel();
+}
+function duplicateMarker() {
+  const kind = layerOf(), L = kind && lay(kind), p = markerSel();
+  if (!p) return;
+  if (L.points.length >= FILE_MAX) { mkErrSet(`A stage holds at most ${FILE_MAX} ${LAYERS[kind].many}.`); return; }
+  const before = JSON.stringify(L.points), sel0 = L.sel, label = markerLabel();
+  const c = JSON.parse(JSON.stringify(p));
+  c.pos[0] = r1(c.pos[0] + 60);
+  if (L.net) c.links = [];
+  L.points.push(c);
+  layerPush(kind, before, sel0, `copy ${label}`);
+  L.sel = L.points.length - 1;
+  mkErrSet('');
+  layerChanged(kind);
+  showSel();
+}
+function removeMarker() {
+  const kind = layerOf(), L = kind && lay(kind), p = markerSel();
+  if (!p) return;
+  const before = JSON.stringify(L.points), sel0 = L.sel, label = markerLabel();
+  if (L.net) removeNode(L.points, L.sel); else L.points.splice(L.sel, 1);
+  layerPush(kind, before, sel0, `delete ${label}`);
+  L.sel = -1;
+  mkErrSet('');
+  layerChanged(kind);
+  showSel();
+}
+function dropMarker() {
+  const p = markerSel();
+  if (!p) return;
+  const y = groundAt(toThree(p.pos));
+  if (y === null) { msg(`Nothing under the ${markerLabel()} to drop onto`, { level: 'warn', toast: true }); return; }
+  markerEdit(`drop ${markerLabel()}`, (q) => { q.pos[2] = r1(y); });
+}
+function nudgeMarker(v) {          // v: a scene vector; the burst's undo step was taken by nudge()
+  const kind = layerOf(), p = markerSel();
+  if (!p) return;
+  p.pos = [r1(p.pos[0] + v.x), r1(p.pos[1] - v.z), r1(p.pos[2] + v.y)];
+  syncMarkerGizmo();
+  fillMarkerFields();
+  layerChanged(kind);
+}
+
+// ---- Save, Back to the disc's, Revert, Clear net
+async function layerPost(kind, body, keepSel = false) {
+  try {
+    const r = await api('/api/spt', Object.assign({ mod: modNow || '', name: stageName, kind }, body));
+    layerTake(kind, r, keepSel);
+    layerChanged(kind);
+    if (layerOf() === kind) { mkFillBar(); showSel(); }
+    return r;
+  } catch (e) {
+    const t = cleanError(e).text;
+    if (layerOf() === kind) mkErrSet(t);
+    msg(`${LAYERS[kind].title}: ${t}`, { level: 'err', toast: true });
+    return null;
+  }
+}
+const savedText = (kind, r) => `Saved ${r.points.length} ${LAYERS[kind].many} in the mod` + (r.warnings.length ? '. ' + r.warnings.join(' ') : '. Restart the stage to see them');
+async function saveLayer(kind) {
+  mkErrSet('');
+  const r = await layerPost(kind, { points: lay(kind).points }, true);
+  if (r) msg(savedText(kind, r), { level: r.warnings.length ? 'warn' : 'ok', toast: true });
+  return r;
+}
+// the layers with changes, one after the other; an error in one does not hold back the others. True when all went in.
+async function saveLayers(kinds = dirtyLayers()) {
+  let ok = true;
+  for (const k of kinds) if (!await saveLayer(k)) ok = false;
+  return ok;
+}
+function resetLayer(kind) {
+  const w = LAYERS[kind];
+  ask(`Take the mod's ${w.many} out?`,
+      `This deletes the ${w.noun} file ${title(stageName)} has in mod "${modNow}" and puts the stage's own back. It can't be undone.`,
+      [['cancel', 'Cancel'], ['go', 'Delete the file', true]], async (v) => {
+        if (v !== 'go') return;
+        mkErrSet('');
+        const r = await layerPost(kind, { reset: true });
+        if (r) { layHist[kind] = { past: [], future: [] }; showUndoButtons(); msg(`The stage's own ${w.many} are back (the mod's file is gone)`, { level: 'ok', toast: true }); }
+      }, { icon: 'delete-outline' });
+}
+function revertLayer(kind) {
+  mkErrSet('');
+  loadLayer(kind);
+}
+function clearNet(kind) {
+  const L = lay(kind), w = LAYERS[kind];
+  const clear = () => {
+    const before = JSON.stringify(L.points), sel0 = L.sel;
+    L.points = [];
+    L.sel = -1;
+    layerPush(kind, before, sel0, `clear the ${w.noun}`);
+    mkErrSet('');
+    layerChanged(kind);
+    showSel();
   };
-  return add(a, b) && add(b, a);
+  if (!L.points.length) { clear(); return; }
+  ask(`Remove all ${L.points.length} nodes?`, `The ${w.noun} in the view is emptied. The mod's file stays as it is until you save, and Ctrl+Z brings the nodes back.`,
+      [['cancel', 'Cancel'], ['go', 'Remove them', true]], (v) => { if (v === 'go') clear(); }, { icon: 'delete-outline' });
 }
-async function openNet(kind) {
-  netKind = kind;
-  await loadNet(kind);
-  const n = nets[kind], w = NET_WORDS[kind], s = title(stageName);
-  $('netTitle').textContent = w.title;
-  $('netText').textContent = n.source === 'mod' ? `The ${w.noun} this mod keeps for ${s}.` : `${s}'s own ${w.noun}; Save keeps your version in the mod.`;
-  $('netTypeLbl').hidden = kind !== 'AIP';
-  $('netTypeSelLbl').hidden = kind !== 'FOP';
-  $('netDropLbl').hidden = kind !== 'FOP';
-  const sel = $('netTypeSel');
-  sel.textContent = '';
-  n.lists.forEach((name, t) => { const o = document.createElement('option'); o.value = t; o.textContent = `${t}: ${name}`; sel.append(o); });
-  $('netWidth').value = w.width;
-  netErr('');
-  netRows();
-  netInfo();
-  $('netDlg').show();
-  updateNetView(kind);
-  updateNetView(kind);       // after the dialog is open: that is what shows the vehicle net
+
+// ---- the left panel: Add, the meters, the list, the foot
+const mkErrSet = (t) => { $('mkErr').hidden = !t; if (t) $('mkErr').querySelector('span').textContent = t; };
+function mkFillBar() {
+  const kind = layerOf();
+  if (!kind) return;
+  const L = lay(kind), w = LAYERS[kind], sl = $('mkNewType');
+  $('mkNewNumF').hidden = kind !== 'AIP';
+  sl.hidden = kind === 'AIP';
+  const key = kind + ':' + L.lists.length;
+  if (sl.dataset.key !== key) {
+    sl.textContent = '';
+    L.lists.forEach((n, i) => { const o = new Option(kind === 'SPT' ? SPT_SHORT[i] || n : n, i); o.title = n; sl.append(o); });
+    sl.value = kind === 'SPT' ? '2' : '0';
+    sl.dataset.key = key;
+  }
+  sl.title = kind === 'SPT' ? 'The list of the new start point: Story, Player, CPU or Respawn' : kind === 'PUP' ? 'The type of the new power-up' : 'The type of the new node: who drives there';
+  const add = $('mkAdd');
+  add.title = L.net ? `Add a node where the view looks (with a node selected, the new one is linked to it, both ways)` : `Add a ${w.one} where the view looks`;
+  const d = $('mkDefaults');
+  d.hidden = !L.net;
+  if (L.net) {
+    $('mkDropLbl').hidden = kind !== 'FOP';
+    $('mkWidth').value = netDefaults[kind].width;
+    $('mkDropN').value = netDefaults[kind].drop;
+  }
 }
-$('aipBtn').onclick = () => openTool(() => openNet('AIP'));
-$('fopBtn').onclick = () => openTool(() => openNet('FOP'));
-$('fopOn').checked = fopOn;
-$('fopOn').onchange = (e) => { fopOn = e.target.checked; store.set('fop', fopOn ? '1' : '0'); updateNetView('FOP'); };
+function mkMeters(kind, L) {
+  const m1 = $('mkM1'), m2 = $('mkM2');
+  const set = (m, label, n, max, tip) => { m.querySelector('.m-l').textContent = label; meter(m.id, n, max); m.title = tip; };
+  set(m1, kind === 'SPT' ? 'Start points' : kind === 'PUP' ? 'Power-ups' : 'Nodes', L.points.length, kind === 'PUP' ? L.caps[0] : FILE_MAX,
+      kind === 'SPT' ? `A stage holds ${FILE_MAX} start points at most; each list has its own room, on its header`
+        : kind === 'PUP' ? `The game keeps ${L.caps[0]} power-ups at a time; the file holds ${FILE_MAX}`
+        : `A net holds ${FILE_MAX} nodes at most, ${L.caps[2]} links each`);
+  m2.hidden = kind !== 'AIP';
+  if (kind === 'AIP') set(m2, 'Paths', netPaths(L.points), L.caps[1], `The game keeps ${L.caps[1]} paths and ignores the rest; a two-way link is one path`);
+}
+function mkFoot(kind) {
+  const L = lay(kind), dirty = L.dirty, w = LAYERS[kind];
+  $('mkState').classList.toggle('dirty', dirty);
+  $('mkState').querySelector('.tx').textContent = dirty ? (L.saved === null ? 'Not in this mod yet' : 'Unsaved changes') : 'No unsaved changes';
+  $('mkSrc').textContent = L.source === 'mod' ? `This mod keeps its own ${w.noun} for ${title(stageName)}.` : `${title(stageName)}'s own ${w.noun}; Save keeps your version in the mod.`;
+  $('mkSrc').title = L.d.file || '';
+  $('mkReset').disabled = L.source !== 'mod';
+  $('mkRevert').hidden = !dirty;
+  $('mkClear').hidden = !L.net;
+  $('mkSave').classList.toggle('primary', dirty);
+}
+const NONE_TEXT = {
+  SPT: 'This stage has no start points. Add puts one where the view looks.',
+  PUP: 'This stage has no power-ups. Add puts one where the view looks.',
+  AIP: 'This stage has no AI net. Add puts a node where the view looks; with a node selected, the new one links to it.',
+  FOP: 'This stage has no vehicle net. Add puts a node where the view looks; with a node selected, the new one links to it.',
+};
+function mkRow(kind, L, i) {
+  const p = L.points[i], li = document.createElement('li');
+  li.className = 'it' + (i === L.sel ? ' sel' : '');
+  li._mk = i;
+  li.tabIndex = -1;                    // reached with the arrows from a section header
+  li.setAttribute('role', 'option');
+  li.setAttribute('aria-selected', String(i === L.sel));
+  const k = icon(LAYERS[kind].icon), h = document.createElement('span'), bd = document.createElement('span'), hd = document.createElement('span');
+  k.classList.add('k');
+  k.style.color = hexColor(markerColor(kind, p));
+  h.className = 'h'; bd.className = 'bd'; hd.className = 'hd num';
+  h.textContent = markerName(kind, L.points, i, L.lists);
+  if (kind === 'SPT') {
+    hd.textContent = `${Math.round(p.heading)}°`;
+    hd.title = 'Heading';
+    if (sptOver(L.points, i, L.caps)) {
+      const b = icon('alert-circle-outline');
+      b.classList.add('dl');
+      b.title = "Past the room of its list: the game overwrites the list's last point with it";
+      bd.append(b);
+    }
+  } else if (kind === 'PUP') {
+    hd.textContent = `z ${Math.round(p.pos[2])}`;
+    hd.title = 'Rest height';
+  } else {
+    hd.textContent = `${p.links.length} ${p.links.length === 1 ? 'link' : 'links'}`;
+  }
+  li.title = `${h.textContent} · x ${Math.round(p.pos[0])}, y ${Math.round(p.pos[1])}, z ${Math.round(p.pos[2])}`;
+  li.append(k, h, bd, hd);
+  li.onclick = () => { selectMarker(i); focusSelection(); };
+  return li;
+}
+function refreshMk() {
+  const kind = layerOf();
+  if (!kind) return;
+  const L = lay(kind), ul = $('mkList'), frag = document.createDocumentFragment();
+  mkMeters(kind, L);
+  mkFoot(kind);
+  const secs = mkSections(kind, L.points, L.lists, L.caps).filter((s) => kind === 'SPT' || s.n);
+  for (const s of secs) {
+    const id = `mk.${kind}.${s.id}`, open = secOpen(id), h = document.createElement('li'), n = document.createElement('span');
+    h.className = 'sec';
+    h.dataset.sec = id;
+    h.tabIndex = 0;
+    h.setAttribute('role', 'button');
+    h.setAttribute('aria-expanded', open);
+    h.title = (s.tip ? s.tip + '. ' : '') + (open ? `Hide the ${s.title.toLowerCase()}` : `Show the ${s.title.toLowerCase()}`);
+    h.append(icon(open ? 'chevron-down' : 'chevron-right'), s.title);
+    if (!open && s.rows.includes(L.sel)) {
+      const d = document.createElement('span');
+      d.className = 'has'; d.title = 'Holds the selection';
+      h.appendChild(d);
+    }
+    n.className = 'n' + (s.cap !== undefined && s.n > s.cap ? ' over' : '');
+    n.textContent = s.cap !== undefined ? `${s.n} / ${s.cap}` : s.n;
+    if (s.cap !== undefined) n.title = `${s.n} of the room for ${s.cap} in this list` + (s.n > s.cap ? ': the extra ones overwrite the last' : '');
+    h.appendChild(n);
+    const flip = () => { store.set('sec.' + id, open ? '0' : '1'); refreshMk(); };
+    h.onclick = flip;
+    h.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); ul.querySelector(`li.sec[data-sec="${id}"]`)?.focus(); } };
+    frag.appendChild(h);
+    if (!open) continue;
+    if (!s.rows.length) { const li = document.createElement('li'); li.className = 'none'; li.textContent = 'None'; frag.appendChild(li); }
+    for (const i of s.rows) frag.appendChild(mkRow(kind, L, i));
+  }
+  // the list is redrawn on every edit: the row that had the keyboard keeps it
+  const had = ul.contains(document.activeElement) ? (document.activeElement._mk ?? document.activeElement.dataset.sec) : null;
+  ul.replaceChildren(frag);
+  if (had !== null && had !== undefined) {
+    const again = [...ul.children].find((e) => (e._mk ?? e.dataset.sec) === had);
+    if (again) again.focus({ preventScroll: true });
+  }
+  ul.hidden = !L.points.length;
+  $('mkNone').hidden = !!L.points.length || !stageName;
+  $('mkNoneTx').textContent = NONE_TEXT[kind];
+  setIc($('mkNoneIc'), LAYERS[kind].icon);
+  const add = $('mkAdd');
+  add.disabled = L.points.length >= FILE_MAX;
+  if (add.disabled) add.title = `A stage holds at most ${FILE_MAX} ${LAYERS[kind].many}`;
+}
+// the list with the keyboard, as the objects' list: Up and Down walk rows and headers, Home and End jump, Enter or Space selects
+$('mkList').addEventListener('keydown', (e) => {
+  const li = e.target.closest && e.target.closest('li');
+  if (!li || e.altKey) return;
+  const rows = [...$('mkList').children].filter((x) => !x.classList.contains('none')), i = rows.indexOf(li);
+  const go = (j) => { const t = rows[Math.max(0, Math.min(rows.length - 1, j))]; if (t) { e.preventDefault(); e.stopPropagation(); t.focus(); } };
+  if (e.key === 'ArrowDown') go(i + 1);
+  else if (e.key === 'ArrowUp') go(i - 1);
+  else if (e.key === 'Home') go(0);
+  else if (e.key === 'End') go(rows.length - 1);
+  else if ((e.key === 'Enter' || e.key === ' ') && li._mk !== undefined) {
+    e.preventDefault(); e.stopPropagation();
+    selectMarker(li._mk);
+    focusSelection();
+  }
+});
+
+// ---- the right panel: nothing selected (what the colors are), and the selected marker
+const MK_HELP = {
+  SPT: 'Click a start point, in the view or in the list. A monster appears at the nearest start point of its list: Player for the first life of the players, CPU for the computer monsters, Respawn after a fall.',
+  PUP: 'Click a power-up, in the view or in the list. The game keeps 100 at a time; the file holds 255.',
+  AIP: 'Click a node, in the view or in the list. A computer monster walks the links between nodes; a two-way link is one path of the 450 the game keeps.',
+  FOP: 'Click a node, in the view or in the list. Cars, helicopters, flying saucers and tanks drive the links between nodes of their type.',
+};
+function showMarkerLegend(kind) {
+  const L = lay(kind), ul = $('mkLegend');
+  setIc($('mkNoSelIc'), LAYERS[kind].icon);
+  $('mkNoSelTx').textContent = MK_HELP[kind];
+  $('mkNoSelHelp').textContent = 'Add, on the bar at the top of the left panel, puts a new one where the view looks. Drag the arrows to move it. Ctrl+Z undoes while this mode is open; Save to mod writes the file.';
+  const rows = kind === 'SPT' ? SPT_SHORT.map((t, l) => [markerColor('SPT', { list: l }), `${t}${L.lists[l] ? ` · ${L.lists[l]}` : ''}`])
+    : kind === 'PUP' ? PUP_GROUPS.map((g) => [markerColor('PUP', { type: g.types[0] }), g.title])
+    : kind === 'AIP' ? [[markerColor('AIP', { type: 0 }), 'Type 0, the main net'], [markerColor('AIP', { type: 1 }), 'Any other type']]
+    : (L.lists.length ? L.lists : ['Car street', 'Helicopter', 'Flying saucer', 'Tank and truck']).map((t, i) => [markerColor('FOP', { type: i }), t]);
+  ul.replaceChildren(...rows.map(([c, t]) => {
+    const li = document.createElement('li'), sw = document.createElement('i');
+    sw.className = 'sw dot';
+    sw.style.background = hexColor(c);
+    li.append(sw, t);
+    return li;
+  }));
+}
+function fillMarkerFields() {
+  const p = markerSel();
+  if (!p) return;
+  $('mkx').value = r1(p.pos[0]); $('mky').value = r1(p.pos[1]); $('mkz').value = r1(p.pos[2]);
+  if (layerOf() === 'SPT') $('mkh').value = r1(p.heading);
+}
+// the selected marker: its header, Type, Position (and Heading, Ground or Shadow), a node's Links, Actions
+function showMarker() {
+  const kind = layerOf(), p = markerSel();
+  if (!kind || !p) return;
+  const L = lay(kind), w = LAYERS[kind], i = L.sel;
+  setIc($('mkIcon').firstElementChild, w.icon);
+  $('mkIcon').style.color = hexColor(markerColor(kind, p));
+  $('mkTitle').textContent = markerName(kind, L.points, i, L.lists);
+  $('mkSub').textContent = kind === 'SPT' ? `Start point ${i + 1} of ${L.points.length}` : kind === 'PUP' ? `Power-up ${i + 1} of ${L.points.length}` : `${w.title}, ${L.points.length} nodes`;
+  // Type: a list of choices, or a number for the AI net
+  const sl = $('mkType'), num = $('mkTypeNum'), key = kind + ':' + L.lists.length;
+  sl.hidden = kind === 'AIP';
+  num.hidden = kind !== 'AIP';
+  $('mkTypeTitle').textContent = kind === 'SPT' ? 'List' : 'Type';
+  if (kind !== 'AIP') {
+    if (sl.dataset.key !== key) {
+      sl.textContent = '';
+      L.lists.forEach((n, t) => sl.append(new Option(kind === 'SPT' ? `${SPT_SHORT[t]} · ${n}` : n, t)));
+      sl.dataset.key = key;
+    }
+    sl.value = String(kind === 'SPT' ? p.list : p.type);
+  } else num.value = p.type;
+  $('mkTypeHelp').textContent = kind === 'SPT' ? `The room of this list: ${L.caps[p.list]}` : kind === 'AIP' ? 'A node type splits the net into sub-nets: the links join nodes of the same net.' : '';
+  fillMarkerFields();
+  $('mkHeadRow').hidden = kind !== 'SPT';
+  const flag = kind === 'SPT' || kind === 'PUP';
+  $('mkFlagRow').hidden = !flag;
+  if (kind === 'SPT') {
+    $('mkFlag').checked = !!p.snap;
+    $('mkFlagTx').textContent = 'Drop to the floor when a monster appears';
+    $('mkFlagRow').title = 'Ground: the point drops to the floor (or roof) under it when a monster appears';
+  } else if (kind === 'PUP') {
+    $('mkFlag').checked = (p.flags & 1) !== 0;
+    $('mkFlagTx').textContent = 'Shadow under the power-up';
+    $('mkFlagRow').title = 'Shadow under the power-up (the game then keeps it on the floor)';
+  }
+  $('mkLinks').hidden = !L.net;
+  if (L.net) showLinks(kind, L, i);
+}
+function showLinks(kind, L, k) {
+  const p = L.points[k], ul = $('mkLinkList'), fop = kind === 'FOP';
+  $('mkLinkCount').textContent = `${p.links.length} of ${L.caps[2]}`;
+  const rows = [];
+  const num = (v, label, set) => {
+    const inp = Object.assign(document.createElement('input'), { type: 'number', min: 0, max: 255, step: 1, value: v });
+    inp.setAttribute('aria-label', label);
+    inp.title = label;
+    inp.onchange = () => markerEdit(`edit a link of ${markerLabel()}`, () => set(clamp255(inp.value)));
+    return inp;
+  };
+  for (const l of p.links) {
+    const li = document.createElement('li');
+    li.className = fop ? 'fop' : '';
+    const to = document.createElement('button');
+    to.type = 'button'; to.className = 'ghost to';
+    to.textContent = `→ Node ${l.to + 1}`;
+    to.title = `Select node ${l.to + 1}`;
+    to.onclick = () => { selectMarker(l.to); focusSelection(); };
+    const two = document.createElement('label'), tc = Object.assign(document.createElement('input'), { type: 'checkbox', checked: netTwoWay(L.points, k, l.to) });
+    two.className = 'two';
+    two.title = 'Two-way: the other node links back to this one';
+    two.append(tc, 'Two-way');
+    tc.onchange = () => {
+      const q = L.points[l.to];
+      if (tc.checked && q.links.length >= L.caps[2]) { tc.checked = false; mkErrSet(`Node ${l.to + 1} already has ${L.caps[2]} links.`); return; }
+      markerEdit(`${tc.checked ? 'link back' : 'cut the link back'} ${markerLabel()}`, () => {
+        if (tc.checked) q.links.push(Object.assign({}, l, { to: k })); else q.links = q.links.filter((m) => m.to !== k);
+      });
+    };
+    const cut = document.createElement('button');
+    cut.type = 'button'; cut.className = 'icon ghost';
+    cut.title = `Cut the link to node ${l.to + 1} (both directions)`;
+    cut.setAttribute('aria-label', cut.title);
+    cut.append(icon('close'));
+    cut.onclick = () => markerEdit(`cut a link of ${markerLabel()}`, () => unlink(L.points, k, l.to));
+    li.append(to, num(l.width, `Width of the link to node ${l.to + 1}`, (v) => { l.width = v; }));
+    if (fop) li.append(num(l.drop || 0, `Drop of the link to node ${l.to + 1}`, (v) => { l.drop = v; }));
+    li.append(two, cut);
+    rows.push(li);
+  }
+  if (!p.links.length) { const li = document.createElement('li'); li.className = 'in'; li.innerHTML = '<span class="none">No links yet. Link it to another node below, or Add a node while this one is selected.</span>'; rows.push(li); }
+  for (const { from } of oneWayIn(L.points, k)) {
+    const li = document.createElement('li'), b = document.createElement('button');
+    li.className = 'in';
+    b.type = 'button'; b.className = 'ghost small-btn';
+    b.textContent = `Node ${from + 1} links here, one way. Link back`;
+    b.title = 'Make the link two-way';
+    b.onclick = () => markerEdit(`link back ${markerLabel()}`, () => {
+      if (p.links.length >= L.caps[2]) { mkErrSet(`Node ${k + 1} already has ${L.caps[2]} links.`); return; }
+      p.links.push(Object.assign({ to: from }, netAttrs(kind)));
+    });
+    li.append(b);
+    rows.push(li);
+  }
+  ul.replaceChildren(...rows);
+}
+
+// ---- wiring
+for (const k of KINDS) {
+  const w = LAYERS[k], c = $(OVERLAY_ID[k]);
+  c.checked = overlayOn[k];
+  c.onchange = (e) => { overlayOn[k] = e.target.checked; store.set(OVERLAY_KEY[k], overlayOn[k] ? '1' : '0'); syncLayerVisibility(); };
+  $(MODE_BUTTON[w.mode]).onclick = () => setMode(w.mode);
+}
+$('modeObjects').onclick = () => setMode('objects');
+$('modePeds').onclick = () => setMode('peds');
+$('mkAdd').onclick = addMarker;
+$('mkSave').onclick = () => { const k = layerOf(); if (k && requireMod('the file is saved in it')) saveLayer(k); };
+$('mkReset').onclick = () => { const k = layerOf(); if (k && requireMod('the file is in it')) resetLayer(k); };
+$('mkRevert').onclick = () => { const k = layerOf(); if (k) revertLayer(k); };
+$('mkClear').onclick = () => { const k = layerOf(); if (k) clearNet(k); };
+for (const [id, key] of [['mkWidth', 'width'], ['mkDropN', 'drop']]) $(id).oninput = () => { const k = layerOf(); if (k && netDefaults[k]) netDefaults[k][key] = clamp255($(id).value); };
+$('mkDrop').onclick = dropMarker;
+$('mkDup').onclick = duplicateMarker;
+$('mkDel').onclick = removeMarker;
+$('mkAim').onclick = () => markerEdit(`move ${markerLabel()} to the aim`, (p) => { p.pos = viewPoint().map(r1); });
+$('mkType').onchange = () => markerEdit(`change the ${layerOf() === 'SPT' ? 'list' : 'type'} of ${markerLabel()}`, (p) => { p[layerOf() === 'SPT' ? 'list' : 'type'] = parseInt($('mkType').value, 10); });
+$('mkTypeNum').onchange = () => markerEdit(`change the type of ${markerLabel()}`, (p) => { p.type = clamp255($('mkTypeNum').value); });
+$('mkFlag').onchange = () => markerEdit(`change ${markerLabel()}`, (p) => {
+  if (layerOf() === 'SPT') p.snap = $('mkFlag').checked;
+  else p.flags = $('mkFlag').checked ? (p.flags & 7 ? p.flags : 7) : 0;
+});
+$('mkRotL').onclick = () => markerEdit(`turn ${markerLabel()}`, (p) => { p.heading = r1(wrapDeg(p.heading + 90)); });
+$('mkRotR').onclick = () => markerEdit(`turn ${markerLabel()}`, (p) => { p.heading = r1(wrapDeg(p.heading - 90)); });
+// X, Y, Z (and the heading) typed: an emptied or half-typed field gives its number back
+for (const id of ['mkx', 'mky', 'mkz', 'mkh']) {
+  $(id).onchange = () => {
+    const p = markerSel();
+    if (!p) return;
+    const ids = layerOf() === 'SPT' ? ['mkx', 'mky', 'mkz', 'mkh'] : ['mkx', 'mky', 'mkz'];
+    if (ids.some((i) => $(i).value.trim() === '' || !Number.isFinite(+$(i).value))) { fillMarkerFields(); return; }
+    markerEdit(`edit ${markerLabel()}`, (q) => {
+      q.pos = [+$('mkx').value, +$('mky').value, +$('mkz').value].map(r1);
+      if (layerOf() === 'SPT') q.heading = r1(wrapDeg(+$('mkh').value));
+    });
+  };
+}
+// dragging a letter or the number sideways: the marker follows, the whole drag is one undo step
+{
+  let from = null;
+  const live = () => {
+    const kind = layerOf(), p = markerSel();
+    if (!from || !p) return;
+    p.pos = [+$('mkx').value, +$('mky').value, +$('mkz').value].map(r1);
+    if (kind === 'SPT') p.heading = r1(wrapDeg(+$('mkh').value));
+    updateLayerView(kind);
+    syncMarkerGizmo();
+  };
+  const hooks = (turn) => ({
+    step: () => ($('snap').checked ? (turn ? snapTurn() : snapMove()) : 1),
+    begin: () => { const k = layerOf(), L = k && lay(k); if (L && markerSel()) from = { p: JSON.stringify(L.points), sel: L.sel, label: `edit ${markerLabel()}` }; },
+    live,
+    end: () => {
+      const k = layerOf();
+      if (from && k && JSON.stringify(lay(k).points) !== from.p) layerPush(k, from.p, from.sel, from.label);
+      from = null;
+      if (k) { layerChanged(k); showMarker(); syncMarkerGizmo(); }
+    },
+  });
+  for (const id of ['mkx', 'mky', 'mkz']) scrubField($(id), hooks(false));
+  scrubField($('mkh'), hooks(true));
+}
+// Link: the selected node and the number typed, both ways, with the numbers of New links
+$('mkLink').onclick = () => {
+  const kind = layerOf(), L = kind && lay(kind), a = L && L.sel, b = parseInt($('mkLinkTo').value, 10) - 1;
+  if (!L || !L.net || a < 0) return;
+  if (!(b >= 0 && b < L.points.length) || b === a) { mkErrSet('Type the number of another node.'); return; }
+  let ok = true;
+  const did = markerEdit(`link ${markerLabel()} to node ${b + 1}`, () => { ok = linkBoth(L.points, a, b, netAttrs(kind), L.caps[2]); });
+  if (!ok) mkErrSet(`A node holds at most ${L.caps[2]} links.`);
+  else { mkErrSet(''); if (did) $('mkLinkTo').value = ''; }
+};
 
 // ------------------------------------------------------------------ ruler (M), minimap (N), screenshot and Pack mod
 // The ruler (web/ruler.js): two clicks on the stage's surface; the first visible hit under the pointer, as viewPoint takes it.
@@ -4150,14 +4613,15 @@ setMini(store.get('mini', '0') === '1');
 // Screenshot: the view as a PNG download; the gizmo is left out of it
 $('shotBtn').onclick = () => {
   if (!stageRoot) return;
-  const gv = gizmo.visible, hv = hoverBox.visible;
+  const gv = gizmo.visible, hv = hoverBox.visible, rv = mkRing.visible;
   gizmo.visible = false;
   hoverBox.visible = false;
+  mkRing.visible = false;
   let url = '';
   try {
     renderer.render(scene, camera);          // the canvas keeps no frame between renders: read it right after one
     url = renderer.domElement.toDataURL('image/png');
-  } finally { gizmo.visible = gv; hoverBox.visible = hv; }
+  } finally { gizmo.visible = gv; hoverBox.visible = hv; mkRing.visible = rv; }
   const d = new Date(), z = (n) => String(n).padStart(2, '0');
   const name = `${stageName}_${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}.png`;
   const a = Object.assign(document.createElement('a'), { href: url, download: name });
@@ -4181,92 +4645,6 @@ $('packMod').onclick = async () => {
     msg(`Packed ${modNow}.zip` + (isDirty() ? '. The changes you have not saved are not in it' : ''), { level: isDirty() ? 'warn' : 'ok', toast: true });
   } catch (e) { msg(e.message || String(e), { level: 'err', toast: true }); }
 };
-$('netAdd').onclick = () => {
-  const n = nets[netKind];
-  if (n.points.length >= n.caps[0]) { netErr(`A net holds at most ${n.caps[0]} nodes.`); return; }
-  const type = netKind === 'AIP' ? Math.max(0, Math.min(255, parseInt($('netType').value, 10) || 0)) : (parseInt($('netTypeSel').value, 10) || 0);
-  const from = n.sel, node = { pos: viewPoint().map((x) => Math.round(x * 10) / 10), type, links: [], w: 0, sel: 0, tail: '' };
-  n.points.push(node);
-  const k = n.points.length - 1;
-  if (from >= 0 && from < k && !netLinkBoth(n, from, k)) {
-    n.points.pop();
-    for (const m of n.points) m.links = m.links.filter((l) => l.to !== k);
-    netErr(`Node ${from + 1} already has ${n.caps[2]} links.`);
-    return;
-  }
-  n.sel = k;
-  netErr('');
-  netRows();
-  updateNetView(netKind);
-  netInfo();
-};
-$('netLink').onclick = () => {
-  const n = nets[netKind], b = parseInt($('netTo').value, 10) - 1, a = n.sel;
-  if (a < 0) { netErr('Select a node (click its row) first.'); return; }
-  if (!(b >= 0 && b < n.points.length) || b === a) { netErr('Type the number of another node.'); return; }
-  if (!netLinkBoth(n, a, b)) { netErr(`A node holds at most ${n.caps[2]} links.`); return; }
-  netErr('');
-  netRows();
-  updateNetView(netKind);
-  netInfo();
-};
-$('netUnlink').onclick = () => {
-  const n = nets[netKind], b = parseInt($('netTo').value, 10) - 1, a = n.sel;
-  if (a < 0 || !(b >= 0 && b < n.points.length)) { netErr('Select a node, then type the number of the other one.'); return; }
-  n.points[a].links = n.points[a].links.filter((l) => l.to !== b);
-  n.points[b].links = n.points[b].links.filter((l) => l.to !== a);
-  netErr('');
-  netRows();
-  updateNetView(netKind);
-  netInfo();
-};
-$('netClear').onclick = () => {
-  const n = nets[netKind];
-  const clear = () => {
-    n.points = [];
-    n.sel = -1;
-    netErr('');
-    netRows();
-    updateNetView(netKind);
-    netInfo();
-  };
-  if (!n.points.length) { clear(); return; }
-  ask(`Remove all ${n.points.length} nodes?`, `The ${NET_WORDS[netKind].noun} in this window is emptied. The mod's file stays as it is until you save.`,
-      [['cancel', 'Cancel'], ['go', 'Remove them', true]], (v) => { if (v === 'go') clear(); }, { icon: 'delete-outline' });
-};
-async function netPost(body) {
-  const kind = netKind, n = nets[kind];
-  netErr('');
-  try {
-    const r = await api('/api/spt', Object.assign({ mod: modNow || '', name: stageName, kind }, body));
-    netTake(n, r);
-    netRows();
-    updateNetView(kind);
-    netInfo();
-    return r;
-  } catch (e) { netErr(cleanError(e).text); return null; }
-}
-$('netSave').onclick = async () => {
-  const r = await netPost({ points: nets[netKind].points });
-  if (!r) return;
-  $('netDlg').close();
-  msg(`Saved a ${NET_WORDS[netKind].noun} of ${r.points.length} nodes in the mod` + (r.warnings.length ? '. ' + r.warnings.join(' ') : '. Restart the stage to see it'),
-      { level: r.warnings.length ? 'warn' : 'ok', toast: true });
-};
-$('netReset').onclick = () => {
-  const kind = netKind;
-  ask(`Take the mod's ${NET_WORDS[kind].noun} out?`,
-      `This deletes the ${NET_WORDS[kind].noun} file ${title(stageName)} has in mod "${modNow}" and puts the stage's own back. It can't be undone.`,
-      [['cancel', 'Cancel'], ['go', 'Delete the file', true]], async (v) => {
-        if (v !== 'go') return;
-        const r = await netPost({ reset: true });
-        if (r) msg(`The stage's own ${NET_WORDS[kind].noun} is back (the mod's file is gone)`, { level: 'ok', toast: true });
-      }, { icon: 'delete-outline' });
-};
-$('netDlg').addEventListener('close', () => {      // closed without saving: back to the file's net
-  const n = nets[netKind];
-  if (netKeep(n) !== n.saved) loadNet(netKind); else updateNetView(netKind);
-});
 // A floor over the new rectangle: a prop of the mod (a visible plate and a coll_ slab), placed at the rectangle's center
 $('gdFloor').onclick = async () => {
   if (!modNow) { gdErr('Choose a mod first: the floor is a prop saved in it.'); return; }
@@ -5020,19 +5398,6 @@ document.querySelectorAll('#dlg .browse').forEach((b) => (b.onclick = async () =
 }));
 $('settings').onclick = () => openSettings();
 document.querySelectorAll('#sTheme input').forEach((r) => (r.onchange = () => applyTheme(r.value)));   // a preview; Cancel goes back
-// a Cancel or close button of a dialog (type="button", so that Enter takes the main one)
-// The dialogs that edit a draft of a mod file (points, nets): Esc and the close button ask before an unsaved draft is thrown away
-const draftGuard = {
-  sptDlg: { dirty: () => ptKeep(ptKind) !== ptSaved[ptKind], what: () => PT_WORDS[ptKind][1], save: () => $('sptSave').click() },
-  netDlg: { dirty: () => netKeep(nets[netKind]) !== nets[netKind].saved, what: () => NET_WORDS[netKind].noun, save: () => $('netSave').click() },
-};
-function askDraft(dlg) {
-  const g = draftGuard[dlg.id];
-  ask('Close with unsaved changes?', `You changed the ${g.what()} and did not save them. Closing throws the changes away.`,
-      [['keep', 'Keep editing'], ['discard', 'Discard'], ['save', 'Save to mod', true]],
-      (v) => { if (v === 'discard') dlg.close('cancel'); else if (v === 'save') g.save(); }, { icon: 'content-save-alert-outline' });
-}
-for (const id of Object.keys(draftGuard)) $(id).addEventListener('cancel', (e) => { if (draftGuard[id].dirty()) { e.preventDefault(); askDraft($(id)); } });
 
 // ---- the two side panels: the right one's width is the user's (drag its edge, the arrows on it, double click puts it back), both can be
 // hidden (the rail's and the top bar's buttons), and the tool panels (docks) fill the right one's place. A dock is a non-modal dialog: the
@@ -5096,27 +5461,14 @@ window.addEventListener('resize', paintPanels);
 // Esc, and the close button, on a dock: an unsaved draft is asked about first
 function requestDockClose(dlg, then) {
   if (dlg.id === 'lightDlg') { lightRequestClose().then(() => { if (!dlg.open && then) then(); }); return; }
-  const g = draftGuard[dlg.id];
-  if (g && g.dirty()) {
-    ask('Close with unsaved changes?', `You changed the ${g.what()} and did not save them. Closing throws the changes away.`,
-        [['keep', 'Keep editing'], ['discard', 'Discard'], ['save', 'Save to mod', true]],
-        async (v) => {
-          if (v === 'discard') dlg.close('cancel');
-          else if (v === 'save') { g.save(); return; }
-          if (!dlg.open && then) then();
-        }, { icon: 'content-save-alert-outline' });
-    return;
-  }
   dlg.close('cancel');
   if (then) then();
 }
-for (const id of ['sptDlg', 'netDlg', 'gridDlg']) {
-  $(id).addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || e.defaultPrevented) return;
-    e.preventDefault(); e.stopPropagation();
-    requestDockClose($(id));
-  });
-}
+$('gridDlg').addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || e.defaultPrevented) return;
+  e.preventDefault(); e.stopPropagation();
+  requestDockClose($('gridDlg'));
+});
 // Enter in a field of a form dialog takes its main button (the buttons are type="button", so that Enter never closes the dialog by itself)
 for (const [dlg, btn] of [['stageDlg', 'nsOk'], ['propDlg', 'ipOk'], ['pfDlg', 'pfOk']]) {
   $(dlg).addEventListener('keydown', (e) => {
@@ -5131,10 +5483,8 @@ function openTool(fn) {
   if (!cur) { fn(); return; }
   requestDockClose(cur, fn);
 }
-document.querySelectorAll('dialog [data-close]').forEach((b) => b.addEventListener('click', () => {
-  const dlg = b.closest('dialog');
-  if (draftGuard[dlg.id] && draftGuard[dlg.id].dirty()) askDraft(dlg); else dlg.close('cancel');
-}));
+// a Cancel or close button of a dialog (type="button", so that Enter takes the main one)
+document.querySelectorAll('dialog [data-close]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close('cancel')));
 $('dlg').addEventListener('close', () => {
   if ($('dlg').returnValue !== 'ok') { applyTheme(cfg.theme || 'dark'); return; }
   const next = { theme: themePicked() };
@@ -5186,11 +5536,11 @@ window.addEventListener('keydown', (e) => {
   else if (e.ctrlKey && k === 'a') { e.preventDefault(); if (editMode === 'objects') selectMany(listed()); }
   else if (k === 'delete') remove();
   else if (e.ctrlKey || e.altKey || e.metaKey) return;
-  else if (k.startsWith('arrow') && (sel || pedSel)) {
+  else if (k.startsWith('arrow') && (sel || pedSel || markerSel())) {
     e.preventDefault();
     nudge(k === 'arrowup' ? 1 : k === 'arrowdown' ? -1 : 0, k === 'arrowright' ? 1 : k === 'arrowleft' ? -1 : 0, 0, e.shiftKey);
   }
-  else if ((k === 'pageup' || k === 'pagedown') && (sel || pedSel)) { e.preventDefault(); nudge(0, 0, k === 'pageup' ? 1 : -1, e.shiftKey); }
+  else if ((k === 'pageup' || k === 'pagedown') && (sel || pedSel || markerSel())) { e.preventDefault(); nudge(0, 0, k === 'pageup' ? 1 : -1, e.shiftKey); }
   else if (k === 'end') { e.preventDefault(); dropToGround(); }
   else if (k === 'home') { e.preventDefault(); frameAll(); }
   else if (fly.on && FLY_CODES[e.code]) { e.preventDefault(); fly.keys.add(FLY_CODES[e.code]); }
@@ -5200,17 +5550,18 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'r') setTool('rotate');
   else if (k === 'f') focusSelection();
   else if (k === 'l') setLook(!gameLook);
-  else if (k === 'p') { if (editMode === 'objects') setPeds(!pedsOn); }
+  else if (k === 'p') { if (editMode !== 'peds') setPeds(!pedsOn); }
   else if (k === 'c') setColl(!collOn);
   else if (k === 'm') setRuler(!ruler.on);
   else if (k === 'n') setMini(!minimap.on);
   else if (k === '1') setMode('objects');
   else if (k === '2') setMode('peds');
+  else if (/^[3-6]$/.test(k)) setMode(LAYERS[KINDS[+k - 3]].mode);
   else if (k === 'escape') {
     e.preventDefault();      // (a question opened by this very key would otherwise get the browser's own Esc and close at once)
-    const cur = markerCtx(), dock = document.querySelector('dialog.dock[open]');
+    const lk = layerOf(), dock = document.querySelector('dialog.dock[open]');
     if (ruler.on) setRuler(false);
-    else if (cur && cur.sel >= 0) { cur.sel = -1; refreshMarkers(cur); }          // a tool's marker first,
+    else if (lk && lay(lk).sel >= 0) deselectMarker();                              // a layer's marker first,
     else if (dock && !sel && !pedSel) requestDockClose(dock);                      // then the tool panel (the focus was in the view)
     else select(null);
   }
@@ -5249,12 +5600,15 @@ function init(r, load = true) {
 setTool('translate');
 orbit.enabled = false;
 setView(fly.on);
-applyPedsView();
+applyModeView();
 showMode();
+syncRailDots();
+mkFillBar();
+showUndoButtons();
 // the editor program quits a few seconds after its page closes (a reload asks again at once and keeps it)
 window.addEventListener('pagehide', () => { try { navigator.sendBeacon('/api/bye', '{}'); } catch (e) { /* ignore */ } });
 if (new URLSearchParams(location.search).has('debug')) {
-  window.wotmDebug = { aimStart, nets, openNet, loadNet, camera, fly, flyStep, setView, select, selectMany, items, listed, dropToGround, nudge, duplicate, remove,
+  window.wotmDebug = { aimStart, nets, selectMarker, addMarker, loadLayer, saveLayers, layersDirty, dirtyLayers, layerUndo, layerRedo, lay, get layer() { return layerOf(); }, camera, fly, flyStep, setView, select, selectMany, items, listed, dropToGround, nudge, duplicate, remove,
                        undo, buildPatch, posOf, setLook, scene, renderer, gsLights, peds, selectPed, setPeds, addPed, pedFromInputs,
                        redo, resetAll, applyPatch, frameAll, resetSel, gameLine, post, setRunning, applyTheme, refreshList, gameBox,
                        msg, toast, openOutput, closeOutput, showStatus, setGameState, readCheck, gameResult,

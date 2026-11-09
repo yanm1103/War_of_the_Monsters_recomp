@@ -28,13 +28,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ids that scripts and tests outside this file click or read: moving a control keeps its id (docs/investigacoes, ux_consolidado 4.3)
 const STABLE_IDS = ['stage', 'newStage', 'editStage', 'mod', 'packMod', 'undo', 'redo', 'check', 'save', 'test', 'testHere', 'testOpts', 'reload',
-  'stop', 'help', 'settings', 'modeObjects', 'modePeds', 'texBtn', 'lightBtn', 'hud', 'filter', 'list', 'canvas', 'toolBar', 'tMove', 'tTurn',
+  'stop', 'help', 'settings', 'modeObjects', 'modePeds', 'modeSpt', 'modePup', 'modeAip', 'modeFop', 'mkPanel', 'mkList', 'mkAdd', 'mkSave', 'mkProps', 'mkNoSel', 'texBtn', 'lightBtn', 'hud', 'filter', 'list', 'canvas', 'toolBar', 'tMove', 'tTurn',
   'snap', 'snapMove', 'snapTurn', 'addProp', 'propMenu', 'pmImport', 'pmTerrain', 'pmSky', 'pmClouds', 'overlay', 'look', 'grid', 'layersBtn',
-  'layersMenu', 'vFly', 'vOrbit', 'focusSel', 'frame', 'gridBtn', 'sptBtn', 'pupBtn', 'aipBtn', 'fopBtn', 'picBtn', 'rulerBtn', 'shotBtn',
+  'layersMenu', 'vFly', 'vOrbit', 'focusSel', 'frame', 'gridBtn', 'picBtn', 'rulerBtn', 'shotBtn',
   'viewTop', 'noSel', 'sumCounts', 'sumStage', 'sumMod', 'sumPath', 'props', 'px', 'py', 'pz', 'ph', 'drop', 'dup', 'reset', 'del', 'carry',
-  'output', 'status', 'dlg', 'gridDlg', 'sptDlg', 'netDlg', 'keysDlg', 'palDlg', 'stageDlg', 'propDlg', 'pfDlg', 'askDlg', 'modDlg'];
+  'output', 'status', 'dlg', 'gridDlg', 'keysDlg', 'palDlg', 'stageDlg', 'propDlg', 'pfDlg', 'askDlg', 'modDlg'];
 // [button, dialog it opens]: each must open, and Esc must close it
-const DIALOGS = [['gridBtn', 'gridDlg'], ['sptBtn', 'sptDlg'], ['pupBtn', 'sptDlg'], ['aipBtn', 'netDlg'], ['fopBtn', 'netDlg'],
+const DIALOGS = [['gridBtn', 'gridDlg'],
   ['texBtn', 'texDlg'], ['lightBtn', 'lightDlg'], ['hud', 'hudDlg'], ['help', 'keysDlg'], ['settings', 'dlg'], ['testOpts', 'testDlg'],
   ['newStage', 'stageDlg']];
 // known to fail today (a step of the UX plan fixes each): reported, not failing
@@ -199,28 +199,45 @@ const answer = async (value) => {      // a button of the question
   await ev(`document.querySelector('#askBtns button[value=${JSON.stringify(value)}]').click()`);
   must(await until(`!document.getElementById('askDlg').open`, 20), 'the question stayed open');
 };
-await check('Remove all nodes asks first; Esc keeps them; Ctrl+P waits for the answer; closing without Save puts them back', async () => {
-  await ev(`document.getElementById('aipBtn').click()`);
-  must(await until(`document.getElementById('netDlg').open`, 80), 'netDlg did not open');
-  const n0 = await ev('window.wotmDebug.nets.AIP.points.length');
-  must(n0 > 0, 'the stage has no AI net to try this on');
-  await ev(`document.getElementById('netClear').click()`);
+// ---- the marker modes: start points, power-ups, AI net and vehicle net are modes 3 to 6 of the rail, each a draft of its file
+const D = 'window.wotmDebug';
+const MODE_KINDS = [['spt', 'SPT', 'modeSpt', '3', 51], ['pup', 'PUP', 'modePup', '4', 52], ['aip', 'AIP', 'modeAip', '5', 53], ['fop', 'FOP', 'modeFop', '6', 54]];
+const layerN = (kind) => ev(`${D}.lay(${JSON.stringify(kind)}).points.length`);
+const goMode = async (m) => {
+  await ev(`${D}.setMode(${JSON.stringify(m)})`);
+  must(await until(`${D}.mode === ${JSON.stringify(m)}`, 20), 'the mode did not open: ' + m);
+};
+await check('AI net mode: Clear net asks first; Esc keeps the nodes; Ctrl+P waits for the answer; Ctrl+Z and Revert bring them back', async () => {
+  await key('5', 'Digit5', 53);
+  must(await until(`${D}.mode === 'aip'`, 20), 'key 5 did not open the AI net mode');
+  must(await until(`${D}.lay('AIP').points.length > 0`, 80), 'the stage has no AI net to try this on');
+  const n0 = await layerN('AIP');
+  await ev(`document.getElementById('mkClear').click()`);
   must(await until(`document.getElementById('askDlg').open`, 20), 'no question was asked');
   await key('p', 'KeyP', 80, 2);                      // Ctrl+P: the palette must not open over the question
   await sleep(300);
   must(await ev(`!(document.getElementById('palDlg') && document.getElementById('palDlg').open)`), 'the palette opened over the question');
   await esc();
   must(await until(`!document.getElementById('askDlg').open`, 20), 'Esc did not close the question');
-  must(await ev('window.wotmDebug.nets.AIP.points.length') === n0, 'Esc removed the nodes');
-  must(await ev(`document.getElementById('netDlg').open`), 'Esc on the question closed the dialog under it too');
-  await ev(`document.getElementById('netClear').click()`);
+  must(await layerN('AIP') === n0, 'Esc removed the nodes');
+  must(await ev(`${D}.mode === 'aip'`), 'Esc on the question left the mode');
+  await ev(`document.getElementById('mkClear').click()`);
   must(await until(`document.getElementById('askDlg').open`, 20), 'no question the second time');
   await ev(`document.querySelector('#askBtns .primary, #askBtns button:last-child').click()`);
-  must(await until(`window.wotmDebug.nets.AIP.points.length === 0`, 20), 'the nodes stayed after the answer');
-  await esc();                                         // the emptied net is an unsaved draft: closing asks first
-  await answer('discard');                             // ...and Discard puts the file's net back
-  must(await until(`!document.getElementById('netDlg').open`, 20), 'netDlg did not close');
-  must(await until(`window.wotmDebug.nets.AIP.points.length === ${n0}`, 40), 'the net did not come back: ' + await ev('window.wotmDebug.nets.AIP.points.length') + ' nodes');
+  must(await until(`${D}.lay('AIP').points.length === 0`, 20), 'the nodes stayed after the answer');
+  must(await ev(`${D}.unsavedCount()`) === 1, 'an emptied net is one unsaved change, not ' + await ev(`${D}.unsavedCount()`));
+  must(await ev(`document.getElementById('modeAip').classList.contains('dirty')`), 'the rail button has no dot for the draft');
+  await ev('document.activeElement.blur()');
+  await key('z', 'KeyZ', 90, 2);                       // Ctrl+Z in a marker mode is that layer's own Undo
+  must(await until(`${D}.lay('AIP').points.length === ${n0}`, 20), 'Ctrl+Z did not bring the nodes back: ' + await layerN('AIP') + ' of ' + n0);
+  must(await ev(`${D}.unsavedCount()`) === 0, 'the undone net still counts as a change');
+  await ev(`document.getElementById('mkClear').click()`);
+  await ev(`document.querySelector('#askBtns .primary, #askBtns button:last-child').click()`);
+  must(await until(`${D}.lay('AIP').points.length === 0`, 20), 'the second Clear did not empty the net');
+  await ev(`document.getElementById('mkRevert').click()`);       // Revert: the file's net comes back
+  must(await until(`${D}.lay('AIP').points.length === ${n0} && ${D}.unsavedCount() === 0`, 40), 'Revert did not bring the net back: ' + await layerN('AIP') + ' nodes');
+  await key('1', 'Digit1', 49);
+  must(await until(`${D}.mode === 'objects'`, 20), 'key 1 did not go back to the Objects mode');
 });
 
 await check('Light and fog: unsaved numbers count, Esc asks, Keep editing keeps, Discard closes and restores', async () => {
@@ -342,28 +359,198 @@ await check("Light and fog: every number has a reset to the disc's value, shown 
   await esc();
   must(await until(`!${dock}.open`, 20), 'Esc did not close the panel at the end');
 });
-await check('Start points: an unsaved point asks on Esc and Close; Discard drops it', async () => {
-  await ev(`document.getElementById('sptBtn').click()`);
-  must(await until(`document.getElementById('sptDlg').open`, 80), 'sptDlg did not open');
-  const rows = () => ev(`document.querySelectorAll('#sptList > *').length`);
-  const n0 = await rows();
-  await ev(`document.getElementById('sptAdd').click()`);
-  must(await until(`document.querySelectorAll('#sptList > *').length > ${n0}`, 20), 'no point was added');
-  await esc();
-  await answer('keep');
-  must(await ev(`document.getElementById('sptDlg').open`), 'Keep editing closed the dialog');
-  await ev(`document.querySelector('#sptDlg .dlg-foot [data-close]').click()`);
-  await answer('discard');
-  must(await until(`!document.getElementById('sptDlg').open`, 20), 'Discard did not close the dialog');
-  await ev(`document.getElementById('sptBtn').click()`);
-  must(await until(`document.getElementById('sptDlg').open`, 80), 'sptDlg did not open again');
-  const onServer = await ev(`fetch('/api/spt?name=${stage}&mod=smoke&kind=SPT').then((r) => r.json()).then((j) => j.points.length)`);
-  must(await until(`document.querySelectorAll('#sptList > *').length === ${n0}`, 40),
-    `the discarded point came back (${await rows()} rows [${await ev(`[...document.querySelectorAll('#sptList > *')].map((e) => e.className + ':' + (e.textContent || '').slice(0, 6)).join(' | ')`)}], ${n0} before; the server has ${onServer} points; the draft has ${await ev('window.wotmDebug.pt.SPT.points.length')}, saved copy ${await ev('JSON.parse(window.wotmDebug.ptSaved.SPT).length')})`);
-  await esc();
-  must(await until(`!document.getElementById('sptDlg').open`, 20), 'a clean dialog did not close on Esc');
+await check('modes 3 to 6: the rail has them, the keys and the buttons open them; the left panel lists the markers, the right one is theirs', async () => {
+  const order = await ev(`[...document.getElementById('rail').children].map((e) => e.id || e.className).join(',')`);
+  must(order === 'modeObjects,modePeds,rsep,modeSpt,modePup,modeAip,modeFop,toggleLeft', 'the rail is: ' + order);
+  must(await ev(`['modeObjects','modePeds','modeSpt','modePup','modeAip','modeFop'].every((i) => { const b = document.getElementById(i);
+    return b.title && b.getAttribute('aria-label') && b.getAttribute('aria-pressed') !== null && b.querySelector('.ic'); })`), 'a mode button lacks its title, label, state or icon');
+  for (const [m, kind, btn, k, vk] of MODE_KINDS) {
+    await goMode('objects');
+    await ev('document.activeElement && document.activeElement.blur()');     // (a click on the view leaves the focus on the page)
+    await key(k, 'Digit' + k, vk);
+    must(await until(`${D}.mode === '${m}'`, 20), `key ${k} did not open ${m}`);
+    const st = JSON.parse(await ev(`JSON.stringify({ pressed: [...document.querySelectorAll('#rail > .mode')].filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.id),
+      body: document.body.dataset.mode, kind: document.body.dataset.kind, panel: !!document.getElementById('mkPanel').offsetParent, bar: !!document.getElementById('mkBar').offsetParent,
+      propBar: !document.getElementById('propBar').hidden, objList: !!document.getElementById('list').offsetParent, noSel: !!document.getElementById('mkNoSel').offsetParent,
+      props: !!document.getElementById('mkProps').offsetParent, objNoSel: !!document.getElementById('noSel').offsetParent, tab: !document.getElementById('selTab').hidden })`));
+    must(JSON.stringify(st.pressed) === JSON.stringify([btn]), `${m}: aria-pressed is on ${st.pressed}`);
+    must(st.body === m && st.kind === kind && st.panel && st.bar && !st.propBar && !st.objList, `${m}: the left panel is ${JSON.stringify(st)}`);
+    must(st.noSel && !st.props && !st.objNoSel, `${m}: the right panel is ${JSON.stringify(st)}`);
+    must(await until(`document.querySelectorAll('#mkList li.it').length === ${D}.lay('${kind}').points.length`, 40), `${kind}: the list rows do not match the points`);
+    must(await ev(`document.querySelectorAll('#mkLegend li').length`) >= 2, `${kind}: the legend of colors is empty`);
+    await shot('mode_' + m);
+  }
+  await ev(`document.getElementById('modeObjects').click()`);                 // the rail buttons too
+  await ev(`document.getElementById('modePup').click()`);
+  must(await until(`${D}.mode === 'pup'`, 20), 'the Power-ups button did not open its mode');
+  await key('1', 'Digit1', 49);
+  must(await until(`${D}.mode === 'objects' && !document.getElementById('propBar').hidden && document.getElementById('mkBar').hidden`, 20), 'key 1 did not bring the Objects mode back');
+  await key('2', 'Digit2', 50);
+  must(await until(`${D}.mode === 'peds'`, 20), 'key 2 did not open Pedestrians');
+  await key('4', 'Digit4', 52);
+  must(await until(`${D}.mode === 'pup'`, 20), 'key 4 from Pedestrians did not open Power-ups');
+  await goMode('objects');
 });
-
+for (const [m, kind] of MODE_KINDS) {
+  await check(`${kind}: Add, select, move with the gizmo, the fields and the keys, duplicate, delete, Undo; Revert drops the draft`, async () => {
+    await goMode(m);
+    must(await until(`document.querySelector('#mkNewType').options.length > 0 || !document.getElementById('mkNewNumF').hidden`, 40), 'the Add bar has no types');
+    const n0 = await layerN(kind);
+    await ev(`document.getElementById('mkAdd').click()`);
+    must(await layerN(kind) === n0 + 1, 'Add did not add');
+    must(await ev(`${D}.lay('${kind}').sel`) === n0, 'the new marker is not the selected one');
+    must(await ev(`${D}.marker.on && !!${D}.gizmoObject && !document.getElementById('mkProps').hidden && document.getElementById('mkNoSel').hidden`), 'no gizmo or no panel for the new marker');
+    must(await ev(`!!document.querySelector('#mkList li.sel') && document.querySelector('#mkList li.sel').getAttribute('aria-selected') === 'true'`), 'its row is not selected');
+    must(await ev(`${D}.unsavedCount()`) === 1, 'the draft is not counted: ' + await ev(`${D}.unsavedCount()`));
+    must(await ev(`document.getElementById('save').classList.contains('dirty') && document.getElementById('mode${m[0].toUpperCase() + m.slice(1)}').classList.contains('dirty')`), 'Save or the rail button is not lit');
+    must(await ev(`document.querySelector('#mkState').classList.contains('dirty')`), 'the foot does not say unsaved');
+    // the gizmo moves it (a drag: the events the gizmo sends), and Ctrl+Z takes the move back
+    const pos = () => ev(`JSON.stringify(${D}.lay('${kind}').points[${n0}].pos)`).then(JSON.parse);
+    const p0 = await pos();
+    await ev(`(() => { const g = ${D}.gizmo; g.dispatchEvent({ type: 'dragging-changed', value: true }); ${D}.gizmoObject.position.x += 50; ${D}.gizmoObject.position.z -= 40;
+      g.dispatchEvent({ type: 'objectChange' }); g.dispatchEvent({ type: 'dragging-changed', value: false }); })()`);
+    const p1 = await pos();
+    must(Math.abs(p1[0] - p0[0] - 50) < 0.2 && Math.abs(p1[1] - p0[1] - 40) < 0.2, `the marker did not follow the gizmo: ${p0} -> ${p1}`);
+    must(await ev(`+document.getElementById('mkx').value`) === p1[0], 'the X field does not show the new place');
+    await ev('document.activeElement.blur()');
+    await key('z', 'KeyZ', 90, 2);
+    must(JSON.stringify(await pos()) === JSON.stringify(p0), 'Ctrl+Z did not put the marker back');
+    await key('y', 'KeyY', 89, 2);
+    must(JSON.stringify(await pos()) === JSON.stringify(p1), 'Ctrl+Y did not move it again');
+    // the fields
+    await ev(`(() => { const f = document.getElementById('mkx'); f.value = '123'; f.dispatchEvent(new Event('change')); })()`);
+    must((await pos())[0] === 123, 'typing X did not move the marker');
+    await ev(`(() => { const f = document.getElementById('mkx'); f.value = ''; f.dispatchEvent(new Event('change')); })()`);
+    must((await pos())[0] === 123 && await ev(`document.getElementById('mkx').value`) === '123', 'an emptied X field moved the marker or kept empty');
+    // the keys: an arrow nudges, Ctrl+D duplicates, Delete deletes
+    await ev('document.activeElement.blur()');
+    const was = JSON.stringify(await pos());
+    await key('ArrowUp', 'ArrowUp', 38);
+    must(await until(`JSON.stringify(${D}.lay('${kind}').points[${n0}].pos) !== ${JSON.stringify(was)}`, 20), 'an arrow did not nudge the marker');
+    await key('d', 'KeyD', 68, 2);
+    must(await until(`${D}.lay('${kind}').points.length === ${n0 + 2}`, 20), 'Ctrl+D did not duplicate');
+    must(await ev(`${D}.lay('${kind}').sel`) === n0 + 1, 'the copy is not selected');
+    await key('Delete', 'Delete', 46);
+    must(await until(`${D}.lay('${kind}').points.length === ${n0 + 1} && ${D}.lay('${kind}').sel === -1`, 20), 'Delete did not delete');
+    must(await ev(`!document.getElementById('mkNoSel').hidden && document.getElementById('mkProps').hidden`), 'the right panel kept the deleted marker');
+    must(await ev(`${D}.lay('${kind}').points.every((p) => !p.links || p.links.every((l) => l.to < ${D}.lay('${kind}').points.length))`), 'a link points past the nodes');
+    await shot('marker_' + m);
+    await ev(`document.getElementById('mkRevert').click()`);
+    must(await until(`${D}.lay('${kind}').points.length === ${n0} && ${D}.unsavedCount() === 0`, 40), 'Revert did not drop the draft');
+    await goMode('objects');
+  });
+}
+await check('drafts: they count as unsaved across modes, a stage switch asks, Save writes the file, Back to the disc\'s takes it away', async () => {
+  const file = path.join(mods, 'smoke', 'PTS', stage + '.SPT');
+  must(!fs.existsSync(file), 'the temporary mod already has a start points file');
+  await goMode('spt');
+  const n0 = await layerN('SPT');
+  await ev(`document.getElementById('mkAdd').click()`);
+  must(await ev(`${D}.unsavedCount()`) === 1, 'the point is not counted');
+  await goMode('objects');                       // the draft stays when the mode is left
+  must(await ev(`${D}.unsavedCount()`) === 1 && await ev(`document.getElementById('modeSpt').classList.contains('dirty')`), 'leaving the mode lost the draft or its dot');
+  const other = await ev(`[...document.getElementById('stage').options].map((o) => o.value).find((v) => v !== ${JSON.stringify(stage)})`);
+  await ev(`(() => { const s = document.getElementById('stage'); s.value = ${JSON.stringify(other)}; s.dispatchEvent(new Event('change')); })()`);
+  must(await until(`document.getElementById('askDlg').open && document.getElementById('askTitle').textContent === 'Unsaved changes'`, 20), 'the stage switch did not ask');
+  await answer('cancel');
+  must(await ev(`document.getElementById('stage').value`) === stage && await layerN('SPT') === n0 + 1, 'Cancel changed the stage or lost the draft');
+  await ev(`${D}.post('save')`);                  // the top bar's Save writes the patch and every changed layer
+  must(await until(`${D}.unsavedCount() === 0`, 80), 'Save did not finish');
+  must(fs.existsSync(file), 'no ' + file);
+  const bytes = fs.readFileSync(file);
+  must(bytes.length === 8 + 64 * (n0 + 1) && bytes.readUInt32LE(4) === n0 + 1, `the file holds ${bytes.readUInt32LE(4)} points, ${n0 + 1} wanted`);
+  must(await ev(`!document.getElementById('modeSpt').classList.contains('dirty')`), 'the rail dot stayed after Save');
+  await goMode('spt');
+  must(await ev(`document.getElementById('mkReset').disabled`) === false, "Back to the disc's is off for a stage the mod has a file for");
+  await ev(`document.getElementById('mkReset').click()`);
+  await answer('go');
+  must(await until(`${D}.lay('SPT').points.length === ${n0}`, 40), "Back to the disc's did not bring the stage's own points");
+  must(!fs.existsSync(file), 'the file stayed after Back to the disc\'s');
+  must(await ev(`document.getElementById('mkReset').disabled`), "Back to the disc's is on with no file");
+  await goMode('objects');
+});
+await check('a stage switch with a draft: Discard opens the other stage with its own markers and no draft', async () => {
+  await goMode('spt');
+  await ev(`document.getElementById('mkAdd').click()`);
+  const other = await ev(`[...document.getElementById('stage').options].map((o) => o.value).find((v) => v !== ${JSON.stringify(stage)})`);
+  await ev(`(() => { const s = document.getElementById('stage'); s.value = ${JSON.stringify(other)}; s.dispatchEvent(new Event('change')); })()`);
+  must(await until(`document.getElementById('askDlg').open`, 20), 'the stage switch did not ask');
+  await answer('discard');
+  const there = await ev(`fetch('/api/spt?name=${other}&mod=smoke&kind=SPT').then((r) => r.json()).then((j) => j.points.length)`);
+  must(await until(`document.getElementById('busy').hidden && document.getElementById('stage').value === ${JSON.stringify(other)} && ${D}.lay('SPT').points.length === ${there}`, 240, 500),
+    `the other stage's start points are not there: ${await layerN('SPT')} of ${there}`);
+  must(await until(`document.querySelectorAll('#mkList li.it').length === ${there}`, 20), 'the list shows the old stage\'s rows');
+  must(await ev(`${D}.unsavedCount()`) === 0, 'the draft came along to the other stage');
+  await ev(`(() => { const s = document.getElementById('stage'); s.value = ${JSON.stringify(stage)}; s.dispatchEvent(new Event('change')); })()`);
+  must(await until(`document.getElementById('busy').hidden && ${D}.items().length > 20 && document.getElementById('stage').value === ${JSON.stringify(stage)}`, 240, 500), 'the first stage did not come back');
+  await goMode('objects');
+});
+await check("Undo and Redo of the patch leave a layer's draft alone; in a marker mode Ctrl+Z is the layer's", async () => {
+  await goMode('spt');
+  const n0 = await layerN('SPT');
+  await ev(`document.getElementById('mkAdd').click()`);
+  await goMode('objects');
+  await ev(`${D}.select(${D}.items().find((x) => x.rec.info.handle === ${JSON.stringify(first)} && !x.copy)); ${D}.nudge(0, 0, 1, false); document.activeElement.blur()`);
+  must(await ev(`${D}.buildPatch().objects.length`) === 1, 'the nudge made no entry');
+  await key('z', 'KeyZ', 90, 2);
+  must(await until(`${D}.buildPatch().objects.length === 0`, 20), 'Ctrl+Z did not undo the nudge');
+  await sleep(1200);                               // (a reload of the files would be done by now)
+  must(await layerN('SPT') === n0 + 1 && await ev(`${D}.unsavedCount()`) === 1, 'Undo of the patch took the start point draft with it');
+  await key('y', 'KeyY', 89, 2);
+  must(await until(`${D}.buildPatch().objects.length === 1`, 20), 'Ctrl+Y did not redo the nudge');
+  await sleep(1200);
+  must(await layerN('SPT') === n0 + 1, 'Redo of the patch took the draft with it');
+  await key('z', 'KeyZ', 90, 2);
+  await ev(`${D}.select(null)`);
+  await goMode('spt');
+  await key('z', 'KeyZ', 90, 2);                   // in the mode it is the layer's own
+  must(await until(`${D}.lay('SPT').points.length === ${n0}`, 20), 'Ctrl+Z in the mode did not undo the point');
+  must(await ev(`${D}.buildPatch().objects.length`) === 0, 'Ctrl+Z in the mode touched the patch');
+  must(await ev(`document.getElementById('undo').title.startsWith('Nothing to undo in start points')`), 'the Undo button does not speak for the layer: ' + await ev(`document.getElementById('undo').title`));
+  await goMode('objects');
+  must(await ev(`!document.getElementById('undo').title.includes(' in start points')`), 'the Undo button did not go back to the patch: ' + await ev(`document.getElementById('undo').title`));
+  must(await ev(`${D}.unsavedCount()`) === 0, 'something is still unsaved');
+});
+await check('Move my changes to another mod keeps a draft that is in no mod yet', async () => {
+  fs.mkdirSync(path.join(mods, 'smoke2'), { recursive: true });
+  await goMode('spt');
+  const n0 = await layerN('SPT');
+  await ev(`document.getElementById('mkAdd').click()`);
+  await ev(`${D}.moveTo('smoke2', false)`);
+  await sleep(800);
+  must(await layerN('SPT') === n0 + 1, 'moving to another mod dropped the draft');
+  must(await ev(`document.querySelector('#mkState .tx').textContent`) === 'Not in this mod yet', 'the foot says: ' + await ev(`document.querySelector('#mkState .tx').textContent`));
+  must(await ev(`${D}.unsavedCount()`) >= 1, 'the draft is not counted');
+  await ev(`${D}.moveTo('smoke', false)`);
+  await sleep(500);
+  await ev(`document.getElementById('mkRevert').click()`);
+  must(await until(`${D}.lay('SPT').points.length === ${n0}`, 40), 'Revert did not drop the draft');
+  await goMode('objects');
+  await ev(`${D}.loadStage(${JSON.stringify(stage)})`);      // the moved patch is empty, so there is nothing to save: open the stage again
+  must(await until(`document.getElementById('busy').hidden && ${D}.items().length > 20 && ${D}.unsavedCount() === 0`, 240, 500), 'the stage did not open again clean');
+  must(await ev(`${D}.modNow`) === 'smoke', 'the mod in use is ' + await ev(`${D}.modNow`));
+});
+await check('the Net links: a node shows its links, Link joins two nodes both ways, Two-way and the cut work from the right panel', async () => {
+  await goMode('aip');
+  must(await until(`${D}.lay('AIP').points.length > 2`, 80), 'the stage has too few AI net nodes');
+  const pair = await ev(`(() => { const P = ${D}.lay('AIP').points; for (let a = 0; a < P.length; a++) for (let b = 0; b < P.length; b++)
+    if (a !== b && !P[a].links.some((l) => l.to === b) && !P[b].links.some((l) => l.to === a)) return JSON.stringify([a, b]); return null; })()`);
+  must(pair, 'every pair of nodes is linked already');
+  const [a, b] = JSON.parse(pair);
+  await ev(`${D}.selectMarker(${a})`);
+  const l0 = await ev(`${D}.lay('AIP').points[${a}].links.length`);
+  must(await ev(`document.querySelectorAll('#mkLinkList li.fop, #mkLinkList li:not(.in)').length`) >= l0, 'the right panel does not list the links');
+  await ev(`(() => { document.getElementById('mkLinkTo').value = ${b + 1}; document.getElementById('mkLink').click(); })()`);
+  must(await ev(`${D}.lay('AIP').points[${a}].links.some((l) => l.to === ${b}) && ${D}.lay('AIP').points[${b}].links.some((l) => l.to === ${a})`), 'Link did not join both ways');
+  must(await ev(`[...document.querySelectorAll('#mkLinkList li')].some((li) => li.querySelector('.to') && li.querySelector('.to').textContent === '→ Node ${b + 1}' && li.querySelector('input[type=checkbox]').checked)`), 'the link is not listed as two-way');
+  await ev(`(() => { const li = [...document.querySelectorAll('#mkLinkList li')].find((x) => x.querySelector('.to') && x.querySelector('.to').textContent === '→ Node ${b + 1}'); const c = li.querySelector('input[type=checkbox]'); c.checked = false; c.dispatchEvent(new Event('change')); })()`);
+  must(await ev(`${D}.lay('AIP').points[${a}].links.some((l) => l.to === ${b}) && !${D}.lay('AIP').points[${b}].links.some((l) => l.to === ${a})`), 'unchecking Two-way did not leave a one-way link');
+  await ev(`[...document.querySelectorAll('#mkLinkList li')].find((x) => x.querySelector('.to') && x.querySelector('.to').textContent === '→ Node ${b + 1}').querySelector('button.icon').click()`);
+  must(await ev(`!${D}.lay('AIP').points[${a}].links.some((l) => l.to === ${b})`), 'the cut kept the link');
+  await ev(`document.getElementById('mkRevert').click()`);
+  must(await until(`${D}.unsavedCount() === 0`, 40), 'Revert did not clean up');
+  await goMode('objects');
+});
 await ev('window.wotmDebug.select(null)').catch(() => {});
 for (const [btn, dlg] of DIALOGS) {
   await check(`${btn} opens ${dlg}`, async () => {
@@ -400,9 +587,12 @@ await check('the right panel has Selection and Stage tabs; the stage tools are r
   must(await ev(`!document.getElementById('stageTab').hidden === false`), 'the Stage tab is open at the start');
   await ev(`document.getElementById('tabStage').click()`);
   must(await ev(`!document.getElementById('stageTab').hidden && document.getElementById('selTab').hidden`), 'the Stage tab did not open');
-  const rows = await ev(`['gridBtn','lightBtn','texBtn','hud','picBtn','sptBtn','pupBtn','aipBtn','fopBtn'].filter((i) => { const b = document.getElementById(i); return !b || !document.getElementById('stageTab').contains(b) || !b.offsetParent; })`);
+  const rows = await ev(`['gridBtn','lightBtn','texBtn','hud','picBtn'].filter((i) => { const b = document.getElementById(i); return !b || !document.getElementById('stageTab').contains(b) || !b.offsetParent; })`);
   must(rows.length === 0, 'not visible in the Stage tab: ' + rows.join(', '));
-  must(await ev(`!document.getElementById('overlay').querySelector('#gridBtn, #sptBtn, #picBtn')`), 'a stage tool is still on the view bar');
+  must(await ev(`!document.getElementById('overlay').querySelector('#gridBtn, #picBtn')`), 'a stage tool is still on the view bar');
+  must(await ev(`!document.getElementById('stageTab').querySelector('#sptBtn, #pupBtn, #aipBtn, #fopBtn') && ![...document.querySelectorAll('#stageTab .sec-title')].some((t) => t.textContent === 'Gameplay')`),
+    'the Stage tab still has the Gameplay rows: start points, power-ups and the nets are modes of the rail');
+  must(await ev(`!document.getElementById('sptDlg') && !document.getElementById('netDlg')`), 'a dock dialog for start points or nets is still there');
   must(await ev(`!document.getElementById('rail').querySelector('#texBtn, #lightBtn, #hud')`), 'a stage tool is still on the rail');
   must(await ev(`document.getElementById('tabStage').classList.contains('on') && !document.getElementById('tabSel').classList.contains('on')
     && document.getElementById('tabStage').getAttribute('aria-selected') === 'true'`), 'the tab buttons do not say which tab is open');
@@ -443,28 +633,36 @@ await check('Add lives at the top of the left panel: Browse models and the searc
   must(await ev(`document.getElementById('pedBar').hidden && !document.getElementById('propBar').hidden`), 'Objects mode does not bring Add back');
   await shot('left_head_objects');
 });
-await check('Display: game look, grid, minimap and the overlays are in one menu; start points, power-ups and the AI net can be switched off', async () => {
+await check('Display: game look, grid, minimap and the overlays are in one menu; start points, power-ups and the nets can be switched off, are faint in other modes and full in their own', async () => {
   must(await ev(`!document.getElementById('overlay').querySelector('#look, #grid')`), 'look or grid is still on the bar');
   await ev(`document.getElementById('layersBtn').click()`);
   const have = await ev(`['look','grid','miniOn','pedsOn','collOn','sptOn','pupOn','aipOn','fopOn'].filter((i) => !document.getElementById('layersMenu').contains(document.getElementById(i)))`);
   must(have.length === 0, 'not in the Display menu: ' + have.join(', '));
   const vis = (e) => ev(e);
-  must(await vis(`window.wotmDebug.nets.AIP.view && window.wotmDebug.nets.AIP.view.visible`), 'the AI net is not drawn by default');
+  const opacity = (view) => `${view}.children[0].material.opacity`;
+  must(await vis(`${D}.nets.AIP.view && ${D}.nets.AIP.view.visible`), 'the AI net is not drawn by default');
+  must(await vis(`${opacity(`${D}.nets.AIP.view`)} < 0.5`), 'the AI net is not faint while the Objects mode is open');
   await ev(`(() => { const c = document.getElementById('aipOn'); c.click(); })()`);
-  must(await vis(`!window.wotmDebug.nets.AIP.view.visible`), 'the AI net stayed drawn with its switch off');
+  must(await vis(`!${D}.nets.AIP.view.visible`), 'the AI net stayed drawn with its switch off');
   await ev(`document.getElementById('aipOn').click()`);
-  must(await vis(`window.wotmDebug.nets.AIP.view.visible`), 'the AI net did not come back');
-  must(await vis(`!!window.wotmDebug.ptViews.SPT && window.wotmDebug.ptViews.SPT.visible`), 'start points are not drawn by default');
+  must(await vis(`${D}.nets.AIP.view.visible`), 'the AI net did not come back');
+  must(await vis(`!!${D}.ptViews.SPT && ${D}.ptViews.SPT.visible`), 'start points are not drawn by default');
   await ev(`document.getElementById('sptOn').click()`);
-  must(await vis(`!window.wotmDebug.ptViews.SPT.visible`), 'start points stayed drawn');
-  await ev(`document.getElementById('layersBtn').click()`);     // the menu first (its Esc comes before a tool's)
-  await ev(`document.getElementById('sptBtn').click()`);     // its own panel draws them, always
-  must(await until(`document.getElementById('sptDlg').open && window.wotmDebug.ptViews.SPT.visible`, 40), 'the dialog does not draw its start points');
-  await esc();
-  must(await until(`!document.getElementById('sptDlg').open && !window.wotmDebug.ptViews.SPT.visible`, 40), 'the start points stayed drawn after the dialog closed: ' + await ev(`JSON.stringify({ open: document.getElementById('sptDlg').open, vis: window.wotmDebug.ptViews.SPT.visible, focus: document.activeElement.id || document.activeElement.tagName, inDlg: document.getElementById('sptDlg').contains(document.activeElement) })`));
+  must(await vis(`!${D}.ptViews.SPT.visible`), 'start points stayed drawn');
+  await ev(`document.getElementById('layersBtn').click()`);     // the menu first (its Esc comes before a mode's)
+  await goMode('spt');                                          // its own mode draws them, full, whatever the switch says
+  must(await vis(`${D}.ptViews.SPT.visible && ${opacity(`${D}.ptViews.SPT`)} > 0.8`), 'the Start points mode does not draw its start points in full');
+  must(await vis(`!${D}.nets.AIP.view || ${opacity(`${D}.nets.AIP.view`)} < 0.5`), 'another layer is not faint in the Start points mode');
+  must(await vis(`document.getElementById('sptOn').checked && document.getElementById('sptOn').disabled`), 'the Start points switch is not checked and locked in its own mode');
+  await goMode('objects');
+  must(await vis(`!${D}.ptViews.SPT.visible`), 'the start points stayed drawn after the mode was left: the switch is off');
   await ev(`document.getElementById('layersBtn').click()`);
   await ev(`document.getElementById('sptOn').click()`);
-  must(await vis(`window.wotmDebug.ptViews.SPT.visible`), 'start points did not come back');
+  must(await vis(`${D}.ptViews.SPT.visible`), 'start points did not come back');
+  must(await vis(`!${D}.nets.FOP.view || !${D}.nets.FOP.view.visible`), 'the vehicle net is drawn by default');
+  await goMode('fop');                                          // an empty or full vehicle net: its own mode draws it
+  must(await vis(`!${D}.nets.FOP.points.length || ${D}.nets.FOP.view.visible`), 'the Vehicle net mode does not draw the vehicle net');
+  await goMode('objects');
   await shot('display_menu');
   await ev(`document.getElementById('layersBtn').click()`);
 });
@@ -472,22 +670,22 @@ await check('tool panels dock over the right panel, not modal: the width follows
   const W = () => ev(`Math.round(document.getElementById('right').getBoundingClientRect().width)`);
   const w0 = await W();
   must(w0 < 400, 'the right panel is already wide: ' + w0);
-  await ev(`document.getElementById('sptBtn').click()`);
-  must(await until(`document.getElementById('sptDlg').open`, 40), 'Start points did not open');
+  await ev(`document.getElementById('gridBtn').click()`);
+  must(await until(`document.getElementById('gridDlg').open`, 40), 'Stage size did not open');
   must(await until(`document.getElementById('right').getBoundingClientRect().width >= 439`, 20), 'the right panel did not widen: ' + await W());
-  const g = JSON.parse(await ev(`(() => { const d = document.getElementById('sptDlg').getBoundingClientRect(), r = document.getElementById('right').getBoundingClientRect();
+  const g = JSON.parse(await ev(`(() => { const d = document.getElementById('gridDlg').getBoundingClientRect(), r = document.getElementById('right').getBoundingClientRect();
     return JSON.stringify({ modal: !!document.querySelector('dialog:modal'), dl: Math.round(d.left), rl: Math.round(r.left), dt: Math.round(d.top), rt: Math.round(r.top), dh: Math.round(d.height), rh: Math.round(r.height) }); })()`));
   must(!g.modal, 'the panel is modal');
   must(Math.abs(g.dl - g.rl) <= 2 && Math.abs(g.dt - g.rt) <= 2 && Math.abs(g.dh - g.rh) <= 2, 'the panel is not where the right panel is: ' + JSON.stringify(g));
   // the camera is free while it is open: the aim takes where the view looks now
   must(await ev(`!!window.wotmDebug.aimStart()`), 'the view has no aim point with the panel open');
-  await shot('dock_spt');
+  await shot('dock_grid');
   // another tool: the first closes (nothing unsaved), the second opens
-  await ev(`document.getElementById('aipBtn').click()`);
-  must(await until(`document.getElementById('netDlg').open && !document.getElementById('sptDlg').open`, 40), 'the AI net did not replace Start points');
-  await shot('dock_net');
+  await ev(`document.getElementById('lightBtn').click()`);
+  must(await until(`document.getElementById('lightDlg') && document.getElementById('lightDlg').open && !document.getElementById('gridDlg').open`, 40), 'Light and fog did not replace Stage size');
+  await shot('dock_light');
   await esc();
-  must(await until(`!document.getElementById('netDlg').open`, 20), 'the AI net panel did not close');
+  must(await until(`!document.getElementById('lightDlg').open`, 20), 'the Light and fog panel did not close');
   must(await until(`document.getElementById('right').getBoundingClientRect().width <= ${w0 + 1}`, 20), 'the right panel did not go back: ' + await W());
   // the edge: the arrows resize, double click puts it back
   await ev(`document.getElementById('rightGrip').focus()`);
@@ -513,13 +711,19 @@ await check('the side panels hide and come back: the view takes their place, a s
   must(await until(`Math.round(document.getElementById('right').getBoundingClientRect().width) === 0`, 20), 'the right panel did not hide: ' + await W('right'));
   must(await W('view') >= view0 + right0 - 2, 'the view did not take the right panel\'s place');
   must(await ev(`document.getElementById('toggleRight').getAttribute('aria-pressed')`) === 'false', 'the button does not say it is hidden');
-  await ev(`document.getElementById('sptBtn').click()`);                      // a tool needs the panel: it shows while the tool is open
-  must(await until(`document.getElementById('sptDlg').open && document.getElementById('right').getBoundingClientRect().width >= 439`, 40), 'the tool did not bring the panel');
+  await ev(`document.getElementById('gridBtn').click()`);                     // a tool needs the panel: it shows while the tool is open
+  must(await until(`document.getElementById('gridDlg').open && document.getElementById('right').getBoundingClientRect().width >= 439`, 40), 'the tool did not bring the panel');
   await esc();
-  must(await until(`!document.getElementById('sptDlg').open && Math.round(document.getElementById('right').getBoundingClientRect().width) === 0`, 40), 'the panel did not hide again after the tool');
+  must(await until(`!document.getElementById('gridDlg').open && Math.round(document.getElementById('right').getBoundingClientRect().width) === 0`, 40), 'the panel did not hide again after the tool');
   await ev(`window.wotmDebug.select(window.wotmDebug.items().find((x) => !x.copy))`);       // a selection brings it back
   must(await until(`document.getElementById('right').getBoundingClientRect().width >= 200`, 20), 'a selection did not bring the right panel back');
   await ev('window.wotmDebug.select(null)');
+  await goMode('spt');                                                                       // a new marker is selected: that brings the right panel back too
+  await ev(`document.getElementById('mkAdd').click()`);
+  must(await until(`document.getElementById('right').getBoundingClientRect().width >= 200 && !document.getElementById('mkProps').hidden`, 20), 'a marker did not bring the right panel back');
+  await ev(`document.getElementById('mkRevert').click()`);
+  must(await until(`window.wotmDebug.unsavedCount() === 0`, 40), 'Revert did not clean up');
+  await goMode('objects');
   await ev(`document.getElementById('toggleLeft').click()`);
   must(await until(`Math.round(document.getElementById('left').getBoundingClientRect().width) === 0`, 20), 'the left panel did not hide');
   await shot('left_hidden');
@@ -537,50 +741,66 @@ const clickAt = async (x, y) => {
 const markerOnScreen = (kind, list) => ev(`(() => { const D = window.wotmDebug; const r = ${list}.map((p, i) => [i, D.markerScreen('${kind}', p)]).filter((x) => x[1]
   && x[1][0] > 330 && x[1][0] < innerWidth - 480 && x[1][1] > 130 && x[1][1] < innerHeight - 120);
   return r.length ? JSON.stringify(r[0]) : null; })()`);
-await check('markers in the view: a click near a start point selects it, the gizmo moves it, a click on nothing lets go, Esc closes the panel', async () => {
-  await ev(`document.getElementById('sptBtn').click()`);
-  must(await until(`document.getElementById('sptDlg').open`, 40), 'Start points did not open');
-  await ev(`window.wotmDebug.frameAll()`);
+await check('markers in the view: a start point is picked only in its own mode; the gizmo moves it; a click on nothing lets go and never picks a building; Esc deselects and keeps the mode', async () => {
+  await goMode('objects');
+  await ev(`${D}.frameAll()`);
   await sleep(500);
-  const want = await markerOnScreen('SPT', 'D.pt.SPT.points');
+  const want = await markerOnScreen('SPT', 'D.lay("SPT").points');
   must(want, 'no start point on screen to click');
   const [idx, [sx, sy]] = JSON.parse(want);
+  // Objects mode: the marker is scenery, so the click is never the marker's
+  await ev(`${D}.select(null)`);
   await clickAt(sx, sy);
-  must(await until(`window.wotmDebug.markerCtx() && window.wotmDebug.markerCtx().sel === ${idx}`, 20), 'the click did not select start point ' + idx);
-  must(await ev('window.wotmDebug.marker.on && !!window.wotmDebug.gizmoObject'), 'the gizmo is not on the marker');
-  must(await ev(`!!document.querySelector('#sptList .spt-row.sel')`), 'its row is not selected');
-  // the gizmo moves it: the point's numbers follow (the gizmo's own drag cannot be driven here; its change event can)
-  const x0 = await ev(`window.wotmDebug.pt.SPT.points[${idx}].pos[0]`);
-  await ev(`(() => { const D = window.wotmDebug; D.gizmoObject.position.x += 50; D.gizmo.dispatchEvent({ type: 'objectChange' }); })()`);
-  const x1 = await ev(`window.wotmDebug.pt.SPT.points[${idx}].pos[0]`);
+  must(await ev(`${D}.markerCtx() === null && ${D}.lay('SPT').sel === -1 && !${D}.marker.on`), 'a start point was picked in the Objects mode');
+  await ev(`${D}.select(null)`);
+  await goMode('spt');
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: sx, y: sy });
+  must(await until(`${D}.hover.marker === ${idx}`, 20), 'the marker under the pointer is not the hovered one: ' + await ev(`${D}.hover.marker`));
+  must(await ev(`document.getElementById('canvas').style.cursor`) === 'pointer', 'the pointer is not a hand over a marker');
+  await clickAt(sx, sy);
+  must(await until(`${D}.markerCtx() && ${D}.markerCtx().sel === ${idx}`, 20), 'the click did not select start point ' + idx);
+  must(await ev(`${D}.marker.on && !!${D}.gizmoObject`), 'the gizmo is not on the marker');
+  must(await ev(`!!document.querySelector('#mkList li.sel') && !document.getElementById('mkProps').hidden`), 'its row or the right panel is not showing it');
+  await shot('marker_selected_spt');
+  // the gizmo moves it: the point's numbers follow
+  const x0 = await ev(`${D}.pt.SPT.points[${idx}].pos[0]`);
+  await ev(`(() => { ${D}.gizmoObject.position.x += 50; ${D}.gizmo.dispatchEvent({ type: 'objectChange' }); })()`);
+  const x1 = await ev(`${D}.pt.SPT.points[${idx}].pos[0]`);
   must(Math.abs(x1 - x0 - 50) < 0.2, `the point did not follow the gizmo: ${x0} -> ${x1}`);
-  // a click on nothing (the corner of the view) lets go
+  // a click on nothing (the corner of the view) lets go, and the building under it is not picked
   await clickAt(340, 140);
-  must(await until(`window.wotmDebug.markerCtx().sel === -1 && !window.wotmDebug.marker.on`, 20), 'a click on nothing did not let go of the marker');
-  await key('Escape', 'Escape', 27);       // the focus is in the view: Esc closes the panel, asking about the moved point first
-  await answer('discard');
-  must(await until(`!document.getElementById('sptDlg').open`, 20), 'Esc with the focus in the view did not close the panel');
+  must(await until(`${D}.markerCtx().sel === -1 && !${D}.marker.on`, 20), 'a click on nothing did not let go of the marker');
+  must(await ev(`${D}.sel === null && ${D}.group.length === 0`), 'a click on nothing in a marker mode picked an object');
+  // Esc, with the focus in the view: the marker lets go and the mode stays
+  await clickAt(sx, sy);
+  must(await until(`${D}.markerCtx().sel === ${idx}`, 20), 'the second click did not select');
+  await key('Escape', 'Escape', 27);
+  must(await until(`${D}.markerCtx().sel === -1`, 20), 'Esc did not let go of the marker');
+  must(await ev(`${D}.mode === 'spt' && !document.getElementById('askDlg').open`), 'Esc left the mode or asked something');
+  await ev(`document.getElementById('mkRevert').click()`);       // the moved point is a draft: back to the file's
+  must(await until(`${D}.pt.SPT.points[${idx}].pos[0] === ${x0} && ${D}.unsavedCount() === 0`, 40), 'Revert did not put the point back');
+  await goMode('objects');
 });
 await check('markers in the view: the same for the nodes of the AI net', async () => {
-  await ev(`document.getElementById('aipBtn').click()`);
-  must(await until(`document.getElementById('netDlg').open`, 40), 'AI net did not open');
-  await ev(`window.wotmDebug.frameAll()`);
+  await goMode('aip');
+  await ev(`${D}.frameAll()`);
   await sleep(500);
-  const want = await markerOnScreen('AIP', 'D.nets.AIP.points');
+  const want = await markerOnScreen('AIP', 'D.lay("AIP").points');
   must(want, 'no AI net node on screen to click');
   const [idx, [sx, sy]] = JSON.parse(want);
   await clickAt(sx, sy);
-  must(await until(`window.wotmDebug.markerCtx() && window.wotmDebug.markerCtx().sel === ${idx} && window.wotmDebug.marker.on`, 20), 'the click did not select node ' + idx);
+  must(await until(`${D}.markerCtx() && ${D}.markerCtx().sel === ${idx} && ${D}.marker.on`, 20), 'the click did not select node ' + idx);
+  must(await ev(`document.getElementById('mkTitle').textContent === 'Node ${idx + 1}'`), 'the right panel does not name the node: ' + await ev(`document.getElementById('mkTitle').textContent`));
   await shot('marker_selected_net');
-  const y0 = await ev(`window.wotmDebug.nets.AIP.points[${idx}].pos[1]`);
-  await ev(`(() => { const D = window.wotmDebug; D.gizmoObject.position.z -= 40; D.gizmo.dispatchEvent({ type: 'objectChange' }); })()`);     // game y is three -z
-  const y1 = await ev(`window.wotmDebug.nets.AIP.points[${idx}].pos[1]`);
+  const y0 = await ev(`${D}.nets.AIP.points[${idx}].pos[1]`);
+  await ev(`(() => { ${D}.gizmoObject.position.z -= 40; ${D}.gizmo.dispatchEvent({ type: 'objectChange' }); })()`);     // game y is three -z
+  const y1 = await ev(`${D}.nets.AIP.points[${idx}].pos[1]`);
   must(Math.abs(y1 - y0 - 40) < 0.2, `the node did not follow the gizmo: ${y0} -> ${y1}`);
-  await key('Escape', 'Escape', 27);       // the marker first (the focus is in the view), then the panel
-  must(await until(`window.wotmDebug.markerCtx().sel === -1`, 20), 'Esc did not let go of the node');
   await key('Escape', 'Escape', 27);
-  await answer('discard');
-  must(await until(`!document.getElementById('netDlg').open && window.wotmDebug.nets.AIP.points[${idx}].pos[1] === ${y0}`, 40), 'Discard did not put the node back');
+  must(await until(`${D}.markerCtx().sel === -1`, 20), 'Esc did not let go of the node');
+  await ev(`document.getElementById('mkRevert').click()`);
+  must(await until(`${D}.nets.AIP.points[${idx}].pos[1] === ${y0}`, 40), 'Revert did not put the node back');
+  await goMode('objects');
 });
 await check('top bar: File menu holds the stage and mod commands; Test has a chevron for Test from here and Test options', async () => {
   must(await ev(`!document.getElementById('bar').querySelector('#newStage, #editStage, #packMod, #check, #testHere, #testOpts')`), 'a command is still loose on the bar');
