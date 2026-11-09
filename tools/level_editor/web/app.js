@@ -3099,9 +3099,10 @@ async function refreshPrefabs() {
   if (!$('propMenu').hidden) renderPrefabs();
 }
 function renderPrefabs() {
-  const list = $('pfList'), here = prefabs.filter((p) => p.stage === baseOf(stageName)), other = prefabs.length - here.length;
+  const list = $('pfList'), here = prefabs.filter((p) => p.stage === baseOf(stageName));
   list.textContent = '';
-  for (const p of here) {
+  // this game stage's first, then the others (they build their objects as props of this stage when pasted)
+  for (const p of [...here, ...prefabs.filter((q) => !here.includes(q))]) {
     const row = document.createElement('div'), b = document.createElement('button'), x = document.createElement('button');
     row.className = 'pf-row';
     b.type = 'button';
@@ -3110,8 +3111,10 @@ function renderPrefabs() {
     b.innerHTML = '<span class="pm-name"></span><span class="pm-meta"></span>';
     b.querySelector('.pm-name').textContent = p.name;
     const props = p.entries.filter((e) => e.kind === 'prop').length;
-    b.querySelector('.pm-meta').textContent = `${p.entries.length} ${p.entries.length === 1 ? 'object' : 'objects'}` + (props ? `, ${props} new` : '');
-    b.title = `Put ${p.name} where the view looks`;
+    const away = p.stage !== baseOf(stageName);
+    b.querySelector('.pm-meta').textContent = (away ? `${title(p.stage)} · ` : '') + `${p.entries.length} ${p.entries.length === 1 ? 'object' : 'objects'}` + (props ? `, ${props} new` : '');
+    b.title = away ? `Put ${p.name} where the view looks: its objects are built as props of this stage from ${title(p.stage)}'s (pickups and vehicles stay out)`
+      : `Put ${p.name} where the view looks`;
     b.onclick = () => pastePrefab(p);
     x.type = 'button';
     x.className = 'icon ghost';
@@ -3123,7 +3126,7 @@ function renderPrefabs() {
     list.appendChild(row);
   }
   const none = !modNow ? 'Choose a mod first: the prefabs live in its prefabs folder.'
-    : !here.length ? `No prefabs for ${title(stageName)} yet: select some objects and save them.` + (other ? ` ${other} of this mod ${other === 1 ? 'is' : 'are'} for other game stages.` : '') : '';
+    : !prefabs.length ? `No prefabs yet: select some objects and save them.` : '';
   $('pfNone').textContent = none;
   $('pfNone').hidden = !none;
   $('pfSave').disabled = !modNow || !group.some((it) => it.node.visible && !isDeleted(it));
@@ -3188,11 +3191,43 @@ function deletePrefab(p) {
         showPropMenu(true);
       });
 }
-// Puts the prefab where the view looks, turned by the Turn field. An entry whose object is not in this stage (another game stage's
-// handle, or the same handle somewhere else) or whose prop model is missing is left out and counted.
-function pastePrefab(p) {
-  if (p.stage !== baseOf(stageName)) { msg(`${p.name} was made for ${title(p.stage)}, not ${title(stageName)}.`, { level: 'warn', toast: true }); return; }
+// A prefab made on another game stage cannot copy its objects (a handle is an address in that stage's file), so each becomes a prop of
+// this mod built for this stage, as the palette does it (/api/props/original: the model, its textures, its broken state). Returns,
+// for each entry, the model it became ('' for one that cannot: a pickup, a vehicle, a Blender prop of the other stage).
+async function bringPrefab(p) {
+  const base = baseOf(stageName), done = new Map(), out = [];
+  const make = async (from, handle) => {
+    const key = `${from}:${handle}`;
+    if (!done.has(key)) {
+      let m = '';
+      try { m = (await api('/api/props/original', { mod: modNow, stage: stageName, from, handle })).prop?.model || ''; } catch (e) { m = ''; }
+      done.set(key, m);
+    }
+    return done.get(key);
+  };
+  for (const e of p.entries) {
+    if (e.kind === 'object') { out.push(await make(p.stage, e.handle)); continue; }
+    const info = propModels.get(propKey(e.model))?.info;      // a prop of the mod: made for this stage already, or from an original object
+    out.push(info && info.stage === base && !info.error ? info.model : info && info.origin && info.origin.stage ? await make(info.origin.stage, info.origin.handle) : '');
+  }
+  return out;
+}
+// Puts the prefab where the view looks, turned by the Turn field. An entry whose object is not in this stage (the same handle somewhere
+// else) or whose prop model is missing is left out and counted. A prefab of another game stage first brings its objects (bringPrefab).
+async function pastePrefab(p) {
+  const cross = p.stage !== baseOf(stageName);
   showPropMenu(false);
+  if (cross && !modNow) { msg('Choose a mod first: the objects of another stage are built into it as props', { level: 'warn', toast: true }); return; }
+  let models = null;
+  if (cross) {
+    msg(`Building the objects of ${p.name} (from ${title(p.stage)}) for ${title(stageName)}…`);
+    models = await bringPrefab(p);
+    if (models.some(Boolean)) {
+      const snap = JSON.stringify(buildPatch());
+      await loadPropModels(modNow);
+      restoreTo(snap);
+    }
+  }
   if (editMode !== 'objects') enterMode('objects');
   const at = viewPoint(), turn = +$('pfTurn').value || 0;
   snapshot('put ' + p.name);
@@ -3200,11 +3235,11 @@ function pastePrefab(p) {
   p.entries.forEach((e, k) => {
     const to = placeEntry(e, at, turn);
     let it = null;
-    if (e.kind === 'object') {
+    if (e.kind === 'object' && !cross) {
       const rec = byHandle.get(normHandle(e.handle));
       if (rec && rec.p0.every((v, i) => Math.abs(v - e.from[i]) < 1)) it = makeCopy(rec, to.pos, to.heading, e.name || '');
-    } else {
-      it = makeProp({ id: newPropId(), model: e.model, pos: to.pos, heading: to.heading, pitch: e.pitch || 0, roll: e.roll || 0, name: e.name || '' });
+    } else if (!cross || models[k]) {
+      it = makeProp({ id: newPropId(), model: cross ? models[k] : e.model, pos: to.pos, heading: to.heading, pitch: e.pitch || 0, roll: e.roll || 0, name: e.name || '' });
     }
     made[k] = it;
     if (!it) skipped.push(e);

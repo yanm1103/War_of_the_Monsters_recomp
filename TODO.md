@@ -10,7 +10,6 @@ O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado s
 Rearranjar fases existentes (mover, girar, apagar, duplicar prédios e objetos, inclusive de outra fase) com um editor que grava o patch JSON por fase em `mods/<mod>/levels/` (`docs/guides/MODS.md`, "Level patches"; aplicado pelo `wotm_levelpatch.inc`).
 
 Ideias para facilitar a vida de quem faz mod (o que o editor ainda não tem; cada uma só no editor, salvo onde disser), na ordem sugerida:
-5. **Inclinação:** falta ver no jogo um monstro batendo num prop inclinado (a matriz e a caixa estão provadas, a colisão por triângulos e por casco, não). O prefab não leva objetos de outra fase do jogo (o handle é um endereço do arquivo da fase): isso pede juntar `.TEX`/`.RTX` e a imagem do prédio na fase de destino.
 8. **Precisam do runtime:** pontos de vida das construções originais, tipo do pickup (carro estacionado para carro no trânsito, `id2` bit 0), escala por objeto.
 
 ## Fora da ordem (até o dono escolher)

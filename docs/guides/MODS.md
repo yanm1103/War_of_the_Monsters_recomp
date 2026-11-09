@@ -1011,13 +1011,16 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   the game stage it was made on (a custom stage saves its base), and each entry is a copy of a stage object (`handle`, and `from`, the
   position the object has on the disc) or a new prop (`model`, `pitch`, `roll`), with `d`, its offset from the middle of the box of
   the objects' positions in X and Y and from the lowest one in Z, its `heading`, its instance `name` and `on`, the entry it rests on.
-  The menu lists the mod's prefabs for the open stage's game stage (a custom stage on CENTRAL sees the prefabs of CENTRAL, from any
-  stage of the mod; the ones for other game stages are only counted): a click puts the group where the view looks, turned by the
+  The menu lists every prefab of the mod, those of the open stage's game stage first (a custom stage on CENTRAL sees the prefabs of CENTRAL, from any
+  stage of the mod); a click puts the group where the view looks, turned by the
   **Turn** field about its middle (counterclockwise seen from above), as copies and new props, selects them all and is one undo
   step; the delete button beside a prefab removes its file. An entry whose handle is not in the open stage at the `from` position, or
-  whose prop model the mod does not have for it, is left out and counted in the message. A prefab holds at most 500 entries
+  whose prop model the mod does not have for it, is left out and counted in the message. A prefab of another game stage (marked with
+  its stage in the menu) cannot copy its objects, since a handle is an address of that stage's own file: each becomes a prop of the
+  mod built for the open stage, the way the palette builds an object of another stage (above; a building keeps its broken state), and
+  a prop that was itself made from another stage's object is built again from it; a pickup, a vehicle or a Blender prop made for the
+  other stage stays out and is counted. A prefab holds at most 500 entries
   (`editor.py`, `PREFAB_MAX`); the copies take the stage's Interactives slots like any copy, and Check says if they do not fit.
-  Objects from another game stage cannot be pasted: a handle is an address of that stage's own file.
 - **List:** every object by name, its handle beside it, in sections (**Buildings**, **Pickups**, **Props**, **Terrain** and **New props**, the
   props over 500 units; a click on a header closes or opens it, Terrain starts closed, and the editor remembers them). A copy
   sits under its original, indented. Small marks after the name: a green dot (moved or turned), the copy icon (it has copies),
