@@ -24,6 +24,9 @@ export function popover({ button, menu, onOpen, onClose, place, closeOnItem }) {
         menu.style.left = `${Math.max(8, Math.min(Math.round(r.left), innerWidth - menu.offsetWidth - 8))}px`;
         menu.style.top = `${Math.round(r.bottom + 4)}px`;
       }
+      // the focus goes into the menu once it shows (an element of a hidden menu cannot take it): arrows and Esc work from there, and
+      // a text field that had the focus no longer keeps the Esc
+      if (on) { const first = walkable()[0]; if (first) first.focus({ preventScroll: true }); }
       button.classList.toggle('on', on);
       button.setAttribute('aria-expanded', String(on));
       if (on) openMenus.add(api); else { openMenus.delete(api); if (onClose) onClose(); }

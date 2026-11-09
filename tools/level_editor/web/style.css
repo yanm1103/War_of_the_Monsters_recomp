@@ -297,7 +297,6 @@ aside { background: var(--surface-1); padding: 12px; overflow: auto; min-height:
 .list-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 8px; padding-top: 32px;
               color: var(--muted); text-align: center; }
 .list-empty > .ic { width: 28px; height: 28px; }
-#count { font-size: 12px; line-height: 16px; flex: none; }
 
 /* the properties panel */
 #right h2 { margin: 0; font: 600 15px/22px var(--font-ui); overflow-wrap: anywhere; min-width: 0; }

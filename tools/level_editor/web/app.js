@@ -1319,8 +1319,6 @@ function refreshList() {
   const nRecs = recs.filter(changed).length + propRecs.length;
   document.querySelector('.kinds .n[data-n="changed"]').textContent = nRecs;
   const bp = buildPatch(), nChanged = bp.objects.length + (bp.props || []).length;
-  $('count').textContent = (shown.length === all.length ? `${all.length} objects` : `${shown.length} of ${all.length} shown`) +
-    ` · ${nChanged} changed` + (group.length ? ` · ${group.length} selected` : '');
   document.title = `WotM Level Editor — ${stageName}${isDirty() ? ' *' : ''}`;
   $('save').classList.toggle('dirty', isDirty());
   showStatus(nChanged);
@@ -2610,6 +2608,12 @@ function ask(head, text, buttons, then, o = {}) {
   dlg.showModal();
   (main || $('askBtns').lastElementChild)?.focus();
 }
+// Something that writes into the mod needs one chosen: true when there is, else says why it is needed, with a button to choose
+function requireMod(why) {
+  if (modNow) return true;
+  msg(`Choose a mod first: ${why}`, { level: 'warn', toast: ['Choose mod', () => $('mod').focus()] });
+  return false;
+}
 const changesText = (n) => `${n} unsaved ${n === 1 ? 'change' : 'changes'}`;
 // How many things differ from the saved file: entries by handle, the instance names, the pedestrians, the rest of the file
 function unsavedCount() {
@@ -3324,7 +3328,7 @@ function prefabItems() {
   });
 }
 function openPrefabSave() {
-  if (!modNow) { msg('Choose a mod first: the prefab is saved in its folder.', { level: 'warn', toast: true }); return; }
+  if (!requireMod('the prefab is saved in its folder')) return;
   const items = prefabItems();
   if (!items.length) { msg('Select the objects to save first.', { level: 'warn', toast: true }); return; }
   showPropMenu(false);
@@ -3395,7 +3399,7 @@ async function bringPrefab(p) {
 async function pastePrefab(p) {
   const cross = p.stage !== baseOf(stageName);
   showPropMenu(false);
-  if (cross && !modNow) { msg('Choose a mod first: the objects of another stage are built into it as props', { level: 'warn', toast: true }); return; }
+  if (cross && !requireMod('the objects of another stage are built into it as props')) return;
   let models = null;
   if (cross) {
     msg(`Building the objects of ${p.name} (from ${title(p.stage)}) for ${title(stageName)}…`);
@@ -3954,7 +3958,7 @@ $('shotBtn').onclick = () => {
 };
 // Pack mod: mods/<mod>/ as a .zip (editor.py pack_mod)
 $('packMod').onclick = async () => {
-  if (!modNow) { msg('Choose a mod first: Pack mod zips its folder', { level: 'warn', toast: true }); return; }
+  if (!requireMod('Pack mod zips its folder')) return;
   try {
     const r = await fetch(`/api/pack?mod=${encodeURIComponent(modNow)}`);
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `The server answered ${r.status}`);
@@ -4073,7 +4077,7 @@ $('gdFloor').onclick = async () => {
 // Stage picture: the view's middle 2:1 band, 512x256, into mods/<mod>/levelpics/ (the stage select's picture)
 $('picBtn').onclick = async () => {
   if (!stageName) return;
-  if (!modNow) { msg('Choose a mod first: the picture is saved in it', { level: 'warn', toast: true }); return; }
+  if (!requireMod('the picture is saved in it')) return;
   renderer.render(scene, camera);          // the canvas keeps no frame between renders: read it right after one
   const src = renderer.domElement, w = src.width, h = src.height, cw = Math.min(w, h * 2), ch = cw / 2;
   const c = document.createElement('canvas');
@@ -4192,7 +4196,7 @@ async function bakeOriginals() {
   finally { bake.on = false; if ($('palDlg').open) origEnsure(); }
 }
 async function addOriginal(it) {
-  if (!modNow) { msg('Choose a mod first: the prop is built into it', { level: 'warn', toast: true }); return; }
+  if (!requireMod('the prop is built into it')) return;
   msg(`Building ${it.name} from ${it.title}…`);
   let res;
   try { res = await api('/api/props/original', { mod: modNow, stage: stageName, from: it.stage, handle: it.handle }); }
@@ -4463,7 +4467,7 @@ function nsOpen(edit) {
 }
 $('newStage').onclick = () => {
   if (!stageName) return;
-  if (!modNow) { msg('Choose a mod first: the new stage is saved in it', { level: 'warn', toast: true }); return; }
+  if (!requireMod('the new stage is saved in it')) return;
   nsOpen('');
 };
 $('editStage').onclick = () => { if (stageMeta[stageName]) nsOpen(stageName); };

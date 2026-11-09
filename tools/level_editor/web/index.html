@@ -68,8 +68,8 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
     <!-- the Objects mode's search, chips and list (class obj); the Pedestrians mode's panel (#pedPanel) -->
     <div class="field search obj">
       <i class="pre ic" style="--ic:url(vendor/mdi/magnify.svg)"></i>
-      <input id="filter" placeholder="Search by name or handle" spellcheck="false" aria-label="Search objects"
-             title="Search by name, handle, kind or model id">
+      <input id="filter" placeholder="Search by name or id" spellcheck="false" aria-label="Search objects"
+             title="Search by name, id (handle), kind or model id">
       <button id="filterClear" class="icon ghost" title="Clear the search" aria-label="Clear the search" hidden><i class="ic" style="--ic:url(vendor/mdi/close-circle.svg)"></i></button>
     </div>
     <div class="kinds obj">
@@ -85,7 +85,6 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <div>No objects match</div>
       <button id="clearFilters" type="button">Clear filters</button>
     </div>
-    <div id="count" class="muted num obj"></div>
     <div id="pedPanel">
       <div class="meters">
         <div class="meter" id="mGroups" title="A stage holds 20 pedestrian groups at most">
@@ -241,7 +240,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
         <span id="pIcon" class="kind-ic"><i class="ic"></i></span>
         <div class="p-names">
           <div class="p-title-row"><h2 id="pTitle"></h2><span id="pBadge" class="badge" hidden></span></div>
-          <div class="p-sub" id="pSub"><button id="pHandle" type="button" class="handle" title="Copy the handle"><span class="tx"></span><i class="ic" style="--ic:url(vendor/mdi/content-copy.svg)"></i></button><span id="pKind"></span></div>
+          <div class="p-sub" id="pSub"><button id="pHandle" type="button" class="handle" title="Copy the object's id (its handle in the game)"><span class="tx"></span><i class="ic" style="--ic:url(vendor/mdi/content-copy.svg)"></i></button><span id="pKind"></span></div>
         </div>
       </div>
       <div class="callout info" id="pGroup" hidden><i class="ic" style="--ic:url(vendor/mdi/information-outline.svg)"></i>
@@ -630,7 +629,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <label class="fl">Based on<select id="nsBase"></select></label>
       <label class="fl">Narrator<input id="nsNarr" maxlength="40" spellcheck="false" autocomplete="off" placeholder="mycity"
         title="narrator/&lt;name&gt;.mp3, played when the stage is confirmed; empty is silence"></label>
-      <label class="fl chk"><input id="nsRandom" type="checkbox" checked>RANDOM can pick this stage</label>
+      <label class="fl chk"><input id="nsRandom" type="checkbox" checked>Include it in the RANDOM choice on the stage select</label>
       <label class="fl chk" id="nsCopyRow"><input id="nsCopy" type="checkbox" checked>Start with the changes I have now</label>
       <div class="help" id="nsBaseNote" hidden>A new base keeps the changes and the points made for the old one, and their handles may not fit: Check it.</div>
       <div class="help">Saved in <span id="nsWhere" class="mono"></span>. The game reads its stages at start-up: Test in game restarts it.</div>

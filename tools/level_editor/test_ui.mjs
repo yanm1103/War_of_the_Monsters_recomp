@@ -294,7 +294,7 @@ await check('the Add prop and Layers menus open and close', async () => {
     must(await until(`!document.getElementById(${JSON.stringify(m)}).hidden`, 12), m + ' did not open');
     await shot('menu_' + m);
     await esc();
-    must(await until(`document.getElementById(${JSON.stringify(m)}).hidden`, 12), 'Esc did not close ' + m);
+    must(await until(`document.getElementById(${JSON.stringify(m)}).hidden`, 12), 'Esc did not close ' + m + ': ' + await ev(`JSON.stringify({ modal: [...document.querySelectorAll('dialog')].filter((d) => d.matches(':modal')).map((d) => d.id), open: [...document.querySelectorAll('dialog[open]')].map((d) => d.id), focus: document.activeElement.id || document.activeElement.tagName })`));
   }
 });
 await check('the right panel has Selection and Stage tabs; the stage tools are rows of the Stage tab; selecting switches back', async () => {
@@ -320,7 +320,8 @@ await check('Add lives at the top of the left panel: Browse models and the searc
   must(await ev(`document.getElementById('leftHead').contains(document.getElementById('addProp'))`), 'Add is not in the left panel');
   must(await ev(`!document.getElementById('toolBar').querySelector('#addProp, #pedAddGroup')`), 'Add is still on the tool bar');
   await ev(`document.getElementById('addProp').click()`);
-  must(await ev(`!document.getElementById('propMenu').hidden && document.getElementById('propMenu').parentElement === document.body`), 'the Add menu is not open in the body');
+  must(await ev(`!document.getElementById('propMenu').hidden && document.getElementById('propMenu').parentElement === document.body`),
+    'the Add menu is not open in the body: ' + await ev(`(() => { try { window.wotmDebug.showPropMenu(true); return 'ok hidden=' + document.getElementById('propMenu').hidden; } catch (e) { return String(e.stack).slice(0, 400); } })()`));
   must(await ev(`['pmBrowse','pmImport','pmTerrain'].every((i) => document.getElementById('propMenu').contains(document.getElementById(i)))`), 'the menu lacks Browse, Import or Terrain');
   must(await ev(`!document.getElementById('propMenu').querySelector('#pmSky, #pmClouds')`), 'sky and clouds are still in the Add menu');
   await ev(`document.getElementById('pmBrowse').click()`);
