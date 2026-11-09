@@ -38,6 +38,26 @@ def main():
     lp2 = lvl.LevelPatch(st2)
     lp2.apply({"objects": [], "grid": {"min": [g.min_x - 30000, g.min_y - 30000], "max": [g.max_x + 30000, g.max_y + 30000]}})
     assert any("grid skipped" in x for x in lp2.log) and lp2.st.grid.addr == g.addr, lp2.log
+    # "walls": "off" empties the boundary walls' leaves (CENTRAL has four) and leaves every other path alone
+    st3 = lvl.Stage("CENTRAL", disc)
+    lp3 = lvl.LevelPatch(st3)
+    walls = lp3.boundary_walls()
+    assert len(walls) == 4, [hex(p.addr) for p, _ in walls]
+    lp3.apply({"objects": [], "walls": "off"})
+    assert not any("skipped" in x for x in lp3.log) and lp3.stats["boundary walls off"] == 4, lp3.log
+    assert all(lp3.img.u32(leaf + 4) == 0 for _, leaf in walls)
+    assert len(lp3.boundary_walls()) == 4        # still the same paths (the box does not change)
+    # CAPITOL's west wall is 8 units thick: the rule finds it too (VEGAS four)
+    for stage, count in (("CAPITOL", 2), ("VEGAS", 4)):
+        lpw = lvl.LevelPatch(lvl.Stage(stage, editor.stage_root(cfg["disc"], stage)))
+        assert len(lpw.boundary_walls()) == count, (stage, [hex(p.addr) for p, _ in lpw.boundary_walls()])
+    # another value, and a stage with no walls, are skipped with a line
+    lp4 = lvl.LevelPatch(lvl.Stage("CENTRAL", disc))
+    lp4.apply({"objects": [], "walls": True})
+    assert any("walls skipped" in x for x in lp4.log) and not lp4.stats["boundary walls off"], lp4.log
+    lp5 = lvl.LevelPatch(lvl.Stage("SANFRAN", editor.stage_root(cfg["disc"], "SANFRAN")))
+    lp5.apply({"objects": [], "walls": "off"})
+    assert any("walls skipped" in x and "no boundary walls" in x for x in lp5.log), lp5.log
     print("ok")
 
 

@@ -4,6 +4,8 @@ Needs the game disc configured in the level editor (Settings). Writes only in a 
 Run: python tools/test_lvlprop_hull.py
 """
 import json
+import math
+import random
 import shutil
 import os
 import struct
@@ -15,6 +17,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "level_editor"))
 import editor   # noqa: E402
 import lvl      # noqa: E402
+import ngp      # noqa: E402
 import lvlprop  # noqa: E402
 
 
@@ -124,20 +127,64 @@ def main():
         assert c["auto"] == "mesh" and c["poly"] == 1 and c["tris"] == 12 and c["hull"] == 0, c
         res = lvlprop.check(lvlprop.load_prop(out), log=lambda *_: None)
         assert res["triangles"] == 12, res
+        # the triangle bits the game's query rejects with: the vertex of the smallest and of the largest coordinate on each axis
+        assert lvlprop.poly_bbox_bits([(0, 0, 0), (2, 1, 0), (1, 3, 5)]) == (1 << 6) | (2 << 8) | (2 << 10), "bbox bits"
         mod = os.path.join(tmp, "mod")
         shutil.copytree(out, os.path.join(mod, "props", "WALL"))
         patch = {"objects": [], "props": [{"id": "w1", "model": "WALL", "pos": [800.0, 900.0, 0.5], "heading": 30}]}
         chk = editor.check_patch(cfg["disc"], "CENTRAL", patch, mod)
         assert chk["ok"], chk["problems"]
+        # a terrain of 40 x 40 quads (3200 triangles, 1681 vertices): several POLY_COLL objects, each with a box tree
+        n = 40
+        grid = [(x * 0.5, y * 0.5, math.sin(x * 0.4) * math.cos(y * 0.3)) for y in range(n + 1) for x in range(n + 1)]
+        gidx = []
+        for y in range(n):
+            for x in range(n):
+                a = y * (n + 1) + x
+                gidx += [a, a + 1, a + n + 2, a, a + n + 2, a + n + 1]
+        make_glb(glb, None, None, coll=(grid, gidx))
+        out = os.path.join(tmp, "TERRAIN")
+        lvlprop.build(glb, out, "CENTRAL", "blender", None, None, "TERRAIN", None, "auto", editor.stage_root(cfg["disc"], "CENTRAL"))
+        meta = json.load(open(os.path.join(out, "prop.json")))
+        assert meta["collision"]["tris"] == 3200, meta["collision"]
+        res = lvlprop.check(lvlprop.load_prop(out), log=lambda *_: None)      # includes verify_poly_leaf on every triangle
+        assert res["triangles"] == 12, res
+        prop = lvlprop.load_prop(out)
+        d = prop.relocate(lvlprop.ARENA)
+        img = ngp.Image(bytes(d), lvlprop.ARENA)
+        leaf = int(meta["collision"]["polys"][0]["node"], 16) - lvlprop.BASE + lvlprop.ARENA
+        nobj = img.u32(leaf + 4)
+        assert nobj >= 7, nobj                                   # 3200 triangles at most 512 per object, 256 vertices each
+        rnd = random.Random(7)
+        for k in range(nobj):
+            o = img.u32(leaf + 8 + 4 * k) & 0x0FFFFFFF
+            npol, nb = img.u16(o + 4), img.u16(o + 6)
+            assert nb and npol <= 512, (npol, nb)
+            vp, polys = img.u32(o) & 0x0FFFFFFF, o + 0x18 + 14 * nb
+            tri = [[tuple(img.f32(vp + 12 * img.u8(polys + 8 * i + j) + 4 * c) for c in range(3)) for j in range(3)] for i in range(npol)]
+            vlo = [min(q[a] for t in tri for q in t) for a in range(3)]
+            vhi = [max(q[a] for t in tri for q in t) for a in range(3)]
+            for _ in range(60):             # a random swept box: every triangle whose own box meets it is a candidate
+                c0 = [rnd.uniform(vlo[a] - 1.0, vhi[a] + 1.0) for a in range(3)]
+                r = [rnd.uniform(0.02, 0.3) * (vhi[a] - vlo[a] + 1.0) for a in range(3)]
+                qlo, qhi = [c0[a] - r[a] for a in range(3)], [c0[a] + r[a] for a in range(3)]
+                got = set(lvlprop.poly_tree_query(img, o, qlo, qhi))
+                for i, t in enumerate(tri):
+                    if all(min(q[a] for q in t) <= qhi[a] and max(q[a] for q in t) >= qlo[a] for a in range(3)):
+                        assert i in got, (k, i)
+        shutil.copytree(out, os.path.join(mod, "props", "TERRAIN"))
+        patch = {"objects": [], "props": [{"id": "t1", "model": "TERRAIN", "pos": [700.0, 800.0, 0.5], "heading": 30}]}
+        chk = editor.check_patch(cfg["disc"], "CENTRAL", patch, mod)
+        assert chk["ok"], chk["problems"]
         # a mesh over the triangle limit is refused
-        big = [(i * 0.1, 0.0, 0.0) for i in range(200)]
-        make_glb(glb, None, None, coll=(big, [k for i in range(70) for k in (i, i + 1, i + 2)]))
+        big = [(i * 0.1, 0.0, 0.0) for i in range(lvlprop.MAX_COLL_TRIS + 4)]
+        make_glb(glb, None, None, coll=(big, [k for i in range(lvlprop.MAX_COLL_TRIS + 1) for k in (i, i + 1, i + 2)]))
         try:
             lvlprop.build(glb, out, "CENTRAL", "blender", None, None, "WALL", None, "auto", editor.stage_root(cfg["disc"], "CENTRAL"))
         except lvlprop.PropError as e:
-            assert "at most 64" in str(e), e
+            assert "at most %d" % lvlprop.MAX_COLL_TRIS in str(e), e
         else:
-            raise AssertionError("a 70-triangle coll_ mesh was accepted")
+            raise AssertionError("a coll_ mesh over the triangle limit was accepted")
     print("ok")
 
 

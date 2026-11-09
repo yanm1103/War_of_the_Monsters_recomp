@@ -559,7 +559,13 @@ namespace
             WRITE32(flipped[--n] + 0x18, 2u);
     }
 
-    void startPointAsHumans(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { callAsHumans(g_origStartPoint, rdram, ctx, runtime); }
+    void startPointAsHumans(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t m = GPR_U32(ctx, 5), ra = GPR_U32(ctx, 31);
+        callAsHumans(g_origStartPoint, rdram, ctx, runtime);
+        if (ctx->pc == ra)   // "Testar daqui" do editor (WOTM_SPAWN, wotm_levelreload.inc): o jogador 1 nasce onde o editor pediu
+            wotm_levelreload::placeAtSpawn(rdram, ctx, runtime, m);
+    }
     void camerasUpdateAsHumans(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { callAsHumans(g_origCamerasUpdate, rdram, ctx, runtime); }
 
     // Free for all de 1 jogador com 0 a 7 IAs (mod, sempre ligado): screenFreeForAllOptions1P (tela 12) anda o cursor so por 1..3

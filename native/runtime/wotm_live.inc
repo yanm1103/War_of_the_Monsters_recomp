@@ -548,6 +548,10 @@ static bool inFullscreen()
 extern "C" __declspec(dllimport) long long __stdcall GetWindowLongPtrW(void *hwnd, int index);
 extern "C" __declspec(dllimport) long long __stdcall SetWindowLongPtrW(void *hwnd, int index, long long value);
 extern "C" __declspec(dllimport) int __stdcall SetWindowPos(void *hwnd, void *after, int x, int y, int cx, int cy, unsigned flags);
+extern "C" __declspec(dllimport) void *__stdcall GetForegroundWindow();
+extern "C" __declspec(dllimport) int __stdcall SetForegroundWindow(void *hwnd);
+// A janela que tinha o foco quando o processo comecou (antes de qualquer janela nossa): o WOTM_NOFOCUS devolve o foco a ela
+static void *const g_foregroundAtStart = GetForegroundWindow();
 static void captureFriendlyBorderless()
 {
     const char *e = std::getenv("WOTM_CAPTUREFIX");
@@ -642,6 +646,18 @@ static void initWindowAspect()
             std::fprintf(stderr, "[native] janela no monitor %d de %d (WOTM_MONITOR)\n", mon, GetMonitorCount());
         }
     }
+#ifdef _WIN32
+    // WOTM_NOFOCUS=1: o raylib da o foco a janela ao abrir; devolve-o a que o tinha (para testar sem tirar o foco de quem esta
+    // trabalhando; o jogo segue rodando por tras, e teste que injeta teclas nao deve usar isto)
+    if (const char *nf = std::getenv("WOTM_NOFOCUS"); nf && *nf && *nf != '0' && !g_localCollect)
+    {
+        void *self = GetWindowHandle();
+        if (g_foregroundAtStart && g_foregroundAtStart != self && SetForegroundWindow(g_foregroundAtStart))
+            std::fprintf(stderr, "[native] foco devolvido a janela anterior (WOTM_NOFOCUS)\n");
+        else
+            std::fprintf(stderr, "[native] WOTM_NOFOCUS: nao havia janela anterior com foco para devolver\n");
+    }
+#endif
     // PS2X_HOSTPROF_WIN=1 (com PS2X_HOSTPROF): o amostrador vigia esta thread (a da janela) em vez da do EE
     if (std::getenv("PS2X_HOSTPROF") && std::getenv("PS2X_HOSTPROF_WIN"))
     {

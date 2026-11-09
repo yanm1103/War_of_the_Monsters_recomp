@@ -16,8 +16,10 @@ comes from tools/lvl.py (objects, patch, path cuts, collision check) and tools/l
 """
 import base64
 import contextlib
+import errno
 import io
 import glob
+import io
 import json
 import math
 import os
@@ -31,6 +33,7 @@ import time
 import traceback
 import urllib.parse
 import urllib.request
+import zipfile
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -47,12 +50,15 @@ import modkit   # noqa: E402 - the disc as a folder or a .iso (disc_iso, disc_ca
 import hudapi   # noqa: E402 - the HUD panel (web/hud.js)
 import pedsapi  # noqa: E402 - the pedestrians (web/peds.js)
 import lvlprop  # noqa: E402 - new props from Blender (Import .glb)
+import lvlterrain  # noqa: E402 - a prop from a heightmap (New terrain)
+import lvlorig  # noqa: E402 - an original object of another stage as a prop (Ctrl+P)
+import collview  # noqa: E402 - the stage's collision shapes for the Collision layer
 
 WEB = os.path.join(HERE, "web")
-CONFIG = os.path.join(os.path.expanduser("~"), ".wotm_level_editor.json")
+CONFIG = os.environ.get("WOTM_LEVEL_EDITOR_CONFIG") or os.path.join(os.path.expanduser("~"), ".wotm_level_editor.json")   # the variable: tests
 # model names (by content signature, tools/lvlnames.py): the repo's, and the user's over them
 REPO_NAMES = os.path.join(HERE, "names.json")
-USER_NAMES = os.path.join(os.path.expanduser("~"), ".wotm_level_editor_names.json")
+USER_NAMES = os.environ.get("WOTM_LEVEL_EDITOR_NAMES") or os.path.join(os.path.expanduser("~"), ".wotm_level_editor_names.json")
 CACHE = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), ".cache"),
                      "WotM" if os.environ.get("LOCALAPPDATA") else "", "level_editor")
 # m_levelNum of each stage file (GameLevelNames; native/runtime/wotm_save.inc kLevels): WOTM_MATCH=<monster>,<levelNum>
@@ -187,6 +193,34 @@ class Stages:
                 self.info[key] = (st, objs, on)
             return self.info[key]
 
+    def plans(self, disc, name):
+        """What the patch can reach on the stage, on its own copy of the stage (the shared one is never patched): "walls", how many
+        invisible boundary walls it has (lvl.py LevelPatch.boundary_walls), and "sky", the OBJECT addresses (hex, as the scene names them
+        in extras.obj) that a sky model replaces: {"dome": [...], "clouds": [...]}, empty for a part the game cannot replace."""
+        key = (disc, name, "plans")
+        with self.lock:
+            if key in self.info:
+                return self.info[key]
+        with contextlib.redirect_stdout(io.StringIO()):
+            lp = lvl.LevelPatch(lvl.Stage(name, stage_root(disc, name)))
+            n = len(lp.boundary_walls())
+            sky = {}
+            for kind, plan in (("dome", lp.sky_plan), ("clouds", lp.sky_clouds_plan)):
+                try:
+                    sky[kind] = sorted({"%x" % (lp.img.u32(s) & lvl.MASK) for _, s in plan(None)})
+                except lvl.PatchError:
+                    sky[kind] = []
+        out = {"walls": n, "sky": sky}
+        with self.lock:
+            self.info[key] = out
+        return out
+
+    def walls(self, disc, name):
+        return self.plans(disc, name)["walls"]
+
+    def sky(self, disc, name):
+        return self.plans(disc, name)["sky"]
+
     def facts(self, disc, name):
         """lvlnames.facts per object (signature, size, rule inputs), kept on disk next to the scene (1 to 10 s per stage)."""
         st, objs, on = self.objects(disc, name)
@@ -289,17 +323,97 @@ def describe(stage, objs, on, facts, names):
                     "movable": bool(o["handle"]),
                     "on": "0x%X" % on[o["handle"]] if o["handle"] in on else "",
                     "name": name, "nameSrc": src, "rule": lvlnames.rule_name(stage, o["kind"], f, names),
-                    "sig": f["sig"] or "", "dims": f["dims"], "ptype": f.get("ptype")})
+                    "sig": f["sig"] or "", "dims": f["dims"], "ptype": f.get("ptype"),
+                    # a building's hit points and whether a car pickup drives in the traffic, as the disc has them (None: not that kind)
+                    "hp": o.get("hp"), "traffic": o.get("traffic"),
+                    # why "scale" does not work on it ("" when it does): lvl.scale_reason
+                    "scaleNo": o.get("scale_no", "")})
     return out
+
+
+def mrs_file(cfg, mod, name):
+    """Where the mod keeps a stage's .MRS: (path, custom). A custom stage's is the first .MRS of its folder (else <ID>.MRS there), the
+    game stage's mods/<mod>/RST/<NAME>.MRS. Raises ValueError for a bad mod name (a custom stage keeps its own mod's)."""
+    name = (name or "").upper()
+    c = custom_stages(cfg).get(name)
+    if not c and bad_mod(mod):
+        raise ValueError(bad_mod_reason(mod))
+    if c:
+        folder = os.path.join(cfg["mods"], c["mod"], "stages", c["folder"])
+        have = sorted(f for f in os.listdir(folder) if f.upper().endswith(".MRS"))
+        return os.path.join(folder, have[0] if have else c["id"].upper() + ".MRS"), c
+    return os.path.join(cfg["mods"], mod, "RST", name + ".MRS"), None
+
+
+def mrs_source(cfg, mod, name):
+    """The .MRS the game reads for the stage with this mod: (path, "mod" | "disc"). A custom stage takes its folder's file, else the
+    base's from the disc; a game stage the mod's, else the disc's."""
+    name = (name or "").upper()
+    c = custom_stages(cfg).get(name)
+    if c or not bad_mod(mod):
+        path, c = mrs_file(cfg, mod, name)
+        if os.path.isfile(path):
+            return path, "mod"
+    base = c["base"] if c else name
+    return os.path.join(stage_root(cfg["disc"], base), "RST", base + ".MRS"), "disc"
+
+
+def original_mrs(cfg, name):
+    """The numbers of the disc's .MRS for the stage (a custom stage's base stage), whatever a mod does to it: what the Light dialog's
+    reset buttons go back to. None when the disc has no such file."""
+    name = (name or "").upper()
+    c = custom_stages(cfg).get(name)
+    base = c["base"] if c else name
+    path = os.path.join(stage_root(cfg["disc"], base), "RST", base + ".MRS")
+    if not os.path.isfile(path):
+        return None
+    with open(path, "rb") as f:
+        return lvl.mrs_values(f.read())
+
+
+def stage_mrs(cfg, mod, name):
+    """The Light dialog's numbers ({"source", "file", "fog", "bg", "lights", "original"}, lvl.mrs_values; "original" is original_mrs)."""
+    path, source = mrs_source(cfg, mod, name)
+    original = original_mrs(cfg, name)
+    if not os.path.isfile(path):
+        return {"source": source, "file": "", "fog": None, "bg": None, "lights": None, "original": original}
+    with open(path, "rb") as f:
+        return dict(lvl.mrs_values(f.read()), source=source, file=path if source == "mod" else "", original=original)
+
+
+def save_mrs(cfg, b):
+    """Writes the stage's .MRS into the mod ({"mod", "name", "fog", "bg", "lights"}: the source file with those parts changed, every
+    other byte as it is), or takes the mod's file away with "reset": true (the disc's comes back). Returns stage_mrs's reply plus
+    "warnings"."""
+    mod, name = (b.get("mod") or "").strip(), (b.get("name") or "").upper()
+    path, _c = mrs_file(cfg, mod, name)
+    if b.get("reset"):
+        if os.path.isfile(path):
+            os.remove(path)
+            try:
+                os.rmdir(os.path.dirname(path))     # the mod's RST folder, when that was all it held (never a custom stage's)
+            except OSError:
+                pass
+        return dict(stage_mrs(cfg, mod, name), warnings=[])
+    src, _how = mrs_source(cfg, mod, name)
+    with open(src, "rb") as f:
+        data = lvl.mrs_edit(f.read(), b.get("fog"), b.get("bg"), b.get("lights"))
+    warn = []
+    fog = b.get("fog")
+    if fog and not fog["maxR"] > fog["minR"]:
+        warn.append("The fog ends before it starts: the game then draws no fog at all.")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".tmp", "wb") as f:
+        f.write(data)
+    os.replace(path + ".tmp", path)
+    return dict(stage_mrs(cfg, mod, name), warnings=warn)
 
 
 def stage_env(cfg, disc, name, mod=""):
     """The stage's look from RST/<STAGE>.MRS (lvl.read_mrs; the mod's own file when it has one): fog (key 4, with FA and FB
     as fogCalcFogValues makes them), background (the fog's color: fogBackgroundColorIsSlaved; key 2 when there is no fog)
     and the three parallel lights (key 5; dir points at the light, game axes, Z up)."""
-    path = os.path.join(cfg["mods"], mod, "RST", name.upper() + ".MRS") if mod else ""
-    if not os.path.isfile(path):
-        path = os.path.join(stage_root(disc, name), "RST", name.upper() + ".MRS")
+    path, _source = mrs_source(cfg, mod, name)
     env = {"file": path, "fog": None, "bg": None, "lights": []}
     if not os.path.isfile(path):
         return env
@@ -326,12 +440,14 @@ def stage_env(cfg, disc, name, mod=""):
 
 # lp.stats keys the summary names, in this order (the others are details of how the patch was laid out)
 STAT_WORDS = (("moved", "moved", "moved"), ("copies", "copy", "copies"), ("deleted", "deleted", "deleted"),
-              ("grid cells", "grid cell", "grid cells"), ("ped segments", "sidewalk", "sidewalks"),
+              ("grid cells", "grid cell", "grid cells"), ("boundary walls off", "boundary wall off", "boundary walls off"),
+              ("ped segments", "sidewalk", "sidewalks"),
               ("ped groups changed", "pedestrian group changed", "pedestrian groups changed"),
               ("ped groups added", "pedestrian group added", "pedestrian groups added"),
               ("ped groups deleted", "pedestrian group deleted", "pedestrian groups deleted"),
               ("ped groups off", "pedestrian group off", "pedestrian groups off"), ("props", "new prop", "new props"),
-              ("sky domes replaced", "sky dome replaced", "sky domes replaced"))
+              ("sky domes replaced", "sky dome replaced", "sky domes replaced"),
+              ("sky clouds replaced", "cloud layer replaced", "cloud layers replaced"))
 
 
 def stats_text(stats):
@@ -395,6 +511,10 @@ def check_patch(disc, name, patch, mod_dir=None, pts_root=None):
         if m:
             problems.append({"level": "err", "kind": "grid", "reason": m.group(1), "text": "The stage size was not applied: %s" % m.group(1)})
             continue
+        m = re.match(r"walls skipped: (.*)$", line)
+        if m:
+            problems.append({"level": "err", "kind": "walls", "reason": m.group(1), "text": "The boundary walls were not turned off: %s" % m.group(1)})
+            continue
         m = re.match(r"pedestrian group (\d+) skipped: (.*)$", line)
         if m:
             problems.append({"level": "err", "kind": "ped", "reason": m.group(2), "index": int(m.group(1)),
@@ -451,6 +571,50 @@ def check_patch(disc, name, patch, mod_dir=None, pts_root=None):
             "lines": buf.getvalue().splitlines()}
 
 
+def budget_patch(disc, name, patch, mod_dir=None, pts_root=None):
+    """What the patch takes of the stage's fixed room, for the status bar: the 8 MB arena (new nodes, props, the bigger grid) and the
+    1024 Interactives slots (as lvl.py counts them, which is what refuses a copy). The same apply order as check_patch, without the
+    collision check, so it answers in about a second. `full` is set when a step ran out of arena."""
+    root = stage_root(disc, name)
+    full = ""
+    with contextlib.redirect_stdout(io.StringIO()):
+        st = lvl.Stage(name, root)
+        lp = lvl.LevelPatch(st)
+        lp.apply(patch)
+        if mod_dir and patch.get("props"):
+            try:
+                lp.apply_props(patch, mod_dir)
+            except lvl.PatchError as err:
+                full = str(err)
+        if patch.get("peds"):
+            pts = lvl.stage_points(pts_root or root, name)
+            try:
+                lp.apply_peds(patch, {"fodder": lvl.net_from_points(pts.get("FOP", [])),
+                                      "ped": lvl.net_from_points(pts.get("PED", []))})
+            except lvl.PatchError as err:
+                full = full or str(err)
+    return {"arena": {"used": int(lp.stats.get("arena bytes", 0)), "total": lvl.ARENA_SIZE},
+            "interactives": {"used": int(lp.interactives_used), "total": lvl.INTERACTIVES,
+                             "disc": int(sum(lp.interactives_before))},
+            "skipped": int(lp.stats.get("skipped", 0)), "full": full}
+
+
+def collision_patch(disc, name, patch, mod_dir=None):
+    """The collision the game would have with the patch (objects, then props): boxes, hulls and triangles (collview.py)."""
+    root = stage_root(disc, name)
+    with contextlib.redirect_stdout(io.StringIO()):
+        st = lvl.Stage(name, root)
+        lp = lvl.LevelPatch(st)
+        lp.apply(patch)
+        if mod_dir and patch.get("props"):
+            try:
+                lp.apply_props(patch, mod_dir)
+            except lvl.PatchError:
+                pass                    # the arena is full: what got in is drawn
+        st.grid = lvl.Grid(st.img, st.grid.addr)
+    return collview.collision_view(st)
+
+
 def bad_mod(mod):
     """A mod name the editor refuses: empty, a path, or one the game skips (leading _ or .)."""
     return not mod or any(c in mod for c in "\\/:*?\"<>|") or mod.startswith(("_", "."))
@@ -488,6 +652,8 @@ def custom_stages(cfg, refused=False):
                     j = json.load(f)
                 sid, base = str(j.get("id") or ""), str(j.get("base") or "").upper()
                 name = str(j.get("name") or sid.upper())
+                narrator = j.get("narrator") if isinstance(j.get("narrator"), str) else ""
+                random_ok = bool(j["random"]) if "random" in j else True
             except (OSError, ValueError, AttributeError) as e:
                 out["?" + mod + "/" + folder] = {"id": folder, "mod": mod, "folder": folder, "reason": "stage.json: %s" % e}
                 continue
@@ -501,7 +667,8 @@ def custom_stages(cfg, refused=False):
             if reason and not refused:
                 continue
             out[sid.upper() or "?" + mod + "/" + folder] = {"id": sid, "name": name[:17], "base": base, "mod": mod,
-                                                         "folder": folder, "reason": reason}
+                                                         "folder": folder, "reason": reason, "narrator": narrator,
+                                                         "random": random_ok}
     return out
 
 
@@ -542,6 +709,104 @@ def points_root(cfg, name):
             elif os.path.exists(dst):
                 os.remove(dst)
     return root
+
+
+def spt_files(cfg, mod, name, ext="SPT"):
+    """Where a stage's .SPT or .PUP lives for this mod: (mod_file, custom): the file the mod keeps it in (the first .<ext> of a custom
+    stage's folder, else <ID>.<ext> there; a game stage's mods/<mod>/PTS/<NAME>.<ext>) and the custom stage record or None. Raises
+    ValueError for a bad mod name (a custom stage keeps its own mod's)."""
+    name = (name or "").upper()
+    c = custom_stages(cfg).get(name)
+    if not c and bad_mod(mod):
+        raise ValueError(bad_mod_reason(mod))
+    if c:
+        folder = os.path.join(cfg["mods"], c["mod"], "stages", c["folder"])
+        have = sorted(f for f in os.listdir(folder) if f.upper().endswith("." + ext))
+        return os.path.join(folder, have[0] if have else c["id"].upper() + "." + ext), c
+    return os.path.join(cfg["mods"], mod, "PTS", name + "." + ext), None
+
+
+# what differs between the two kinds of point file: the codec and the lists the dialog offers (SPT: the four lists; PUP: the types)
+POINT_KINDS = {
+    "SPT": {"read": lambda p: lvl.read_spt(p), "build": lambda pts: lvl.build_spt(pts),
+            "caps": lambda: list(lvl.SPT_CAPS), "lists": lambda: list(lvl.SPT_LISTS)},
+    "PUP": {"read": lambda p: lvl.read_pup(p), "build": lambda pts: lvl.build_pup(pts),
+            "caps": lambda: [lvl.PUP_MAX_ACTIVE], "lists": lambda: list(lvl.PUP_TYPES)},
+    "AIP": {"read": lambda p: lvl.read_aip(p), "build": lambda pts: lvl.build_aip(pts),
+            "caps": lambda: [lvl.AIP_NODES, lvl.AIP_MAX_PATHS, lvl.AIP_LINKS], "lists": lambda: []},
+    "FOP": {"read": lambda p: lvl.read_fop(p), "build": lambda pts: lvl.build_fop(pts),
+            "caps": lambda: [lvl.FOP_NODES, 0, lvl.FOP_LINKS], "lists": lambda: list(lvl.FOP_TYPES)},
+}
+
+
+def point_kind(k):
+    k = str(k or "SPT").upper()
+    if k not in POINT_KINDS:
+        raise ValueError("kind is SPT, PUP, AIP or FOP")
+    return k
+
+
+def stage_spt(cfg, mod, name, ext="SPT"):
+    """The stage's start points (.SPT) or power-ups (.PUP) as the game will read them with this mod: {"points", "caps", "lists",
+    "source": "mod" | "disc", "file"}. A custom stage reads its own folder's file, else the base's; a game stage the mod's
+    PTS/<NAME>.<ext>, else the disc's."""
+    kind = POINT_KINDS[ext]
+    name = (name or "").upper()
+    caps = {"caps": kind["caps"](), "lists": kind["lists"]()}
+    c = custom_stages(cfg).get(name)
+    if c or not bad_mod(mod):
+        path, c = spt_files(cfg, mod, name, ext)
+        if os.path.isfile(path):
+            return dict(caps, points=kind["read"](path), source="mod", file=path)
+    base = c["base"] if c else name
+    disc = os.path.join(stage_root(cfg["disc"], base), "PTS", base + "." + ext)
+    if os.path.isfile(disc):
+        return dict(caps, points=kind["read"](disc), source="disc", file="")
+    return dict(caps, points=[], source="disc", file="")
+
+
+def save_spt(cfg, b, ext="SPT"):
+    """Writes the points ({"mod", "name", "points"}) into the mod, or takes the mod's file away with "reset": true (the disc's points
+    come back). Returns stage_spt's reply plus "warnings" (more points than the game keeps)."""
+    kind = POINT_KINDS[ext]
+    mod, name = (b.get("mod") or "").strip(), (b.get("name") or "").upper()
+    path, c = spt_files(cfg, mod, name, ext)
+    if b.get("reset"):
+        if os.path.isfile(path):
+            os.remove(path)
+            try:
+                os.rmdir(os.path.dirname(path))     # the mod's PTS folder, when that was all it held (never a custom stage's)
+            except OSError:
+                pass
+        return dict(stage_spt(cfg, mod, name, ext), warnings=[])
+    pts = b.get("points")
+    if not isinstance(pts, list):
+        raise ValueError("The points are a list")
+    data = kind["build"](pts)
+    warn = []
+    if ext == "SPT":
+        for k, cap in enumerate(lvl.SPT_CAPS):
+            n = sum(1 for p in pts if p.get("list") == k)
+            if n > cap:
+                warn.append("List %d (%s) has room for %d, you placed %d: each extra one overwrites the last." % (
+                    k, lvl.SPT_LISTS[k], cap, n))
+    elif ext == "AIP":
+        n = lvl.aip_paths(pts)
+        if n > lvl.AIP_MAX_PATHS:
+            warn.append("The net makes %d paths; the game keeps %d and ignores the rest (\"Exceeded AiPathNet::MAX_PATHS\")." % (n, lvl.AIP_MAX_PATHS))
+        if len(pts) < 2:
+            warn.append("A net of fewer than 2 nodes gives the AI nowhere to walk.")
+    elif ext == "FOP":
+        if len(pts) == 1:
+            warn.append("A net of one node gives the vehicles nowhere to drive.")
+    elif len(pts) > lvl.PUP_MAX_ACTIVE:
+        warn.append("The game keeps %d power-ups at a time, you placed %d: the extra ones are not created." % (lvl.PUP_MAX_ACTIVE, len(pts)))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.replace(tmp, path)
+    return dict(stage_spt(cfg, mod, name, ext), warnings=warn)
 
 
 # the stages whose select picture a mod's levelpics/<name>.png replaces (SHELL.TEX has none of them), and the custom stages' <id>
@@ -593,19 +858,64 @@ def new_stage(cfg, b):
         raise ValueError("A stage called %s exists already." % sid.upper())
     if base not in CUSTOM_BASES:
         raise ValueError("The base must be one of %s." % ", ".join(CUSTOM_BASES))
-    name = (b.get("name") or "").strip() or sid.upper()
-    if len(name) > 17 or not all(32 <= ord(c) < 127 for c in name):
-        raise ValueError("The name is up to 17 ASCII characters.")
+    name, narrator, rnd = stage_fields(b, sid)
     folder = os.path.join(cfg["mods"], mod, "stages", sid.lower())
     if os.path.exists(folder) or sid.upper() in custom_stages(cfg, refused=True):
         raise ValueError("A stage folder or id %s exists already (a refused one counts: see the game log)." % sid.upper())
     os.makedirs(folder)
+    j = {"id": sid, "name": name, "base": base}
+    if narrator:
+        j["narrator"] = narrator
+    if not rnd:
+        j["random"] = False
     with open(os.path.join(folder, "stage.json"), "w", encoding="utf-8") as f:
-        json.dump({"id": sid, "name": name, "base": base}, f, indent=1)
+        json.dump(j, f, indent=1)
     patch = b.get("patch")
     if isinstance(patch, dict):
         save_patch(cfg, mod, sid.upper(), patch)
-    return {"name": sid.upper(), "title": name, "level": LEVEL_NUM.get(base), "custom": True, "base": base, "mod": mod, "id": sid}
+    return {"name": sid.upper(), "title": name, "level": LEVEL_NUM.get(base), "custom": True, "base": base, "mod": mod, "id": sid,
+            "narrator": narrator, "random": rnd}
+
+
+def stage_fields(b, sid):
+    """The stage.json fields a dialog sets, checked: (name, narrator, random). The name defaults to the id in capitals."""
+    name = (b.get("name") or "").strip() or sid.upper()
+    if len(name) > 17 or not all(32 <= ord(c) < 127 for c in name):
+        raise ValueError("The name is up to 17 ASCII characters.")
+    narrator = (b.get("narrator") or "").strip()
+    if narrator.lower().endswith(".mp3"):
+        narrator = narrator[:-4]
+    if narrator and not re.fullmatch(r"[A-Za-z0-9_.\- ]{1,40}", narrator):
+        raise ValueError("The narrator is the name of a narrator/<name>.mp3 (letters, digits, _ - . and spaces, up to 40).")
+    return name, narrator, b.get("random") is not False
+
+
+def edit_stage(cfg, b):
+    """Edit stage…: rewrites the name, base, narrator and random of an existing custom stage's stage.json (the id, which names its
+    patch and its files, stays; keys the editor does not know are kept). A new base leaves the patch and the points made for the old
+    one; "baseChanged" says so. Returns the listing entry."""
+    c = custom_stages(cfg).get((b.get("stage") or "").upper())
+    if not c:
+        raise ValueError("%s is not a custom stage." % (b.get("stage") or "That"))
+    base = (b.get("base") or "").strip().upper()
+    if base not in CUSTOM_BASES:
+        raise ValueError("The base must be one of %s." % ", ".join(CUSTOM_BASES))
+    name, narrator, rnd = stage_fields(b, c["id"])
+    path = os.path.join(cfg["mods"], c["mod"], "stages", c["folder"], "stage.json")
+    with open(path, encoding="utf-8") as f:
+        j = json.load(f)
+    j["name"], j["base"] = name, base
+    for key, keep in (("narrator", bool(narrator)), ("random", not rnd)):
+        if not keep:
+            j.pop(key, None)
+    if narrator:
+        j["narrator"] = narrator
+    if not rnd:
+        j["random"] = False
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(j, f, indent=1)
+    return {"name": c["id"].upper(), "title": name, "level": LEVEL_NUM.get(base), "custom": True, "base": base, "mod": c["mod"],
+            "id": c["id"], "narrator": narrator, "random": rnd, "baseChanged": base != c["base"]}
 
 
 def stage_list(cfg):
@@ -619,7 +929,7 @@ def stage_list(cfg):
         if c["base"] not in names:
             continue
         base.append({"name": key, "title": c["name"], "level": LEVEL_NUM.get(c["base"]), "custom": True, "base": c["base"],
-                     "mod": c["mod"], "id": c["id"]})
+                     "mod": c["mod"], "id": c["id"], "narrator": c["narrator"], "random": c["random"]})
     return base
 
 
@@ -659,13 +969,201 @@ def props_list(cfg, mod):
             pv = os.path.join(d, n, (m.get("files") or {}).get("preview", ""))
             e.update(name=m.get("name") or n, stage=(m.get("stage") or "").upper(), triangles=m.get("triangles", 0),
                      bounds=m.get("bounds"), light=prop_light(m), bytes=m.get("bytes"), units=m.get("units"),
-                     scale=m.get("scale"), preview=os.path.isfile(pv),
+                     scale=m.get("scale"), preview=os.path.isfile(pv), origin=m.get("origin"),
                      destructible=({"class": (m["destructible"] or {}).get("class"), "states": len((m["destructible"] or {}).get("states") or [])}
                                     if m.get("destructible") else None))
+            e["terrain"] = os.path.isfile(os.path.join(d, n, "terrain.json")) and os.path.isfile(os.path.join(d, n, "heightmap.png"))
         except (OSError, ValueError, AttributeError) as err:
             e["error"] = "prop.json does not read: %s" % err
         out.append(e)
     return out
+
+
+PACK_MAX = 400 * 1024 * 1024        # the zip is built in memory: a mod over this (uncompressed) is packed by hand
+
+
+def pack_mod(cfg, mod):
+    """The mod's folder as a .zip to share: one top folder named like the mod, so it unpacks into mods/. Every file under it (levels,
+    props, prefabs, PTS, textures, models, sounds...) but hidden ones and __pycache__; the sources kept in mods/_<mod>_src/ are
+    another folder and stay out. Returns (bytes, file name, file count). ValueError for no mod, a missing one or one over PACK_MAX."""
+    d = mod_folder(cfg, mod)
+    if not d:
+        raise ValueError(bad_mod_reason((mod or "").strip()))
+    if not os.path.isdir(d):
+        raise ValueError('Mod "%s" has no folder yet: save something into it first' % mod.strip())
+    files, total = [], 0
+    for root, dirs, names in os.walk(d):
+        dirs[:] = sorted(x for x in dirs if not x.startswith(".") and x != "__pycache__")
+        for n in sorted(names):
+            if n.startswith("."):
+                continue
+            p = os.path.join(root, n)
+            files.append(p)
+            total += os.path.getsize(p)
+    if not files:
+        raise ValueError('Mod "%s" is empty: there is nothing to pack' % mod.strip())
+    if total > PACK_MAX:
+        raise ValueError("Mod %s is %d MB: too big to pack here (the limit is %d MB). Zip its folder by hand." % (mod.strip(), total >> 20, PACK_MAX >> 20))
+    buf = io.BytesIO()
+    top = os.path.basename(os.path.normpath(d))
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+        for p in files:
+            z.write(p, top + "/" + os.path.relpath(p, d).replace(os.sep, "/"))
+    return buf.getvalue(), top + ".zip", len(files)
+
+
+def terrain_get(cfg, mod, name):
+    """What New terrain kept in the prop's folder, to open the dialog on it again: {"terrain": terrain.json, "heights": base64 of
+    heightmap.png, "colors": base64 of colors.png or ""}. ValueError when the prop has none."""
+    name = str(name or "").strip().upper()
+    d = props_dir(cfg, mod)
+    folder = lvl._child_nocase(d, name) if d and re.fullmatch(r"[A-Z0-9_]{1,8}", name) else None
+    try:
+        with open(os.path.join(folder, "terrain.json"), encoding="utf-8") as f:
+            t = json.load(f)
+        with open(os.path.join(folder, "heightmap.png"), "rb") as f:
+            hm = f.read()
+    except (OSError, TypeError, ValueError):
+        raise ValueError("%s has no terrain numbers or heightmap to open again (it was not made by New terrain)" % (name or "That prop"))
+    cm = b""
+    p = os.path.join(folder, "colors.png")
+    if os.path.isfile(p):
+        with open(p, "rb") as f:
+            cm = f.read()
+    return {"terrain": t, "heights": base64.b64encode(hm).decode(), "colors": base64.b64encode(cm).decode() if cm else ""}
+
+
+# ------------------------------------------------------------------ prefabs (a saved selection, mods/<mod>/prefabs/<name>.json)
+PREFAB_MAX = 500          # entries in one prefab (one paste makes that many objects)
+PREFAB_MAX_COORD = 100000
+
+
+class PrefabExists(ValueError):
+    pass
+
+
+def prefab_slug(name):
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40] or "prefab"
+
+
+def prefabs_dir(cfg, mod, create=False):
+    d = mod_folder(cfg, mod)
+    if not d or not os.path.isdir(d):
+        return None
+    p = os.path.join(d, "prefabs")
+    if create:
+        os.makedirs(p, exist_ok=True)
+    return p if os.path.isdir(p) else None
+
+
+def _prefab_num(v, what, lo=-PREFAB_MAX_COORD, hi=PREFAB_MAX_COORD):
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not lo <= v <= hi:
+        raise ValueError("%s must be a number from %g to %g." % (what, lo, hi))
+    return round(float(v), 1)
+
+
+def prefab_entries(raw):
+    """The prefab's entries, checked and rounded to 0.1. An entry: {"kind": "object", "handle", "from": [x, y, z]} (a copy of that
+    stage object) or {"kind": "prop", "model"} (a new prop), and "d" ([dx, dy, dz] from the group's middle and lowest point),
+    "heading", for a prop "pitch" and "roll", "name" and "on" (the index of the entry this one rests on, so that they travel
+    together)."""
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("A prefab needs at least one object.")
+    if len(raw) > PREFAB_MAX:
+        raise ValueError("A prefab holds at most %d objects (this one has %d)." % (PREFAB_MAX, len(raw)))
+    out = []
+    for k, e in enumerate(raw):
+        if not isinstance(e, dict):
+            raise ValueError("Entry %d is not an object." % (k + 1))
+        kind = e.get("kind")
+        d = e.get("d")
+        if not (isinstance(d, list) and len(d) == 3):
+            raise ValueError("Entry %d has no offset [dx, dy, dz]." % (k + 1))
+        o = {"kind": kind, "d": [_prefab_num(x, "The offset of entry %d" % (k + 1)) for x in d]}
+        if kind == "object":
+            h = str(e.get("handle") or "")
+            if not re.fullmatch(r"0[xX][0-9A-Fa-f]{1,8}", h):
+                raise ValueError("Entry %d has no handle like 0xB18310." % (k + 1))
+            fr = e.get("from")
+            if not (isinstance(fr, list) and len(fr) == 3):
+                raise ValueError("Entry %d has no \"from\" position." % (k + 1))
+            o["handle"] = "0x" + h[2:].upper()
+            o["from"] = [_prefab_num(x, "The position of entry %d" % (k + 1)) for x in fr]
+        elif kind == "prop":
+            m = str(e.get("model") or "")
+            if not re.fullmatch(r"[A-Za-z0-9_.\-]{1,40}", m):
+                raise ValueError("Entry %d has no model name." % (k + 1))
+            o["model"] = m.upper()
+            for key, lim in (("pitch", 180), ("roll", 89)):
+                if e.get(key) not in (None, 0):
+                    o[key] = _prefab_num(e[key], "The %s of entry %d" % (key, k + 1), -lim, lim)
+        else:
+            raise ValueError("Entry %d is neither an object nor a prop." % (k + 1))
+        o["heading"] = _prefab_num(e.get("heading") or 0, "The heading of entry %d" % (k + 1), -720, 720)
+        nm = e.get("name")
+        if nm:
+            o["name"] = str(nm)[:60]
+        on = e.get("on")
+        if on is not None:
+            if isinstance(on, bool) or not isinstance(on, int) or not 0 <= on < len(raw) or on == k:
+                raise ValueError("Entry %d rests on an entry that is not there." % (k + 1))
+            o["on"] = on
+        out.append(o)
+    return out
+
+
+def prefabs_list(cfg, mod):
+    """The mod's prefabs (prefabs/*.json): {"file", "name", "stage", "entries"}; a file that does not read is left out."""
+    d = prefabs_dir(cfg, mod)
+    out = []
+    if not d:
+        return out
+    for n in sorted(os.listdir(d), key=str.lower):
+        if not n.lower().endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(d, n), encoding="utf-8") as f:
+                j = json.load(f)
+            out.append({"file": n[:-5], "name": str(j.get("name") or n[:-5]), "stage": str(j.get("stage") or "").upper(),
+                        "entries": prefab_entries(j.get("entries"))})
+        except (OSError, ValueError, AttributeError):
+            continue
+    return out
+
+
+def save_prefab(cfg, b):
+    """Save as prefab…: writes mods/<mod>/prefabs/<slug of the name>.json. Another prefab with the same name is replaced only with
+    "overwrite" (PrefabExists says it is there). Returns the listing entry."""
+    mod = (b.get("mod") or "").strip()
+    d = prefabs_dir(cfg, mod, create=True) if mod_folder(cfg, mod) and os.path.isdir(mod_folder(cfg, mod)) else None
+    if not d:
+        raise ValueError("Choose a mod first: the prefab is saved in its folder.")
+    name = re.sub(r"\s+", " ", str(b.get("name") or "")).strip()
+    if not 1 <= len(name) <= 40 or any(ord(c) < 32 for c in name):
+        raise ValueError("The name is 1 to 40 characters.")
+    stage = str(b.get("stage") or "").strip().upper()
+    if stage not in CUSTOM_BASES:
+        raise ValueError("The stage must be one of %s." % ", ".join(CUSTOM_BASES))
+    entries = prefab_entries(b.get("entries"))
+    slug = prefab_slug(name)
+    path = os.path.join(d, slug + ".json")
+    if os.path.exists(path) and not b.get("overwrite"):
+        raise PrefabExists('There is a prefab called "%s" already.' % name)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"format": 1, "name": name, "stage": stage, "entries": entries}, f, indent=1)
+    return {"file": slug, "name": name, "stage": stage, "entries": entries}
+
+
+def delete_prefab(cfg, b):
+    d = prefabs_dir(cfg, b.get("mod"))
+    f = str(b.get("file") or "")
+    if not d or not re.fullmatch(r"[a-z0-9\-]{1,40}", f):
+        raise ValueError("No such prefab.")
+    path = os.path.join(d, f + ".json")
+    if not os.path.isfile(path):
+        raise ValueError("No such prefab.")
+    os.remove(path)
+    return {"ok": True}
 
 
 def prop_preview(cfg, mod, model):
@@ -723,6 +1221,219 @@ def import_prop(cfg, b):
         raise
     entry = next((e for e in props_list(cfg, mod) if e["model"] == os.path.basename(folder).upper()), None)
     return {"prop": entry, "lines": lines, "replaced": existed}
+
+
+FLOOR_MARGIN = 50.0     # the floor stops this far inside the grid's rectangle
+
+
+def floor_prop(cfg, b):
+    """A flat floor over the rectangle b["min"], b["max"] (the patch's grid) as a prop of the mod, named FL_<stage>: a visible plate and
+    a coll_ slab (lvlprop.floor_glb), built again each time. Returns import_prop's reply and "pos" (the rectangle's center)."""
+    stage = base_of(cfg, (b.get("stage") or "").upper()).upper()
+    lo, hi = b.get("min"), b.get("max")
+    try:
+        lo, hi = [float(v) for v in lo], [float(v) for v in hi]
+    except (TypeError, ValueError):
+        raise ValueError("The floor needs the rectangle's four numbers")
+    if len(lo) != 2 or len(hi) != 2 or hi[0] - lo[0] <= 2 * FLOOR_MARGIN or hi[1] - lo[1] <= 2 * FLOOR_MARGIN:
+        raise ValueError("The rectangle is too small for a floor")
+    body = {"mod": b.get("mod"), "stage": stage, "name": "FL_" + re.sub(r"[^A-Z0-9]", "", stage)[:5], "replace": True,
+            "title": "Floor", "units": "blender",
+            "data": base64.b64encode(lvlprop.floor_glb((hi[0] - lo[0]) / 2 - FLOOR_MARGIN, (hi[1] - lo[1]) / 2 - FLOOR_MARGIN)).decode()}
+    out = import_prop(cfg, body)
+    out["pos"] = [round((lo[0] + hi[0]) / 2, 1), round((lo[1] + hi[1]) / 2, 1), 0.0]
+    out["model"] = body["name"]
+    return out
+
+
+def terrain_prop(cfg, b):
+    """New terrain: a PNG of heights (b["heights"], base64) becomes the prop b["name"] of the mod (lvlterrain.terrain_glb: a drawn mesh and
+    the same triangles as a coll_ mesh), b["size"] = [X, Y] units, b["height"] units for white, b["cells"] along the longer side, an
+    optional b["colors"] PNG, b["brightness"] in percent. The PNGs and the numbers stay in the prop's folder (heightmap.png, colors.png, terrain.json). Returns
+    import_prop's reply and "terrain" (the numbers)."""
+    try:
+        size = [float(v) for v in b.get("size")]
+        height, cells = float(b.get("height")), int(b.get("cells") or 64)
+        bright = float(b.get("brightness") or lvlterrain.DEFAULT_BRIGHTNESS)
+        assert len(size) == 2
+    except (TypeError, ValueError, AssertionError):
+        raise ValueError("The terrain needs its size (two numbers), its height and its resolution")
+    try:
+        hm = base64.b64decode(b.get("heights") or "")
+        cm = base64.b64decode(b["colors"]) if b.get("colors") else None
+    except ValueError:
+        raise ValueError("The heightmap did not arrive intact")
+    if not hm:
+        raise ValueError("Choose a heightmap (a PNG) first")
+    try:
+        glb, info = lvlterrain.terrain_glb(hm, size[0], size[1], height, cells, cm, bright)
+    except lvlterrain.TerrainError as e:
+        raise ValueError(str(e))
+    body = {"mod": b.get("mod"), "stage": b.get("stage"), "name": b.get("name"), "replace": bool(b.get("replace")),
+            "title": (b.get("title") or "").strip() or "Terrain", "units": "blender", "light": "auto",
+            "data": base64.b64encode(glb).decode()}
+    out = import_prop(cfg, body)
+    if out.get("exists"):
+        return out
+    pd = props_dir(cfg, body["mod"])
+    folder = lvl._child_nocase(pd, body["name"].strip().upper()) or os.path.join(pd, body["name"].strip().upper())
+    for fname, data in (("heightmap.png", hm), ("colors.png", cm)):
+        path = os.path.join(folder, fname)
+        if data:
+            with open(path, "wb") as f:
+                f.write(data)
+        elif os.path.isfile(path):
+            os.remove(path)
+    with open(os.path.join(folder, "terrain.json"), "w", encoding="utf-8") as f:
+        json.dump({"size": info["size"], "height": info["height"], "cells": info["cells"], "triangles": info["triangles"],
+                   "brightness": info["brightness"], "colors": bool(cm)}, f, indent=1)
+    out["terrain"] = info
+    return out
+
+
+ORIGINALS = {"lock": threading.Lock(), "key": None, "items": [], "done": 0, "total": 0}
+
+
+def originals_work(cfg, key):
+    """Fills ORIGINALS with the models (props and destructibles, one per signature) of every stage on the disc."""
+    disc = cfg["disc"]
+    names = load_names()
+    stages = [s["name"] for s in STAGES.list(disc)]
+    with ORIGINALS["lock"]:
+        ORIGINALS["total"] = len(stages)
+    for n in stages:
+        items = []
+        try:
+            st, objs, on = STAGES.objects(disc, n)
+            seen = {}
+            # the objects the scene draws: the others (a stage's hidden or never drawn ones) have nothing to take out
+            drawn = {(nd.get("extras") or {}).get("handle", "").upper().replace("0X", "0x")
+                     for nd in lvlorig.ngpmesh.Glb(STAGES.glb(disc, n)).nodes}
+            for d in describe(n, objs, on, STAGES.facts(disc, n), names):
+                if d["kind"] not in lvlorig.KINDS or not d["sig"] or not d["movable"] or d["handle"] not in drawn:
+                    continue
+                k = (d["sig"], d["kind"])
+                if k not in seen and any(x["handle"] == d["handle"] for x in items):      # one handle is one node: one model
+                    continue
+                if k in seen:
+                    seen[k]["count"] += 1
+                    continue
+                seen[k] = {"stage": n, "title": STAGE_TITLE.get(n, n), "handle": d["handle"], "kind": d["kind"], "name": d["name"],
+                           "sig": d["sig"], "dims": d["dims"], "states": d["states"], "count": 1}
+                items.append(seen[k])
+        except Exception:      # noqa: BLE001 - a stage that does not read has no entries
+            traceback.print_exc()
+        with ORIGINALS["lock"]:
+            if ORIGINALS["key"] != key:
+                return
+            ORIGINALS["items"] += items
+            ORIGINALS["done"] += 1
+
+
+def originals_index(cfg):
+    """The index of original models of every stage (built in the background on the first call): {"ready", "done", "total", "items"}."""
+    key = cfg["disc"]
+    with ORIGINALS["lock"]:
+        if ORIGINALS["key"] != key:
+            ORIGINALS.update(key=key, items=[], done=0, total=0)
+            threading.Thread(target=originals_work, args=(cfg, key), daemon=True).start()
+        items = list(ORIGINALS["items"])
+        out = {"ready": ORIGINALS["total"] > 0 and ORIGINALS["done"] >= ORIGINALS["total"], "done": ORIGINALS["done"],
+               "total": ORIGINALS["total"]}
+    names = {s["name"] for s in STAGES.list(cfg["disc"])}
+    out["items"] = [dict(it, pic=os.path.isfile(original_pic_path(cfg, it["stage"], it["handle"], names))) for it in items]   # pic: kept already
+    return out
+
+
+SCENE_GLB = {"lock": threading.Lock(), "key": None, "glb": None}
+
+
+def original_glb(cfg, stage, handle):
+    """The .glb of one original object (lvlorig.extract from the stage's scene), kept on disk next to the scene."""
+    base = base_of(cfg, stage)
+    if not re.fullmatch(r"0[xX][0-9A-Fa-f]{1,8}", handle or ""):
+        raise ValueError("Not an object handle: %r" % handle)
+    scene = STAGES.glb(cfg["disc"], base)
+    path = os.path.join(CACHE, "orig", "%s-%s-%X.glb" % (base, disc_key(cfg["disc"]), int(handle, 16)))
+    if not (os.path.isfile(path) and os.path.getmtime(path) >= os.path.getmtime(scene)
+            and os.path.getmtime(path) >= os.path.getmtime(lvlorig.__file__)):
+        with SCENE_GLB["lock"]:            # the last scene read stays: the objects of one stage come one after another
+            key = (scene, os.path.getmtime(scene))
+            if SCENE_GLB["key"] != key:
+                SCENE_GLB.update(key=None, glb=None)
+                SCENE_GLB.update(glb=lvlorig.ngpmesh.Glb(scene), key=key)
+            data = lvlorig.extract(SCENE_GLB["glb"], handle, STAGES.objects(cfg["disc"], base)[0])
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + ".tmp", "wb") as f:
+            f.write(data)
+        os.replace(path + ".tmp", path)
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def original_pic_path(cfg, stage, handle, stages=None):
+    """Where the picture (PNG) of an original model is kept: next to the scene's cache, one file per stage and handle."""
+    if not re.fullmatch(r"0[xX][0-9A-Fa-f]{1,8}", handle or "") or stage.upper() not in (stages or [s["name"] for s in STAGES.list(cfg["disc"])]):
+        raise ValueError("Not an original object: %s %s" % (stage, handle))
+    return os.path.join(CACHE, "origpic192", "%s-%s-%X.png" % (stage.upper(), disc_key(cfg["disc"]), int(handle, 16)))
+
+
+def save_original_pic(cfg, b):
+    """The palette's picture of an original model, rendered by the page (b: stage, handle, png as base64)."""
+    path = original_pic_path(cfg, b.get("stage") or "", b.get("handle") or "")
+    data = base64.b64decode(b.get("png") or "")
+    if data[:8] != b"\x89PNG\r\n\x1a\n" or len(data) > 300000:
+        raise ValueError("That is not a PNG of a small picture")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".tmp", "wb") as f:
+        f.write(data)
+    os.replace(path + ".tmp", path)
+    return {"ok": True}
+
+
+def original_prop(cfg, b):
+    """An original object of another stage as a prop of the mod, built for the open stage (lvlprop.build, units game): b has mod,
+    stage (the open one), from (the object's stage) and handle. The model is named from the stage and the object's signature; one
+    already made from the same object is reused. Returns import_prop's reply with "reused"."""
+    mod, src = (b.get("mod") or "").strip(), (b.get("from") or "").upper()
+    if bad_mod(mod):
+        raise ValueError(bad_mod_reason(mod))
+    if src not in [s["name"] for s in STAGES.list(cfg["disc"])]:
+        raise ValueError("%s is not a stage on the disc" % src)
+    raw = b.get("handle") or ""
+    handle = "0x%X" % int(raw, 16) if re.fullmatch(r"0[xX][0-9A-Fa-f]{1,8}", raw) else ""
+    st, objs, on = STAGES.objects(cfg["disc"], src)
+    found = next((d for d in describe(src, objs, on, STAGES.facts(cfg["disc"], src), load_names()) if d["handle"] == handle), None)
+    if not found or found["kind"] not in lvlorig.KINDS or not found["sig"]:
+        raise ValueError("%s has no object %s that can be a prop" % (src, handle or "?"))
+    origin = {"stage": src, "handle": handle, "sig": found["sig"]}
+    for p in props_list(cfg, mod):          # made before from the same model of that stage
+        o = p.get("origin") or {}
+        if o.get("stage") == src and o.get("sig") == found["sig"] and p.get("stage") == base_of(cfg, (b.get("stage") or "").upper()).upper():
+            return {"prop": p, "lines": [], "reused": True}
+    d = props_dir(cfg, mod)
+    name = None
+    for k in range(0, len(found["sig"]) - 3, 4):        # the first free name (a name from another model keeps its own)
+        cand = lvlorig.prop_name(src, found["sig"][k:])
+        if not d or not lvl._child_nocase(d, cand):
+            name = cand
+            break
+    if not name:
+        raise ValueError("No free model name for %s in mod %s" % (src, mod))
+    body = {"mod": mod, "stage": b.get("stage"), "name": name, "units": "game", "title": "%s (%s)" % (found["name"], STAGE_TITLE.get(src, src)),
+            "data": base64.b64encode(original_glb(cfg, src, handle)).decode()}
+    out = import_prop(cfg, body)
+    folder = os.path.join(props_dir(cfg, mod), name)
+    pj = os.path.join(folder, "prop.json")
+    with open(pj, encoding="utf-8") as f:
+        m = json.load(f)
+    m["origin"] = origin
+    with open(pj, "w", encoding="utf-8") as f:
+        json.dump(m, f, indent=1)
+        f.write("\n")
+    out["prop"] = next((e for e in props_list(cfg, mod) if e["model"] == name), out.get("prop"))
+    out["reused"] = False
+    return out
 
 
 def edit_prop(cfg, b):
@@ -785,6 +1496,13 @@ def edit_prop(cfg, b):
                           title if title is not None else m.get("name"), m.get("light") or "auto", stage_root(cfg["disc"], stage),
                           abe=(m.get("template") or {}).get("abe", 1),
                           strength=(m.get("destructible") or {}).get("class", lvlprop.DEFAULT_STRENGTH), log=lines.append)
+            if m.get("origin"):                 # build writes prop.json anew
+                with open(pj, encoding="utf-8") as f:
+                    nm = json.load(f)
+                nm["origin"] = m["origin"]
+                with open(pj, "w", encoding="utf-8") as f:
+                    json.dump(nm, f, indent=1)
+                    f.write("\n")
         except Exception:
             for n in os.listdir(folder):
                 if n not in backup and n.lower() != "source.glb":
@@ -827,6 +1545,15 @@ def game_stage_lines(cfg):
             return [l.rstrip() for l in f if l.startswith("[fase]")]
     except OSError:
         return []
+
+
+def file_stamp(path):
+    """When a file last changed, in microseconds (a whole number a page can hold), or 0 when it is not there. The page sends it back
+    with Save: a file that changed in between (by hand, by another editor, by modkit.py) is not overwritten without asking."""
+    try:
+        return os.stat(path).st_mtime_ns // 1000
+    except OSError:
+        return 0
 
 
 def save_patch(cfg, mod, name, patch):
@@ -885,25 +1612,142 @@ class SettingsError(RuntimeError):
     """A setting is missing or wrong: the page offers to open Settings (code "settings")."""
 
 
-def reload_game(name):
+def reload_game(name, here=None):
+    """Asks the running game to reload `name`; with here ([x, y, z, heading]) player 1 starts there, else on the stage's start points."""
     if not game_running():
         raise RuntimeError("no game opened by the editor is running: use Test in game")
+    spawn = spawn_numbers(here) if here is not None else []
     GAME["count"] += 1
     with open(RELOAD_FILE + ".tmp", "w", encoding="utf-8") as f:
-        f.write("%s %d\n" % (name, GAME["count"]))
+        f.write(" ".join([name, str(GAME["count"])] + spawn) + "\n")
     os.replace(RELOAD_FILE + ".tmp", RELOAD_FILE)
 
 
-def launch_game(cfg, name, training):
-    if not cfg.get("game") or not os.path.exists(cfg["game"]):
-        raise SettingsError("Can't find the game (wotm.exe).")
-    env = dict(os.environ)
-    os.makedirs(CACHE, exist_ok=True)
-    env.update({"WOTM_MODS": os.path.abspath(cfg["mods"]), "WOTM_MATCH": ("3,1,@" + custom_stages(cfg)[name.upper()]["id"]) if name.upper() in custom_stages(cfg)
-                else "3,%d" % LEVEL_NUM.get(name, 1),
-                "WOTM_FULLSCREEN": "0", "WOTM_LEVELPATCH": "1", "WOTM_LEVELRELOAD": RELOAD_FILE})
+# The monsters a test can play (WOTM_MATCH numbers; 6 and 12 have no files on the disc, 13..15 are bosses): index, the game's name, the
+# lowercase name and the file prefix a skin.json "monster" may use
+TEST_MONSTERS = ((1, "Congar", "congar", "monkey"), (2, "Robo-47", "robo-47", "robot"), (3, "Togera", "togera", "lizard"),
+                 (4, "Ultra V", "ultra-v", "shogun"), (5, "Preytor", "preytor", "mantis"), (7, "Kineticlops", "kineticlops", "energy"),
+                 (8, "Magmo", "magmo", "lava"), (9, "Raptros", "raptros", "dragon"), (10, "Agamo", "agamo", "rock"),
+                 (11, "Zorgulon", "zorgulon", "alien"))
+TEST_MAX_CPUS = 7
+TEST_MAX_MONSTERS = 8       # players and CPUs together (the game's limit)
+TEST_MODES = {"ffa": None, "elimination": 6}   # the modes a test of one stage can use: the minigames play in their own arenas
+TEST_ID = re.compile(r"^[a-z0-9_]{1,24}$")
+
+
+def test_options(cfg):
+    """What the Test dialog offers: {"monsters": [{id, name}], "customs": [{id, name, mod, ai}], "skins": [{monster, id, name, mod, ai}]}.
+    The customs and skins come from every mod folder (monsters/<id>/monster.json, skins/<id>/skin.json); a skin's "monster" is the
+    disc monster's index as a string, or a custom's id. Files that do not read are left out."""
+    keys = {}
+    for idx, _name, low, pre in TEST_MONSTERS:
+        keys[low] = keys[pre] = str(idx)
+    out = {"monsters": [{"id": str(i), "name": n} for i, n, _l, _p in TEST_MONSTERS], "customs": [], "skins": []}
+    mods = cfg.get("mods") or ""
+    for mod in list_mods(cfg):
+        for kind, fname in (("monsters", "monster.json"), ("skins", "skin.json")):
+            for path in sorted(glob.glob(os.path.join(mods, mod, kind, "*", fname))):
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        j = json.load(f)
+                    folder = os.path.basename(os.path.dirname(path))
+                    cid = str(j.get("id") or folder).lower()
+                    if not TEST_ID.match(cid):
+                        continue
+                    ent = {"id": cid, "name": str(j.get("name") or cid), "mod": mod, "ai": bool(j.get("ai"))}
+                    if kind == "monsters":
+                        out["customs"].append(ent)
+                    else:
+                        who = str(j.get("monster") or "").lower()
+                        out["skins"].append(dict(ent, monster=keys.get(who, who)))
+                except (OSError, ValueError, AttributeError):
+                    continue
+    return out
+
+
+def match_token(sel, what, customs):
+    """One WOTM_MATCH field for a monster choice {"monster": "3" or a custom's id, "skin": "" | "0".."99" | a skin's id}."""
+    sel = sel if isinstance(sel, dict) else {}
+    mon, skin = str(sel.get("monster") or ""), str(sel.get("skin") or "")
+    if mon.isdigit():
+        if int(mon) not in [m[0] for m in TEST_MONSTERS]:
+            raise ValueError("%s: monster %s is not one the game can play." % (what, mon))
+    elif mon not in customs:
+        raise ValueError("%s: there is no custom monster \"%s\" in your mods." % (what, mon))
+    if skin and not (int(skin) <= 99 if skin.isdigit() else TEST_ID.match(skin)):
+        raise ValueError("%s: the costume is a number or a skin's id." % what)
+    return mon + (":" + skin if skin else "")
+
+
+def test_env(cfg, name, training, opts):
+    """The environment variables the Test options make (WOTM_MATCH, WOTM_PLAYERS, WOTM_MODE, WOTM_TRAINING, WOTM_TRAINING_DUMMY,
+    WOTM_SPAWN). opts (all optional): {"monster": sel (player 1), "players": [sel...] (players 2 to 4), "mode": "ffa" | "elimination"
+    (with 2 or more players), "continues": 0..9 (elimination), "cpus": [sel...] (players and CPUs up to 8), "dummy": 0..4 (the CPUs in
+    training), "here": [x, y, z, heading] or [x, y, z, heading, radius] (where player 1 starts; the radius puts the others on a ring
+    around it)}; none: Togera alone, as before."""
+    opts = opts if isinstance(opts, dict) else {}
+    others = opts.get("players") or []
+    cpus = opts.get("cpus") or []
+    customs = {c["id"] for c in test_options(cfg)["customs"]} if (opts.get("monster") or others or cpus) else set()
+    if not isinstance(others, list) or len(others) > 3:
+        raise ValueError("A test has up to 4 players.")
+    if not isinstance(cpus, list) or len(cpus) > TEST_MAX_CPUS:
+        raise ValueError("A test has up to %d CPUs." % TEST_MAX_CPUS)
+    if 1 + len(others) + len(cpus) > TEST_MAX_MONSTERS:
+        raise ValueError("The game holds %d monsters: %d players leave room for %d CPUs." % (
+            TEST_MAX_MONSTERS, 1 + len(others), TEST_MAX_MONSTERS - 1 - len(others)))
+    mode = opts.get("mode") or "ffa"
+    if mode not in TEST_MODES:
+        raise ValueError("The mode is free for all or elimination.")
+    if TEST_MODES[mode] and not others:
+        raise ValueError("Elimination needs two players or more.")
+    toks = [match_token(opts.get("monster") or {"monster": "3"}, "Your monster", customs)]
+    toks += [match_token(c, "Player %d" % (k + 2), customs) for k, c in enumerate(others)]
+    toks += [match_token(c, "CPU %d" % (k + 1), customs) for k, c in enumerate(cpus)]
+    custom = custom_stages(cfg).get(name.upper())
+    toks.append("@" + custom["id"] if custom else str(LEVEL_NUM.get(name, 1)))
+    env = {"WOTM_MATCH": ",".join(toks)}
+    if others:
+        env["WOTM_PLAYERS"] = str(1 + len(others))
+    if TEST_MODES[mode]:
+        continues = opts.get("continues", 2)
+        if not isinstance(continues, int) or isinstance(continues, bool) or not 0 <= continues <= 9:
+            raise ValueError("The continues are 0 to 9.")
+        env["WOTM_MODE"] = "%d:%d" % (TEST_MODES[mode], continues)
     if training:
         env["WOTM_TRAINING"] = "1"
+        dummy = opts.get("dummy")
+        if dummy is not None and cpus:
+            if not isinstance(dummy, int) or isinstance(dummy, bool) or not 0 <= dummy <= 4:
+                raise ValueError("The CPUs' behavior is 0 to 4.")
+            env["WOTM_TRAINING_DUMMY"] = str(dummy)
+    here = opts.get("here")
+    if here is not None:
+        env["WOTM_SPAWN"] = ",".join(spawn_numbers(here))
+    return env
+
+
+def spawn_numbers(here):
+    """["x", "y", "z", "heading"] (and "radius") for a start point [x, y, z, heading] (and a radius from 0 to 3000: the ring the other
+    monsters start on; 0 or none leaves them on the stage's points), finite numbers, as the game's WOTM_SPAWN and the reload file take them."""
+    if not (isinstance(here, (list, tuple)) and len(here) in (4, 5) and all(
+            isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in here)):
+        raise ValueError("The start point is x, y, z and a heading.")
+    if len(here) == 5 and not 0 <= here[4] <= 3000:
+        raise ValueError("The ring around the start point is 0 to 3000 units.")
+    return ["%.2f" % v for v in here]
+
+
+def launch_game(cfg, name, training, opts=None):
+    if not cfg.get("game") or not os.path.exists(cfg["game"]):
+        raise SettingsError("Can't find the game (wotm.exe).")
+    extra = test_env(cfg, name, training, opts)       # before anything starts: a bad option is refused first
+    env = dict(os.environ)
+    os.makedirs(CACHE, exist_ok=True)
+    for k in ("WOTM_TRAINING", "WOTM_TRAINING_DUMMY", "WOTM_SPAWN", "WOTM_PLAYERS", "WOTM_MODE"):
+        env.pop(k, None)        # the editor's own shell may have them: the options decide
+    env.update({"WOTM_MODS": os.path.abspath(cfg["mods"]), "WOTM_FULLSCREEN": "0", "WOTM_LEVELPATCH": "1", "WOTM_LEVELRELOAD": RELOAD_FILE})
+    env.update(extra)
     if cfg.get("elf"):
         # the clone's runtime run as run_live.ps1 does: the disc image, native movies and drawing, no emulated VU1/VIF1/GS
         iso = cfg.get("iso") or (cfg["disc"] if is_iso(cfg["disc"]) else "")
@@ -1024,13 +1868,15 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
-    def send(self, code, body, ctype="application/json"):
+    def send(self, code, body, ctype="application/json", filename=None):
         if isinstance(body, (dict, list)):
             body = json.dumps(body).encode()
         elif isinstance(body, str):
             body = body.encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
+        if filename:
+            self.send_header("Content-Disposition", 'attachment; filename="%s"' % filename)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -1040,7 +1886,31 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         return json.loads(self.rfile.read(n) or b"{}")
 
+    def refused(self, post):
+        """Is this request one the editor's own page could not have sent? Answers 403 and says True then.
+        The server only listens on 127.0.0.1, but any page open in the same browser can still reach it: a form or a
+        no-cors fetch with a text/plain body needs no preflight, and DNS rebinding makes another name point here. So the
+        Host must be this server's own address, an Origin (when the browser sends one) must be this page's, and a POST
+        must say it is JSON (the editor's api() does; the page-close beacon, /api/bye, is exempt)."""
+        port = self.server.server_address[1]
+        hosts = ("127.0.0.1:%d" % port, "localhost:%d" % port)
+        why = ""
+        if self.headers.get("Host", "").lower() not in hosts:
+            why = "Host"
+        elif self.headers.get("Origin") not in (None, "") and self.headers.get("Origin").lower() not in ["http://" + h for h in hosts]:
+            why = "Origin"
+        elif self.headers.get("Sec-Fetch-Site", "same-origin") not in ("same-origin", "none"):
+            why = "Sec-Fetch-Site"
+        elif post and self.path != "/api/bye" and \
+                self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
+            why = "Content-Type"
+        if why:
+            self.send(403, {"error": "This request did not come from the editor's own page (%s)." % why, "code": "forbidden"})
+        return bool(why)
+
     def do_GET(self):
+        if self.refused(False):
+            return
         LIFE["seen"] = time.monotonic()
         u = urllib.parse.urlparse(self.path)
         q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
@@ -1065,23 +1935,67 @@ class Handler(BaseHTTPRequestHandler):
                 winner = patch_winner(cfg, mod, q["name"]) if mod and not bad_mod(mod) else \
                     (sorted(have, key=str.lower)[-1] if have else "")
                 return self.send(200, {"objects": describe(q["name"], objs, on, facts, load_names()), "patch": patch,
-                                       "env": stage_env(cfg, cfg["disc"], base, mod),
+                                       "env": stage_env(cfg, cfg["disc"], q["name"], mod),
                                        "grid": {"min": [st.grid.min_x, st.grid.min_y], "max": [st.grid.max_x, st.grid.max_y],
                                                 "cell": st.grid.cell, "cols": st.grid.cols, "rows": st.grid.rows} if st.grid else None,
+                                       "walls": STAGES.walls(cfg["disc"], base), "sky": STAGES.sky(cfg["disc"], base),
                                        "peds": pedsapi.stage_peds(st, points_root(cfg, q["name"]) or stage_root(cfg["disc"], base)),
-                                       "have": have, "winner": winner, "others": [m for m in have if m != mod]})
+                                       "have": have, "winner": winner, "others": [m for m in have if m != mod],
+                                       "stamp": file_stamp(patch_path(cfg, q["mod"], q["name"])) if q.get("mod") and not bad_mod(q["mod"]) else 0})
+            if u.path == "/api/spt":            # the stage's start points as the game reads them with this mod
+                try:
+                    return self.send(200, stage_spt(cfg, q.get("mod", ""), q.get("name", ""), point_kind(q.get("kind"))))
+                except (ValueError, OSError) as e:
+                    return self.send(400, {"error": str(e)})
+            if u.path == "/api/testopts":       # the monsters, custom monsters and skins the Test dialog offers
+                return self.send(200, test_options(cfg))
+            if u.path == "/api/mrs":            # the stage's fog, background and lights as the game reads them with this mod
+                try:
+                    return self.send(200, stage_mrs(cfg, q.get("mod", ""), q.get("name", "")))
+                except (ValueError, OSError) as e:
+                    return self.send(400, {"error": str(e)})
             if u.path == "/api/props":          # the mod's props (props/*/prop.json)
                 return self.send(200, {"props": props_list(cfg, q.get("mod", ""))})
+            if u.path == "/api/props/terrain":  # the numbers and PNGs a New terrain left in the prop's folder
+                try:
+                    return self.send(200, terrain_get(cfg, q.get("mod", ""), q.get("name", "")))
+                except ValueError as e:
+                    return self.send(400, {"error": str(e)})
+            if u.path == "/api/pack":           # the mod's folder as a .zip download
+                try:
+                    data, fname, n = pack_mod(cfg, q.get("mod", ""))
+                except (ValueError, OSError) as e:
+                    return self.send(400, {"error": str(e)})
+                return self.send(200, data, "application/zip", fname)
+            if u.path == "/api/prefabs":        # the mod's prefabs (prefabs/*.json)
+                return self.send(200, {"prefabs": prefabs_list(cfg, q.get("mod", ""))})
             if u.path == "/api/propglb":        # a prop's preview (what the game draws)
                 path = prop_preview(cfg, q.get("mod", ""), q.get("model", ""))
                 if not path:
                     return self.send(404, {"error": "not found"})
                 with open(path, "rb") as f:
                     return self.send(200, f.read(), "model/gltf-binary")
+            if u.path == "/api/originals":      # the models of every stage's original objects (Ctrl+P), built in the background
+                return self.send(200, originals_index(cfg))
+            if u.path == "/api/origglb":        # one of them as a .glb (its picture in Ctrl+P)
+                try:
+                    return self.send(200, original_glb(cfg, q.get("stage", ""), q.get("handle", "")), "model/gltf-binary")
+                except (ValueError, KeyError, lvlorig.OrigError, lvlorig.ngpmesh.MeshError) as e:
+                    return self.send(404, {"error": str(e)})
+            if u.path == "/api/origpic":        # the picture of one (rendered by the page once, then kept)
+                try:
+                    with open(original_pic_path(cfg, q.get("stage", ""), q.get("handle", "")), "rb") as f:
+                        return self.send(200, f.read(), "image/png")
+                except (OSError, ValueError):
+                    return self.send(404, {"error": "no picture yet"})
             if u.path == "/api/hud":
                 mod = q.get("mod", "").strip()
                 mods_dir, mod_arg, base, _sub, _c = hud_target(cfg, q["stage"], mod if mod and not bad_mod(mod) else "")
                 return self.send(200, HUD.panel(cfg["disc"], mods_dir, mod_arg, base))
+            if u.path == "/api/texs":           # the Textures dialog: every picture of the stage
+                mod = q.get("mod", "").strip()
+                mods_dir, mod_arg, base, _sub, _c = hud_target(cfg, q["stage"], mod if mod and not bad_mod(mod) else "")
+                return self.send(200, HUD.textures(cfg["disc"], mods_dir, mod_arg, base))
             if u.path == "/api/hudimg":
                 mod = q.get("mod", "").strip()
                 mods_dir, mod_arg, base, _sub, _c = hud_target(cfg, q["stage"], "" if bad_mod(mod) else mod)
@@ -1112,6 +2026,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, f.read(), ctype + ("; charset=utf-8" if ctype.startswith("text") else ""))
 
     def do_POST(self):
+        if self.refused(True):
+            return
         LIFE["seen"] = time.monotonic()
         cfg = self.cfg
         try:
@@ -1130,6 +2046,23 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200, new_stage(cfg, b))
                 except ValueError as e:
                     return self.send(400, {"error": str(e), "code": "newstage"})
+            if self.path == "/api/stage/edit":
+                try:
+                    return self.send(200, edit_stage(cfg, b))
+                except ValueError as e:
+                    return self.send(400, {"error": str(e), "code": "editstage"})
+            if self.path == "/api/prefab":
+                try:
+                    return self.send(200, save_prefab(cfg, b))
+                except PrefabExists as e:
+                    return self.send(409, {"error": str(e), "code": "exists"})
+                except (ValueError, OSError) as e:
+                    return self.send(400, {"error": str(e), "code": "prefab"})
+            if self.path == "/api/prefab/delete":
+                try:
+                    return self.send(200, delete_prefab(cfg, b))
+                except (ValueError, OSError) as e:
+                    return self.send(400, {"error": str(e), "code": "prefab"})
             if self.path == "/api/names":
                 if not b.get("sig"):
                     return self.send(400, {"error": "this object has no mesh to name as a model"})
@@ -1139,11 +2072,46 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/api/check":
                 return self.send(200, check_patch(cfg["disc"], base_of(cfg, b["name"]), b["patch"], mod_folder(cfg, b.get("mod")),
                                                   points_root(cfg, b["name"])))
+            if self.path == "/api/budget":      # the status bar's arena and slots meters (nothing is saved)
+                return self.send(200, budget_patch(cfg["disc"], base_of(cfg, b["name"]), b["patch"], mod_folder(cfg, b.get("mod")),
+                                                   points_root(cfg, b["name"])))
+            if self.path == "/api/collision":   # the Collision layer: the shapes the game collides with, patch applied
+                return self.send(200, collision_patch(cfg["disc"], base_of(cfg, b["name"]), b["patch"], mod_folder(cfg, b.get("mod"))))
             if self.path == "/api/paths":       # Settings' badges for what is typed (nothing is saved)
                 return self.send(200, path_states(b))
             if self.path == "/api/props/import":   # Import .glb: a new prop in the mod, built for the open stage
                 try:
                     return self.send(200, import_prop(cfg, b))
+                except (ValueError, lvlprop.PropError, lvlprop.ngpmesh.MeshError, lvlprop.vifpkt.FormatError) as e:
+                    return self.send(400, {"error": str(e), "code": "prop"})
+            if self.path == "/api/origpic":
+                try:
+                    return self.send(200, save_original_pic(cfg, b))
+                except ValueError as e:
+                    return self.send(400, {"error": str(e)})
+            if self.path == "/api/props/original":   # an original object of another stage as a prop of the mod
+                try:
+                    return self.send(200, original_prop(cfg, b))
+                except (ValueError, lvlorig.OrigError, lvlprop.PropError, lvlprop.ngpmesh.MeshError, lvlprop.vifpkt.FormatError) as e:
+                    return self.send(400, {"error": str(e), "code": "prop"})
+            if self.path == "/api/spt":            # write the start points into the mod (or "reset": back to the disc's)
+                try:
+                    return self.send(200, save_spt(cfg, b, point_kind(b.get("kind"))))
+                except (ValueError, OSError) as e:
+                    return self.send(400, {"error": str(e)})
+            if self.path == "/api/mrs":            # write the fog, background and lights into the mod (or "reset": back to the disc's)
+                try:
+                    return self.send(200, save_mrs(cfg, b))
+                except (ValueError, KeyError, TypeError, AttributeError, OSError) as e:
+                    return self.send(400, {"error": str(e)})
+            if self.path == "/api/props/floor":    # a floor prop over the grid's rectangle
+                try:
+                    return self.send(200, floor_prop(cfg, b))
+                except (ValueError, lvlprop.PropError, lvlprop.ngpmesh.MeshError, lvlprop.vifpkt.FormatError) as e:
+                    return self.send(400, {"error": str(e), "code": "prop"})
+            if self.path == "/api/props/terrain":  # a prop from a heightmap
+                try:
+                    return self.send(200, terrain_prop(cfg, b))
                 except (ValueError, lvlprop.PropError, lvlprop.ngpmesh.MeshError, lvlprop.vifpkt.FormatError) as e:
                     return self.send(400, {"error": str(e), "code": "prop"})
             if self.path == "/api/props/edit":     # a model's name in the list or its height (built again from its .glb)
@@ -1160,11 +2128,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {"ok": True})
             if self.path == "/api/stop":        # only the game this editor opened
                 return self.send(200, {"ok": True, "stopped": stop_game(), "running": False})
-            if self.path in ("/api/save", "/api/test", "/api/reload", "/api/hud/replace", "/api/hud/remove"):
+            if self.path in ("/api/save", "/api/test", "/api/reload", "/api/hud/replace", "/api/hud/remove",
+                             "/api/tex/replace", "/api/tex/remove"):
                 mod = (b.get("mod") or "").strip()
-                # Test without saving writes nothing: no mod needed
-                if bad_mod(mod) and not (self.path == "/api/test" and not b.get("save", True) and not mod):
+                # Test (or Reload) without saving writes nothing: no mod needed
+                if bad_mod(mod) and not (self.path in ("/api/test", "/api/reload") and not b.get("save", True) and not mod):
                     return self.send(400, {"error": bad_mod_reason(mod), "code": "mod"})
+                if self.path in ("/api/tex/replace", "/api/tex/remove"):
+                    mods_dir, mod_arg, base, sub, _custom = hud_target(cfg, b["stage"], mod)
+                    if self.path == "/api/tex/replace":
+                        return self.send(200, {"lines": HUD.tex_replace(cfg["disc"], mods_dir, mod_arg, base, b["png"], b["data"], sub)})
+                    return self.send(200, {"lines": HUD.tex_remove(cfg["disc"], mods_dir, mod_arg, base, b["png"])})
                 if self.path in ("/api/hud/replace", "/api/hud/remove"):
                     mods_dir, mod_arg, base, sub, custom = hud_target(cfg, b["stage"], mod)
                     every = bool(b.get("every")) and not custom and b.get("role") != "sky"   # a custom stage's picture and a sky are its own
@@ -1179,21 +2153,39 @@ class Handler(BaseHTTPRequestHandler):
                 if self.path == "/api/test" and game_running() and not b.get("restart"):
                     return self.send(409, {"error": "the game is already open", "code": "running", "stage": GAME["stage"]})
                 if self.path == "/api/test" and not b.get("save", True):
-                    return self.send(200, {"ok": True, "lines": [], "launched": launch_game(cfg, name, b.get("training", True))})
+                    return self.send(200, {"ok": True, "lines": [], "launched": launch_game(cfg, name, b.get("training", True), b.get("options"))})
+                if self.path == "/api/reload" and not b.get("save", True):      # "Test without my changes": the file on disk, nothing written
+                    reload_game(name, (b.get("options") or {}).get("here"))
+                    return self.send(200, {"ok": True, "lines": [], "reloading": True})
+                # the file changed since the page read it (b["since"], from /api/stage or the last save): ask before overwriting
+                if b.get("since") is not None and not b.get("overwrite") and file_stamp(patch_path(cfg, mod, name)) != b["since"]:
+                    return self.send(409, {"error": "mods/%s/levels/%s.json changed on disk after the editor read it (by hand, or by another program)."
+                                                    % (mod, name), "code": "changed"})
                 res = check_patch(cfg["disc"], base_of(cfg, name), b["patch"], mod_folder(cfg, mod), points_root(cfg, name))
                 res["saved"] = save_patch(cfg, mod, name, b["patch"])
+                res["stamp"] = file_stamp(patch_path(cfg, mod, name))
                 # another mod with this stage's file that loads later wins in the game: the page says so (not a check problem)
                 res["winner"] = patch_winner(cfg, mod, name)
                 res["have"] = [m for m in list_mods(cfg) if os.path.isfile(patch_path(cfg, m, name))]
                 if self.path == "/api/test":
-                    res["launched"] = launch_game(cfg, name, b.get("training", True))
+                    res["launched"] = launch_game(cfg, name, b.get("training", True), b.get("options"))
                 if self.path == "/api/reload":
-                    reload_game(name)
+                    reload_game(name, (b.get("options") or {}).get("here"))
                     res["reloading"] = True
                 return self.send(200, res)
             return self.send(404, {"error": "not found"})
         except SettingsError as e:
             return self.send(400, {"error": str(e), "code": "settings"})
+        except OSError as e:
+            if not (isinstance(e, PermissionError) or e.errno in (errno.ENOSPC, errno.EROFS, errno.EACCES, errno.EBUSY)):
+                traceback.print_exc()
+                return self.send(500, {"error": "%s: %s" % (type(e).__name__, e)})
+            # a write that the system refused: say what to look at (the generic text was "PermissionError: [Errno 13] ...")
+            traceback.print_exc()
+            what = os.path.basename(e.filename) if e.filename else "a file"
+            return self.send(500, {"error": "The system would not write %s (%s). The mod's folder may be read-only, the disk full, or a program "
+                                            "(the game, an antivirus) may have the file open." % (what, e.strerror or type(e).__name__),
+                                   "code": "disk"})
         except Exception as e:      # noqa: BLE001
             traceback.print_exc()
             return self.send(500, {"error": "%s: %s" % (type(e).__name__, e)})
@@ -1232,6 +2224,9 @@ class Server(ThreadingHTTPServer):
     # on Windows SO_REUSEADDR lets a second server bind a port already in use: off there, so a taken port is noticed
     allow_reuse_address = os.name != "nt"
     daemon_threads = True
+    # the page opens dozens of connections at once (modules, icons, the stage): with the default queue of 5 the system refuses the
+    # extra ones ("connection refused" from a server that is up, a page that opens blank or without icons)
+    request_queue_size = 128
 
 
 def editor_at(port):

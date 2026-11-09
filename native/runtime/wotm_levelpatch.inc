@@ -5,7 +5,7 @@
 // FORMATS.md ("Stage objects", "Stage collision"); tools/lvl.py patch aplica o mesmo patch na imagem do disco, na mesma ordem e com
 // as mesmas contas, e confere a colisao do resultado. Os nos novos (ROTATE no lugar de um TRANSLATE que gira, GROUP que segura o
 // original e as copias, a espinha clonada de cada copia com o estado de animacao das partes animadas dela, acoes refeitas, o ANIM_MGR
-// que registra as CHAR_INSTANCEs clonadas, caminhos de colisao e nos de lista das celulas) vao para a arena de 1 MB abaixo do MB dos ganchos (wotm_mods_hooks::kLevelArena), refeita a cada carga. Cada entrada
+// que registra as CHAR_INSTANCEs clonadas, caminhos de colisao e nos de lista das celulas) vao para a arena de 8 MB abaixo do MB dos ganchos (wotm_mods_hooks::kLevelArena), refeita a cada carga. Cada entrada
 // confere antes de escrever o que pode tomar da arena e dos 1024 Interactives; a que nao cabe e pulada inteira.
 // WOTM_LEVELPATCH_SHALLOW=1 faz copias rasas e WOTM_LEVELPATCH_BREAK quebra copias ou originais na luta (diagnostico, NATIVE.md).
 // O JSON e procurado e lido a cada carga da fase (findPatch): o editor grava e a recarga (wotm_levelreload.inc, RESTART) ja o pega.
@@ -57,7 +57,10 @@ const char *opName(uint32_t o)   // tools/ngp.py OPNAMES
 // ids de pickup (um por instancia), ignorados, e o "nao perde vida" do DESTRUCTIBLE
 bool animOp(uint32_t o) { return o == CHAR_INSTANCE || o == ANIM_XFORM || o == SKEL_BONE || o == ANIM_SCALE; }
 bool animStateOp(uint32_t o) { return o == ANIM_XFORM || o == ANIM_SCALE; }
-constexpr uint32_t kId2Max = 0x7FF;            // ActAnim::ids.anim e _hierhead::id2 tem 11 bits
+constexpr uint32_t kPickupBase = 0x1388;       // o tipo de um pickup e o id1 menos isto (createPickup)
+constexpr uint32_t kHpMax = 32767;             // Destructible::takeHit faz (int)vida * 65535, que estoura acima disto
+constexpr uint32_t kHpMinDamage = 5;           // dano minimo das classes de vida 2 a 6: um golpe abaixo dele nao faz nada
+constexpr uint32_t kId2Max = 0x7FF;           // ActAnim::ids.anim e _hierhead::id2 tem 11 bits
 constexpr uint16_t kActAnimMonster = 0x1800;   // ACTANIM_PLAYER | ACTANIM_AI: o alvo e um monstro
 bool cbOp(uint32_t o) { return o <= 4 || o == 6 || o == 11 || o == 17 || o == 30 || o == 40 || o == 41; }
 constexpr uint32_t kPickupLo = 0x12C0, kPickupHi = 0x13EC, kExclLo = 0x7D0, kExclHi = 0x898, kKeepLo = 0x1A90, kKeepHi = 0x1B58;
@@ -231,6 +234,8 @@ struct Stage
     std::map<std::string, int> stats;
     std::vector<std::string> log, pathLines;
     std::vector<Footprint> footprints;   // cada caixa solida no lugar novo, para cortar as redes de carros e pedestres
+    std::map<uint32_t, size_t> fpIndex;  // caminho -> lugar em footprints (refeito de novo, pela escala depois de um movimento, troca a caixa)
+    std::map<std::pair<uint32_t, double>, uint32_t> leafCache;   // (folha, escala) -> o clone escalado, na entrada que se aplica
     bool shallow = false;
     std::vector<uint32_t> wraps;           // GROUPs das copias: filho 0 e o original, os outros as copias
     std::array<int64_t, 3> interBefore{};  // Interactives antes do patch (carga + 1, destrocos com pickup, folga)
@@ -238,6 +243,7 @@ struct Stage
     uint32_t mgr = 0;                                    // raiz ANIM_MGR da fase (animationSetGlobal le a lista dela depois do gancho)
     std::map<uint32_t, std::set<uint32_t>> id2Used;      // id1 -> id2 das CHAR_INSTANCEs registradas e das clonadas
     std::vector<uint32_t> animAdded;                     // CHAR_INSTANCEs clonadas que ainda nao estao no ANIM_MGR
+    std::vector<uint32_t> hpNodes;                       // os DESTRUCTIBLEs que o "hp" mexeu (WOTM_LEVELPATCH_HP confere a vida deles no jogo)
 
     uint32_t u32(uint32_t a) const { uint32_t v; std::memcpy(&v, ram + (a & PS2_RAM_MASK), 4); return v; }
     uint16_t u16(uint32_t a) const { uint16_t v; std::memcpy(&v, ram + (a & PS2_RAM_MASK), 2); return v; }
@@ -256,7 +262,7 @@ struct Stage
     uint32_t alloc(uint32_t size, uint32_t align = 4)
     {
         const uint32_t a = (arenaTop + align - 1) & ~(align - 1);
-        if (a + size > kArenaEnd) throw PatchError("a arena de 1 MB encheu");
+        if (a + size > kArenaEnd) throw PatchError("a arena de 8 MB encheu");
         std::memset(ram + a, 0, size);
         arenaTop = a + size;
         stats["arena bytes"] = int(arenaTop - kArena);
@@ -583,7 +589,14 @@ struct Stage
             how = "carried";
         }
         aabb(w, bb);
-        if (!(u32(pa + 0x20) & 1)) footprints.push_back({hull2d(w), bb.mn.v[2], bb.mx.v[2]});
+        if (!(u32(pa + 0x20) & 1))
+        {
+            const Footprint fp{hull2d(w), bb.mn.v[2], bb.mx.v[2]};
+            if (const auto it = fpIndex.find(pa); it != fpIndex.end())
+                footprints[it->second] = fp;
+            else
+                fpIndex[pa] = footprints.size(), footprints.push_back(fp);
+        }
         for (int i = 0; i < 3; ++i) wf32(pa + 4 * i, bb.mn.v[i]), wf32(pa + 0xC + 4 * i, bb.mx.v[i]);
         const std::set<int> cs = cellsFor(bb);
         setCells(pa, cs);
@@ -616,8 +629,9 @@ struct Stage
         }
         return any;
     }
-    // O desenho pula o GROUP cuja esfera sai da vista (Scene::outOfView): as dos GROUPs acima de h crescem para cobrir o que pende dela
-    void growSpheres(uint32_t h, const V3 &oldPos)
+    // O desenho pula o GROUP cuja esfera sai da vista (Scene::outOfView): as dos GROUPs acima de h crescem para cobrir o que pende dela.
+    // `scale` e o SCALE que o patch vai pôr abaixo de h (o que pende dela fica tantas vezes maior)
+    void growSpheres(uint32_t h, const V3 &oldPos, double scale = 1.0)
     {
         const M4 w = world(h);
         const std::vector<uint32_t> ch = chain(h);
@@ -628,14 +642,14 @@ struct Stage
         V3 co, lc;
         double ro, lr;
         if (objSphere(h, lc, lr))
-            co = xform(w, lc), ro = lr * maxScale(w);
+            co = xform(w, {{lc.v[0] * scale, lc.v[1] * scale, lc.v[2] * scale}}), ro = lr * scale * maxScale(w);
         else
         {   // nada para medir: a esfera do GROUP mais perto, levada do lugar antigo
             const uint32_t g = groups.back();
             const M4 m = above(g);
             const V3 cw = xform(m, {{f32(g + 0x10), f32(g + 0x14), f32(g + 0x18)}});
             co = {{w.m[3][0], w.m[3][1], w.m[3][2]}};
-            ro = f32(g + 0x1C) * maxScale(m) + dist(cw, oldPos);
+            ro = (f32(g + 0x1C) * maxScale(m) + dist(cw, oldPos)) * std::max(scale, 1.0);
         }
         for (uint32_t g : groups)
         {
@@ -733,7 +747,7 @@ struct Stage
     }
 
     // ------------------------------------------------------------------ edicoes
-    void move(uint32_t h, const V3 &pos, double heading)
+    uint32_t move(uint32_t h, const V3 &pos, double heading)   // devolve a alca: um ROTATE novo quando um TRANSLATE gira
     {
         const M4 before = world(h, false);
         const V3 oldPos = pos3(world(h));
@@ -742,6 +756,7 @@ struct Stage
         for (uint32_t pa : pathsThrough(h)) redo(pa, carry);
         growSpheres(h, oldPos);
         ++stats["moved"];
+        return h;
     }
     void erase(uint32_t h)
     {
@@ -781,7 +796,227 @@ struct Stage
                         ++stats["incoming dominoes cut"];
                     }
     }
-    struct Place { V3 pos; double heading; };
+    // "hp" e "traffic" da entrada ou da copia (lvl.py LevelPatch.extras_of/set_extras, mesma regra); -1: a entrada nao diz
+    struct Extras { int hp = -1, traffic = -1; };
+    struct Place { V3 pos; double heading; Extras ex; double scale = std::nan(""); };
+    // Os DESTRUCTIBLEs do proprio objeto da alca h: a descida para em cada um, entao um destrutivel dentro de um estado de outro (uma
+    // placa no telhado que quebra sozinha) fica com os pontos de vida que tem
+    std::vector<uint32_t> hpTargets(uint32_t h) const
+    {
+        std::vector<uint32_t> out, stack{h};
+        std::unordered_set<uint32_t> seen;
+        while (!stack.empty())
+        {
+            const uint32_t x = stack.back();
+            stack.pop_back();
+            if (!seen.insert(x).second) continue;
+            if (op(x) == DESTRUCTIBLE) out.push_back(x);
+            else for (uint32_t c : children(x)) stack.push_back(c);
+        }
+        std::sort(out.begin(), out.end());
+        return out;
+    }
+    // Os GROUPs de id de pickup abaixo de h que podem virar carro no transito (createPickup: tipos 2, 3, 15 e 26)
+    std::vector<uint32_t> trafficTargets(uint32_t h) const
+    {
+        std::vector<uint32_t> out;
+        for (uint32_t x : subtree(h))
+        {
+            const uint32_t t = ident(x) - kPickupBase;
+            if (op(x) == GROUP && (t == 2 || t == 3 || t == 15 || t == 26)) out.push_back(x);
+        }
+        std::sort(out.begin(), out.end());
+        return out;
+    }
+    Extras extrasOf(const json::Value &e, uint32_t h, const char *where) const
+    {
+        Extras x;
+        if (const json::Value *v = e.get("hp"); v && v->type != json::Value::Null)
+        {
+            if (v->type != json::Value::Int || v->d != std::floor(v->d) || v->d < 1 || v->d > kHpMax)
+                throw PatchError(fmt("%s: \"hp\" e um inteiro de 1 a %u", where, kHpMax));
+            if (hpTargets(h).empty()) throw PatchError(fmt("%s: a alca %07x nao tem destrutivel: \"hp\" e para predios", where, h));
+            x.hp = int(v->d);
+        }
+        if (const json::Value *v = e.get("traffic"); v && v->type != json::Value::Null)
+        {
+            if (v->type != json::Value::Bool) throw PatchError(fmt("%s: \"traffic\" e true ou false", where));
+            if (trafficTargets(h).empty())
+                throw PatchError(fmt("%s: a alca %07x nao e um pickup de carro (tipos 2, 3, 15, 26): \"traffic\" e para esses", where, h));
+            x.traffic = v->b ? 1 : 0;
+        }
+        return x;
+    }
+    // Classe de vida 0 em cada destrutivel de h: `hp` pontos e o dano minimo que ele ja tinha (classe 1 nenhum, 2 e acima 5, classe 0 o
+    // seu): so o numero muda. A classe 0 deixa ligado o bit 3 das flags do Interactive (o AddDestruct o apaga na classe 1), que e o que
+    // deixa um monstro arremessado machucar o predio
+    void setExtras(uint32_t h, const Extras &x)
+    {
+        if (x.hp >= 0)
+        {
+            const std::vector<uint32_t> ds = hpTargets(h);
+            for (uint32_t d : ds)
+            {
+                const uint32_t cls = u16(d + 4);
+                w16(d + 8, uint16_t(cls == 0 ? u16(d + 8) : cls == 1 ? 0 : kHpMinDamage));
+                w16(d + 4, 0), w16(d + 6, uint16_t(x.hp));
+                hpNodes.push_back(d);
+            }
+            stats["hit points set"] += int(ds.size());
+        }
+        if (x.traffic >= 0)
+        {   // bit 0 do id2 do GROUP do id (bit 7 da primeira palavra): carro no transito ou estacionado
+            const std::vector<uint32_t> gs = trafficTargets(h);
+            for (uint32_t g : gs) w32(g, (u32(g) & ~0x80u) | (x.traffic ? 0x80u : 0u));
+            stats["traffic set"] += int(gs.size());
+        }
+    }
+    // ------------------------------------------------------------------ escala (lvl.py LevelPatch.scale_plan e seguintes, mesma regra e mesma ordem)
+    // "scale" da entrada ou da copia: o objeto cresce em torno da alca. O desenho ganha um SCALE uniforme embaixo da alca; a colisao nao
+    // conhece SCALE, entao cada caminho passa a apontar para uma folha com os numeros ja multiplicados (COLL_VOL: d, centro e raio da
+    // esfera; POLY_COLL: vertices e bboxOrigin vezes k, bboxScale sobre k, porque o hdSphereVsPolyCollis quantiza (p - origem) * escala).
+    // So vale sem nada entre a alca e a folha que mova a peca (TRANSLATE, ROTATE, animacao), em folha de triangulos ou planos e fora
+    // de pickup (o monstro o pega e o carrega)
+    static constexpr double kScaleMin = 0.1, kScaleMax = 8.0;
+    static bool scaleBlocker(uint32_t o)
+    {
+        return o == TRANSLATE || o == ROTATE || o == SCALE || o == ANIM_XFORM || o == CHAR_INSTANCE || o == SKEL_BONE || o == ANIM_SCALE;
+    }
+    std::vector<uint32_t> scalePlan(uint32_t h, const char *where) const
+    {
+        for (uint32_t c : children(h))
+            if (op(c) == GROUP && ident(c) >= kPickupLo && ident(c) < kPickupHi)
+                throw PatchError(fmt("%s: a alca %07x e um pickup: \"scale\" e para predios e props", where, h));
+        std::vector<uint32_t> paths = pathsThrough(h);
+        for (uint32_t pa : paths)
+        {
+            const Path p = path(pa);
+            const auto it = std::find(p.nodes.begin(), p.nodes.end(), h);
+            for (auto q = it + 1; q + 1 < p.nodes.end(); ++q)
+                if (scaleBlocker(op(*q)))
+                    throw PatchError(fmt("%s: um caminho de colisao da alca %07x passa por um %s (%07x) abaixo dela, uma peca que anda sozinha: "
+                                         "\"scale\" e para objetos sem uma", where, h, opName(op(*q)), *q));
+            if (op(p.nodes.back()) != COLL_VOL && op(p.nodes.back()) != POLY_COLL)
+                throw PatchError(fmt("%s: a alca %07x tem um %s na colisao (gatilho de camera): \"scale\" nao o escala", where, h, opName(op(p.nodes.back()))));
+        }
+        return paths;
+    }
+    // NaN quando o item nao diz "scale"
+    double scaleOf(const json::Value &e, uint32_t h, const char *where) const
+    {
+        const json::Value *v = e.get("scale");
+        if (!v || v->type == json::Value::Null) return std::nan("");
+        if (v->type != json::Value::Int || !(v->d >= kScaleMin && v->d <= kScaleMax))
+            throw PatchError(fmt("%s: \"scale\" e um numero de %g a %g", where, kScaleMin, kScaleMax));
+        scalePlan(h, where);
+        return v->d;
+    }
+    // Vertices do pool do objeto ob que os triangulos leem (o maior indice + 1)
+    uint32_t poolCount(uint32_t ob) const
+    {
+        const uint32_t polys = ob + 0x18 + 14 * u16(ob + 6), n = u16(ob + 4);
+        uint32_t m = 0;
+        for (uint32_t i = 0; i < n; ++i)
+            for (uint32_t j = 0; j < 3; ++j) m = std::max<uint32_t>(m, u8(polys + 8 * i + j) + 1u);
+        return m;
+    }
+    int64_t leafCloneCost(uint32_t leaf) const
+    {
+        if (op(leaf) == COLL_VOL) return 0x20 + 16 * int64_t(std::max<int>(s16(leaf + 4), 0)) + 15;
+        const uint32_t n = std::min<uint32_t>(u32(leaf + 4), 256);
+        int64_t c = 8 + 4 * int64_t(n) + 15;
+        for (uint32_t k = 0; k < n; ++k)
+        {
+            const uint32_t ob = u32(leaf + 8 + 4 * k) & kMask;
+            c += 0x18 + 14 * int64_t(u16(ob + 6)) + 8 * int64_t(u16(ob + 4)) + 15 + 12 * int64_t(poolCount(ob)) + 15;
+        }
+        return c;
+    }
+    // O mais que a escala de h toma da arena: o SCALE, um clone de cada folha e nos de lista para as celulas das caixas maiores
+    int64_t scaleCost(uint32_t h, double k) const
+    {
+        int64_t cost = 0x2C + 4 * int64_t(childSlots(h).size()) + 15;
+        std::set<uint32_t> leaves;
+        for (uint32_t pa : pathsThrough(h))
+        {
+            const Path p = path(pa);
+            leaves.insert(p.nodes.back());
+            const int n = int(std::floor((std::hypot(p.box.mx.v[0] - p.box.mn.v[0], p.box.mx.v[1] - p.box.mn.v[1]) * std::max(k, 1.0) + 2.0) / cell)) + 2;
+            cost += 8 * int64_t(std::min(n, cols)) * std::min(n, rows);
+        }
+        for (uint32_t lf : leaves) cost += leafCloneCost(lf);
+        return cost;
+    }
+    uint32_t scaledLeaf(uint32_t leaf, double k)
+    {
+        const auto key = std::make_pair(leaf, k);
+        if (const auto it = leafCache.find(key); it != leafCache.end()) return it->second;
+        uint32_t a;
+        if (op(leaf) == COLL_VOL)
+        {
+            const uint32_t n = uint32_t(std::max<int>(s16(leaf + 4), 0)), size = 0x20 + 16 * n;
+            a = alloc(size, 16);
+            copyBytes(a, leaf, size);
+            for (uint32_t off : {0x10u, 0x14u, 0x18u, 0x1Cu}) wf32(a + off, f32(leaf + off) * k);
+            for (uint32_t j = 0; j < n; ++j) wf32(a + 0x2C + 16 * j, f32(leaf + 0x2C + 16 * j) * k);
+        }
+        else
+        {
+            const uint32_t n = std::min<uint32_t>(u32(leaf + 4), 256);
+            a = alloc(8 + 4 * n, 16);
+            copyBytes(a, leaf, 8 + 4 * n);
+            for (uint32_t j = 0; j < n; ++j)
+            {
+                const uint32_t ob = u32(leaf + 8 + 4 * j) & kMask, size = 0x18 + 14 * uint32_t(u16(ob + 6)) + 8 * uint32_t(u16(ob + 4));
+                const uint32_t nb = alloc(size, 16), pc = poolCount(ob), vp = u32(ob) & kMask, pool = alloc(12 * pc, 16);
+                copyBytes(nb, ob, size);
+                for (uint32_t v = 0; v < pc * 3; ++v) wf32(pool + 4 * v, f32(vp + 4 * v) * k);
+                setPtr(nb, pool);
+                for (uint32_t c = 0; c < 3; ++c) wf32(nb + 8 + 4 * c, f32(ob + 8 + 4 * c) * k);
+                wf32(nb + 0x14, f32(ob + 0x14) / k);
+                setPtr(a + 8 + 4 * j, nb);
+            }
+        }
+        leafCache[key] = a;
+        ++stats["leaves scaled"];
+        return a;
+    }
+    // Um SCALE uniforme como unico filho da alca h, com os filhos dela: o desenho (e o dbsTraverse, que da aos destrutiveis a matriz
+    // escalada) cresce em torno da origem da alca, nos eixos do objeto
+    void insertScale(uint32_t h, double k)
+    {
+        const std::vector<uint32_t> slots = childSlots(h), kids = children(h);
+        if (slots.empty()) return;
+        const uint32_t s = alloc(0x2C + 4 * uint32_t(slots.size()), 16);
+        w32(s, SCALE);
+        w32(s + 8, uint32_t(slots.size()));
+        w32(s + 0xC, 1);   // uniforme: o hierScaleNode mantem a tabela de luz
+        for (int i = 0; i < 3; ++i) wf32(s + 0x20 + 4 * i, k);
+        for (size_t j = 0; j < slots.size(); ++j) w32(s + 0x2C + 4 * uint32_t(j), u32(slots[j]));
+        w32(h + 8, 1);
+        setPtr(slots[0], s);
+        for (uint32_t c : kids)
+            for (uint32_t &x : parents[c])
+                if (x == h) x = s;
+        parents[s] = {h};
+        inTree.insert(s);
+    }
+    // Escala o objeto da alca h (a que o move devolveu) por k em torno da origem dela: caminhos com folhas escaladas e caixa e celulas
+    // refeitas, GROUPs acima crescem e o SCALE entra embaixo da alca
+    void setScale(uint32_t h, double k)
+    {
+        if (std::fabs(k - 1.0) < 1e-6) return;
+        for (uint32_t pa : scalePlan(h, "escala"))
+        {
+            const Path p = path(pa);
+            setPtr(pa + 0x24 + 4 * uint32_t(p.len - 1), scaledLeaf(p.nodes.back(), k));
+            redo(pa, identM());
+        }
+        growSpheres(h, pos3(world(h)), k);
+        insertScale(h, k);
+        ++stats["scaled"];
+    }
+
     // Copia de n e dos GROUP/SWITCH/TRANSLATE/ROTATE abaixo dele que nao tem outro pai; o que e compartilhado fica compartilhado
     uint32_t clonePrivate(uint32_t n, bool top)
     {
@@ -1339,6 +1574,7 @@ struct Stage
                 deepClone(order, twins), hc = twins[h];
             parents[hc] = {wrap};
             hc = place(hc, places[i].pos, places[i].heading);
+            setExtras(hc, places[i].ex);
             w32(wrap + 0x24 + 4 * uint32_t(i), hc);   // depois do place: o ROTATE novo toma o lugar do TRANSLATE
             twins[h] = hc;
             const M4 carry = carryFrom(before, hc);
@@ -1357,6 +1593,7 @@ struct Stage
                 ++stats["paths added"];
             }
             growSpheres(hc, oldPos);
+            if (!std::isnan(places[i].scale)) setScale(hc, places[i].scale);
             w16(wrap + 8, uint16_t(2 + i));
             ++stats["copies"];
         }
@@ -1431,6 +1668,81 @@ struct Stage
         log.push_back(fmt("grid: %d x %d celulas (eram %d x %d), x [%.0f, %.0f] y [%.0f, %.0f]; %zu caminhos listados de novo, %d nos novos", nc, nr, oc, orow,
                           lo[0], maxX, lo[1], maxY, cells.size(), stats["new list nodes"] - before));
     }
+    // "walls": "off": as paredes invisiveis de borda deixam de colidir (lvl.py LevelPatch.apply_walls, mesma regra e mesma ordem): os caminhos
+    // POLY_COLL da grade achatados em x ou y (caixa de menos de 10 de espessura), com pelo menos 600 de altura e 1500 de comprimento; a folha
+    // fica sem objetos (numObjs 0, o hdTestNode nao percorre nenhum)
+    void applyWalls(const json::Value &spec)
+    {
+        if (spec.type != json::Value::Str || spec.s != "off") throw PatchError("\"walls\" e \"off\"");
+        std::string names;
+        int n = 0;
+        for (const auto &kv : cells)
+        {
+            const Path p = path(kv.first);
+            if (p.nodes.empty() || op(p.nodes.back()) != POLY_COLL) continue;
+            const double sx = p.box.mx.v[0] - p.box.mn.v[0], sy = p.box.mx.v[1] - p.box.mn.v[1], sz = p.box.mx.v[2] - p.box.mn.v[2];
+            if (std::min(sx, sy) >= 10.0 || sz < 600.0 || std::max(sx, sy) < 1500.0) continue;
+            w32(p.nodes.back() + 4, 0);
+            names += fmt("%s%s=%.0f", n ? ", " : "", sx < sy ? "x" : "y", sx < sy ? p.box.mn.v[0] : p.box.mn.v[1]);
+            ++n;
+        }
+        if (!n) throw PatchError("a fase nao tem paredes de borda");
+        stats["boundary walls off"] += n;
+        log.push_back(fmt("walls: %d paredes de borda desligadas (%s)", n, names.c_str()));
+    }
+    // "clear": "scenery" (lvl.py LevelPatch.apply_clear, mesma regra): o cenario nu da fase deixa de ser desenhado e de colidir. Nu = sem
+    // TRANSLATE, ROTATE, SCALE, SWITCH, DESTRUCTIBLE, INTERACTIVE, CHAR_INSTANCE, ANIM_XFORM, SKEL_BONE ou ANIM_SCALE acima (o que tem
+    // alca e o que e animado fica com a entrada de "objects") e, no desenho, fora do ceu (GROUP de id 2); no com id fica (o jogo o acha
+    // pelo id). Cada OBJECT e PART_EMITTER sai do pai (o slot passa a apontar um no NULL, o no em si nao e escrito: uma copia que o
+    // compartilha o mantem); cada caminho POLY_COLL/COLL_VOL deixa todas as celulas. As cameras (COLL_TRIG) ficam. Roda antes de "objects".
+    static bool coverOp(uint32_t o)
+    {
+        return o == TRANSLATE || o == ROTATE || o == SCALE || o == SWITCH || o == DESTRUCTIBLE || o == INTERACTIVE || o == CHAR_INSTANCE ||
+               o == ANIM_XFORM || o == SKEL_BONE || o == ANIM_SCALE;
+    }
+    void applyClear(const json::Value &spec)
+    {
+        if (spec.type != json::Value::Str || spec.s != "scenery") throw PatchError("\"clear\" e \"scenery\"");
+        std::vector<uint32_t> slots;
+        std::set<uint32_t> seenSlots;
+        std::set<std::pair<uint32_t, bool>> seen;
+        std::function<void(uint32_t, bool)> walk = [&](uint32_t n, bool sky)
+        {
+            if (!seen.insert({n, sky}).second) return;
+            for (uint32_t s : childSlots(n))
+            {
+                if (!ok(s)) continue;
+                const uint32_t c = u32(s) & kMask;
+                if (!c || !ok(c)) continue;
+                const uint32_t o = op(c);
+                if (coverOp(o)) continue;
+                if ((o == OBJECT || o == PART_EMITTER) && !sky && !(u32(c) >> 6) && seenSlots.insert(s).second) slots.push_back(s);
+                else if (o != OBJECT && o != PART_EMITTER) walk(c, sky || (o == GROUP && ident(c) == 2));
+            }
+        };
+        for (uint32_t r : roots)
+            if (op(r) != ANIM_MGR && !coverOp(op(r))) walk(r, op(r) == GROUP && ident(r) == 2);
+        std::vector<uint32_t> paths;
+        for (const auto &kv : cells)
+        {
+            const Path p = path(kv.first);
+            if (p.nodes.empty() || (op(p.nodes.back()) != POLY_COLL && op(p.nodes.back()) != COLL_VOL)) continue;
+            bool covered = false;
+            for (uint32_t n : p.nodes) covered = covered || coverOp(op(n));
+            if (!covered) paths.push_back(kv.first);
+        }
+        if (slots.empty() && paths.empty()) throw PatchError("a fase nao tem cenario nu");
+        if (!slots.empty())
+        {
+            const uint32_t nul = alloc(0x10, 16);
+            w32(nul, NUL);
+            for (uint32_t s : slots) setPtr(s, nul);
+        }
+        for (uint32_t pa : paths) setCells(pa, {});
+        stats["scenery cleared"] += int(slots.size());
+        stats["scenery paths removed"] += int(paths.size());
+        log.push_back(fmt("clear: %zu OBJECTs e emissores do cenario nu fora, %zu caminhos de colisao fora", slots.size(), paths.size()));
+    }
     void apply(const json::Value &patch)
     {
         if (const json::Value *gs = patch.get("grid"))
@@ -1442,6 +1754,28 @@ struct Stage
             catch (const PatchError &e)
             {   // nada foi escrito: os objetos seguem com a grade do disco
                 log.push_back(fmt("grid pulada: %s", e.what()));
+            }
+        }
+        if (const json::Value *ws = patch.get("walls"))
+        {
+            try
+            {
+                applyWalls(*ws);
+            }
+            catch (const PatchError &e)
+            {
+                log.push_back(fmt("walls pulada: %s", e.what()));
+            }
+        }
+        if (const json::Value *cs = patch.get("clear"))
+        {
+            try
+            {
+                applyClear(*cs);
+            }
+            catch (const PatchError &e)
+            {
+                log.push_back(fmt("clear pulada: %s", e.what()));
             }
         }
         const json::Value *objs = patch.get("objects");
@@ -1468,8 +1802,14 @@ struct Stage
                                              pos.v[1], pos.v[2], from.v[0], from.v[1], from.v[2]));
                 if (children(h).size() > 1) log.push_back(fmt("item %zu: a alca %07x segura %zu objetos; vao todos", k, h, children(h).size()));
                 const json::Value *del = e.get("delete");
-                const bool moving = !(del && del->asBool()) && (e.get("pos") || e.get("heading"));
-                const int64_t extra = moving ? moveCost(h, !std::isnan(headingOf(e))) : 0;
+                const bool deleting = del && del->asBool();
+                const bool moving = !deleting && (e.get("pos") || e.get("heading"));
+                int64_t extra = moving ? moveCost(h, !std::isnan(headingOf(e))) : 0;
+                const Extras mine = deleting ? Extras{} : extrasOf(e, h, "entrada");   // "hp" e "traffic": conferidos antes de escrever
+                leafCache.clear();
+                const double sc = deleting ? std::nan("") : scaleOf(e, h, "entrada");   // "scale": o mesmo
+                const auto scaled = [](double k) { return !std::isnan(k) && std::fabs(k - 1.0) > 1e-6; };
+                if (scaled(sc)) extra += scaleCost(h, sc);
                 if (const json::Value *cp = e.get("copies"); cp && cp->type == json::Value::Arr && !cp->arr.empty())
                 {
                     std::vector<Place> places;
@@ -1478,19 +1818,29 @@ struct Stage
                         Place pl;
                         if (!num3(c.get("pos"), pl.pos)) throw PatchError("copia sem \"pos\" [x, y, z]");
                         pl.heading = headingOf(c);
+                        const Extras own = extrasOf(c, h, "uma copia");   // a copia toma o que a entrada diz, salvo o que ela mesma diz
+                        pl.ex = {own.hp >= 0 ? own.hp : mine.hp, own.traffic >= 0 ? own.traffic : mine.traffic};
+                        const double ownScale = scaleOf(c, h, "uma copia");
+                        pl.scale = std::isnan(ownScale) ? sc : ownScale;
+                        if (scaled(pl.scale)) extra += scaleCost(h, pl.scale);
                         places.push_back(pl);
                     }
                     copy(h, places, extra);
                 }
                 else if (extra > int64_t(arenaFree()))
                     throw PatchError(fmt("alca %07x: o movimento leva ate %lld bytes, a arena tem %u livres", h, (long long)extra, arenaFree()));
-                if (del && del->asBool())
+                if (deleting)
                     erase(h);
-                else if (moving)
+                else
                 {
-                    V3 to = pos;
-                    if (e.get("pos") && !num3(e.get("pos"), to)) throw PatchError("\"pos\" nao e [x, y, z]");
-                    move(h, to, headingOf(e));
+                    setExtras(h, mine);
+                    if (moving)
+                    {
+                        V3 to = pos;
+                        if (e.get("pos") && !num3(e.get("pos"), to)) throw PatchError("\"pos\" nao e [x, y, z]");
+                        h = move(h, to, headingOf(e));
+                    }
+                    if (!std::isnan(sc)) setScale(h, sc);
                 }
             }
             catch (const PatchError &err)
@@ -1862,9 +2212,31 @@ void breakTick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         }
     }
 }
+// WOTM_LEVELPATCH_HP=1: no primeiro TheGame::Update depois da carga, a vida que o jogo guardou (Destructible: vida +0x14, maxima +0x18,
+// dano minimo +0x1C, classe +0x30, flags do Interactive +0x4) de cada DESTRUCTIBLE que o "hp" do patch mexeu
+std::vector<uint32_t> g_hpWatch;
+bool g_hpReport = false;   // o diagnostico esta ligado
+void hpTick(uint8_t *rdram)
+{
+    auto rd = [&](uint32_t a) { uint32_t v; std::memcpy(&v, rdram + (a & PS2_RAM_MASK), 4); return v; };
+    auto rf = [&](uint32_t a) { float v; std::memcpy(&v, rdram + (a & PS2_RAM_MASK), 4); return v; };
+    const std::unordered_set<uint32_t> want(g_hpWatch.begin(), g_hpWatch.end());
+    g_hpWatch.clear();
+    size_t found = 0;
+    for (uint32_t i = 1; i < kInteractives; ++i)
+    {
+        const uint32_t d = rd(kInteractivesTab + 4 * i) & kMask;
+        if (!d || rd(d) != 3 || !want.count(rd(d + 0x24) & kMask)) continue;
+        if (++found <= 40)
+            std::fprintf(stderr, "[fase] vida: destrutivel %07x classe %u vida %.0f de %.0f, dano minimo %.0f, flags %x\n", rd(d + 0x24) & kMask,
+                         rd(d + 0x30), rf(d + 0x14), rf(d + 0x18), rf(d + 0x1C), rd(d + 4) & 0xFFFFu);
+    }
+    std::fprintf(stderr, "[fase] vida: %zu de %zu destrutiveis do patch achados na tabela do jogo\n", found, want.size());
+}
 void updateHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
     if (ctx->pc == kTheGameUpdate && !g_breakWraps.empty()) breakTick(rdram, ctx, runtime);
+    if (ctx->pc == kTheGameUpdate && !g_hpWatch.empty()) hpTick(rdram);
     g_origUpdate(rdram, ctx, runtime);
 }
 
@@ -1967,6 +2339,7 @@ void applyFor(uint8_t *rdram)
         st.log.push_back(fmt("parou no meio: %s", e.what()));
     }
     breakArm(st.wraps);
+    if (g_hpReport) g_hpWatch = st.hpNodes;
     try
     {
         applyProps(st, rdram, v, f.host.parent_path().parent_path(), name);
@@ -2068,11 +2441,16 @@ void wotmLevelPatchInstall(PS2Runtime &runtime)
             }
             at = comma + 1;
         }
-        if (!g_breakSteps.empty() && (g_origUpdate = runtime.lookupFunction(kTheGameUpdate)))
-        {
-            runtime.registerFunction(kTheGameUpdate, &updateHook);
-            std::fprintf(stderr, "[fase] WOTM_LEVELPATCH_BREAK: %zu quebras marcadas\n", g_breakSteps.size());
-        }
+    }
+    if (const char *e = std::getenv("WOTM_LEVELPATCH_HP"); e && std::atoi(e) > 0)
+    {
+        g_hpReport = true;
+        std::fprintf(stderr, "[fase] WOTM_LEVELPATCH_HP=1: a vida dos destrutiveis com \"hp\" sai no primeiro quadro da luta\n");
+    }
+    if ((!g_breakSteps.empty() || g_hpReport) && (g_origUpdate = runtime.lookupFunction(kTheGameUpdate)))
+    {
+        runtime.registerFunction(kTheGameUpdate, &updateHook);
+        if (!g_breakSteps.empty()) std::fprintf(stderr, "[fase] WOTM_LEVELPATCH_BREAK: %zu quebras marcadas\n", g_breakSteps.size());
     }
     // o gancho fica mesmo sem patch no boot: o JSON e procurado a cada carga (findPatch)
     if (!(g_orig = runtime.lookupFunction(kDbInitDb)))

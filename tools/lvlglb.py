@@ -131,10 +131,14 @@ def export(st, objs, disc, out, lod=99, on=None):
             return ngp.gs_apply(img, gs, img.u32(node + 8))
         return gs
 
-    def walk(node, m, owner, state, depth=0, gs=ngp.GS_DEFAULT, sky=False):
+    in_clouds = [0]     # > 0 while walking below a CHAR_INSTANCE (op 25)
+
+    def walk(node, m, owner, state, depth=0, gs=ngp.GS_DEFAULT, sky=False, bare=True):
         if depth > 64 or not img.ok(node, 4):
             return
         op = img.u32(node) & 63
+        # bare scenery (what the patch's "clear" takes out, lvl.py scenery_plan): no handle, no cover node above, outside the sky
+        bare = bare and not sky and isinstance(owner, str) and op not in lvl.LevelPatch.CLEAR_COVER
         if not sky and op not in (0, 0x1F, 0x27) and img.u32(node) >> 18 == 2:   # 0x1F/0x27 are destructibles (dbProcInteractive)
             # the sky (viewSetSkyEntry): drawn on its own, around the camera; the transforms above it do not apply
             if "sky" not in handle_node:
@@ -158,13 +162,17 @@ def export(st, objs, disc, out, lod=99, on=None):
                 open_handle(child, ngp.mul(lm, mm) if lm else mm, par)     # nested: relative to the owner's node
                 walk_handle(child, gs)
             elif child not in by_handle:
-                walk(child, mm, owner, state, depth + 1, gs, sky)
+                walk(child, mm, owner, state, depth + 1, gs, sky, bare)
 
         if op == 0:
             mi = mesh(node, gs)
             stats["sky objects"] += bool(sky and mi is not None)
             if mi is not None:
-                new_node({"mesh": mi, "matrix": gl_matrix(m)}, owner_node(owner, state))
+                # a mesh under a CHAR_INSTANCE of the sky is the cloud layer (the editor shows it apart from the dome: extras.clouds);
+                # extras.obj is its OBJECT's address, which the patch's sky models name (editor.py Stages.plans)
+                ex = ({"obj": "%x" % node, **({"clouds": True} if in_clouds[0] else {})} if sky
+                      else {"bare": True} if bare and not img.u32(node) >> 6 else None)
+                new_node({"mesh": mi, "matrix": gl_matrix(m), **({"extras": ex} if ex else {})}, owner_node(owner, state))
                 stats["instances"] += 1
         elif op == 1:
             if img.u16(node + 0xA) & 1:
@@ -192,7 +200,9 @@ def export(st, objs, disc, out, lod=99, on=None):
         elif op == 35:
             kids(node + 0xC, img.u32(node + 4), m)
         elif op == 25:
+            in_clouds[0] += 1
             kids(node + 0x2C, img.u32(node + 0x28), m)
+            in_clouds[0] -= 1
         elif op == 17:
             kids(node + 0xCC, img.u32(node + 4), m)
         elif op == 38:
@@ -207,7 +217,7 @@ def export(st, objs, disc, out, lod=99, on=None):
         elif op == 31:      # DESTRUCTIBLE: every state, each in its owner's "stateN"
             for k in range(min(img.u16(node + 0xA), 8)):
                 walk(img.u32(node + 0xC + 12 * k) & lvl.MASK, m, owner, k if not isinstance(owner, str) else state, depth + 1,
-                     gs, sky)
+                     gs, sky, bare)
 
     def walk_handle(h, gs):
         op = img.u32(h) & 63

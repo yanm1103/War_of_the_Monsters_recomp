@@ -27,7 +27,7 @@ constexpr uint32_t kLowCeiling = 0x1F10000u;   // fim da regiao do NGP da fase e
 constexpr uint32_t kPtsMagic = 0x12282000u, kPtsCap = 0x4000u;
 // Topo da RAM de 64 MB: o ultimo MB e dos ganchos (textos, ViewDef, mechas, _fvector: PS2_RAM_SIZE - 0x1440 em diante) e o MB abaixo
 // dele e a arena dos patches de fase (wotm_levelpatch.inc). As cargas acima de 32 MB (monstros, texturas, .PTR grandes) param antes.
-constexpr uint32_t kLevelArenaSize = 0x100000u, kLevelArena = PS2_RAM_SIZE - 0x100000u - kLevelArenaSize, kHighCeiling = kLevelArena;
+constexpr uint32_t kLevelArenaSize = 0x800000u, kLevelArena = PS2_RAM_SIZE - 0x100000u - kLevelArenaSize, kHighCeiling = kLevelArena;
 
 // Arquivos de formato de tamanho fixo, lidos num buffer do tamanho exato: os do resetcom (RST/*.CHR, .MRS, .GBL, .MDR e os .AIC das
 // pastas das fases) em resetcom::m_data[0xC000], e os pontos (PTS/*) num buffer de 0x4000 do topo da MemoryStack, copiados para
@@ -122,7 +122,7 @@ void searchFile(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt)
 // Carga de arquivo de mod pelo zipInflateAll (fase e menu, compactados) e pelo fileReadf: confere o fim do arquivo ja descompactado
 // contra o teto da regiao. Embaixo de 32 MB o NGP da fase e o menu (NGP, RTX, TEX e .PTR do SHELL) moram em sequencia a partir de
 // 0xA00000 ate 0x1F10000, onde comecam dados vivos (o buffer do zip fica em 0x1F7F840). A copia do SHELL.RTX/LOAD.RTX que o
-// BootInitUserint descompacta em 0x1B7FFF0 nao e lida por ninguem depois. Acima de 32 MB vale o kHighCeiling (fim da RAM menos 2 MB:
+// BootInitUserint descompacta em 0x1B7FFF0 nao e lida por ninguem depois. Acima de 32 MB vale o kHighCeiling (fim da RAM menos 9 MB:
 // a arena dos patches de fase e o MB dos ganchos). Os .PTR dos monstros saem no ptrRelocate; RST, AIC e PTS tem tamanho fixo (fixedCap).
 void checkLoad(uint8_t *rdram, const char *what, const std::string &gameName, uint32_t dst, int32_t size)
 {

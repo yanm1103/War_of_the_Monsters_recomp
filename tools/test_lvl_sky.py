@@ -37,6 +37,30 @@ def domes(st):
     return out
 
 
+def cloud_objects(st):
+    """Addresses of the OBJECTs under the CHAR_INSTANCEs (op 25) of the sky nodes."""
+    img, out = st.img, []
+    for n in sorted(st.root_of):
+        if st.ident(n) == 2 and st.op(n) == 1:
+            stack, seen = [n], set()
+            while stack:
+                x = stack.pop()
+                if x in seen:
+                    continue
+                seen.add(x)
+                if st.op(x) == 25:
+                    sub = list(lvl.children(img, x))
+                    while sub:
+                        y = sub.pop()
+                        if img.u32(y) & 63 == 0:
+                            out.append(y)
+                        else:
+                            sub.extend(lvl.children(img, y))
+                else:
+                    stack.extend(lvl.children(img, x))
+    return out
+
+
 def main():
     cfg = editor.load_config()
     with tempfile.TemporaryDirectory() as tmp:
@@ -98,6 +122,46 @@ def main():
         assert lp.arena_top() == top and not lp.stats["sky domes replaced"]
         chk = editor.check_patch(cfg["disc"], "CANYON1", patch, mod)
         assert not chk["ok"] and any(p["kind"] == "sky" for p in chk["problems"]), chk["problems"]
+
+        # the cloud layer: "sky": "clouds" swaps the OBJECT under the CHAR_INSTANCE's ANIM_XFORM and leaves the dome and the animation
+        shutil.rmtree(os.path.join(mod, "props", "SKYBOX"))
+        lvlprop.build(glb, out, "CENTRAL", "game", 400.0, None, "SKYBOX", None, "auto", editor.stage_root(cfg["disc"], "CENTRAL"))
+        shutil.copytree(out, os.path.join(mod, "props", "SKYBOX"))
+        cpatch = {"objects": [], "props": [{"model": "SKYBOX", "sky": "clouds"}]}
+        st = lvl.Stage("CENTRAL", editor.stage_root(cfg["disc"], "CENTRAL"))
+        old_dome, old_cloud = domes(st), cloud_objects(st)
+        assert len(old_cloud) == 1, old_cloud
+        ctpl = {o: st.img.u32(old_cloud[0] + o) for o in (0, 0xC, 0x2C, 0x40)}
+        lp = lvl.LevelPatch(st)
+        lp.apply(cpatch)
+        lp.apply_props(cpatch, mod)
+        assert not any("skipped" in x for x in lp.log), lp.log
+        img = lp.img
+        new_cloud = cloud_objects(lp.st)
+        assert len(new_cloud) == 1 and new_cloud[0] >= lp.arena, (new_cloud, lp.log)
+        assert img.u32(new_cloud[0]) == ctpl[0] and img.u32(new_cloud[0] + 0x2C) == ctpl[0x2C] and img.u32(new_cloud[0] + 0x40) == ctpl[0x40]
+        assert domes(lp.st) == old_dome, "the dome must stay"
+        assert lp.stats["sky clouds replaced"] == 1 and not lp.stats["sky domes replaced"], dict(lp.stats)
+        def below(n, target, seen=None):
+            seen = set() if seen is None else seen
+            if n == target:
+                return True
+            seen.add(n)
+            return any(c not in seen and below(c, target, seen) for c in lvl.children(img, n))
+        xf = [n for n in lp.st.root_of if lp.st.op(n) == 17 and below(n, new_cloud[0])]
+        assert xf, "the model must hang under the ANIM_XFORM that turns the clouds"
+        chk = editor.check_patch(cfg["disc"], "CENTRAL", cpatch, mod)
+        assert chk["ok"] and "1 cloud layer replaced" in chk["summary"], chk
+        # dome and clouds from one model are refused (the second entry), with a line
+        both = {"objects": [], "props": [{"model": "SKYBOX", "sky": True}, {"model": "SKYBOX", "sky": "clouds"}]}
+        st = lvl.Stage("CENTRAL", editor.stage_root(cfg["disc"], "CENTRAL"))
+        lp = lvl.LevelPatch(st)
+        lp.apply(both)
+        lp.apply_props(both, mod)
+        assert any("sky skipped" in x and "both" in x for x in lp.log), lp.log
+        assert lp.stats["sky domes replaced"] == 1 and not lp.stats["sky clouds replaced"], dict(lp.stats)
+        # a stage's check names every kind of sky change
+        assert lvl.sky_kind({"sky": True}) == "dome" and lvl.sky_kind({"sky": "clouds"}) == "clouds" and not lvl.sky_kind({"sky": "x"})
     print("ok")
 
 

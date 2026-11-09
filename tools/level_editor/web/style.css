@@ -2,8 +2,8 @@
    preference take the light set. --panel / --panel2 / --accent-fg stay as aliases for hud.js and peds.js. */
 :root, :root[data-theme="dark"], :root[data-theme="system"] {
   --bg: #15171B; --surface-1: #1C1F24; --surface-2: #24282E; --surface-3: #2D323A; --input-bg: #16191D;
-  --line: #2E333B; --line-strong: #3D434D;
-  --fg: #E6E9EE; --fg-2: #AEB6C2; --muted: #7F8895; --disabled: #565D68;
+  --line: #2E333B; --line-strong: #3D434D; --control: #6B7380;
+  --fg: #E6E9EE; --fg-2: #AEB6C2; --muted: #8B94A1; --disabled: #565D68;
   --accent: #2563EB; --accent-hover: #3B74F0; --accent-press: #1E4FC4; --accent-text: #7AB0FF;
   --sel: #FFC233; --sel-2: #FF8A3D;
   --sel-bg: color-mix(in srgb, #FFC233 16%, transparent); --sel-bg-2: color-mix(in srgb, #FF8A3D 12%, transparent);
@@ -17,12 +17,12 @@
 }
 :root[data-theme="light"] {
   --bg: #E9ECF0; --surface-1: #FFFFFF; --surface-2: #F4F6F8; --surface-3: #EBEEF2; --input-bg: #FFFFFF;
-  --line: #DDE1E7; --line-strong: #C5CBD3;
-  --fg: #1B1F24; --fg-2: #4A525E; --muted: #6B7380; --disabled: #A3AAB4;
+  --line: #DDE1E7; --line-strong: #C5CBD3; --control: #868E9A;
+  --fg: #1B1F24; --fg-2: #4A525E; --muted: #5F6772; --disabled: #A3AAB4;
   --accent: #2563EB; --accent-hover: #1D55D6; --accent-press: #1846B5; --accent-text: #1D5BD8;
   --sel: #E0A100; --sel-2: #F07A2A;
   --sel-bg: color-mix(in srgb, #F5B400 22%, transparent); --sel-bg-2: color-mix(in srgb, #F07A2A 14%, transparent);
-  --ok: #1F9D63; --changed: #1F9D63; --added: #1D5BD8; --danger: #D13B35; --warn: #B7791F;
+  --ok: #167A4B; --changed: #167A4B; --added: #1D5BD8; --danger: #D13B35; --warn: #8A5A0E;
   --ax-x: #D9443D; --ax-y: #2F74D0; --ax-z: #1F9D63;
   --view: #CAD2DC; --checker-a: #C8CCD2; --checker-b: #E2E5E9;
   --seg-on: var(--surface-1);
@@ -33,12 +33,12 @@
 @media (prefers-color-scheme: light) {
   :root[data-theme="system"] {
     --bg: #E9ECF0; --surface-1: #FFFFFF; --surface-2: #F4F6F8; --surface-3: #EBEEF2; --input-bg: #FFFFFF;
-    --line: #DDE1E7; --line-strong: #C5CBD3;
-    --fg: #1B1F24; --fg-2: #4A525E; --muted: #6B7380; --disabled: #A3AAB4;
+    --line: #DDE1E7; --line-strong: #C5CBD3; --control: #868E9A;
+    --fg: #1B1F24; --fg-2: #4A525E; --muted: #5F6772; --disabled: #A3AAB4;
     --accent: #2563EB; --accent-hover: #1D55D6; --accent-press: #1846B5; --accent-text: #1D5BD8;
     --sel: #E0A100; --sel-2: #F07A2A;
     --sel-bg: color-mix(in srgb, #F5B400 22%, transparent); --sel-bg-2: color-mix(in srgb, #F07A2A 14%, transparent);
-    --ok: #1F9D63; --changed: #1F9D63; --added: #1D5BD8; --danger: #D13B35; --warn: #B7791F;
+    --ok: #167A4B; --changed: #167A4B; --added: #1D5BD8; --danger: #D13B35; --warn: #8A5A0E;
     --ax-x: #D9443D; --ax-y: #2F74D0; --ax-z: #1F9D63;
     --view: #CAD2DC; --checker-a: #C8CCD2; --checker-b: #E2E5E9;
     --seg-on: var(--surface-1);
@@ -102,7 +102,7 @@ button:disabled, button.primary:disabled, button.on:disabled, button.ghost:disab
 /* ------------------------------------------------------------------ fields and pickers */
 /* :where keeps this base at one element's weight, so that a wrapper (.field, .fl) can set the padding and width */
 input:where(:not([type=checkbox]):not([type=radio]):not([type=range])), select {
-  font: inherit; color: var(--fg); background: var(--input-bg); border: 1px solid var(--line-strong);
+  font: inherit; color: var(--fg); background: var(--input-bg); border: 1px solid var(--control);
   border-radius: var(--r-md); height: var(--h-ctl); padding: 0 8px; min-width: 0;
   transition: border-color .12s, box-shadow .12s; }
 input:not([type=checkbox]):not([type=radio]):not([type=range]):focus, select:focus {
@@ -206,9 +206,9 @@ kbd { font: 600 11px/1 var(--font-mono); padding: 2px 5px; border: 1px solid var
 @keyframes dot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 /* in a narrower window the main buttons keep only their icon (the title says what they do), and the game's state its stage */
 @media (max-width: 1439px) {
-  #check .lbl, #save .lbl, #test .lbl, #reload .lbl { display: none; }
-  #check, #save, #test, #reload { width: var(--h-ctl); padding: 0; }
-  #check .ic, #save .ic, #test .ic, #reload .ic { width: 18px; height: 18px; }
+  #save .lbl, #test .lbl, #reload .lbl { display: none; }
+  #save, #test, #reload { width: var(--h-ctl); padding: 0; }
+  #save .ic, #test .ic, #reload .ic { width: 18px; height: 18px; }
 }
 @media (max-width: 1099px) {
   .game-ind .where { display: none; }
@@ -218,14 +218,29 @@ kbd { font: 600 11px/1 var(--font-mono); padding: 2px 5px; border: 1px solid var
 }
 
 /* ------------------------------------------------------------------ panels */
-main { display: grid; grid-template-columns: 44px 272px minmax(0, 1fr) 304px; min-height: 0; }
+main { display: grid; grid-template-columns: 44px var(--left-w, 272px) minmax(0, 1fr) var(--right-w, 304px); min-height: 0; position: relative; }
 aside { background: var(--surface-1); padding: 12px; overflow: auto; min-height: 0; }
 #left { border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
 #right { border-left: 1px solid var(--line); overflow-x: hidden; }
+/* the right panel's two tabs (Selection, Stage) and the Stage tab's rows: a labeled button per tool, with how it saves */
+.rtabs { display: flex; gap: 2px; margin: -4px -4px 12px; border-bottom: 1px solid var(--line); position: sticky; top: -12px; background: var(--surface-1); z-index: 1; padding-top: 4px; }
+.rtab { flex: 1; height: 32px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--fg-2); font-weight: 600; }
+.rtab:hover { color: var(--fg); background: var(--surface-2); }
+.rtab.on { color: var(--accent-text); border-bottom-color: var(--accent); }
+.rtab:focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 75%, transparent); }
+#stageTab .sec-title { margin-top: 14px; }
+#stageTab .sum + .sec-title { margin-top: 0; }
+.srow { display: flex; align-items: center; gap: 10px; width: 100%; height: auto; min-height: 44px; padding: 6px 10px; margin: 0 0 4px; text-align: left; justify-content: flex-start; }
+.srow > .ic { width: 20px; height: 20px; flex: none; color: var(--muted); }
+.srow .st { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.srow .st b { font-weight: 600; color: var(--fg); }
+.srow .st small { color: var(--muted); font-size: 11px; line-height: 14px; overflow-wrap: anywhere; }
+.srow .how { flex: none; font-size: 10px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 0 6px; }
+.how-key { margin-top: 12px; }
 .sec-title { display: flex; align-items: center; gap: 4px; font: 600 11px/16px var(--font-ui); letter-spacing: .06em;
              text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
 
-/* the mode rail: Objects and Pedestrians are modes; Fight HUD opens its dialog */
+/* the mode rail: Objects, Pedestrians, Start points, Power-ups, AI net and Vehicle net are modes */
 #rail { background: var(--bg); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center;
         gap: 4px; padding: 8px 0; min-height: 0; }
 #rail > button { width: 36px; height: 36px; padding: 0; border: 0; background: transparent; color: var(--fg-2); border-radius: var(--r-md); }
@@ -250,37 +265,38 @@ aside { background: var(--surface-1); padding: 12px; overflow: auto; min-height:
 .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--changed); flex: none; }
 
 /* the object list: sections (Buildings, Pickups, Props, Terrain) with a sticky header; one row per object and copy */
-:is(#list, #pedList) { list-style: none; margin: 0 -12px; padding: 0 0 4px; overflow: auto; flex: 1; min-height: 0; }
-:is(#list, #pedList) li.sec { position: sticky; top: 0; z-index: 1; height: 24px; display: flex; align-items: center; gap: 4px; padding: 0 12px 0 8px;
+:is(#list, #pedList, #mkList) { list-style: none; margin: 0 -12px; padding: 0 0 4px; overflow: auto; flex: 1; min-height: 0; }
+:is(#list, #pedList, #mkList) li.sec { position: sticky; top: 0; z-index: 1; height: 24px; display: flex; align-items: center; gap: 4px; padding: 0 12px 0 8px;
                background: var(--surface-1); cursor: pointer; user-select: none; font: 600 11px/16px var(--font-ui); letter-spacing: .06em;
                text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); }
-:is(#list, #pedList) li.sec:hover { color: var(--fg); }
-:is(#list, #pedList) li.sec .ic { width: 16px; height: 16px; }
-:is(#list, #pedList) li.sec .n { margin-left: auto; font-variant-numeric: tabular-nums; letter-spacing: 0; }
-:is(#list, #pedList) li.sec .has { width: 6px; height: 6px; border-radius: 50%; background: var(--sel); margin-left: 4px; }
-:is(#list, #pedList) li.it { height: var(--h-row); display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: center; gap: 8px;
+:is(#list, #pedList, #mkList) li.sec:hover { color: var(--fg); }
+:is(#list, #pedList, #mkList) li.sec .ic { width: 16px; height: 16px; }
+:is(#list, #pedList, #mkList) li.sec .n { margin-left: auto; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+:is(#list, #pedList, #mkList) li.sec .has { width: 6px; height: 6px; border-radius: 50%; background: var(--sel); margin-left: 4px; }
+:is(#list, #pedList, #mkList) li.it { height: var(--h-row); display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: center; gap: 8px;
               padding: 0 12px; cursor: pointer; white-space: nowrap; }
-:is(#list, #pedList) li.it:hover { background: var(--surface-2); }
-:is(#list, #pedList) li.it > .k { width: 16px; height: 16px; color: var(--muted); }
-:is(#list, #pedList) li.it .h { overflow: hidden; text-overflow: ellipsis; color: var(--fg); font-weight: 500; }
-:is(#list, #pedList) li.it.rule .h { color: var(--fg-2); font-weight: 400; }
-:is(#list, #pedList) li.it.copy { padding-left: 30px; }
-:is(#list, #pedList) li.it.copy .h { color: var(--fg-2); font-weight: 400; }
-:is(#list, #pedList) li.it .bd { display: inline-flex; gap: 2px; }
-:is(#list, #pedList) li.it .bd .ic { width: 14px; height: 14px; }
-:is(#list, #pedList) li.it .bd .mv { color: var(--changed); } :is(#list, #pedList) li.it .bd .cp { color: var(--added); }
-:is(#list, #pedList) li.it .bd .dl { color: var(--danger); } :is(#list, #pedList) li.it .bd .on { color: var(--muted); }
-:is(#list, #pedList) li.it .hd { color: var(--muted); font: 11px/16px var(--font-mono); opacity: .6; }
-:is(#list, #pedList) li.it:is(:hover, .sel, .sel2) .hd { opacity: 1; }
+:is(#list, #pedList, #mkList) li.it:hover { background: var(--surface-2); }
+/* the keyboard's place in the list: the ring, and a transparent outline that forced-colors turns into a visible one */
+:is(#list, #pedList, #mkList) :is(li.it, li.sec):focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 75%, transparent); outline: 2px solid transparent; outline-offset: -2px; }
+:is(#list, #pedList, #mkList) li.it > .k { width: 16px; height: 16px; color: var(--muted); }
+:is(#list, #pedList, #mkList) li.it .h { overflow: hidden; text-overflow: ellipsis; color: var(--fg); font-weight: 500; }
+:is(#list, #pedList, #mkList) li.it.rule .h { color: var(--fg-2); font-weight: 400; }
+:is(#list, #pedList, #mkList) li.it.copy { padding-left: 30px; }
+:is(#list, #pedList, #mkList) li.it.copy .h { color: var(--fg-2); font-weight: 400; }
+:is(#list, #pedList, #mkList) li.it .bd { display: inline-flex; gap: 2px; }
+:is(#list, #pedList, #mkList) li.it .bd .ic { width: 14px; height: 14px; }
+:is(#list, #pedList, #mkList) li.it .bd .mv { color: var(--changed); } :is(#list, #pedList, #mkList) li.it .bd .cp { color: var(--added); }
+:is(#list, #pedList, #mkList) li.it .bd .dl { color: var(--danger); } :is(#list, #pedList, #mkList) li.it .bd .on { color: var(--muted); }
+:is(#list, #pedList, #mkList) li.it .hd { color: var(--muted); font: 11px/16px var(--font-mono); opacity: .6; }
+:is(#list, #pedList, #mkList) li.it:is(:hover, .sel, .sel2) .hd { opacity: 1; }
 #pedList li.none { padding: 4px 12px 4px 30px; color: var(--muted); font-size: 12px; }
-:is(#list, #pedList) li.it.sel { background: var(--sel-bg); box-shadow: inset 3px 0 0 var(--sel); }
-:is(#list, #pedList) li.it.sel2 { background: var(--sel-bg-2); box-shadow: inset 3px 0 0 var(--sel-2); }
-:is(#list, #pedList) li.it.deleted > :not(.bd) { opacity: .55; }
-:is(#list, #pedList) li.it.deleted .h { text-decoration: line-through; }
+:is(#list, #pedList, #mkList) li.it.sel { background: var(--sel-bg); box-shadow: inset 3px 0 0 var(--sel); }
+:is(#list, #pedList, #mkList) li.it.sel2 { background: var(--sel-bg-2); box-shadow: inset 3px 0 0 var(--sel-2); }
+:is(#list, #pedList, #mkList) li.it.deleted > :not(.bd) { opacity: .55; }
+:is(#list, #pedList, #mkList) li.it.deleted .h { text-decoration: line-through; }
 .list-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 8px; padding-top: 32px;
               color: var(--muted); text-align: center; }
 .list-empty > .ic { width: 28px; height: 28px; }
-#count { font-size: 12px; line-height: 16px; flex: none; }
 
 /* the properties panel */
 #right h2 { margin: 0; font: 600 15px/22px var(--font-ui); overflow-wrap: anywhere; min-width: 0; }
@@ -308,7 +324,7 @@ aside { background: var(--surface-1); padding: 12px; overflow: auto; min-height:
 .p-sub .handle .ic { width: 12px; height: 12px; opacity: 0; transition: opacity .12s; }
 .p-sub .handle:hover .ic, .p-sub .handle:focus-visible .ic { opacity: 1; }
 .p-sub .handle:not([hidden]) + span::before { content: "·"; margin-right: 6px; }
-:is(#list, #pedList) li.it { scroll-margin-top: 24px; }
+:is(#list, #pedList, #mkList) li.it { scroll-margin-top: 24px; }
 /* sections */
 .psec { border-top: 1px solid var(--line); padding: 12px 0; }
 .psec:last-child { padding-bottom: 0; }
@@ -332,12 +348,31 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 .heading-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 .heading-row .lbl { color: var(--muted); width: 58px; flex: none; }
 .heading-row .field { flex: 1; }
+#tiltRow .field > input { padding-left: 22px; }
 .fl { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; margin-top: 8px; }
 .fl:first-of-type { margin-top: 0; }
-.fl > input { width: 100%; }
+.fl > input, .fl > select { width: 100%; }
 .fl > input:disabled { border-style: dashed; }
+.fl.chk { flex-direction: row; align-items: center; }
 .help { color: var(--muted); font-size: 11px; line-height: 16px; margin-top: 4px; }
 /* actions: full-width buttons with their key on the right */
+/* Arrange: the mode picker, then one pane of rows for the mode */
+#secArrange .ar-body { display: flex; flex-direction: column; gap: 8px; }
+#secArrange .ar-body > select { width: 100%; }
+#secArrange .ar-pane { display: flex; flex-direction: column; gap: 8px; }
+#secArrange .ar-pane[hidden] { display: none; }
+#secArrange .ar-row { display: grid; grid-template-columns: 88px 78px 1fr; gap: 8px; align-items: center; }
+#secArrange .ar-row > label { color: var(--fg-2); }
+#secArrange .ar-row > select { grid-column: 2 / -1; width: 100%; }
+#secArrange .ar-row .unit { color: var(--muted); font-size: 12px; line-height: 14px; }
+#secArrange .ar-lbl { color: var(--muted); font-size: 12px; margin-top: 2px; }
+#secArrange .xyz.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#secArrange .ar-btns { display: flex; gap: 6px; }
+#secArrange .ar-btns > button { flex: 1; }
+#secArrange .ar-sw { width: 100%; font-size: 13px; }
+#secArrange .ar-note { margin-top: 0; color: var(--warn); }
+#secArrange .ar-note:empty { display: none; }
+#secArrange .help { margin-top: 0; }
 .actions { display: flex; flex-direction: column; gap: 6px; }
 .actions > button, button.wide { width: 100%; justify-content: flex-start; padding: 0 8px; }
 .actions > button .lbl { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; }
@@ -361,6 +396,7 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 .facts dd.mono { font: 11px/18px var(--font-mono); }
 .facts a { color: var(--accent-text); text-decoration: none; cursor: pointer; }
 .facts a:hover { text-decoration: underline; }
+.facts dd > select { width: 100%; min-width: 0; text-overflow: ellipsis; }
 .facts .hfield { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
 /* nothing selected: what a click does, the stage, where the mod saves, how to start */
 #noSel { font-size: 12px; line-height: 18px; color: var(--fg-2); }
@@ -399,8 +435,10 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 .float .fsep { width: 1px; height: 20px; background: var(--line); margin: 0 3px; flex: none; }
 .float .seg { border-color: transparent; }
 .float .seg > button { height: 24px; }
-#toolBar { top: 8px; left: 8px; }
-#overlay { top: 8px; right: 8px; }
+/* the two bars share one row and wrap onto a second when the view is narrow, so they never cover each other (--vt: that block's height) */
+#viewTop { position: absolute; top: 8px; left: 8px; right: 8px; z-index: 2; display: flex; flex-wrap: wrap; align-items: flex-start;
+           justify-content: space-between; gap: 8px; pointer-events: none; }
+#viewTop > .float { position: static; pointer-events: auto; max-width: 100%; flex-wrap: wrap; }
 #toolBar .field.small-num { width: 56px; margin-left: 2px; }
 #toolBar .field.small-num > input { height: 24px; }
 #toolBar:not(:has(#snap:checked)) .small-num { display: none; }
@@ -419,11 +457,12 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 .float button.ghost:hover { color: var(--fg); }
 .float button:disabled { border-color: transparent; color: var(--disabled); }
 /* the layers menu, under the view bar */
-#layersMenu { top: 48px; right: 8px; z-index: 4; flex-direction: column; align-items: stretch; gap: 4px; padding: 8px 10px; min-width: 210px; }
+#layersMenu { top: calc(var(--vt, 36px) + 12px); right: 8px; z-index: 4; flex-direction: column; align-items: stretch; gap: 4px; padding: 8px 10px; min-width: 210px; }
 #layersMenu .sec-title { margin: 0 0 2px; }
 #layersMenu .switch { height: 28px; }
 #layersMenu .switch .ic { color: var(--muted); }
 #layersMenu .switch .tx { flex: 1; }
+#layersMenu .help { margin: -2px 0 2px 36px; max-width: 230px; }
 /* a narrow view: the bars keep only their icons (each title says what it does) */
 @container (max-width: 820px) {
   .float .lbl { display: none; }
@@ -434,19 +473,38 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 #pedBar { display: contents; }
 /* Add prop: the mod's models for this stage, under the tool bar's button */
 #propBar { display: contents; }
-#propMenu { top: 48px; left: 8px; z-index: 4; flex-direction: column; align-items: stretch; gap: 2px; padding: 8px; width: 280px; }
+/* the Add button: the top of the left panel; the menu floats over the page under it (the app moves it to the body) */
+#leftHead { display: flex; gap: 6px; }
+#leftHead > span { display: contents; }
+#leftHead #addProp { flex: 1; justify-content: flex-start; }
+#leftHead #addProp .chev { margin-left: auto; width: 16px; height: 16px; }
+#leftHead #addProp.on { background: var(--accent-press); border-color: var(--accent-press); }
+#leftHead #pedBar > button { flex: 1; }
+#leftHead #pedBar { display: flex; gap: 6px; flex: 1; }
+#propMenu { position: fixed; z-index: 30; flex-direction: column; align-items: stretch; gap: 2px; padding: 8px; width: 280px; overflow-y: auto; }
+#propMenu kbd { margin-left: auto; }
 #propMenu .sec-title { margin: 0 2px 4px; }
 .gd-pair { display: flex; gap: 8px; }
 .gd-pair input { flex: 1; min-width: 0; }
 .gd-btns { display: flex; gap: 8px; margin: 8px 0; }
-dialog.pal { width: min(560px, 92vw); }
+dialog.pal { width: min(96vw, 2400px); max-width: none; }
+#palList .pal-fold { cursor: pointer; }
+#palList .pal-fold:hover { color: var(--fg, inherit); }
 #palQ { width: 100%; box-sizing: border-box; }
-#palList { display: flex; flex-direction: column; gap: 2px; max-height: 50vh; overflow-y: auto; margin: 8px 0; }
-#palList button { height: auto; min-height: 36px; flex-direction: row; justify-content: flex-start; gap: 10px; text-align: left; }
-#palList button[aria-selected="true"] { background: var(--hover, rgba(128,128,128,.22)); }
-#palList .pal-pic { width: 40px; height: 40px; border-radius: 4px; flex: none; }
-#palList .pal-meta { margin-left: auto; color: var(--muted); font-size: 11px; }
-#palList .pal-h { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-top: 6px; }
+.pal-bar { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+.pal-bar .pal-tab { height: 30px; padding: 0 12px; }
+.pal-bar .pal-tab[aria-pressed="true"] { background: var(--hover, rgba(128,128,128,.22)); border-color: var(--accent, #4c8dff); }
+.pal-bar select { margin-left: auto; max-width: 240px; }
+#palList { display: flex; flex-direction: column; gap: 2px; max-height: calc(100vh - 260px); overflow-y: auto; margin: 8px 0; }
+#palList .pal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; margin-top: 4px; }
+#palList .pal-card { height: auto; min-height: 0; flex-direction: column; justify-content: flex-start; align-items: stretch; gap: 4px; padding: 6px; text-align: left; border: 1px solid transparent; }
+#palList .pal-card[aria-selected="true"] { background: var(--hover, rgba(128,128,128,.22)); border-color: var(--accent, #4c8dff); }
+#palList .pal-pic { width: 100%; aspect-ratio: 1; height: auto; border-radius: 4px; object-fit: contain; display: flex; align-items: center; justify-content: center; background: rgba(128,128,128,.12); }
+#palList .pal-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#palList .pal-meta { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#palList .pal-h { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-top: 6px; display: flex; align-items: center; gap: 4px; }
+#palList .pal-h span { margin-right: auto; }
+#palList .pal-h .pal-pg { min-height: 22px; height: 22px; width: 28px; padding: 0; justify-content: center; font-size: 15px; }
 #pmList { display: flex; flex-direction: column; gap: 2px; max-height: 50vh; overflow-y: auto; }
 #propMenu button.pm-row { height: auto; min-height: 40px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px;
   padding: 4px 8px; text-align: left; }
@@ -456,14 +514,32 @@ dialog.pal { width: min(560px, 92vw); }
 .pm-none { color: var(--muted); font-size: 12px; padding: 4px 6px 6px; line-height: 1.4; }
 .pm-sky { display: flex; align-items: center; gap: 8px; margin: 6px 2px 0; padding-top: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 .pm-sky select { flex: 1; min-width: 0; }
+.pm-sky2 { margin-top: 4px; padding-top: 0; border-top: 0; }
+#pfList { display: flex; flex-direction: column; gap: 2px; max-height: 30vh; overflow-y: auto; }
+.pf-row { display: flex; align-items: stretch; gap: 2px; }
+.pf-row > .pm-row { flex: 1; min-width: 0; }
+.pf-row > .icon { align-self: center; }
+.pf-title { margin-top: 8px !important; padding-top: 8px; border-top: 1px solid var(--line); }
+.pf-tools { display: flex; align-items: center; gap: 6px; margin: 2px 2px 0; }
+.pf-tools .field { width: 104px; flex: none; }
+.pf-tools .field > input { padding-left: 38px; }
 #pmImport { margin-top: 4px; border-top: 1px solid var(--line); border-radius: 0; padding-top: 2px; }
 #propMenu .lbl { display: inline !important; }
 /* the Import a prop dialog */
 #propDlg { width: 460px; }
+/* New terrain */
+#terrainDlg { width: 480px; }
+#terrainDlg .tr-file { display: flex; align-items: center; gap: 10px; margin: 4px 0 8px; }
+#terrainDlg .tr-file .muted { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#terrainDlg .tr-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: var(--r-sm); border: 1px solid var(--line-strong); image-rendering: pixelated; flex: none; }
+#terrainDlg .tr-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+#terrainDlg .tr-grid .fl { margin-top: 0; }
+#terrainDlg .tr-grid input[type=number] { width: 100%; }
+#terrainDlg .tr-info { margin: 6px 0; }
 .ip-file { display: flex; align-items: center; gap: 10px; margin: 4px 0 10px; }
 .ip-file #ipFile { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* notes over the view's upper left (under the tool bar): the mod that wins in the game, what the file keeps */
-#notes { position: absolute; top: 52px; left: 8px; max-width: min(520px, 55%); display: flex; flex-direction: column; gap: 8px; z-index: 2;
+#notes { position: absolute; top: calc(var(--vt, 36px) + 16px); left: 8px; max-width: min(520px, 55%); display: flex; flex-direction: column; gap: 8px; z-index: 2;
          pointer-events: none; }
 #notes > .callout { margin: 0; box-shadow: var(--shadow-pop); pointer-events: auto; }
 /* loading: a veil over the view and a card with a spinner */
@@ -528,6 +604,8 @@ dialog.pal { width: min(560px, 92vw); }
 #status .st + .st:not(.msg) { border-left: 1px solid var(--line); border-radius: 0; }
 #status .st.ok .ic { color: var(--ok); }
 #status .st.err { color: var(--danger); }
+#status .st.budget { font-variant-numeric: tabular-nums; }
+#status .st.budget.warn { color: var(--warn); }
 #status .st.warn .ic { color: var(--warn); }
 #status .st.idle { color: var(--muted); }
 #status .st.save .dot { background: var(--muted); }
@@ -604,8 +682,9 @@ dialog.dlg .callout { font-size: 12px; line-height: 18px; }
 
 /* ------------------------------------------------------------------ the Pedestrians mode (body[data-mode]) */
 /* the left panel: the Objects mode's search, chips and list (.obj), or #pedPanel */
-body[data-mode="peds"] #left > .obj { display: none !important; }
+body[data-mode]:not([data-mode="objects"]) #left > .obj { display: none !important; }
 body:not([data-mode="peds"]) #pedPanel { display: none; }
+body:is(:not([data-kind]), [data-kind=""]) #mkPanel { display: none; }
 #pedPanel { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
 /* the meters: groups and sidewalks against the stage's limits (amber past 90 %, red at the limit), and the people */
 .meters { display: flex; flex-direction: column; gap: 8px; flex: none; padding: 2px 0 10px; border-bottom: 1px solid var(--line); }
@@ -639,6 +718,65 @@ body:not([data-mode="peds"]) #pedPanel { display: none; }
 #pdNote { align-items: center; }
 #pdNote > span { min-width: 0; overflow-wrap: anywhere; }
 button.small-btn { height: 22px; padding: 0 8px; font-size: 12px; flex: none; }
+/* ------------------------------------------------------------------ the marker modes: Start points, Power-ups, AI net, Vehicle net */
+/* the rail: a dot on a mode whose layer has changes that are not saved */
+#rail > button.mode { position: relative; }
+#rail > button.mode.dirty::after { content: ""; position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--changed);
+                                   box-shadow: 0 0 0 2px var(--bg); }
+/* Add: the type of the new marker and the button, on the left panel's head */
+#leftHead #mkBar { display: flex; gap: 6px; flex: 1; min-width: 0; }
+#leftHead #mkBar > select, #leftHead #mkBar > .field { flex: 1; min-width: 0; }
+#leftHead #mkNewNumF > input { padding-left: 40px; }
+#leftHead #mkBar > button { flex: none; }
+#mkPanel { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
+#mkM2[hidden] { display: none; }
+.mk-defaults { display: flex; align-items: center; gap: 6px; flex: none; }
+.mk-defaults > .lbl { color: var(--muted); font-size: 12px; flex: none; }
+.mk-defaults .field { flex: 1; min-width: 0; }
+.mk-defaults .field > input { padding-left: 44px; }
+#mkList li.sec .n.over { color: var(--danger); font-weight: 600; }
+#mkList li.it .k { color: var(--muted); }
+#mkList li.it .bd .dl { color: var(--danger); }
+#mkList li.none { padding: 4px 12px 4px 30px; color: var(--muted); font-size: 12px; }
+/* the foot: whether the layer is saved, where the file is, the errors, and the buttons */
+.mk-foot { flex: none; display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+.mk-foot .muted { font-size: 12px; line-height: 16px; }
+.mk-foot .callout { margin: 0; }
+.mk-state { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 16px; color: var(--fg-2); }
+.mk-state .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
+.mk-state.dirty { color: var(--fg); font-weight: 600; }
+.mk-state.dirty .dot { background: var(--changed); }
+.mk-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.mk-btns > button { flex: 1 1 auto; padding: 0 8px; }
+/* the right panel: a node's links */
+#mkProps select, #mkProps #mkTypeNum { width: 100%; }
+#mkNoSel { font-size: 12px; line-height: 18px; color: var(--fg-2); }
+.mk-links { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.mk-links li { display: grid; grid-template-columns: minmax(0, 1fr) 56px auto auto; gap: 6px; align-items: center; }
+.mk-links li.in { grid-template-columns: minmax(0, 1fr); color: var(--fg-2); font-size: 12px; }
+.mk-links li.inlink { grid-template-columns: minmax(0, 1fr) auto; }
+/* a vehicle net link has two more numbers: the node it goes to and the cut button take the first row, the numbers and Two-way the second */
+.mk-links li.fop { grid-template-columns: 52px 52px minmax(0, 1fr) auto; }
+.mk-links li.fop > .to { grid-column: 1 / 4; grid-row: 1; }
+.mk-links li.fop > .icon { grid-column: 4; grid-row: 1; }
+.mk-links .to { justify-content: flex-start; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px; }
+.mk-links input[type=number] { min-width: 0; width: 100%; padding: 0 4px; }
+.mk-links .two { display: inline-flex; gap: 4px; align-items: center; min-height: 24px; font-size: 12px; color: var(--fg-2); cursor: pointer; }
+.mk-links .none { color: var(--muted); font-size: 12px; display: block; }
+.mk-linkadd { display: flex; gap: 6px; }
+.mk-linkadd > button { flex: 1; justify-content: flex-start; }
+.mk-linkadd > button kbd, .mk-linkrow > button kbd { margin-left: auto; font-size: 10px; padding: 1px 4px; }
+/* the Link tool on the left panel: its button and the option to go on from the node just linked */
+.mk-linkrow { display: flex; align-items: center; gap: 10px; flex: none; }
+.mk-linkrow > button { flex: none; }
+.mk-linkrow > .switch { flex: 1; min-width: 0; }
+#mkLinkHow { flex: none; }
+/* the chip at the pointer in the Link tool: what the click will do */
+.link-chip { position: absolute; left: 0; top: 0; z-index: 3; pointer-events: none; white-space: nowrap; font-size: 12px; line-height: 16px;
+             padding: 2px 8px; border-radius: 10px; color: var(--fg); border: 1px solid var(--accent); will-change: transform;
+             background: color-mix(in srgb, var(--surface-1) 92%, transparent); box-shadow: var(--shadow-1); }
+.link-chip[hidden] { display: none; }
+.link-chip.bad { border-color: var(--danger); color: var(--danger); }
 /* People and Width: a slider and its number */
 .slide-row { display: flex; align-items: center; gap: 8px; }
 .slide-row > input[type=range] { flex: 1; min-width: 0; margin: 0; }
@@ -673,3 +811,148 @@ button.small-btn { height: 22px; padding: 0 8px; font-size: 12px; flex: none; }
 #hudDlg label.hud-every { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; color: var(--fg-2); font-size: 12px; cursor: pointer; }
 #hudDlg .dlg-foot { align-items: center; }
 #hudDlg .hud-game { margin-right: auto; font-size: 12px; }
+
+/* the Textures dialog (web/tex.js) */
+#texDlg { width: 920px; max-width: calc(100vw - 32px); }
+#texDlg .tx-nomod { align-items: center; }
+#texDlg .tx-nomod > select { width: 160px; flex: none; }
+#texDlg .tx-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 12px; }
+#texDlg .tx-bar .field { width: 220px; }
+#texDlg .tx-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+#texDlg .tx-none { padding: 24px 0; text-align: center; }
+.tx-card { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: var(--r-md);
+           background: var(--surface-1); transition: background-color .12s; }
+.tx-card.on { border-color: var(--changed); }
+.tx-card.drop { background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: inset 0 0 0 2px var(--accent); }
+.tx-pic { position: relative; aspect-ratio: 1; border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden;
+          background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 12px 12px; }
+.tx-img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.tx-img.px { image-rendering: pixelated; }
+.tx-img.none { display: grid; place-items: center; color: var(--muted); font-size: 11px; background: var(--surface-2); }
+.tx-badges { position: absolute; left: 4px; top: 4px; display: flex; flex-wrap: wrap; gap: 3px; }
+.tx-badges .badge { background: color-mix(in srgb, var(--surface-1) 86%, transparent); }
+.tx-badges .badge.hud { color: var(--fg-2); }
+.tx-badges .badge.grey { color: var(--muted); }
+.tx-name { display: flex; flex-direction: column; min-width: 0; line-height: 16px; }
+.tx-name b { font-weight: 600; }
+.tx-meta { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tx-acts { display: flex; gap: 4px; }
+.tx-acts > button { width: 28px; height: 26px; }
+#texDlg .dlg-foot { align-items: center; }
+#texDlg .tx-game { margin-right: auto; font-size: 12px; }
+
+/* the Test options (web/testopts.js) */
+#testDlg { width: 560px; max-width: calc(100vw - 32px); }
+#testDlg .dlg-body { padding: 8px 20px 12px; }
+#testDlg .sec-title { margin: 14px 0 6px; }
+#testDlg .sec-title:first-child { margin-top: 4px; }
+#testDlg .to-row { display: grid; grid-template-columns: 96px minmax(0, 1.4fr) minmax(0, 1fr); gap: 8px; align-items: center; margin: 6px 0; }
+#testDlg .to-row .to-lbl { color: var(--fg-2); margin: 0; }
+#testDlg .to-row select, #testDlg .to-row input[type=number] { min-width: 0; width: 100%; margin: 0; }
+#testDlg .to-row input[type=number] { width: 5em; }
+#testDlg .to-ring { display: flex; align-items: center; gap: 4px; margin-top: 8px; color: var(--fg-2); }
+#testDlg .to-here { margin-top: 12px; }
+#testDlg .dlg-foot { align-items: center; }
+
+/* the Light and fog panel (web/light.js): a dialog docked at the right, not modal, so the view stays in sight */
+#lightDlg .dlg-body { padding: 12px 16px; }
+#lightDlg .dlg-body > .callout { margin: 0 0 10px; }
+#lightDlg .sec-title { margin: 12px 0 4px; }
+#lightDlg .dlg-body > .lt-fog .sec-title:first-child, #lightDlg .dlg-body > .lt-bg .sec-title:first-child { margin-top: 4px; }
+#lightDlg .lt-hint { font: 400 12px/16px var(--font-ui); text-transform: none; letter-spacing: 0; }
+#lightDlg .lt-row { display: grid; grid-template-columns: 104px 96px 1fr 24px; gap: 8px; align-items: center; margin: 6px 0; }
+#lightDlg .lt-row > label, #lightDlg .lt-light label { margin: 0; display: block; color: var(--fg-2); }
+#lightDlg .lt-row input[type=number] { width: 100%; margin: 0; }
+#lightDlg .lt-row .unit { color: var(--muted); font-size: 12px; }
+#lightDlg input[type=color] { width: 44px; height: 26px; padding: 0; border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+                              background: transparent; cursor: pointer; }
+#lightDlg .lt-light { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 8px; align-items: end; padding: 8px 0;
+                      border-bottom: 1px solid var(--line); }
+#lightDlg .lt-lh { grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; min-height: 26px; }
+#lightDlg .lt-lh > b { font-weight: 600; margin-right: auto; }
+#lightDlg .lt-f { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+#lightDlg .lt-fh { display: flex; align-items: center; justify-content: space-between; gap: 2px; min-height: 24px; }
+#lightDlg .lt-light label { font-size: 12px; margin: 0; color: var(--fg-2); }
+#lightDlg .lt-f > input { width: 100%; margin: 0; }
+#lightDlg .lt-row > .lt-rs.lt-rs { grid-column: 4; }
+#lightDlg .lt-rs { width: 24px; height: 24px; min-width: 24px; padding: 0; color: var(--fg-2); }
+#lightDlg .lt-rs .ic { width: 16px; height: 16px; }
+#lightDlg .lt-rs.lt-rs-all { width: auto; padding: 0 8px 0 4px; gap: 2px; font-size: 12px; }
+#lightDlg .lt-rs[hidden] { display: none; }
+#lightDlg .lt-lab { user-select: none; }
+#lightDlg .lt-dirhint { margin-top: 8px; }
+#lightDlg .lt-warn { margin-top: 10px; color: var(--warn); font-size: 12px; }
+#lightDlg .lt-look > button, #lightDlg .lt-nomod > select { flex: none; }
+#lightDlg .dlg-foot { align-items: center; }
+#lightDlg .lt-game { margin-right: auto; font-size: 12px; }
+/* the ruler's label over the middle of its line (ruler.js) */
+.ruler-label { position: absolute; transform: translate(-50%, -140%); pointer-events: none; z-index: 3; white-space: nowrap;
+               font-size: 12px; line-height: 16px; padding: 3px 9px; border-radius: 12px; color: var(--fg); border: 1px solid var(--line);
+               background: color-mix(in srgb, var(--surface-1) 90%, transparent); backdrop-filter: blur(8px); box-shadow: var(--shadow-1); }
+/* the text over the markers of the view (markerlabels.js): --c is the marker's color */
+.mk-label { position: absolute; left: 0; top: 0; z-index: 1; pointer-events: none; white-space: nowrap; will-change: transform;
+            font-size: 11px; line-height: 14px; padding: 1px 6px 1px 5px; border-radius: 8px; color: var(--fg); border: 1px solid var(--line);
+            border-left: 3px solid var(--c, var(--line)); background: color-mix(in srgb, var(--surface-1) 88%, transparent); box-shadow: var(--shadow-1); }
+.mk-label[hidden] { display: none; }
+.mk-label.num { padding: 0 4px; font: 10px/13px var(--font-mono); font-variant-numeric: tabular-nums; }
+.mk-label.dim { opacity: .65; }
+.mk-label.warn { border-color: var(--warn); color: var(--warn); }
+.mk-label.sel { border-color: var(--c, var(--accent)); border-left-width: 3px; font-weight: 600; }
+.mk-label.hot { color: var(--accent-text); border-color: var(--accent-text); border-left-color: var(--c, var(--accent-text)); z-index: 2; }
+/* a marker as the view draws it: the rows of the lists and the legend (app.js shapeSwatch); --c is its color */
+.shape { display: inline-block; width: 10px; height: 10px; flex: none; background: var(--c); }
+.shape.ball { border-radius: 50%; box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 45%, transparent); }
+.shape.cube { border-radius: 2px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 45%, transparent); }
+.shape.cone { position: relative; width: 11px; height: 12px; clip-path: polygon(50% 0, 100% 100%, 0 100%); background: color-mix(in srgb, var(--fg) 45%, transparent); }
+.shape.cone::before { content: ""; position: absolute; left: 2px; right: 2px; top: 3.5px; bottom: 1.5px; background: var(--c); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+:is(#list, #pedList, #mkList) li.it > .k:has(.shape) { display: inline-flex; align-items: center; justify-content: center; }
+.legend .shape { margin: 0 3px; }
+/* the minimap (minimap.js): lower right of the view; the canvas is 220 x 220 whatever its size on the screen */
+#minimap { position: absolute; right: 8px; bottom: 8px; width: 160px; height: 160px; z-index: 2; cursor: crosshair; touch-action: none;
+           background: color-mix(in srgb, var(--surface-1) 78%, transparent); backdrop-filter: blur(8px); border: 1px solid var(--line);
+           border-radius: var(--r-lg); box-shadow: var(--shadow-pop); }
+#minimap[hidden] { display: none; }
+
+/* the top bar's menus (File, Test): fixed under their button (menu.js moves them to the body) */
+.menu-fixed { position: fixed; z-index: 30; flex-direction: column; align-items: stretch; gap: 2px; padding: 6px; min-width: 200px; }
+.menu-fixed button.wide { height: 32px; }
+.menu-fixed .lbl { display: inline !important; }
+#fileBtn { padding: 0 8px; }
+#fileBtn .chev, #leftHead .chev { width: 16px; height: 16px; }
+/* Test in game with a chevron for Test from here and Test options */
+.split { display: inline-flex; }
+.split > #test { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.split > .split-more { width: 26px; padding: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 1px solid color-mix(in srgb, #000 25%, var(--accent)); }
+.split > .split-more .ic { width: 16px; height: 16px; }
+
+/* the right panel's width is the user's (drag the edge, or the arrow keys on it; double click puts it back) */
+#rightGrip { position: absolute; top: 0; bottom: 0; right: calc(var(--right-w, 304px) - 3px); width: 7px; cursor: ew-resize; z-index: 6; touch-action: none; }
+#rightGrip::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: transparent; transition: background-color .12s; }
+#rightGrip:hover::after, #rightGrip:focus-visible::after, #rightGrip.drag::after { background: var(--accent); width: 2px; left: 2px; }
+#rightGrip:focus-visible { outline: none; }
+/* a tool panel that stays in sight of the view: not modal, it fills the right panel's place (app.js keeps --dock-* in step with it) and takes
+   the right panel's width, at least 400 px, so the camera and the objects stay usable while it is open */
+dialog.dock { position: fixed; inset: var(--dock-top, 44px) 0 auto auto; width: var(--dock-w, 400px); height: var(--dock-h, calc(100vh - 100px)); max-width: none; max-height: none;
+              margin: 0; border-radius: 0; border-left: 1px solid var(--line); box-shadow: none; z-index: 8; }
+dialog.dock > form { height: 100%; max-height: none; }
+dialog.dock .dlg-head { height: 44px; padding-left: 16px; }
+dialog.dock .dlg-body { padding: 12px 16px; overflow-x: hidden; }
+dialog.dock .dlg-foot { padding: 10px 16px; }
+
+/* people who ask the system for less motion get none (the pulse of the game indicator, the fades) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
+}
+/* forced colors (Windows high contrast): focus and the "on" state are drawn with outlines, which the system keeps */
+@media (forced-colors: active) {
+  :focus-visible { outline: 2px solid Highlight !important; outline-offset: 1px; }
+  .tgl:has(> input:checked), .chip:has(input:checked), .rtab.on, #rail > button.on, button.toggle.on, .seg > button.on, #mkLinkTool.on, #mkLink.on { outline: 2px solid Highlight; outline-offset: -2px; }
+  .mk-state .dot, #status .dot, .chip .dot, #rail > button.mode.dirty::after { forced-color-adjust: none; border: 1px solid CanvasText; }
+  .switch input:checked + .track { outline: 2px solid Highlight; }
+}
+
+/* a side panel that is hidden keeps its column at 0 (display none would let the grid shift the others) */
+main.left-off #left, main.right-off #right { visibility: hidden; padding: 0; border: 0; overflow: hidden; }
+#toggleLeft { margin-top: auto; }
+#bar #toggleRight.on { color: var(--accent-text); }
+#toggleLeft[aria-pressed="false"] { color: var(--muted); }

@@ -15,7 +15,7 @@ level patch places in the stage (docs/FORMATS.md, ".NGP image", "Fixups", "Meshe
 - `<NAME>.preview.glb`: the generated packets decoded back (what the game draws), in tools/lvlglb.py's conventions (game units,
   raw GS colors, materials named `tex<texId>`, with no image unless `--preview-tex` embeds the stage's);
 - `prop.json`: stage, textures (slot -> texId), template (rule and the OBJECT it found), bounds, collision, counts.
-`info` loads a prop, relocates it to ADDR (default the level arena, 0x3E00000) and walks it with the readers of ngp.py and
+`info` loads a prop, relocates it to ADDR (default the level arena, 0x3700000) and walks it with the readers of ngp.py and
 vifpkt.py: every node, packet and fixup has to be readable there.
 
 Tree: root GROUP (flags 0x0003, no high byte) -> one OBJECT per texture (more when a texture passes the 13-bit numVerts) +
@@ -34,7 +34,7 @@ is ignored) draws with that stage texture; a material with no image is vertex co
 (baseColorTexture, PNG; JPEG and others need Pillow) is a texture of the prop's own: the image goes beside the files as
 `<NAME>_T<slot>.png` and into the image as a `.TEX` packet of a CT32 copy (power of two, at most 128 a side and the stage's largest
 texture bin: own_packet) with its own gsTexCtx (own_ctx, TEX1 of the stage); the loader gives it a texId past the loaded ones and a
-bin, and the PC draws the PNG in its place. UVs outside 0..1 are clamped (warning). A mesh named `hull_*` is collision (its convex hull becomes a COLL_VOL), `coll_*` too (its triangles become a POLY_COLL, at most 64);
+bin, and the PC draws the PNG in its place. UVs outside 0..1 are clamped (warning). A mesh named `hull_*` is collision (its convex hull becomes a COLL_VOL), `coll_*` too (its triangles become a POLY_COLL with a box tree, up to 16384 of them);
 without either, a box of the visual stands in. `state<N>_*` (destructible states) is refused. Only the standard library: it runs inside the level editor.
 """
 import json
@@ -53,7 +53,7 @@ BASE = 0xA00000
 NAME_RE = re.compile(r"^[A-Z0-9_]{1,8}$")
 UNITS_PER_METER = 18.0
 MAX_NUMVERTS = 0x1FFF          # _hierobject.bits.numVerts, 13 bits
-ARENA = 0x3E00000              # the level patch arena (PS2_RAM_SIZE - 2 MB), info's default address
+ARENA = 0x3700000              # the level patch arena (PS2_RAM_SIZE - 1 MB - its 8 MB), info's default address
 ROOT_FLAGS = 0x0003            # visual + collision, no option byte (hdTraversePath stops at flags & (option << 8))
 COLL_FLAGS = 0x0102            # the GROUP the stages' building collision leaves hang from
 MAX_STATES = 4                 # states of a destructible prop (the .glb's state0_, state1_...)
@@ -63,7 +63,9 @@ DEFAULT_STRENGTH = 2
 COLL_MATID = 1                 # matId of the monsters' and 3-MILE's box hulls
 OP_OBJECT, OP_GROUP, OP_COLL_VOL, OP_POLY_COLL = 0, 1, 10, 42
 POLY_MATID = 0x010A            # matId of the stages' building faces (the same on every triangle of a coll_ mesh)
-MAX_COLL_TRIS = 64             # a coll_ mesh is one POLY_COLL object with no box tree (numBBoxes 0): the game walks every triangle
+MAX_COLL_TRIS = 16384          # triangles of one coll_ mesh (a POLY_COLL leaf of several objects, each with a box tree); the arena decides the rest
+POLY_OBJ_TRIS = 512            # triangles in one POLY_COLL object: the tree's first-child field has 9 bits
+POLY_LEAF_TRIS = 8             # triangles in a leaf of the box tree (the stages' have 1..8; the field holds up to 15)
 OWN_MAX_LOG = 7                # a texture of the prop's own: at most 128 texels a side in the game's copy (the PC draws the PNG)
 OWN_PREVIEW_ID = 1000          # the texIds the preview gives the prop's own textures (1000 + slot: past texInfo[1000])
 TEMPLATE_RULE = "first-object-roundtrip"
@@ -361,12 +363,12 @@ def resample(px, w, h, tw, th):
     return out
 
 
-def own_packet(tw, th, px):
+def own_packet(tw, th, px, hi=False):
     """A .TEX packet (docs/FORMATS.md, ".TEX and .RTX files") of a CT32 texture: descriptor (texId and bin 0: the loader
     writes them), DMA ret tag + VIF DIRECT, the sceGsLoadImage of sceGsSetDefLoadImage (DBP 0: texmActivateTexture writes
     the VRAM slot) and the texels. CT32 has no palette, so nothing goes to the .RTX."""
     import tex
-    pix = tex.encode(px, tex.CT32)
+    pix = tex.encode(px, tex.CT32, hi=hi)
     qwc = len(pix) // 16
     lw, lh = tw.bit_length() - 1, th.bit_length() - 1
     tbw = 1 if tw <= 64 else tw // 64
@@ -441,7 +443,7 @@ def read_glb(path, units, scale=None, height=None, warn=print):
             for prim in mesh.get("primitives", []):
                 for q in glb.accessor(prim["attributes"]["POSITION"]):
                     pts.append(tuple(m[r][0] * q[0] + m[r][1] * q[1] + m[r][2] * q[2] + m[r][3] for r in range(3)))
-            hull_raw.append((sidx, name, pts))
+            hull_raw.append((sidx, name, pts, _coll_mat(low, COLL_MATID)))
             continue
         if low.startswith("coll_"):          # collision by triangles: the mesh's own vertices and faces, no tree
             cv, ct = [], []
@@ -452,7 +454,7 @@ def read_glb(path, units, scale=None, height=None, warn=print):
                 cv += [tuple(m[r][0] * q[0] + m[r][1] * q[1] + m[r][2] * q[2] + m[r][3] for r in range(3)) for q in pos]
                 tr = [tuple(base + i for i in idx[k:k + 3]) for k in range(0, len(idx) - 2, 3)]
                 ct += [(b, a, c) if _det3(m) < 0 else (a, b, c) for a, b, c in tr]
-            coll_raw.append((sidx, name, cv, ct))
+            coll_raw.append((sidx, name, cv, ct, _coll_mat(low, POLY_MATID)))
             continue
         if "skin" in nd:
             raise PropError("mesh %s has a skin: a prop is static (apply the armature in Blender first)" % name)
@@ -462,6 +464,10 @@ def read_glb(path, units, scale=None, height=None, warn=print):
             if prim.get("mode", 4) != 4:
                 raise PropError("mesh %s: primitive mode %d (triangles only)" % (name, prim["mode"]))
             key, factor = _material_key(glb, prim, warn)
+            # a material the stage drew with no blending (tools/lvlglb.py: extras.gs.blend null) has a vertex alpha the GS ignored,
+            # and a prop draws with the template's ABE: the alpha goes to the GS's opaque (0x80) or the building shows through
+            gsx = ((glb.j.get("materials") or [{}])[prim["material"]].get("extras") or {}).get("gs") if "material" in prim else None
+            opaque_a = units == "game" and isinstance(gsx, dict) and gsx.get("blend") is None
             at = prim["attributes"]
             pos = glb.accessor(at["POSITION"])
             nrm = glb.accessor(at["NORMAL"]) if "NORMAL" in at else None
@@ -480,6 +486,8 @@ def read_glb(path, units, scale=None, height=None, warn=print):
                     n = tuple(nm[r][0] * q[0] + nm[r][1] * q[1] + nm[r][2] * q[2] for r in range(3))
                 t = uv[v] if uv is not None else None
                 c = tuple(col[v]) + ((1.0,) if len(col[v]) == 3 else ()) if col is not None else None
+                if c is not None and opaque_a:
+                    c = c[:3] + (0x80 / 255,)
                 return wp, n, t, c, factor
             lst = raw.setdefault(bucket, {}).setdefault(key, [])
             for k in range(0, len(idx) - 2, 3):
@@ -518,10 +526,10 @@ def read_glb(path, units, scale=None, height=None, warn=print):
     stats = {"degenerate": 0, "triangles": 0, "hulls": [], "colls": [], "lift": zlift, "declared": sorted(declared), "more": {}}
     per = {si: {"by_key": {}, "hulls": [], "colls": []} for si in sorted(declared)}
     per.update({b: {"by_key": {}, "hulls": [], "colls": []} for b in raw if not isinstance(b, int)})
-    for si, cname, cverts, ctris in coll_raw:
-        per[si]["colls"].append((cname, [place(q) for q in cverts], ctris))
-    for si, hname, hpts in hull_raw:
-        per[si]["hulls"].append((hname, [place(q) for q in hpts]))
+    for si, cname, cverts, ctris, cmat in coll_raw:
+        per[si]["colls"].append((cname, [place(q) for q in cverts], ctris, cmat))
+    for si, hname, hpts, hmat in hull_raw:
+        per[si]["hulls"].append((hname, [place(q) for q in hpts], hmat))
     for si, sd in sorted(raw.items(), key=lambda kv: (not isinstance(kv[0], int), str(kv[0]))):
         out = per[si]["by_key"]
         for key, tris in sd.items():
@@ -903,38 +911,169 @@ def hull_volume(mb, planes, pts, matid=COLL_MATID):
     return cv, lo, hi
 
 
-def poly_coll(mb, verts, tris):
-    """POLY_COLL (op 42) of one object with no box tree: `verts` (local floats, at most 256) and `tris` (index triples). The
-    triangle's bbox bits are all ones (the query never rejects one on them); matId POLY_MATID. Returns (leaf, lo, hi)."""
-    used = sorted({i for t in tris for i in t})
+def poly_bbox_bits(tri):
+    """The u16 of a POLY_COLL triangle that `hdSphereVsPolyCollis` rejects it with: per axis, the index (0..2) of the vertex with the
+    smallest coordinate (bits 0..5: x, y, z) and of the one with the largest (bits 6..11). The query skips the triangle when the
+    swept box is outside those two vertices' coordinates, so 0xFFFF (index 3 = the always-zero fourth index byte) would reject
+    every query that does not hold vertex 0."""
+    bits = 0
+    for c in range(3):
+        bits |= min(range(3), key=lambda i: tri[i][c]) << (2 * c)
+        bits |= max(range(3), key=lambda i: tri[i][c]) << (6 + 2 * c)
+    return bits
+
+
+def _coll_mat(low, default):
+    """The matId a collision mesh asks for in its name: hull_m20c_... or coll_m10a_... (hex; the surface word, kind in the high byte:
+    2 is a wall the monsters climb, 1 a floor), else `default`."""
+    m = re.match(r"(?:hull|coll)_m([0-9a-f]{1,4})(?:_|$)", low)
+    return int(m.group(1), 16) if m else default
+
+
+def _tri_groups(verts, tris):
+    """`tris` cut in pieces a POLY_COLL object can hold (at most POLY_OBJ_TRIS triangles and 256 distinct vertices each): halves
+    along the longest axis of the triangle centers until both limits hold, so each piece is a compact block of the mesh."""
+    used = {i for t in tris for i in t}
+    if len(tris) <= POLY_OBJ_TRIS and len(used) <= 256:
+        return [tris]
+    cen = [[sum(verts[i][c] for i in t) / 3.0 for c in range(3)] for t in tris]
+    ax = max(range(3), key=lambda c: max(q[c] for q in cen) - min(q[c] for q in cen))
+    order = sorted(range(len(tris)), key=lambda k: cen[k][ax])
+    h = len(order) // 2
+    if h == 0:
+        raise PropError("a coll_ triangle uses more than 256 vertices")
+    return _tri_groups(verts, [tris[k] for k in order[:h]]) + _tri_groups(verts, [tris[k] for k in order[h:]])
+
+
+def _poly_tree(pts, tris):
+    """The box tree of the game's POLY_COLL objects over `tris` (index triples into `pts`): (origin, scale, nodes, order). Leaves hold at
+    most POLY_LEAF_TRIS triangles, a node's two children are consecutive, `order` is the triangle order the leaves' ranges need, and a
+    node is [min xyz, max xyz, leaf?, first, count] in s16 units of (p - origin) * scale, rounded outward (the query rounds its own box
+    outward by one more). The origin is the middle of the vertices' box and the scale spreads its longest side over 32768, as the
+    stages' own trees do."""
+    lo = [min(q[c] for q in pts) for c in range(3)]
+    hi = [max(q[c] for q in pts) for c in range(3)]
+    org = [_f32(0.5 * (a + b)) for a, b in zip(lo, hi)]
+    scale = _f32(32768.0 / max(max(b - a for a, b in zip(lo, hi)), 1.0))
+    tb = [([min(pts[i][c] for i in t) for c in range(3)], [max(pts[i][c] for i in t) for c in range(3)]) for t in tris]
+    cen = [[0.5 * (a + b) for a, b in zip(*bb)] for bb in tb]
+
+    def quant(bb):
+        return ([max(-32768, math.floor((bb[0][c] - org[c]) * scale) - 1) for c in range(3)],
+                [min(32767, math.ceil((bb[1][c] - org[c]) * scale) + 1) for c in range(3)])
+    nodes, order, queue = [None], [], [(0, list(range(len(tris))))]
+    while queue:
+        n, ids = queue.pop(0)
+        bb = ([min(tb[k][0][c] for k in ids) for c in range(3)], [max(tb[k][1][c] for k in ids) for c in range(3)])
+        mn, mx = quant(bb)
+        if len(ids) <= POLY_LEAF_TRIS:
+            nodes[n] = [mn, mx, True, len(order), len(ids)]
+            order += ids
+            continue
+        ax = max(range(3), key=lambda c: max(cen[k][c] for k in ids) - min(cen[k][c] for k in ids))
+        ids = sorted(ids, key=lambda k: cen[k][ax])
+        h = len(ids) // 2
+        first = len(nodes)
+        nodes[n] = [mn, mx, False, first, 2]
+        nodes += [None, None]
+        queue += [(first, ids[:h]), (first + 1, ids[h:])]
+    if len(nodes) > 512:
+        raise PropError("a coll_ box tree of %d nodes (at most 512)" % len(nodes))
+    return org, scale, nodes, order
+
+
+def poly_tree_query(img, obj, qmin, qmax):
+    """The triangle indices the game's `hdSphereVsPolyCollis` would test for the swept box (qmin, qmax) in the object's local space
+    (the object at `obj` in `img`): the tree's leaves the box reaches, or every triangle when the object has no tree."""
+    npol, nb = img.u16(obj + 4), img.u16(obj + 6)
+    if not nb:
+        return list(range(npol))
+    org = [img.f32(obj + 8 + 4 * c) for c in range(3)]
+    sc = img.f32(obj + 0x14)
+    lo = [max(-32768, min(32767, int((qmin[c] - org[c]) * sc) - 1)) for c in range(3)]
+    hi = [max(-32768, min(32767, int((qmax[c] - org[c]) * sc) + 1)) for c in range(3)]
+    out, stack = [], [0]
+    while stack:
+        a = obj + 0x18 + 14 * stack.pop()
+        mn = [struct.unpack_from("<h", img.d, a + 2 * c - img.base)[0] for c in range(3)]
+        mx = [struct.unpack_from("<h", img.d, a + 6 + 2 * c - img.base)[0] for c in range(3)]
+        if any(hi[c] < mn[c] or mx[c] < lo[c] for c in range(3)):
+            continue
+        bits = img.u16(a + 12)
+        first = (bits >> 5) & 0x1FF
+        if bits & 1:
+            out += range(first, first + ((bits >> 1) & 0xF))
+        else:
+            stack += [first, first + 1]
+    return out
+
+
+def verify_poly_leaf(img, leaf):
+    """Raises PropError unless every triangle of the POLY_COLL leaf is among the ones `poly_tree_query` returns for the box of that
+    triangle alone (so no query that touches a triangle can miss it) and each tree leaf range is inside the object's triangles."""
+    for k in range(img.u32(leaf + 4)):
+        o = img.u32(leaf + 8 + 4 * k) & 0x0FFFFFFF
+        vp, npol, nb = img.u32(o) & 0x0FFFFFFF, img.u16(o + 4), img.u16(o + 6)
+        polys = o + 0x18 + 14 * nb
+        for n in range(nb):
+            bits = img.u16(o + 0x18 + 14 * n + 12)
+            first, cnt = (bits >> 5) & 0x1FF, (bits >> 1) & 0xF
+            if bits & 1 and (not cnt or first + cnt > npol) or not bits & 1 and first + 1 >= nb:
+                raise PropError("POLY_COLL object 0x%X: node %d points outside it" % (o, n))
+        for i in range(npol):
+            idx = [img.u8(polys + 8 * i + j) for j in range(3)]
+            pts = [tuple(img.f32(vp + 12 * v + 4 * c) for c in range(3)) for v in idx]
+            lo = [min(q[c] for q in pts) for c in range(3)]
+            hi = [max(q[c] for q in pts) for c in range(3)]
+            if i not in poly_tree_query(img, o, lo, hi):
+                raise PropError("POLY_COLL object 0x%X: triangle %d is not reached by its own box" % (o, i))
+
+
+def poly_coll(mb, verts, tris, matid=None):
+    """POLY_COLL (op 42) of `verts` (local floats) and `tris` (index triples): one object per block of at most POLY_OBJ_TRIS triangles and
+    256 vertices, each with the box tree the game's query walks (`_poly_tree`; a block of POLY_LEAF_TRIS or fewer triangles has none,
+    the query then tests them all). The triangle's bbox bits are the vertex indices of its extremes (`poly_bbox_bits`); matId
+    POLY_MATID. Returns (leaf, lo, hi)."""
     if not tris:
         raise PropError("a coll_ mesh with no triangles")
     if len(tris) > MAX_COLL_TRIS:
         raise PropError("a coll_ mesh has %d triangles; at most %d (it is a collision shape: simplify it)" % (len(tris), MAX_COLL_TRIS))
-    if len(used) > 256:
-        raise PropError("a coll_ mesh uses %d vertices; at most 256" % len(used))
-    remap = {v: k for k, v in enumerate(used)}
-    pts = [verts[v] for v in used]
-    lo = [min(q[c] for q in pts) for c in range(3)]
-    hi = [max(q[c] for q in pts) for c in range(3)]
-    ctr = [0.5 * (a + b) for a, b in zip(lo, hi)]
-    pool = mb.alloc(12 * len(pts), 16)
-    for k, q in enumerate(pts):
-        mb.raw(pool + 12 * k, struct.pack("<3f", *q))
-    obj = mb.alloc(0x18 + 8 * len(tris), 16)
-    mb.ptr_to(obj, pool, keep_high=False)
-    mb.u16(obj + 4, len(tris))
-    mb.u16(obj + 6, 0)
-    for c in range(3):
-        mb.f(obj + 8 + 4 * c, ctr[c])
-    mb.f(obj + 0x14, max(math.dist(ctr, q) for q in pts))
-    for k, (a, b, c) in enumerate(tris):
-        mb.raw(obj + 0x18 + 8 * k, bytes((remap[a], remap[b], remap[c], 0)) + struct.pack("<HH", POLY_MATID, 0xFFFF))
-    leaf = mb.alloc(0x10, 16)
+    mid = POLY_MATID if matid is None else matid
+    objs, allp = [], []
+    for g in _tri_groups(verts, tris):
+        used = sorted({i for t in g for i in t})
+        remap = {v: k for k, v in enumerate(used)}
+        pts = [verts[v] for v in used]
+        allp += pts
+        lt = [(remap[a], remap[b], remap[c]) for a, b, c in g]
+        if len(lt) > POLY_LEAF_TRIS:
+            org, scale, nodes, order = _poly_tree(pts, lt)
+        else:
+            org = [0.5 * (min(q[c] for q in pts) + max(q[c] for q in pts)) for c in range(3)]
+            scale, nodes, order = max(math.dist(org, q) for q in pts), [], list(range(len(lt)))
+        pool = mb.alloc(12 * len(pts), 16)
+        for k, q in enumerate(pts):
+            mb.raw(pool + 12 * k, struct.pack("<3f", *q))
+        obj = mb.alloc(0x18 + 14 * len(nodes) + 8 * len(lt), 16)
+        mb.ptr_to(obj, pool, keep_high=False)
+        mb.u16(obj + 4, len(lt))
+        mb.u16(obj + 6, len(nodes))
+        for c in range(3):
+            mb.f(obj + 8 + 4 * c, org[c])
+        mb.f(obj + 0x14, scale)
+        for k, (mn, mx, is_leaf, first, cnt) in enumerate(nodes):
+            mb.raw(obj + 0x18 + 14 * k, struct.pack("<3h3hH", *mn, *mx, (first << 5) | (cnt << 1) | (1 if is_leaf else 0)))
+        base = obj + 0x18 + 14 * len(nodes)
+        for k, ti in enumerate(order):
+            a, b, c = lt[ti]
+            mb.raw(base + 8 * k, bytes((a, b, c, 0)) + struct.pack("<HH", mid, poly_bbox_bits([pts[a], pts[b], pts[c]])))
+        objs.append(obj)
+    leaf = mb.alloc(8 + 4 * len(objs), 16)
     mb.u32(leaf, OP_POLY_COLL)
-    mb.u32(leaf + 4, 1)
-    mb.ptr_to(leaf + 8, obj, keep_high=False)
-    return leaf, lo, hi
+    mb.u32(leaf + 4, len(objs))
+    for k, obj in enumerate(objs):
+        mb.ptr_to(leaf + 8 + 4 * k, obj, keep_high=False)
+    return leaf, [min(q[c] for q in allp) for c in range(3)], [max(q[c] for q in allp) for c in range(3)]
 
 
 def box_hull(mb, lo, hi, matid=COLL_MATID):
@@ -1018,13 +1157,24 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
     imgs = sorted({k[1] for k in by_key if k[0] == "img"})
     if imgs:
         glb = ngpmesh.Glb(glb_path)
+        gsraw = bool((glb.j.get("asset", {}).get("extras") or {}).get("gsRaw"))
         max_bytes = max(sz for _n, sz in stage_tex_sizes(disc, stage))
         tex1 = stage_tex1(st.img, objs)
         for idx in imgs:
             data, mime, iname = glb_image(glb, idx)
             w, h, px, png = decode_image(data, mime)
+            hi = False
+            if gsraw:
+                # the image is a stage texture with the GS's raw alpha (tools/lvlglb.py). Past 0x80 (most of the game's: 0..0xFF, drawn
+                # with a vertex alpha around 0x42) it stays raw, and the PC reads the PNG raw because the CT32 copy passes 0x80
+                # too; up to 0x80 the PNG goes to the usual scale (255 = 0x80) that the PC reads and the CT32 copy comes back from
+                hi = any(c[3] > 0x80 for c in px)
+                if not hi:
+                    import tex
+                    px = [c[:3] + (255 if c[3] >= 128 else c[3] * 2,) for c in px]
+                    png = tex.png_bytes(w, h, px)
             tw, th = own_size(w, h, max_bytes)
-            pkt = own_packet(tw, th, resample(px, w, h, tw, th) if (tw, th) != (w, h) else px)
+            pkt = own_packet(tw, th, resample(px, w, h, tw, th) if (tw, th) != (w, h) else px, hi)
             at = mb.alloc(len(pkt), 0x80)
             mb.raw(at, pkt)
             slot = len(textures)
@@ -1074,15 +1224,15 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
         if si == 0:
             lo, hi = slo, shi
         hs, ps = [], []
-        for hname, hpts in hl:
+        for hname, hpts, hmat in hl:
             planes = convex_planes(hpts)
-            cv, hlo, hhi = hull_volume(mb, planes, hpts)
-            hs.append({"mesh": hname, "node": "0x%X" % cv, "planes": len(planes),
+            cv, hlo, hhi = hull_volume(mb, planes, hpts, hmat)
+            hs.append({"mesh": hname, "node": "0x%X" % cv, "planes": len(planes), "matId": hmat,
                        "min": [round(x, 4) for x in hlo], "max": [round(x, 4) for x in hhi]})
             log("collision hull %s: %d planes" % (hname, len(planes)))
-        for cname, cverts, ctris in cl:
-            leaf, plo, phi = poly_coll(mb, cverts, ctris)
-            ps.append({"mesh": cname, "node": "0x%X" % leaf, "triangles": len(ctris),
+        for cname, cverts, ctris, cmat in cl:
+            leaf, plo, phi = poly_coll(mb, cverts, ctris, cmat)
+            ps.append({"mesh": cname, "node": "0x%X" % leaf, "triangles": len(ctris), "matId": cmat,
                        "min": [round(x, 4) for x in plo], "max": [round(x, 4) for x in phi]})
             log("collision triangles %s: %d" % (cname, len(ctris)))
         cvs = [int(h["node"], 16) for h in hs + ps]
@@ -1337,6 +1487,8 @@ def check(prop, at=ARENA, log=print):
             if n in first:
                 pts += [(v.x, v.y, v.z) for v in md.tris]
         elif op in (OP_COLL_VOL, OP_POLY_COLL) and n in first:
+            if op == OP_POLY_COLL:
+                verify_poly_leaf(img, n)
             hulls.append(lvl.aabb(lvl.leaf_points(img, n)))
     lo = [min(p[c] for p in pts) for c in range(3)]
     hi = [max(p[c] for p in pts) for c in range(3)]
@@ -1466,6 +1618,46 @@ def preview(prop, st, disc, out, textures=False):
         g.j["nodes"].append({"name": "obj_%x" % (n - BASE), "mesh": len(g.j["meshes"]) - 1})
         top["children"].append(len(g.j["nodes"]) - 1)
     g.write(out)
+
+
+# ---------------------------------------------------------------- generated floor
+
+FLOOR_DROP = 0.6      # the visible plate sits this far under the stage's own floor, so the two never fight for the pixel
+FLOOR_COLOR = (0.09, 0.09, 0.1)     # the plate's COLOR_0 (linear, Blender; the game gets 0.34 of full light): a dark asphalt gray
+
+
+def floor_glb(half_x, half_y):
+    """A binary glTF of a flat floor centered on the origin, half sizes in game units (the file is in Blender meters, Y up, so a build
+    with units "blender" and no scale gives them back): a visible plate just under z 0 (mesh `vis`) and the same slab as collision
+    (mesh `coll_floor`, two triangles facing up)."""
+    hx, hy = half_x / UNITS_PER_METER, half_y / UNITS_PER_METER
+    quad = lambda y: [(-hx, y / UNITS_PER_METER, -hy), (hx, y / UNITS_PER_METER, -hy), (hx, y / UNITS_PER_METER, hy), (-hx, y / UNITS_PER_METER, hy)]
+    meshes = (("vis", quad(-FLOOR_DROP)), ("coll_floor", quad(0.0)))      # y in game units here
+    tris = [0, 2, 1, 0, 3, 2]
+    blob, views, accs, ms, nodes = b"", [], [], [], []
+    for name, pts in meshes:
+        parts = [(struct.pack("<12f", *[c for p in pts for c in p]), 5126, 4, "VEC3", 34962,
+                  ([min(p[i] for p in pts) for i in range(3)], [max(p[i] for p in pts) for i in range(3)])),
+                 (struct.pack("<6H", *tris), 5123, 6, "SCALAR", 34963, None)]
+        if name == "vis":       # a color: with none the game draws the plate white (an untextured vertex color of 0x80 is full light)
+            parts.append((struct.pack("<12f", *FLOOR_COLOR * 4), 5126, 4, "VEC3", 34962, None))
+        for data, ctype, count, typ, target, mm in parts:
+            views.append({"buffer": 0, "byteOffset": len(blob), "byteLength": len(data), "target": target})
+            blob += data + bytes((-len(data)) % 4)
+            acc = {"bufferView": len(views) - 1, "componentType": ctype, "count": count, "type": typ}
+            if mm:
+                acc["min"], acc["max"] = mm
+            accs.append(acc)
+        attrs = {"POSITION": len(accs) - len(parts)}
+        if name == "vis":
+            attrs["COLOR_0"] = len(accs) - 1
+        ms.append({"primitives": [{"attributes": attrs, "indices": len(accs) - len(parts) + 1}]})
+        nodes.append({"mesh": len(ms) - 1, "name": name})
+    js = json.dumps({"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": list(range(len(nodes)))}], "nodes": nodes,
+                     "meshes": ms, "accessors": accs, "bufferViews": views, "buffers": [{"byteLength": len(blob)}]}).encode()
+    js += b" " * ((-len(js)) % 4)
+    return (struct.pack("<4sII", b"glTF", 2, 12 + 8 + len(js) + 8 + len(blob)) + struct.pack("<I4s", len(js), b"JSON") + js
+            + struct.pack("<I4s", len(blob), b"BIN\0") + blob)
 
 
 # ---------------------------------------------------------------- command line

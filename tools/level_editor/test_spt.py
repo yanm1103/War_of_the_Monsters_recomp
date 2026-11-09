@@ -1,0 +1,184 @@
+"""Test: the editor's start points (.SPT): the codec in tools/lvl.py (read_spt, build_spt) and editor.stage_spt / save_spt for a game
+stage and for a custom stage. Needs the game disc configured in the editor; writes only into a temporary mods folder.
+Run: python tools/level_editor/test_spt.py
+"""
+import json
+import os
+import shutil
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE)))
+sys.path.insert(0, HERE)
+import editor   # noqa: E402
+import lvl      # noqa: E402
+
+
+def main():
+    cfg = dict(editor.load_config())
+    # the codec: the disc's own file reads and writes back byte for byte (w and the 0x3C byte are kept)
+    disc = os.path.join(editor.stage_root(cfg["disc"], "CENTRAL"), "PTS", "CENTRAL.SPT")
+    pts = lvl.read_spt(disc)
+    assert len(pts) == 11 and {p["list"] for p in pts} <= {0, 1, 2, 3}, pts
+    assert lvl.build_spt(pts) == open(disc, "rb").read(), "round trip"
+    # a heading keeps 1.41 degrees, and -90 and 270 are the same byte
+    p = lvl.build_spt([{"list": 2, "pos": [1.0, 2.0, 3.0], "heading": -90.0, "snap": True}])
+    assert p[8 + 0x2D] == round(270 * 255 / 360) and p[8 + 0x2E] == 1 and p[8 + 0x2C] == 2
+    assert abs(lvl.spt_heading(p[8 + 0x2D]) + 90.0) < 1.5
+    for bad in ({"list": 4, "pos": [0, 0, 0]}, {"list": 0, "pos": [0, 0]}, {"list": 0, "pos": [0, 0, float("nan")]},
+                {"list": True, "pos": [0, 0, 0]}):
+        try:
+            lvl.build_spt([bad])
+        except ValueError:
+            continue
+        raise AssertionError("accepted %r" % (bad,))
+    try:
+        lvl.build_spt([{"list": 0, "pos": [0, 0, 0]}] * 256)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("256 points accepted")
+    # the .PUP codec: the disc's file round-trips byte for byte; limits
+    pup = os.path.join(editor.stage_root(cfg["disc"], "CENTRAL"), "PTS", "CENTRAL.PUP")
+    pp = lvl.read_pup(pup)
+    assert len(pp) == 35 and all(0 <= p["type"] < len(lvl.PUP_TYPES) for p in pp), len(pp)
+    assert lvl.build_pup(pp) == open(pup, "rb").read(), "pup round trip"
+    for bad in ({"type": 20, "pos": [0, 0, 0]}, {"type": 0, "pos": [0, 0]}, {"type": 0, "pos": [0, 0, 0], "flags": 256}):
+        try:
+            lvl.build_pup([bad])
+        except ValueError:
+            continue
+        raise AssertionError("accepted %r" % (bad,))
+    tmp = tempfile.mkdtemp(prefix="spttest_")
+    try:
+        cfg["mods"] = tmp
+        os.makedirs(os.path.join(tmp, "M"))
+        # a game stage with no file in the mod: the disc's points; saving makes mods/M/PTS/CENTRAL.SPT; reset takes it away
+        r = editor.stage_spt(cfg, "M", "CENTRAL")
+        assert r["source"] == "disc" and len(r["points"]) == 11 and r["caps"] == [1, 2, 20, 20], r
+        mine = [{"list": 0, "pos": [10.0, 20.0, 30.0], "heading": 45.0, "snap": False},
+                {"list": 1, "pos": [0.0, 0.0, 5.0], "heading": 0.0, "snap": True},
+                {"list": 1, "pos": [50.0, 0.0, 5.0], "heading": 180.0, "snap": True},
+                {"list": 1, "pos": [90.0, 0.0, 5.0], "heading": 0.0, "snap": True}]
+        out = editor.save_spt(cfg, {"mod": "M", "name": "central", "points": mine})
+        f = os.path.join(tmp, "M", "PTS", "CENTRAL.SPT")
+        assert os.path.isfile(f) and out["source"] == "mod" and len(out["points"]) == 4, out
+        assert len(out["warnings"]) == 1 and "List 1" in out["warnings"][0], out["warnings"]     # 3 points, room for 2
+        assert abs(out["points"][0]["heading"] - 45.0) < 1.5 and out["points"][1]["snap"] is True
+        out = editor.save_spt(cfg, {"mod": "M", "name": "CENTRAL", "reset": True})
+        assert not os.path.exists(f) and out["source"] == "disc", out
+        # no mod chosen on a game stage: reading gives the disc's, writing is refused
+        assert editor.stage_spt(cfg, "", "CENTRAL")["source"] == "disc"
+        try:
+            editor.save_spt(cfg, {"mod": "", "name": "CENTRAL", "points": mine})
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("saved with no mod")
+        # a custom stage keeps its points in its own folder, whatever mod the editor has chosen
+        sd = os.path.join(tmp, "M", "stages", "mycity")
+        os.makedirs(sd)
+        json.dump({"id": "mycity", "name": "MY CITY", "base": "CENTRAL"}, open(os.path.join(sd, "stage.json"), "w"))
+        r = editor.stage_spt(cfg, "", "MYCITY")
+        assert r["source"] == "disc" and len(r["points"]) == 11, r
+        out = editor.save_spt(cfg, {"mod": "", "name": "MYCITY", "points": mine[:2]})
+        assert os.path.isfile(os.path.join(sd, "MYCITY.SPT")) and out["source"] == "mod" and len(out["points"]) == 2, out
+        assert not os.path.exists(os.path.join(tmp, "M", "PTS")), "a custom stage wrote into the mod's PTS"
+        # power-ups: same routes with kind PUP, in the mod's PTS/<STAGE>.PUP, apart from the start points
+        r = editor.stage_spt(cfg, "M", "CENTRAL", "PUP")
+        assert r["source"] == "disc" and len(r["points"]) == 35 and r["caps"] == [100] and len(r["lists"]) == 20, r["source"]
+        out = editor.save_spt(cfg, {"mod": "M", "name": "CENTRAL", "points": [{"type": 8, "pos": [1.0, 2.0, 3.0], "flags": 7}] * 101}, "PUP")
+        assert os.path.isfile(os.path.join(tmp, "M", "PTS", "CENTRAL.PUP")) and len(out["points"]) == 101 and len(out["warnings"]) == 1, out
+        assert editor.stage_spt(cfg, "M", "CENTRAL")["source"] == "disc"           # the .SPT is untouched
+        out = editor.save_spt(cfg, {"mod": "M", "name": "CENTRAL", "reset": True}, "PUP")
+        assert out["source"] == "disc" and not os.path.exists(os.path.join(tmp, "M", "PTS")), out["source"]
+        out = editor.save_spt(cfg, {"mod": "", "name": "MYCITY", "points": [{"type": 0, "pos": [0, 0, 0]}]}, "PUP")
+        assert os.path.isfile(os.path.join(sd, "MYCITY.PUP")) and out["source"] == "mod", out
+        try:
+            editor.point_kind("PED")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("kind PED accepted")
+        # the vehicle net: every disc .FOP reads, rebuilds and reads back the same net, and an unchanged net rebuilds to the same records
+        # (up to the unused link slots, which the game never reads)
+        vdir = os.path.join(editor.stage_root(cfg["disc"], "CENTRAL"), "PTS")
+        seen = 0
+        for f in sorted(os.listdir(vdir)):
+            if f.upper().endswith(".FOP"):
+                p = os.path.join(vdir, f)
+                net = lvl.read_fop(p)
+                assert all(0 <= n["type"] <= 3 for n in net), f
+                tmpf = os.path.join(tmp, "x.FOP")
+                open(tmpf, "wb").write(lvl.build_fop(net))
+                assert lvl.read_fop(tmpf) == net, f
+                seen += 1
+        assert seen >= 10, seen
+        net = lvl.read_fop(os.path.join(vdir, "VEGAS.FOP"))
+        assert {n["type"] for n in net} == {0, 1, 2, 3} and any(l["drop"] == 26 for n in net for l in n["links"]), "VEGAS: all four types, a 26 drop"
+        r = editor.stage_spt(cfg, "M", "CENTRAL", "FOP")
+        assert r["source"] == "disc" and len(r["points"]) == 60 and r["caps"] == [255, 0, 6] and len(r["lists"]) == 4, r["source"]
+        net = [{"pos": [0.0, 0.0, 0.0], "type": 1, "links": [{"to": 1, "width": 12, "drop": 26}]},
+               {"pos": [100.0, 0.0, 50.0], "type": 1, "links": [{"to": 0, "width": 12, "drop": 26}]}]
+        out = editor.save_spt(cfg, {"mod": "M", "name": "CENTRAL", "points": net}, "FOP")
+        assert os.path.isfile(os.path.join(tmp, "M", "PTS", "CENTRAL.FOP")) and out["source"] == "mod" and not out["warnings"], out
+        assert out["points"][0]["links"] == [{"to": 1, "width": 12, "drop": 26}] and out["points"][1]["pos"] == [100.0, 0.0, 50.0]
+        raw = open(os.path.join(tmp, "M", "PTS", "CENTRAL.FOP"), "rb").read()
+        assert len(raw) == 8 + 2 * 64 and raw[8 + 0x2C] == 12 and raw[8 + 0x33] == 26 and raw[8 + 0x32] == 1, raw[:80].hex()
+        assert len(editor.save_spt(cfg, {"mod": "M", "name": "CENTRAL", "points": [dict(net[0], links=[])]}, "FOP")["warnings"]) == 1     # one node: nowhere to drive
+        for bad in ([{"pos": [0, 0, 0], "links": [{"to": 5, "width": 1}]}], [{"pos": [0, 0, 0], "links": [{"to": 0, "width": 1}]}],
+                    [{"pos": [0, 0, 0], "links": [{"to": 0, "width": 1}] * 7}], [{"pos": [0, 0, 0], "type": 4}],
+                    [{"pos": [0, 0, 0], "links": [{"to": 0, "width": 1, "drop": 256}]}]):
+            try:
+                lvl.build_fop(bad)
+            except ValueError:
+                continue
+            raise AssertionError("accepted %r" % (bad,))
+        editor.save_spt(cfg, {"mod": "M", "name": "CENTRAL", "reset": True}, "FOP")
+        assert not os.path.exists(os.path.join(tmp, "M", "PTS", "CENTRAL.FOP"))
+        # the AI net: every disc .AIP reads, rebuilds and reads back the same net; paths counted as the game does
+        ddir = os.path.join(editor.stage_root(cfg["disc"], "CENTRAL"), "PTS")
+        want = {"ISLAND": 418, "TOKYO": 304, "VEGAS": 187}
+        for f in sorted(os.listdir(ddir)):
+            if f.upper().endswith(".AIP"):
+                p = os.path.join(ddir, f)
+                net = lvl.read_aip(p)
+                tmpf = os.path.join(tmp, "x.AIP")
+                open(tmpf, "wb").write(lvl.build_aip(net))
+                again = lvl.read_aip(tmpf)
+                assert [(n["pos"], n["type"], n["links"]) for n in net] == [(n["pos"], n["type"], n["links"]) for n in again], f
+                if f[:-4] in want:
+                    assert lvl.aip_paths(net) == want[f[:-4]], (f, lvl.aip_paths(net))
+        r = editor.stage_spt(cfg, "M", "CENTRAL", "AIP")
+        assert r["source"] == "disc" and len(r["points"]) == 27 and r["caps"] == [255, 450, 6], r["source"]
+        net = [{"pos": [0.0, 0.0, 0.0], "type": 0, "links": [{"to": 1, "width": 20}]},
+               {"pos": [100.0, 0.0, 0.0], "type": 0, "links": [{"to": 0, "width": 20}]}]
+        out = editor.save_spt(cfg, {"mod": "M", "name": "CENTRAL", "points": net}, "AIP")
+        assert os.path.isfile(os.path.join(tmp, "M", "PTS", "CENTRAL.AIP")) and out["source"] == "mod" and not out["warnings"], out
+        assert lvl.aip_paths(out["points"]) == 1
+        # the Link tool's result: 1 and 2 joined both ways, then 2 to 3 both ways with its own width, 3 to 1 one way
+        net = [{"pos": [0.0, 0.0, 0.0], "type": 0, "links": [{"to": 1, "width": 20}]},
+               {"pos": [100.0, 0.0, 0.0], "type": 0, "links": [{"to": 0, "width": 20}, {"to": 2, "width": 33}]},
+               {"pos": [200.0, 0.0, 0.0], "type": 0, "links": [{"to": 1, "width": 33}, {"to": 0, "width": 9}]}]
+        out = editor.save_spt(cfg, {"mod": "M", "name": "CENTRAL", "points": net}, "AIP")
+        assert [n["links"] for n in out["points"]] == [n["links"] for n in net], out["points"]
+        assert lvl.aip_paths(out["points"]) == 3, lvl.aip_paths(out["points"])         # two two-way links and one one-way
+        for bad in ([{"pos": [0, 0, 0], "links": [{"to": 5, "width": 1}]}], [{"pos": [0, 0, 0], "links": [{"to": 0, "width": 1}]}],
+                    [{"pos": [0, 0, 0], "links": [{"to": 0, "width": 1}] * 7}], [{"pos": [0, 0, 0], "type": 256}]):
+            try:
+                lvl.build_aip(bad)
+            except ValueError:
+                continue
+            raise AssertionError("accepted %r" % (bad,))
+        editor.save_spt(cfg, {"mod": "M", "name": "CENTRAL", "reset": True}, "AIP")
+        # the editor's pedestrian panel and check read the same file through points_root
+        root = editor.points_root(cfg, "MYCITY")
+        assert len(lvl.read_spt(os.path.join(root, "PTS", "CENTRAL.SPT"))) == 2
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    print("ok")
+
+
+if __name__ == "__main__":
+    main()

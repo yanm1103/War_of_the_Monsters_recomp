@@ -190,7 +190,11 @@ Reader: `python tools/lvl.py collision <STAGE> [--check]` (`--check` redoes ever
   own paths; state 0 always collides, and the broken states of most buildings have none.
 - **Leaves:** `POLY_COLL` (op 42, `_hierpolycollisiongroup`: `numObjs` +4, objects +8; each object has `vertexPool` (+0, local),
   `u16 numPolys` (+4), `u16 numBBoxes` (+6), `bboxOrigin` (+8), `bboxScale` (+0x14), a box tree of 14-byte nodes (+0x18), then
-  8-byte triangles `{u8 idx[4] (3 read), u16 matId, bbox bits}`); `COLL_VOL` (op 10, convex hull: `s16 numPlanes` +4, `matId` +8,
+  8-byte triangles `{u8 idx[4] (3 read), u16 matId, bbox bits}`; the bits are, per axis, the index (0..2) of the triangle's vertex with the
+  smallest coordinate (bits 0..5, x y z) and of the one with the largest (bits 6..11), and `hdSphereVsPolyCollis` skips the triangle when the
+  swept box is outside those two vertices, so a wrong value hides the triangle from every query; an object with `numBBoxes` 0 has no box
+  tree and the query walks all its triangles; the tree's shorts are `(p − bboxOrigin) · bboxScale` of the box corners, which
+  `hdSphereVsPolyCollis` redoes for the swept box); `COLL_VOL` (op 10, convex hull: `s16 numPlanes` +4, `matId` +8,
   local sphere +0x10, planes `{n, d}` from +0x20, inside when `n · p < d`); `COLL_TRIG` (op 11, camera trigger: a BSP of 0x20-byte
   nodes at +4, tested by `bspPointTest`). Leaves are read-only and may be shared by several paths.
 - **What a level patch updates:** moving or turning a handle means writing the node and then, for every path that passes through it,
@@ -201,6 +205,15 @@ Reader: `python tools/lvl.py collision <STAGE> [--check]` (`--check` redoes ever
   nodes between can be shared), so that `path[i+1]` stays a child of `path[i]`, as `hdTraversePath` requires of `DESTRUCTIBLE` and
   `SWITCH`. A destructible inside the object must be cloned with its `INTERACTIVE_STATE` and every node above it up to the handle,
   otherwise the copy's path goes through the original's state and collides by the original's damage.
+- **Scaling an object:** the drawing has a `SCALE` node (op 30: `+4` GS context, `+8` numKids, `+0xC` uniform flag (nonzero keeps the
+  light table of the parent), `+0x10` translation applied after the scale, `+0x20` scale x y z, children from `+0x2C`), which
+  `dbsTraverse` also multiplies into the matrix it hands to the destructibles. The collision has no `SCALE`, so a patch puts one
+  `SCALE` (translation 0) as the only child of the handle and points each path of the object at a clone of its leaf with the numbers
+  multiplied by k: a `COLL_VOL` takes `d`, the sphere centre and the sphere radius times k (the normals stay); a `POLY_COLL` object
+  takes a copy of its vertices times k, `bboxOrigin` times k and `bboxScale` over k (the box tree and the triangles are copied
+  unchanged). A path's box then comes from the scaled leaf through the path's own `TRANSLATE`/`ROTATE` nodes, so it only works when
+  there are none between the handle and the leaf (an inner `TRANSLATE` would stay unscaled in the collision), and the path keeps
+  listing the handle, the states and the groups, only its last node changes.
 
 ## Meshes (`HierObject::polyPkt`)
 Reference readers: `tools/ngp.py` (Python, offline, straight from the disc) and `native/wotm_native.hpp` (`decodeObject`, C++, reads EE RAM). Writer: `tools/vifpkt.py` (packet to geometry and back; byte-exact on every packet of the 44 monster `.NGP`).

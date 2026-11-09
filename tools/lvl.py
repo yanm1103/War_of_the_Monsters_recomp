@@ -39,6 +39,12 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 # ------------------------------------------------------------------------------------------------------------- hierarchy
+def sky_kind(e):
+    """What a props entry replaces in the sky: "dome" (`"sky": true`), "clouds" (`"sky": "clouds"`) or "" (it places a prop)."""
+    s = e.get("sky")
+    return "dome" if s is True else "clouds" if s == "clouds" else ""
+
+
 def child_slots(img, n):
     """Addresses of a node's child pointers, as dbsTraverse walks them, plus the DESTRUCTIBLE states and both CONTROL children."""
     u32, u16, u8 = img.u32, img.u16, img.u8
@@ -392,6 +398,11 @@ class Stage:
                     break
         return out
 
+    def hit_points(self, d):
+        """The hit points a DESTRUCTIBLE starts with (Destructibles::AddDestruct: class 0 the node's own, 1 to 5 the table, 6 and over 3000)."""
+        cls = self.img.u16(d + 4)
+        return self.img.u16(d + 6) if cls == 0 else {1: 10, 2: 50, 3: 100, 4: 150, 5: 250}.get(cls, 3000)
+
     def _describe(self, node, kind, through, handle=None):
         img = self.img
         if handle is None:
@@ -406,7 +417,11 @@ class Stage:
              "handle_shared": bool(handle and handle != node and len(children(img, handle)) > 1),
              "nested": any(self.op(a) == 39 for a in self.chain(node)[:-1]),
              "parents": len(self.parents.get(node, [])), "chain": self.chain_str(self.chain(node))}
+        o["scale_no"] = scale_reason(img, handle, through.get(handle, [])) if handle else "it has no handle"     # "" when "scale" works on it
         o["states"] = img.u16((img.u32(node + 0xC) & MASK) + 0xA) if kind == "destr" else 0
+        o["hp"] = self.hit_points(img.u32(node + 0xC) & MASK) if kind == "destr" else None
+        # a pickup that can be a car in the traffic: {"traffic": whether id2 bit 0 is set}
+        o["traffic"] = bool((img.u32(node) >> 7) & 1) if kind == "pickup" and self.ident(node) - PICKUP_BASE in CAR_TYPES else None
         sub = self.subtree(node if (o["handle_shared"] or not handle) else handle)
         c = collections.Counter(self.op(x) for x in sub)
         o.update(n_nodes=len(sub), n_obj=c[0], n_emit=c[22], n_anim=c[25],
@@ -702,7 +717,7 @@ def ped_net_segments(net):
     return out
 
 
-ARENA_SIZE = 0x100000           # the hook's arena for new nodes (wotm_mods_hooks::kLevelArenaSize)
+ARENA_SIZE = 0x800000           # the hook's arena for new nodes (wotm_mods_hooks::kLevelArenaSize)
 ANIM_OPS = (25, 17, 35, 38)     # CHAR_INSTANCE, ANIM_XFORM, SKEL_BONE, ANIM_SCALE: the animated parts
 ANIM_STATE_OPS = (17, 38)       # ANIM_XFORM, ANIM_SCALE: keep per-instance state (visible, rotation, dirty bits) of their CHAR_INSTANCE
 ID2_MAX = 0x7FF                 # ActAnim::ids.anim and _hierhead::id2 have 11 bits
@@ -713,8 +728,35 @@ EXCLUDED_IDS = (0x7D0, 0x898)   # ids dbProcInteractive ignores
 KEEP_DESTR_IDS = (0x1A90, 0x1B58)   # DESTRUCTIBLE id1 here: never loses health (Destructible::takeHit)
 GLOBAL_ACTS = (2, 12, 14)       # ANIM, RUNSCRIPT, GENERICEVENT: they act on something fixed in the level, so a copy drops them
 DOMINO_OFF = 6                  # an action type DelayAction::doIt skips: what a DOMINO aimed at a deleted object becomes
+PICKUP_BASE = 0x1388            # a pickup's type is its id1 minus this (createPickup)
+CAR_TYPES = (2, 3, 15, 26)      # the pickup types whose id GROUP's id2 bit 0 makes a CarPickup (traffic) instead of a parked one
+HP_MAX = 32767                  # Destructible::takeHit computes (int)health * 65535, which overflows over this
+HP_MIN_DAMAGE = 5               # the minimum damage of hit point classes 2 to 6: a hit under it does nothing
 INTERACTIVES = 1024            # Interactives::s_dbInteractive, unchecked
 INTERACTIVE_SPARE = 32          # monsters, helicopters, bugs: what the budget keeps free besides slot 0
+SCALE_MIN, SCALE_MAX = 0.1, 8.0     # the entry's "scale" range
+# nodes a collision path may not cross below a scaled handle: hdTraversePath rebuilds its matrix from TRANSLATE/ROTATE/ANIM_XFORM and
+# knows no SCALE, so the part's offset would stay unscaled in the collision while the drawing scales it
+SCALE_BLOCKERS = (3, 4, 30, 17, 25, 35, 38)
+
+
+def scale_reason(img, h, paths):
+    """Why the object under handle h cannot take a "scale" (the empty string when it can). The drawing scales with a SCALE under the
+    handle, but the collision knows no SCALE (hdTraversePath), so each path takes a leaf with the numbers already multiplied: right
+    only when nothing between the handle and the leaf moves the part (TRANSLATE, ROTATE, an animation), when the leaf holds triangles
+    or planes, and when the object is not a pickup (a monster picks it up and carries it). `paths` are the Path objects through h."""
+    for c in children(img, h):
+        if img.u32(c) & 63 == 1 and PICKUP_IDS[0] <= img.u32(c) >> 18 < PICKUP_IDS[1]:
+            return "it is a pickup (a monster picks it up and carries it)"
+    for p in paths:
+        below = p.nodes[p.nodes.index(h) + 1:] if h in p.nodes else []
+        bad = next((n for n in below[:-1] if img.u32(n) & 63 in SCALE_BLOCKERS), None)
+        if bad is not None:
+            return "a collision path of it goes through a %s (%07x) below the handle, a part that moves on its own" % (
+                OPN.get(img.u32(bad) & 63, img.u32(bad) & 63), bad)
+        if img.u32(p.leaf) & 63 not in (10, 42):
+            return "its collision has a %s (a camera trigger)" % OPN.get(img.u32(p.leaf) & 63, img.u32(p.leaf) & 63)
+    return ""
 
 
 def node_size(img, n):
@@ -788,6 +830,19 @@ def _number(x):
     return isinstance(x, (int, float))
 
 
+def prop_matrix(pos, heading=0.0, pitch=0.0, roll=0.0):
+    """The ROTATE matrix (4 rows of 4, the game's row vectors) of a prop at `pos`: Rx(pitch) * Ry(roll) * Rz(heading), degrees.
+    The model is tipped first (pitch: its nose, +Y, up for +; roll: its top, +Z, toward +X for +), then turned about the vertical by
+    the heading; with pitch and roll 0 it is the plain heading matrix. The hook (wotm_levelprops.inc) writes the same numbers."""
+    cp, sp = math.cos(math.radians(pitch)), math.sin(math.radians(pitch))
+    cr, sr = math.cos(math.radians(roll)), math.sin(math.radians(roll))
+    ch, sh = math.cos(math.radians(heading)), math.sin(math.radians(heading))
+    t = ((cr, 0.0, -sr), (sp * sr, cp, sp * cr), (cp * sr, -sp, cp * cr))      # Rx(pitch) * Ry(roll)
+    rows = [(r[0] * ch - r[1] * sh, r[0] * sh + r[1] * ch, r[2]) for r in t]      # ... * Rz(heading)
+    return ((rows[0][0], rows[0][1], rows[0][2], 0.0), (rows[1][0], rows[1][1], rows[1][2], 0.0),
+            (rows[2][0], rows[2][1], rows[2][2], 0.0), (pos[0], pos[1], pos[2], 1.0))
+
+
 def _child_nocase(d, name):
     """The entry of directory d named `name` without regard to case (the hook's childNoCase), or None."""
     try:
@@ -826,6 +881,9 @@ class LevelPatch:
         self.log = []
         self.redone = {}            # path -> (box, cells, how)
         self.footprints = []        # (convex XY polygon, zmin, zmax) of every solid box in its new place
+        self.fp_index = {}          # path -> its place in footprints (a path redone again, by a scale after a move, replaces its box)
+        self.leaf_cache = {}        # (leaf, scale) -> the scaled clone, for the entry being applied
+        self.leaf_of = {}           # scaled clone -> the leaf it was cloned from (the one the tree still holds)
         self.stats = collections.Counter()
         self.shallow = shallow      # WOTM_LEVELPATCH_SHALLOW: copies share all but the handle and the top state pair
         self.wraps = []             # GROUPs the copies made: child 0 is the original, the others its copies
@@ -865,7 +923,7 @@ class LevelPatch:
         d = self.img.d
         pad = (-(self.img.base + len(d))) % align
         if pad + size > self.arena_free():
-            raise PatchError("the 1 MB arena is full")
+            raise PatchError("the 8 MB arena is full")
         d.extend(bytes(pad + size))
         self.stats["arena bytes"] = self.img.base + len(d) - self.arena
         return self.img.base + len(d) - size
@@ -929,7 +987,12 @@ class LevelPatch:
             wc, how = [ngp.xform(carry, c) for c in corners], "carried"
         bb = aabb(wc)
         if not p.trigger:
-            self.footprints.append((hull2d(wc), bb[0][2], bb[1][2]))
+            fp = (hull2d(wc), bb[0][2], bb[1][2])
+            if pa in self.fp_index:
+                self.footprints[self.fp_index[pa]] = fp
+            else:
+                self.fp_index[pa] = len(self.footprints)
+                self.footprints.append(fp)
         for i in range(3):
             self.wf32(pa + 4 * i, bb[0][i])
             self.wf32(pa + 0xC + 4 * i, bb[1][i])
@@ -958,19 +1021,20 @@ class LevelPatch:
             c, r = _union(c, r, c2, r2)
         return c, r
 
-    def grow_spheres(self, h, old_pos):
-        """The drawing skips a GROUP whose sphere is out of view: grow the ones above h to keep covering what hangs under it."""
+    def grow_spheres(self, h, old_pos, scale=1.0):
+        """The drawing skips a GROUP whose sphere is out of view: grow the ones above h to keep covering what hangs under it.
+        `scale` is the SCALE the patch is about to put under h (what hangs under it gets that much bigger)."""
         img, st = self.img, self.st
         W = self.world(h)
         groups = [g for g in st.chain(h)[:-1] if self.op(g) == 1]
         s = self.obj_sphere(h)
         if s:
-            co, ro = list(ngp.xform(W, s[0])), s[1] * _maxscale(W)
+            co, ro = list(ngp.xform(W, [x * scale for x in s[0]])), s[1] * scale * _maxscale(W)
         else:   # nothing to measure: the nearest GROUP's sphere, carried from the old place
             g = groups[-1]
             M = chain_matrix(img, st.chain(g)[:-1])
             cw = ngp.xform(M, [img.f32(g + 0x10 + 4 * i) for i in range(3)])
-            co, ro = list(W[3][:3]), img.f32(g + 0x1C) * _maxscale(M) + math.dist(cw, old_pos)
+            co, ro = list(W[3][:3]), (img.f32(g + 0x1C) * _maxscale(M) + math.dist(cw, old_pos)) * max(scale, 1.0)
         for g in groups:
             M = chain_matrix(img, st.chain(g)[:-1])
             k = _maxscale(M)
@@ -1059,6 +1123,7 @@ class LevelPatch:
             self.redo(pa, carry)
         self.grow_spheres(h, old_pos)
         self.stats["moved"] += 1
+        return h
 
     def delete(self, h):
         for pa in self.paths_through(h):
@@ -1066,6 +1131,200 @@ class LevelPatch:
             self.stats["paths removed"] += 1
         self.w32(h, (self.img.u32(h) & ~63) | 9)
         self.stats["deleted"] += 1
+
+    # --- hit points and pickup type (the entry's "hp" and "traffic")
+    def hp_targets(self, h):
+        """The DESTRUCTIBLEs under handle h that are the object's own: the walk stops at each one, so a destructible inside a state of
+        another (a sign on a roof that breaks on its own) keeps its hit points."""
+        out, seen, stack = [], set(), [h]
+        while stack:
+            x = stack.pop()
+            if x in seen:
+                continue
+            seen.add(x)
+            if self.op(x) == 31:
+                out.append(x)
+            else:
+                stack.extend(children(self.img, x))
+        return sorted(out)
+
+    def traffic_targets(self, h):
+        """The id GROUPs under handle h of a pickup that can be a car in the traffic (LevelPickups::createPickup: types 2, 3, 15, 26)."""
+        return sorted(x for x in self.st.subtree(h) if self.op(x) == 1 and self.st.ident(x) - PICKUP_BASE in CAR_TYPES)
+
+    def set_hp(self, h, hp):
+        """Hit point class 0 on every destructible of h: `hp` hit points, and the minimum damage it had (class 1 none, 2 and over 5, class 0
+        its own): only the number changes. Class 0 also leaves bit 3 of the Interactive's flags set (AddDestruct clears it for class 1), which
+        is what lets a thrown monster hurt it."""
+        for d in self.hp_targets(h):
+            cls = self.img.u16(d + 4)
+            self.w16(d + 8, self.img.u16(d + 8) if cls == 0 else 0 if cls == 1 else HP_MIN_DAMAGE)
+            self.w16(d + 4, 0)
+            self.w16(d + 6, hp)
+        self.stats["hit points set"] += len(self.hp_targets(h))
+
+    def set_traffic(self, h, traffic):
+        """Bit 0 of the id2 of the pickup's id GROUP (bit 7 of its first word): a car that drives in the traffic, or one parked."""
+        for g in self.traffic_targets(h):
+            self.w32(g, (self.img.u32(g) & ~0x80) | (0x80 if traffic else 0))
+        self.stats["traffic set"] += len(self.traffic_targets(h))
+
+    def set_extras(self, h, spec):
+        """The entry's (or copy's) "hp" and "traffic" on the object under h."""
+        if spec.get("hp") is not None:
+            self.set_hp(h, spec["hp"])
+        if spec.get("traffic") is not None:
+            self.set_traffic(h, spec["traffic"])
+
+    def extras_of(self, e, h, where="entry"):
+        """{"hp", "traffic"} of an entry or copy, checked against what is under h; PatchError before anything is written."""
+        out = {}
+        hp = e.get("hp")
+        if hp is not None:
+            if not (_number(hp) and not isinstance(hp, bool) and 1 <= hp <= HP_MAX and hp == int(hp)):
+                raise PatchError("%s: \"hp\" is a whole number from 1 to %d" % (where, HP_MAX))
+            if not self.hp_targets(h):
+                raise PatchError("%s: handle %07x has no destructible: \"hp\" is for buildings" % (where, h))
+            out["hp"] = int(hp)
+        tr = e.get("traffic")
+        if tr is not None:
+            if not isinstance(tr, bool):
+                raise PatchError("%s: \"traffic\" is true or false" % where)
+            if not self.traffic_targets(h):
+                raise PatchError("%s: handle %07x is not a car pickup (types 2, 3, 15, 26): \"traffic\" is for those" % (where, h))
+            out["traffic"] = tr
+        return out
+
+    # --- scale (the entry's and the copy's "scale")
+    def scale_plan(self, h, where="entry"):
+        """The collision paths through handle h, after checking that its object can be scaled; PatchError before anything is written.
+        The drawing takes a SCALE under the handle; the collision knows no SCALE, so each path gets a leaf with the numbers already
+        multiplied (scale_reason says when that is not right)."""
+        paths = self.paths_through(h)
+        why = scale_reason(self.img, h, [Path(self.img, pa) for pa in paths])
+        if why:
+            raise PatchError("%s: handle %07x: %s, so \"scale\" cannot scale it" % (where, h, why))
+        return paths
+
+    def scale_of(self, e, h, where="entry"):
+        """The entry's (or copy's) "scale" as a float, or None when it names none; checked against what is under h."""
+        k = e.get("scale")
+        if k is None:
+            return None
+        if not (_number(k) and not isinstance(k, bool) and SCALE_MIN <= k <= SCALE_MAX):
+            raise PatchError("%s: \"scale\" is a number from %g to %g" % (where, SCALE_MIN, SCALE_MAX))
+        self.scale_plan(h, where)
+        return float(k)
+
+    def pool_count(self, ob):
+        """Vertices of POLY_COLL object ob that its triangles read (the highest index + 1)."""
+        img = self.img
+        polys = ob + 0x18 + 14 * img.u16(ob + 6)
+        return 1 + max((img.u8(polys + 8 * i + j) for i in range(img.u16(ob + 4)) for j in range(3)), default=-1)
+
+    def leaf_clone_cost(self, leaf):
+        img = self.img
+        if self.op(leaf) == 10:
+            return 0x20 + 16 * max(img.s16(leaf + 4), 0) + 15
+        n = min(img.u32(leaf + 4), 256)
+        cost = 8 + 4 * n + 15
+        for k in range(n):
+            ob = img.u32(leaf + 8 + 4 * k) & MASK
+            cost += 0x18 + 14 * img.u16(ob + 6) + 8 * img.u16(ob + 4) + 15 + 12 * self.pool_count(ob) + 15
+        return cost
+
+    def scale_cost(self, h, k):
+        """The most arena bytes scaling the object under h takes: the SCALE node, one clone of each leaf, new list nodes for the cells
+        the bigger boxes cover."""
+        img, g = self.img, self.st.grid
+        paths = [Path(img, pa) for pa in self.paths_through(h)]
+        cost = 0x2C + 4 * len(child_slots(img, h)) + 15
+        cost += sum(self.leaf_clone_cost(lf) for lf in {p.leaf for p in paths})
+        for p in paths:
+            n = int(math.floor((math.hypot(p.max[0] - p.min[0], p.max[1] - p.min[1]) * max(k, 1.0) + 2.0) / g.cell)) + 2
+            cost += 8 * min(n, g.cols) * min(n, g.rows)
+        return cost
+
+    def scaled_leaf(self, leaf, k):
+        """A clone of a collision leaf whose numbers are multiplied by k about the leaf's origin. A hull (COLL_VOL) keeps its plane
+        normals and takes d, the local sphere's centre and its radius times k. A triangle leaf (POLY_COLL) takes copies of its objects
+        and vertex pools: vertices times k, bboxOrigin times k and bboxScale over k (hdSphereVsPolyCollis quantises a point as
+        (p - bboxOrigin) * bboxScale, so the box tree's shorts stay the same)."""
+        img, base = self.img, self.img.base
+        key = (leaf, k)
+        if key in self.leaf_cache:
+            return self.leaf_cache[key]
+        if self.op(leaf) == 10:
+            n = max(img.s16(leaf + 4), 0)
+            a = self.alloc(0x20 + 16 * n, 16)
+            img.d[a - base:a - base + 0x20 + 16 * n] = img.d[leaf - base:leaf - base + 0x20 + 16 * n]
+            for off in (0x10, 0x14, 0x18, 0x1C):
+                self.wf32(a + off, img.f32(leaf + off) * k)
+            for j in range(n):
+                self.wf32(a + 0x2C + 16 * j, img.f32(leaf + 0x2C + 16 * j) * k)
+        else:
+            n = min(img.u32(leaf + 4), 256)
+            a = self.alloc(8 + 4 * n, 16)
+            img.d[a - base:a - base + 8 + 4 * n] = img.d[leaf - base:leaf - base + 8 + 4 * n]
+            for j in range(n):
+                ob = img.u32(leaf + 8 + 4 * j) & MASK
+                size = 0x18 + 14 * img.u16(ob + 6) + 8 * img.u16(ob + 4)
+                nb = self.alloc(size, 16)
+                img.d[nb - base:nb - base + size] = img.d[ob - base:ob - base + size]
+                pc, vp = self.pool_count(ob), img.u32(ob) & MASK
+                pool = self.alloc(12 * pc, 16)
+                for v in range(pc * 3):
+                    self.wf32(pool + 4 * v, img.f32(vp + 4 * v) * k)
+                self.set_ptr(nb, pool)
+                for c in range(3):
+                    self.wf32(nb + 8 + 4 * c, img.f32(ob + 8 + 4 * c) * k)
+                self.wf32(nb + 0x14, img.f32(ob + 0x14) / k)
+                self.set_ptr(a + 8 + 4 * j, nb)
+        self.leaf_cache[key] = a
+        self.leaf_of[a] = leaf
+        self.stats["leaves scaled"] += 1
+        return a
+
+    def insert_scale(self, h, k):
+        """A uniform SCALE as the only child of handle h, holding h's children: the drawing (and dbsTraverse, which hands the destructibles
+        the scaled matrix) scales about the handle's origin, in the object's own axes."""
+        img, st = self.img, self.st
+        slots = child_slots(img, h)
+        if not slots:
+            return
+        kids = children(img, h)
+        s = self.alloc(0x2C + 4 * len(slots), 16)
+        self.w32(s, 30)
+        self.w32(s + 8, len(slots))
+        self.w32(s + 0xC, 1)            # uniform: hierScaleNode keeps the light table
+        for i in range(3):
+            self.wf32(s + 0x20 + 4 * i, k)
+        for j, sl in enumerate(slots):
+            self.w32(s + 0x2C + 4 * j, img.u32(sl))
+        self.w32(h + 8, 1)
+        self.set_ptr(slots[0], s)
+        for c in kids:
+            st.parents[c] = [s if x == h else x for x in st.parents[c]]
+        st.parents[s] = [h]
+        if h in st.root_of:
+            st.root_of[s] = st.root_of[h]
+        self.through.add(s)
+
+    def set_scale(self, h, k):
+        """Scale the object under handle h (the handle itself, the one `h` returned from move, not the TRANSLATE a ROTATE replaced) by k
+        about its origin: the collision paths take scaled leaves and their boxes and cells are redone, the GROUPs above grow, and a
+        SCALE goes under the handle for the drawing."""
+        if abs(k - 1.0) < 1e-6:
+            return
+        img = self.img
+        paths = self.scale_plan(h)
+        for pa in paths:
+            p = Path(img, pa)
+            self.set_ptr(pa + 0x24 + 4 * (p.length - 1), self.scaled_leaf(p.leaf, k))
+            self.redo(pa, ngp.ident())
+        self.grow_spheres(h, self.world(h)[3][:3], k)
+        self.insert_scale(h, k)
+        self.stats["scaled"] += 1
 
     def reached(self):
         """The nodes dbsTraverse reaches from the roots it walks (dbProcInteractive registers only these)."""
@@ -1517,6 +1776,7 @@ class LevelPatch:
                 hc = twins[h]
             st.parents[hc] = [wrap]
             hc = self.place(hc, pl["pos"], pl.get("heading"))
+            self.set_extras(hc, pl)
             self.w32(wrap + 0x24 + 4 * i, hc)           # after place: a new ROTATE takes the TRANSLATE's place
             twins[h] = hc
             carry = ngp.mul(inv_affine(before), self.world(hc, False))
@@ -1534,6 +1794,8 @@ class LevelPatch:
                     self.unlinked_before.add(np_)
                 self.stats["paths added"] += 1
             self.grow_spheres(hc, old_pos)
+            if pl.get("scale") is not None:
+                self.set_scale(hc, pl["scale"])
             self.w16(wrap + 8, 2 + i)
             self.stats["copies"] += 1
         self.register_instances()
@@ -1590,7 +1852,11 @@ class LevelPatch:
         return False
 
     def path_linked(self, pa):
-        nodes = Path(self.img, pa).nodes
+        nodes = []
+        for n in Path(self.img, pa).nodes:
+            while n in self.leaf_of:        # a scaled leaf stands for the disc's one it was cloned from (a handle scaled twice: a chain)
+                n = self.leaf_of[n]
+            nodes.append(n)
         return all(self._next_to(a, b) for a, b in zip(nodes, nodes[1:]))
 
     def check_copies(self):
@@ -1684,6 +1950,94 @@ class LevelPatch:
         self.log.append("grid: %d x %d cells (was %d x %d), x [%.0f, %.0f] y [%.0f, %.0f]; %d paths listed again, %d new list nodes" % (
             cols, rows, g.cols, g.rows, lo[0], st.grid.max_x, lo[1], st.grid.max_y, len(self.cells), self.stats["new list nodes"] - before))
 
+    WALL_MIN_HEIGHT, WALL_MIN_LENGTH, WALL_MAX_THICK = 600.0, 1500.0, 10.0
+
+    def boundary_walls(self):
+        """The stage's invisible boundary walls: the grid's POLY_COLL paths that are flat in x or y (a box under 10 units thick), at
+        least 600 tall and 1500 long (CENTRAL has four, VEGAS four, CAPITOL two; the other stages none). [(path, leaf)]."""
+        out = []
+        for pa in sorted(self.cells):
+            p = Path(self.img, pa)
+            sx, sy, sz = (p.max[i] - p.min[i] for i in range(3))
+            if self.op(p.leaf) == 42 and min(sx, sy) < self.WALL_MAX_THICK and sz >= self.WALL_MIN_HEIGHT and max(sx, sy) >= self.WALL_MIN_LENGTH:
+                out.append((p, p.leaf))
+        return out
+
+    def apply_walls(self, spec):
+        """The patch's `"walls": "off"`: the boundary walls stop colliding (their leaf gets no objects: the game's polygon query
+        walks none), so a monster can go as far as the floor and the grid reach. PatchError for any other value or a stage with none."""
+        if spec != "off":
+            raise PatchError('"walls" is "off"')
+        walls = self.boundary_walls()
+        if not walls:
+            raise PatchError("the stage has no boundary walls")
+        names = []
+        for p, leaf in walls:
+            self.w32(leaf + 4, 0)
+            sx, sy = p.max[0] - p.min[0], p.max[1] - p.min[1]
+            names.append("%s=%.0f" % (("x", p.min[0]) if sx < sy else ("y", p.min[1])))
+        self.stats["boundary walls off"] += len(walls)
+        self.log.append("walls: %d boundary walls off (%s)" % (len(walls), ", ".join(names)))
+
+    # Nodes that put an object in a handle's care (a prop, a pickup, a destructible, an animated part): what hangs below one belongs to
+    # its entry in "objects", not to the stage's bare scenery.
+    CLEAR_COVER = frozenset((3, 4, 30, 6, 31, 39, 25, 17, 35, 38))
+
+    def scenery_plan(self):
+        """What `"clear": "scenery"` takes out of the stage: ([(parent, slot)] of the OBJECTs and PART_EMITTERs of the bare scenery,
+        [path] of its POLY_COLL and COLL_VOL leaves). Bare means no TRANSLATE, ROTATE, SCALE, SWITCH, DESTRUCTIBLE, INTERACTIVE,
+        CHAR_INSTANCE, ANIM_XFORM, SKEL_BONE or ANIM_SCALE above it and, for the drawing, outside the sky (a GROUP with id 2); a
+        node with an id word (the game finds it by id) stays. The camera triggers (COLL_TRIG) stay."""
+        st, img = self.st, self.img
+        slots, seen_slots, seen = [], set(), set()
+
+        def walk(n, sky):
+            if (n, sky) in seen:
+                return
+            seen.add((n, sky))
+            for s in child_slots(img, n):
+                c = img.u32(s) & MASK
+                if not c or not img.ok(c):
+                    continue
+                op = img.u32(c) & 63
+                if op in self.CLEAR_COVER:
+                    continue
+                if op in (0, 22) and not sky and not img.u32(c) >> 6 and s not in seen_slots:
+                    seen_slots.add(s)
+                    slots.append((n, s))
+                elif op not in (0, 22):
+                    walk(c, sky or (op == 1 and st.ident(c) == 2))
+        for r in sorted(st.roots):
+            if st.op(r) != 7 and st.op(r) not in self.CLEAR_COVER:
+                walk(r, st.op(r) == 1 and st.ident(r) == 2)
+        paths = []
+        for pa in sorted(self.cells):
+            p = Path(img, pa)
+            if self.op(p.leaf) in (10, 42) and not any(self.op(n) in self.CLEAR_COVER for n in p.nodes):
+                paths.append(pa)
+        return slots, paths
+
+    def apply_clear(self, spec):
+        """The patch's `"clear": "scenery"`: the stage's bare scenery stops being drawn and colliding. Each OBJECT and PART_EMITTER of it
+        (`scenery_plan`) is taken out of its parent: the slot points to one NULL node instead (nothing else is written to the node, so
+        a copy that shares it keeps it); each of its collision paths leaves every cell. Runs before "objects" and "props"."""
+        if spec != "scenery":
+            raise PatchError('"clear" is "scenery"')
+        slots, paths = self.scenery_plan()
+        if not slots and not paths:
+            raise PatchError("the stage has no bare scenery")
+        if slots:
+            null = self.alloc(0x10, 16)
+            self.w32(null, 9)
+            for _p, s in slots:
+                self.w32(s, null)
+        for pa in paths:
+            self.set_cells(pa, set())
+            self.cells.pop(pa, None)
+        self.stats["scenery cleared"] += len(slots)
+        self.stats["scenery paths removed"] += len(paths)
+        self.log.append("clear: %d OBJECTs and emitters of the bare scenery out, %d collision paths out" % (len(slots), len(paths)))
+
     def apply(self, patch):
         """Every entry: {"handle", "from": [x, y, z], and "pos"/"heading", "delete": true or "copies": [{"pos", "heading"}]}.
         An entry that does not match the image is skipped with a line in the log."""
@@ -1693,6 +2047,16 @@ class LevelPatch:
                 self.apply_grid(patch["grid"])
             except PatchError as err:       # nothing was written: the entries go on with the disc's grid
                 self.log.append("grid skipped: %s" % err)
+        if patch.get("walls") is not None:
+            try:
+                self.apply_walls(patch["walls"])
+            except PatchError as err:
+                self.log.append("walls skipped: %s" % err)
+        if patch.get("clear") is not None:
+            try:
+                self.apply_clear(patch["clear"])
+            except PatchError as err:
+                self.log.append("clear skipped: %s" % err)
         for k, e in enumerate(patch.get("objects", [])):
             try:
                 hv = e.get("handle")
@@ -1709,6 +2073,11 @@ class LevelPatch:
                     self.log.append("entry %d: handle %07x holds %d objects; they all go" % (k, h, len(children(img, h))))
                 moving = not e.get("delete") and ("pos" in e or "heading" in e)
                 extra = self.move_cost(h, e.get("heading") is not None) if moving else 0
+                mine = {} if e.get("delete") else self.extras_of(e, h)      # "hp" and "traffic": checked before anything is written
+                self.leaf_cache = {}
+                sc = None if e.get("delete") else self.scale_of(e, h)       # "scale": the same
+                if sc is not None and abs(sc - 1.0) > 1e-6:
+                    extra += self.scale_cost(h, sc)
                 cp = e.get("copies")
                 if isinstance(cp, list) and cp:
                     places = []         # all checked before copy(), as the hook does: a bad one leaves nothing behind
@@ -1717,14 +2086,23 @@ class LevelPatch:
                         if not (isinstance(p3, list) and len(p3) == 3 and all(_number(x) for x in p3)):
                             raise PatchError("a copy without \"pos\" [x, y, z]")
                         hd = c.get("heading")
-                        places.append({"pos": [float(x) for x in p3], "heading": float(hd) if _number(hd) else None})
+                        own = self.scale_of(c, h, "a copy")
+                        # a copy takes the entry's hit points, pickup type and scale unless it names its own
+                        places.append({"pos": [float(x) for x in p3], "heading": float(hd) if _number(hd) else None,
+                                       **{**mine, **self.extras_of(c, h, "a copy")}, "scale": sc if own is None else own})
+                        if places[-1]["scale"] is not None and abs(places[-1]["scale"] - 1.0) > 1e-6:
+                            extra += self.scale_cost(h, places[-1]["scale"])
                     self.copy(h, places, extra)
                 elif extra > self.arena_free():
                     raise PatchError("handle %07x: the move takes up to %d bytes, the arena has %d left" % (h, extra, self.arena_free()))
                 if e.get("delete"):
                     self.delete(h)
-                elif moving:
-                    self.move(h, e.get("pos") or pos, e.get("heading"))
+                else:
+                    self.set_extras(h, mine)
+                    if moving:
+                        h = self.move(h, e.get("pos") or pos, e.get("heading"))
+                    if sc is not None:
+                        self.set_scale(h, sc)
             except (PatchError, KeyError, TypeError, ValueError) as err:
                 self.log.append("entry %d skipped: %s" % (k, err))
                 self.stats["skipped"] += 1
@@ -1779,10 +2157,51 @@ class LevelPatch:
             raise PatchError("the stage's sky has no dome OBJECT to replace")
         return slots
 
-    def sky_swap(self, slots, root, name):
-        """The dome takes the model: every OBJECT of the model gets the first dome's first word, flags (but its vertex count) and
-        the fields at +0x20..+0x4F (fog burn-through 3500, tint), the first dome's slot points at the model's root and the other
-        domes' slots at one empty GROUP."""
+    def sky_clouds_plan(self, root):
+        """The slots of the sky's cloud layer, as [(parent, slot)]: the OBJECTs under the first CHAR_INSTANCE (op 25) of a sky node
+        (id 2), through its ANIM_XFORM, which keeps turning whatever hangs there. PatchError when the stage has none."""
+        st, img = self.st, self.img
+        slots, seen = [], set()
+
+        def walk(n):
+            if n in seen:
+                return
+            seen.add(n)
+            for s in child_slots(img, n):
+                c = img.u32(s) & MASK
+                if not c or not img.ok(c):
+                    continue
+                if img.u32(c) & 63 == 0:
+                    slots.append((n, s))
+                else:
+                    walk(c)
+
+        def find(n):
+            if slots or n in seen:
+                return
+            seen.add(n)
+            for s in child_slots(img, n):
+                c = img.u32(s) & MASK
+                if not c or not img.ok(c):
+                    continue
+                if img.u32(c) & 63 == 25:
+                    walk(c)
+                else:
+                    find(c)
+                if slots:
+                    return
+
+        for n in sorted(st.root_of):
+            if st.ident(n) == 2 and st.op(n) == 1 and not slots:
+                find(n)
+        if not slots:
+            raise PatchError("the stage's sky has no cloud layer OBJECT to replace")
+        return slots
+
+    def sky_swap(self, slots, root, name, clouds=False):
+        """The dome (or, with `clouds`, the cloud layer) takes the model: every OBJECT of the model gets the first one's first word,
+        flags (but its vertex count) and the fields at +0x20..+0x4F (fog burn-through 3500 for a dome, tint), the first slot points
+        at the model's root and the other domes' slots at one empty GROUP."""
         st, img = self.st, self.img
         tpl = img.u32(slots[0][1]) & MASK
         vmask = 0x1FFF << 16
@@ -1813,9 +2232,10 @@ class LevelPatch:
                     self.w32(empty, 1)
                 self.set_ptr(s, empty)
                 st.parents[empty].append(p)
-        self.stats["sky domes replaced"] += len(slots)
-        self.log.append("sky: model %s (%d objects) replaces %d dome%s (style of OBJECT %07x)" % (
-            name, len(objs), len(slots), "" if len(slots) == 1 else "s", tpl))
+        what = "cloud layer" if clouds else "dome"
+        self.stats["sky clouds replaced" if clouds else "sky domes replaced"] += len(slots)
+        self.log.append("sky: model %s (%d objects) replaces %d %s%s (style of OBJECT %07x)" % (
+            name, len(objs), len(slots), what, "" if len(slots) == 1 else "s", tpl))
 
     def apply_props(self, patch, mod_dir):
         """The patch's "props" (docs/guides/MODS.md, "Level patches"), after "objects" and before "peds": each entry {"id",
@@ -1840,16 +2260,19 @@ class LevelPatch:
                     raise PatchError("not an object")
                 name = str(e.get("model") or "").upper()
                 p3 = e.get("pos")
-                if e.get("sky") is True:
-                    p3 = [0, 0, 0]                  # the sky entry has no place: the model takes the dome's
+                if sky_kind(e):
+                    p3 = [0, 0, 0]                  # the sky entry has no place: the model takes the dome's or the clouds'
                 if not (isinstance(p3, list) and len(p3) == 3 and all(_number(x) for x in p3)):
                     raise PatchError("without \"pos\" [x, y, z]")
                 hd = e.get("heading")
                 hd = float(hd) if _number(hd) else 0.0
+                pt, rl = e.get("pitch"), e.get("roll")
+                pt = float(pt) if _number(pt) else 0.0
+                rl = float(rl) if _number(rl) else 0.0
                 if name not in models:
                     models[name] = []
                     order.append(name)
-                models[name].append((k, e, [float(x) for x in p3], hd))
+                models[name].append((k, e, [float(x) for x in p3], (hd, pt, rl)))
             except PatchError as err:
                 self.log.append("prop %d skipped: %s" % (k, err))
                 self.stats["skipped"] += 1
@@ -1912,17 +2335,20 @@ class LevelPatch:
                 mine, need = [], 0
                 sky_jobs = []
                 for k, e, pos, hd in ents:
-                    if e.get("sky") is True:
+                    if sky_kind(e):
                         try:
                             if dstr:
                                 raise PatchError("a sky model has no destructible states")
-                            sky_jobs.append(self.sky_plan(root))
+                            if any(j[1] != (sky_kind(e) == "clouds") for j in sky_jobs):
+                                raise PatchError("a model cannot be both the dome and the clouds")
+                            sky_jobs.append((self.sky_clouds_plan(root) if sky_kind(e) == "clouds" else self.sky_plan(root),
+                                             sky_kind(e) == "clouds"))
                         except PatchError as err:
                             self.log.append("sky skipped: model %s: %s" % (name, err))
                             self.stats["skipped"] += 1
                         continue
                     t_top = self.arena_top()
-                    turn = abs(math.remainder(hd, 360.0)) > 1e-6
+                    turn = any(abs(math.remainder(a, 360.0)) > 1e-6 for a in hd)       # hd: (heading, pitch, roll)
                     t = self.alloc(0x54 if turn else 0x20, 16)
                     ist = destr = 0
                     inst_roots, inst_chains = sroots, chains
@@ -1960,10 +2386,9 @@ class LevelPatch:
                                 self.w32(destr + 0xC + 12 * i + 4, at + prop.actions[i])
                     below = ist or root
                     if turn:
-                        cs, sn = math.cos(math.radians(hd)), math.sin(math.radians(hd))
                         self.w32(t, 4)
                         self.w32(t + 8, 1)
-                        for r, row in enumerate(((cs, sn, 0, 0), (-sn, cs, 0, 0), (0, 0, 1, 0), (pos[0], pos[1], pos[2], 1))):
+                        for r, row in enumerate(prop_matrix(pos, *hd)):
                             for c in range(4):
                                 self.wf32(t + 0x10 + 16 * r + 4 * c, row[c])
                         self.w32(t + 0x50, below)
@@ -2012,8 +2437,8 @@ class LevelPatch:
                     self.interactives_used = iu0
                     raise PatchError("model %s: %d entries take up to %d bytes more, the arena has %d left" % (
                         name, len(mine), need, self.arena_free()))
-                for job in sky_jobs:            # last, when nothing can fail: the slots now point into the arena
-                    self.sky_swap(job, root, name)
+                for job, clouds in sky_jobs:    # last, when nothing can fail: the slots now point into the arena
+                    self.sky_swap(job, root, name, clouds)
                 made += mine
                 summary.append("%s x%d (%d bytes)" % (name, len(mine), prop.size))
                 if dstr:
@@ -2230,6 +2655,199 @@ def read_points(path):
     return out
 
 
+SPT_CAPS = (1, 2, 20, 20)       # StartPoints::s_pointTypes: a point past the list's room overwrites its last one
+SPT_LISTS = ("story, first life of the player", "first life of the players", "first life of a CPU", "respawn")
+
+
+def spt_heading(b):
+    """The heading in degrees (-180..180] a .SPT angle byte stands for (`graus = b / (255 / 360)`, above 180 minus 360)."""
+    g = b * 360.0 / 255.0
+    return g - 360.0 if g > 180.0 else g
+
+
+def read_spt(path):
+    """A .SPT as the editor's start points: [{"list", "pos": [x, y, z], "heading", "snap", "w", "sel"}] (`w` and `sel`, the 0x3C byte,
+    are kept as the file had them; the game reads neither)."""
+    return [{"list": p["raw"][0x2C], "pos": [float(v) for v in p["pos"][:3]], "heading": spt_heading(p["raw"][0x2D]),
+             "snap": bool(p["raw"][0x2E]), "w": p["pos"][3], "sel": p["raw"][0x3C]} for p in read_points(path)]
+
+
+def build_spt(points):
+    """The bytes of a .SPT for those start points: version, count and one 64-byte record each (no links; the angle byte is
+    `heading · 255 / 360` rounded, so a heading keeps 1.41 degrees). ValueError for a bad point or more than 255."""
+    if len(points) > 255:
+        raise ValueError("a .SPT holds at most 255 start points (it has %d)" % len(points))
+    out = [struct.pack("<II", POINTS_MAGIC, len(points))]
+    for k, p in enumerate(points):
+        lst, pos, hd = p.get("list"), p.get("pos"), p.get("heading", 0.0)
+        if not isinstance(lst, int) or isinstance(lst, bool) or not 0 <= lst < len(SPT_CAPS):
+            raise ValueError("start point %d: the list is 0 to %d" % (k + 1, len(SPT_CAPS) - 1))
+        if not (isinstance(pos, (list, tuple)) and len(pos) == 3 and all(isinstance(v, (int, float)) and math.isfinite(v) for v in pos)):
+            raise ValueError("start point %d: the position is three numbers" % (k + 1))
+        if not (isinstance(hd, (int, float)) and math.isfinite(hd)):
+            raise ValueError("start point %d: the heading is a number" % (k + 1))
+        rec = bytearray(64)
+        struct.pack_into("<4f", rec, 0, pos[0], pos[1], pos[2], float(p.get("w") or 0.0))
+        rec[0x2C] = lst
+        rec[0x2D] = int(round((hd % 360.0) * 255.0 / 360.0)) & 0xFF
+        rec[0x2E] = 1 if p.get("snap") else 0
+        rec[0x3C] = int(p.get("sel") or 0) & 0xFF
+        out.append(bytes(rec))
+    return b"".join(out)
+
+
+PUP_MAX_ACTIVE = 100            # PowerUps::m_powerUps[100]: the 101st is refused
+PUP_TYPES = ("Health 25", "Health 50", "Health 100", "Stamina 25", "Stamina 50", "Stamina 100", "Health 10", "Stamina 10 (no regen)",
+             "Special weapon", "Cloak") + tuple("Story item %d" % k for k in range(10, 20))
+PUP_FLAGS = 7                   # shadow, the update re-settles it, the settling also lowers the rest height (439 of 528 points)
+
+
+def read_pup(path):
+    """A .PUP as the editor's power-ups: [{"type", "pos": [x, y, z], "flags", "w", "sel"}] (z is the rest height; the rotation is random)."""
+    return [{"type": p["raw"][0x2C], "pos": [float(v) for v in p["pos"][:3]], "flags": p["raw"][0x2D], "w": p["pos"][3],
+             "sel": p["raw"][0x3C]} for p in read_points(path)]
+
+
+def build_pup(points):
+    """The bytes of a .PUP for those power-ups (type 0..19, flags 0..255). ValueError for a bad point or more than 255."""
+    if len(points) > 255:
+        raise ValueError("a .PUP holds at most 255 power-ups (it has %d)" % len(points))
+    out = [struct.pack("<II", POINTS_MAGIC, len(points))]
+    for k, p in enumerate(points):
+        t, pos, fl = p.get("type"), p.get("pos"), p.get("flags", PUP_FLAGS)
+        if not isinstance(t, int) or isinstance(t, bool) or not 0 <= t < len(PUP_TYPES):
+            raise ValueError("power-up %d: the type is 0 to %d" % (k + 1, len(PUP_TYPES) - 1))
+        if not isinstance(fl, int) or isinstance(fl, bool) or not 0 <= fl <= 255:
+            raise ValueError("power-up %d: the flags are 0 to 255" % (k + 1))
+        if not (isinstance(pos, (list, tuple)) and len(pos) == 3 and all(isinstance(v, (int, float)) and math.isfinite(v) for v in pos)):
+            raise ValueError("power-up %d: the position is three numbers" % (k + 1))
+        rec = bytearray(64)
+        struct.pack_into("<4f", rec, 0, pos[0], pos[1], pos[2], float(p.get("w") or 0.0))
+        rec[0x2C] = t
+        rec[0x2D] = fl
+        rec[0x3C] = int(p.get("sel") or 0) & 0xFF
+        out.append(bytes(rec))
+    return b"".join(out)
+
+
+AIP_NODES = 255                 # a points file holds 255 records (the in-game net has room for 300)
+AIP_MAX_PATHS = 450             # AiPathNet::MAX_PATHS: "Exceeded ... ignoring path"
+AIP_LINKS = 6                   # links per node (the width bytes sit at 0x2C..0x31)
+
+
+def read_aip(path):
+    """An .AIP as the editor's AI net: [{"pos": [x, y, z], "type", "links": [{"to", "width"}], "w", "sel", "tail"}]. `type` (0x32) splits
+    the net into sub-nets (the AI only follows paths of the type it stands on); `links` are directed (a two-way link is one on each
+    node); `tail` keeps the unread bytes 0x33..0x3B as hex. Links to a missing node are dropped."""
+    pts = read_points(path)
+    out = []
+    for p in pts:
+        r = p["raw"]
+        links = [{"to": p["links"][j], "width": r[0x2C + j]} for j in range(max(0, min(p["nlinks"], AIP_LINKS)))
+                 if 0 <= p["links"][j] < len(pts)]
+        out.append({"pos": [float(v) for v in p["pos"][:3]], "type": r[0x32], "links": links, "w": p["pos"][3], "sel": r[0x3C],
+                    "tail": r[0x33:0x3C].hex()})
+    return out
+
+
+def aip_paths(nodes):
+    """How many paths AiPathNet makes of this net: a two-way link is one path, a one-way link its own."""
+    seen, n = set(), 0
+    for i, nd in enumerate(nodes):
+        for l in nd["links"]:
+            key = (min(i, l["to"]), max(i, l["to"])) if any(m["to"] == i for m in nodes[l["to"]]["links"]) else (i, l["to"], 1)
+            if key not in seen:
+                seen.add(key)
+                n += 1
+    return n
+
+
+def build_aip(nodes):
+    """The bytes of an .AIP for those nodes (links: at most 6 per node, to an existing other node, width 0..255; type 0..255)."""
+    if len(nodes) > AIP_NODES:
+        raise ValueError("an .AIP holds at most %d nodes (it has %d)" % (AIP_NODES, len(nodes)))
+    out = [struct.pack("<II", POINTS_MAGIC, len(nodes))]
+    for k, nd in enumerate(nodes):
+        pos, links, t = nd.get("pos"), nd.get("links") or [], nd.get("type", 0)
+        if not (isinstance(pos, (list, tuple)) and len(pos) == 3 and all(isinstance(v, (int, float)) and math.isfinite(v) for v in pos)):
+            raise ValueError("node %d: the position is three numbers" % (k + 1))
+        if not isinstance(t, int) or isinstance(t, bool) or not 0 <= t <= 255:
+            raise ValueError("node %d: the type is 0 to 255" % (k + 1))
+        if len(links) > AIP_LINKS:
+            raise ValueError("node %d has %d links; at most %d" % (k + 1, len(links), AIP_LINKS))
+        rec = bytearray(64)
+        struct.pack_into("<4f", rec, 0, pos[0], pos[1], pos[2], float(nd.get("w") or 0.0))
+        struct.pack_into("<i", rec, 0x10, len(links))
+        for j, l in enumerate(links):
+            to, w = l.get("to"), l.get("width", 10)
+            if not isinstance(to, int) or isinstance(to, bool) or not 0 <= to < len(nodes) or to == k:
+                raise ValueError("node %d: link %d goes to a node that does not exist (or to itself)" % (k + 1, j + 1))
+            if not isinstance(w, int) or isinstance(w, bool) or not 0 <= w <= 255:
+                raise ValueError("node %d: link %d width is 0 to 255" % (k + 1, j + 1))
+            struct.pack_into("<i", rec, 0x14 + 4 * j, to)
+            rec[0x2C + j] = w
+        rec[0x32] = t
+        tail = bytes.fromhex(nd.get("tail") or "")
+        rec[0x33:0x33 + len(tail[:9])] = tail[:9]
+        rec[0x3C] = int(nd.get("sel") or 0) & 0xFF
+        out.append(bytes(rec))
+    return b"".join(out)
+
+
+FOP_NODES = 255                 # a points file holds 255 records (the in-game net has room for 256)
+FOP_LINKS = 6
+FOP_TYPES = ("Car street", "Helicopter", "Flying saucer", "Tank and truck")     # the node types 0..3 (3: VEGAS only)
+
+
+def read_fop(path):
+    """A .FOP as the editor's vehicle net: [{"pos": [x, y, z], "type", "links": [{"to", "width", "drop"}], "w", "sel", "tail"}]. The links
+    are directed (a road has one on each end); only the low 16 bits of a link count; `drop` (0x33..0x38, per link) is how far below the
+    path a helicopter may fly, times 10; `tail` keeps the unread bytes 0x39..0x3B as hex. Links to a missing node are dropped."""
+    pts = read_points(path)
+    out = []
+    for p in pts:
+        r = p["raw"]
+        links = [{"to": p["links"][j] & 0xFFFF, "width": r[0x2C + j], "drop": r[0x33 + j]} for j in range(max(0, min(p["nlinks"], FOP_LINKS)))
+                 if 0 <= (p["links"][j] & 0xFFFF) < len(pts)]
+        out.append({"pos": [float(v) for v in p["pos"][:3]], "type": r[0x32], "links": links, "w": p["pos"][3], "sel": r[0x3C],
+                    "tail": r[0x39:0x3C].hex()})
+    return out
+
+
+def build_fop(nodes):
+    """The bytes of a .FOP for those nodes (type 0..3, at most 6 links per node to an existing other node, width and drop 0..255)."""
+    if len(nodes) > FOP_NODES:
+        raise ValueError("a .FOP holds at most %d nodes (it has %d)" % (FOP_NODES, len(nodes)))
+    out = [struct.pack("<II", POINTS_MAGIC, len(nodes))]
+    for k, nd in enumerate(nodes):
+        pos, links, t = nd.get("pos"), nd.get("links") or [], nd.get("type", 0)
+        if not (isinstance(pos, (list, tuple)) and len(pos) == 3 and all(isinstance(v, (int, float)) and math.isfinite(v) for v in pos)):
+            raise ValueError("node %d: the position is three numbers" % (k + 1))
+        if not isinstance(t, int) or isinstance(t, bool) or not 0 <= t < len(FOP_TYPES):
+            raise ValueError("node %d: the type is 0 to %d" % (k + 1, len(FOP_TYPES) - 1))
+        if len(links) > FOP_LINKS:
+            raise ValueError("node %d has %d links; at most %d" % (k + 1, len(links), FOP_LINKS))
+        rec = bytearray(64)
+        struct.pack_into("<4f", rec, 0, pos[0], pos[1], pos[2], float(nd.get("w") or 0.0))
+        struct.pack_into("<i", rec, 0x10, len(links))
+        for j, l in enumerate(links):
+            to, w, dr = l.get("to"), l.get("width", 10), l.get("drop", 0)
+            if not isinstance(to, int) or isinstance(to, bool) or not 0 <= to < len(nodes) or to == k:
+                raise ValueError("node %d: link %d goes to a node that does not exist (or to itself)" % (k + 1, j + 1))
+            for what, v in (("width", w), ("drop", dr)):
+                if not isinstance(v, int) or isinstance(v, bool) or not 0 <= v <= 255:
+                    raise ValueError("node %d: link %d %s is 0 to 255" % (k + 1, j + 1, what))
+            struct.pack_into("<i", rec, 0x14 + 4 * j, to)
+            rec[0x2C + j] = w
+            rec[0x33 + j] = dr
+        rec[0x32] = t
+        tail = bytes.fromhex(nd.get("tail") or "")
+        rec[0x39:0x39 + len(tail[:3])] = tail[:3]
+        rec[0x3C] = int(nd.get("sel") or 0) & 0xFF
+        out.append(bytes(rec))
+    return b"".join(out)
+
+
 def describe_point(ext, p):
     r, n = p["raw"], min(p["nlinks"], 6)
     if ext == "SPT":
@@ -2264,6 +2882,80 @@ def read_mrs(path):
         out.append((off, key, data[off + 8: off + size]))
         off += size
     return out
+
+
+def mrs_entries(data):
+    """[(offset, key, size)] of a .MRS image's entries (the 12-byte header is skipped; key 1 or a bad size ends the list)."""
+    off, out = 12, []
+    while off + 8 <= len(data):
+        key, size = struct.unpack_from("<ii", data, off)
+        if key == 1 or size < 8 or off + size > len(data):
+            break
+        out.append((off, key, size))
+        off += size
+    return out
+
+
+def mrs_values(data):
+    """What the editor's Light dialog shows of a .MRS image: {"bg": [r, g, b, a] | None, "fog": {minR, maxR, maxV, farClip, rgb} | None,
+    "lights": [{rgb, h, p}] x 3 | None} (key 2, 4 and 5; the rest of the file is not looked at)."""
+    out = {"bg": None, "fog": None, "lights": None}
+    for off, key, size in mrs_entries(data):
+        body = data[off + 8: off + size]
+        if key == 2 and len(body) >= 16:
+            out["bg"] = list(struct.unpack_from("<4i", body))
+        elif key == 4 and len(body) >= 28:
+            mn, mx, maxv, far, r, g, b = struct.unpack_from("<4f3i", body)
+            out["fog"] = {"minR": mn, "maxR": mx, "maxV": maxv, "farClip": far, "rgb": [r, g, b]}
+        elif key == 5 and len(body) >= 60:
+            v = struct.unpack_from("<15f", body)
+            out["lights"] = [{"rgb": [v[i], v[3 + i], v[6 + i]], "h": v[9 + i], "p": v[12 + i]} for i in range(3)]
+    return out
+
+
+def _mrs_num(x, name, lo, hi):
+    if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) or not lo <= x <= hi:
+        raise ValueError("%s must be a number from %g to %g" % (name, lo, hi))
+    return float(x)
+
+
+def mrs_edit(data, fog=None, bg=None, lights=None):
+    """A copy of a .MRS image with the fog (key 4), the background (key 2) and the three lights (key 5) set; every entry keeps its size and
+    everything else, the header and the tail included, stays byte for byte. fog: {minR, maxR, maxV, farClip, rgb}; bg: [r, g, b] (its
+    alpha stays); lights: three {rgb, h, p}. A part the file has no entry for is refused."""
+    out = bytearray(data)
+    keys = {k: (off, size) for off, k, size in reversed(mrs_entries(data))}
+    for part, key in ((fog, 4), (bg, 2), (lights, 5)):
+        if part is not None and key not in keys:
+            raise ValueError("this file has no entry for %s" % {4: "fog", 2: "background", 5: "lights"}[key])
+
+    def rgb(c, name, hi=255):
+        if not isinstance(c, (list, tuple)) or len(c) != 3:
+            raise ValueError("%s needs 3 numbers" % name)
+        return [_mrs_num(x, name, 0, hi) for x in c]
+    if fog is not None:
+        off, size = keys[4]
+        c = [int(round(x)) for x in rgb(fog.get("rgb"), "the fog color")]
+        mn, mx = _mrs_num(fog.get("minR"), "the fog start", 0, 1e6), _mrs_num(fog.get("maxR"), "the fog end", 0, 1e6)
+        maxv = _mrs_num(fog.get("maxV"), "the fog density", 0, 255)
+        far = _mrs_num(fog.get("farClip"), "the far clip", 1, 1e6)
+        struct.pack_into("<4f3i", out, off + 8, mn, mx, maxv, far, *c)
+    if bg is not None:
+        off, size = keys[2]
+        c = [int(round(x)) for x in rgb(bg, "the background color")]
+        struct.pack_into("<3i", out, off + 8, *c)          # the alpha (the 4th int) stays
+    if lights is not None:
+        if not isinstance(lights, (list, tuple)) or len(lights) != 3:
+            raise ValueError("there are three lights")
+        off, size = keys[5]
+        v = [0.0] * 15
+        for i, lt in enumerate(lights):
+            c = rgb(lt.get("rgb"), "light %d's color" % (i + 1), 1000)
+            v[i], v[3 + i], v[6 + i] = c
+            v[9 + i] = _mrs_num(lt.get("h"), "light %d's heading" % (i + 1), -720, 720)
+            v[12 + i] = _mrs_num(lt.get("p"), "light %d's pitch" % (i + 1), -90, 90)
+        struct.pack_into("<15f", out, off + 8, *v)
+    return bytes(out)
 
 
 def describe_mrs(key, body):

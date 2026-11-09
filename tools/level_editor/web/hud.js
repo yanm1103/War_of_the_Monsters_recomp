@@ -176,15 +176,21 @@ async function replace(r, every, file = null) {
     say(`${r.label}: replaced in mod "${ctx.mod}"` + (every && r.every > 1 ? ` on ${r.every} stages` : ''), 'ok');
   } catch (e) { say(`Couldn't replace ${r.label}: ${e.message}`, 'err'); }
   await refresh();
+  if (ctx.changed) ctx.changed();      // the view draws the mod's picture
 }
 
 async function remove(r, every) {
+  const go = await new Promise((res) => ctx.ask("Back to the disc's picture?",
+    `This deletes your PNG for ${r.label} from mod "${ctx.mod}"` + (every && r.every > 1 ? ` on ${r.every} stages` : '') + ". It can't be undone.",
+    [['cancel', 'Cancel'], ['go', 'Delete the PNG', true]], (v) => res(v === 'go'), { icon: 'delete-outline' }));
+  if (!go) return;
   try {
     const res = await ctx.api('/api/hud/remove', { stage: ctx.stage, mod: ctx.mod, role: r.role, png: r.png, every });
     ctx.msg(res.lines, { level: 'muted' });
     say(`${r.label}: the disc's picture is back`, 'ok');
   } catch (e) { say(`Couldn't remove ${r.label}: ${e.message}`, 'err'); }
   await refresh();
+  if (ctx.changed) ctx.changed();
 }
 
 export async function openHud(opts) {
@@ -194,5 +200,7 @@ export async function openHud(opts) {
   dlg.showModal();
   q('.dlg-foot .primary').focus();
 }
+// the helpers the Textures dialog (tex.js) shares: building elements, a picked image as PNG bytes, the file picker
+export { el, icon, asPng, pick, psmText };
 // app.js calls it when the game starts or stops while the dialog is open
 export function hudGameChanged() { if (dlg && dlg.open && ctx) showGame(); }

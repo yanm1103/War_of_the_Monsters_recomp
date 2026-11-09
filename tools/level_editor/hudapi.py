@@ -1,6 +1,7 @@
 """The level editor's HUD panel on the server side (web/hud.js): the stage's HUD textures (tools/lvlhud.py), their PNGs from the
 disc and from the mod, and replacing or removing them in the mod. editor.py routes /api/hud, /api/hudimg, /api/hud/replace and
-/api/hud/remove here.
+/api/hud/remove here, and for the Textures dialog (web/tex.js, every picture of the stage) /api/texs, /api/tex/replace and
+/api/tex/remove.
 
 Every stage's HUD (for "every stage with this picture") is read once per disc and kept in <cache>/hud-<disc key>.json."""
 import base64
@@ -19,6 +20,7 @@ class HudApi:
         self.cache_dir, self.root_of, self.stages_of, self.key_of = cache_dir, root_of, stages_of, key_of
         self.lock = threading.Lock()
         self.infos = {}       # disc key -> {stage: lvlhud.stage_hud}
+        self.tex_lists = {}   # (disc key, stage) -> lvlhud.stage_textures
 
     def _all(self, disc):
         key = self.key_of(disc)
@@ -63,14 +65,52 @@ class HudApi:
         p["versions"] = {st: info["version"] for st, info in sorted(infos.items())}   # the version B note names the stages
         return p
 
-    def image(self, disc, mods, mod, stage, src, png):
-        """Path of a HUD PNG the panel listed: the disc's (exported) or the mod's. None for any other name."""
+    def _textures(self, disc, stage):
+        key = (self.key_of(disc), stage)
+        with self.lock:
+            if key not in self.tex_lists:
+                self.tex_lists[key] = lvlhud.stage_textures(self.root_of(disc, stage), stage)
+            return self.tex_lists[key]
+
+    def textures(self, disc, mods, mod, stage):
+        """The Textures dialog: every picture of the stage's .TEX and .RTX (see lvlhud.texture_rows)."""
         stage = stage.upper()
-        rows = lvlhud.panel(self._all(disc)[stage], os.path.join(mods, mod) if mod else None, self._exported(disc, stage))["rows"]
+        infos = self._all(disc)
+        if stage not in infos:
+            raise ValueError("no stage %s on the disc" % stage)
+        rows = lvlhud.texture_rows(infos[stage], self._textures(disc, stage), os.path.join(mods, mod) if mod else None,
+                                   self._exported(disc, stage))
+        for r in rows:
+            r["disc"], r["mod"] = bool(r["disc"]), bool(r["mod"])   # the page asks /api/hudimg by name, never by path
+        return {"stage": stage, "version": infos[stage]["version"], "rows": rows}
+
+    def image(self, disc, mods, mod, stage, src, png):
+        """Path of a PNG the HUD or Textures dialog listed: the disc's (exported) or the mod's. None for any other name."""
+        stage = stage.upper()
+        rows = lvlhud.texture_rows(self._all(disc)[stage], self._textures(disc, stage), os.path.join(mods, mod) if mod else None,
+                                   self._exported(disc, stage))
         for r in rows:
             if r["png"] == png:
                 return r["disc"] if src == "disc" else r["mod"] if src == "mod" else None
         return None
+
+    def _own_png(self, disc, stage, png):
+        stage = stage.upper()
+        if png not in [lvlhud.png_name(stage, e) for e in self._textures(disc, stage)]:
+            raise ValueError("%s is not a picture of %s" % (png, stage))
+
+    def tex_replace(self, disc, mods, mod, stage, png, data_b64, sub="LVL"):
+        data = base64.b64decode(data_b64)
+        if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise ValueError("not a PNG")
+        self._own_png(disc, stage, png)
+        lvlhud.write_mod_png(os.path.join(mods, mod), png, data, sub)
+        return ["Textures: %s/%s%s" % (mod, sub + "/" if sub else "", png)]
+
+    def tex_remove(self, disc, mods, mod, stage, png):
+        self._own_png(disc, stage, png)
+        gone = lvlhud.remove_mod_png(os.path.join(mods, mod), png)
+        return ["Textures: removed %s from %s" % (png, mod)] if gone else ["Textures: the mod had no %s" % png]
 
     def _targets(self, disc, stage, role, png, every):
         stage = stage.upper()

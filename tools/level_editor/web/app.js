@@ -7,6 +7,22 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { createPeds } from './peds.js';
 import { openHud, hudGameChanged } from './hud.js';
+import { openTex, texGameChanged } from './tex.js';
+import { openLight, lightGameChanged, lightLookChanged, lightClose, lightDirty, lightSave, lightRequestClose } from './light.js';
+import { popover } from './menu.js';
+import { initArrange } from './arrange.js';
+import { openTerrain } from './terrain.js';
+import { initColl } from './coll.js';
+import { propRows, propAngles as propAngles_ } from './tilt_math.js';
+import { toPrefabEntries, placeEntry } from './prefab_math.js';
+import { testBody, openTestOpts, loadTestOpts, testSummary } from './testopts.js';
+import { createRuler } from './ruler.js';
+import { createMinimap } from './minimap.js';
+import { KINDS, isNet, LAYERS, KIND_OF_MODE, FILE_MAX, SPT_SHORT, sptOver, PUP_GROUPS, markerColor, hexColor, sections as mkSections,
+         markerName, netTwoWay, netPaths, removeNode, linkBoth, unlink, oneWayIn, markerShape, sptViewLabel,
+         linkPlan, applyLink, linkWords } from './markers.js';
+import { markerScale, EXTENT, SEL_GROW, pickBest } from './marker_math.js';
+import { createMarkerLabels } from './markerlabels.js';
 
 // The GS modulates and blends the bytes as they are: no color management (texture, vertex and interface colors stay raw).
 THREE.ColorManagement.enabled = false;
@@ -29,7 +45,13 @@ const wrapDeg = (a) => ((a + 180) % 360 + 360) % 360 - 180;
 const normHandle = (h) => '0x' + parseInt(String(h), 16).toString(16).toUpperCase();
 
 async function api(path, body) {
-  const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+  let r;
+  try {
+    r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+  } catch (e) {          // no answer at all: the program quit (its window closed, or it was stopped), not a fault of the request
+    throw Object.assign(new Error("The editor program isn't answering. It may have been closed. What you changed stays in this window " +
+                                  'until you start the editor again; Copy patch keeps it.'), { code: 'offline' });
+  }
   const j = await r.json();
   if (!r.ok) throw Object.assign(new Error(j.error || r.statusText), { status: r.status, code: j.code, data: j });
   return j;
@@ -40,6 +62,57 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem('wotmLevelEditor.' + k); return v === null ? d : v; } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem('wotmLevelEditor.' + k, v); } catch (e) { /* no storage */ } },
 };
+
+// ------------------------------------------------------------------ the unsaved draft, kept in the browser
+// What is not saved survives a crashed tab, a closed window or a program that quit: the patch is copied to localStorage a moment after
+// each change (only the patch, text of a few KB; a patch over DRAFT_MAX is not kept, and only the DRAFT_KEEP newest drafts stay, so it
+// can always fit) and offered back when that stage opens in that mod. A save, or going back to the saved state, removes it.
+const DRAFT_MAX = 200 * 1024, DRAFT_KEEP = 3;
+let draftTimer = 0, draftHold = false, draftTooBig = false;
+const draftKey = () => `draft.${modNow}|${stageName}`;
+function draftIndex() { try { return JSON.parse(store.get('draftIndex', '[]')) || []; } catch (e) { return []; } }
+function removeDraft(key = draftKey()) {
+  clearTimeout(draftTimer);
+  try { localStorage.removeItem('wotmLevelEditor.' + key); } catch (e) { /* no storage */ }
+  store.set('draftIndex', JSON.stringify(draftIndex().filter((k) => k !== key)));
+}
+function readDraft() {
+  if (!modNow || !stageName) return null;
+  try { const d = JSON.parse(store.get(draftKey(), 'null')); return d && typeof d.patch === 'string' ? d : null; } catch (e) { return null; }
+}
+function writeDraft() {
+  if (draftHold || !stageName || !modNow || openFailed || !stageRoot) return;
+  const key = draftKey();
+  if (!dirty) { removeDraft(key); draftTooBig = false; return; }
+  const patch = JSON.stringify(buildPatch());
+  if (patch.length > DRAFT_MAX) {
+    removeDraft(key);
+    if (!draftTooBig) { draftTooBig = true; msg('This stage has too many changes for the automatic backup in the browser: save often', { level: 'warn', toast: true }); }
+    return;
+  }
+  draftTooBig = false;
+  store.set(key, JSON.stringify({ patch, saved: savedJson, at: Date.now() }));
+  const keep = [key, ...draftIndex().filter((k) => k !== key)];
+  for (const old of keep.slice(DRAFT_KEEP)) { try { localStorage.removeItem('wotmLevelEditor.' + old); } catch (e) { /* no storage */ } }
+  store.set('draftIndex', JSON.stringify(keep.slice(0, DRAFT_KEEP)));
+}
+const queueDraft = () => { clearTimeout(draftTimer); draftTimer = setTimeout(writeDraft, 800); };
+// the stage has just opened: a draft of it that is not the saved state is offered back
+function offerDraft() {
+  const d = readDraft();
+  if (!d || d.patch === savedJson) { if (d) removeDraft(); return; }
+  draftHold = true;
+  const when = new Date(d.at).toLocaleString([], { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' });
+  const moved = d.saved !== savedJson;
+  ask('Restore your unsaved changes?', `${title(stageName)} had changes that were not saved (${when}) when the editor closed or stopped.` +
+      (moved ? ' The mod\'s file is not the one they were made on: they go on top of the file as it is now.' : ''),
+      [['discard', 'Discard them'], ['restore', 'Restore', true]], (v) => {
+        draftHold = false;
+        if (v === 'restore') { restoreTo(d.patch); msg('Restored the changes that were not saved', { level: 'ok', toast: true }); }
+        else if (v === 'discard') removeDraft();
+        else queueDraft();
+      }, { icon: 'restore' });
+}
 
 // ------------------------------------------------------------------ messages: the Output drawer, the status bar and toasts
 // The Output has three tabs: Messages (everything the page says), Check (the last check, its problems and the raw lvl.py output)
@@ -106,7 +179,7 @@ function msg(text, o = {}) {
   for (const t of lines) addLine(tab, lineEl(t, level, o));
   const last = lines[lines.length - 1];
   if (level !== 'muted' && o.status !== false) setStatusMsg(last, level, tab);
-  const tst = o.toast !== undefined ? o.toast : !!document.querySelector('dialog[open]') && level !== 'muted';
+  const tst = o.toast !== undefined ? o.toast : !!document.querySelector('dialog:modal') && level !== 'muted';
   if (tst) toast(last, level, Array.isArray(tst) ? tst : null);
   if (level === 'err' && o.open !== false) openOutput(o.open || tab);
 }
@@ -158,7 +231,7 @@ function placeToasts() {
   b.style.bottom = Math.max(8, innerHeight - r.bottom + 12) + 'px';
 }
 function toast(text, level = 'info', action = null) {
-  const box = $('toasts'), host = document.querySelector('dialog[open]') || document.body;
+  const box = $('toasts'), host = document.querySelector('dialog:modal') || document.body;
   if (box.parentElement !== host) host.appendChild(box);
   placeToasts();
   const t = document.createElement('div'), x = document.createElement('span');
@@ -192,7 +265,7 @@ document.addEventListener('close', (e) => {
   const box = $('toasts');
   if (e.target instanceof HTMLDialogElement && e.target.contains(box)) {
     document.body.appendChild(box);
-    const other = document.querySelector('dialog[open]');
+    const other = document.querySelector('dialog:modal');
     if (other) other.appendChild(box);
   }
 }, true);
@@ -249,10 +322,13 @@ function gridHelper(size, divisions, opacity) {
 let gridMinor = gridHelper(20000, 200, 0.10), gridMinorStep = 100;
 const gridMajor = gridHelper(20000, 20, 0.28);
 let gridOn = false;
+let skyViews = { dome: null, clouds: null };   // the models swapped into the sky: {from: the preview scene, view: its copy in the view} (updateSkyView)
+let skyParts = null;   // {dome: [addr], clouds: [addr]}: the OBJECTs of the stage's sky that a model replaces in the game (/api/stage "sky"); empty for a part it cannot replace
 let stageRoot = null, skyRoot = null, env = null;   // env: the stage's fog, background and lights (/api/stage, RST/<STAGE>.MRS)
 // pedestrians (web/peds.js): a layer shown with P; pedSel is the marker the gizmo holds (never together with an object)
 const peds = createPeds({ THREE, scene, toThree, toGame });
-let discPeds = null, pedSel = null, stageGrid = null;   // stageGrid: the disc's collision grid (/api/stage)
+const coll = initColl({ THREE, scene });   // the Collision layer (C): what the game collides with, patch applied (web/coll.js)
+let discPeds = null, pedSel = null, stageGrid = null, stageWalls = 0;   // stageGrid: the disc's collision grid (/api/stage)
 
 function resize() {
   const r = canvas.parentElement.getBoundingClientRect();
@@ -280,9 +356,11 @@ function applyLook() {
   scene.fog = gameLook && f ? new THREE.Fog(gsColor(f.rgb), f.fa, f.fb) : null;
   gsFog.gsFogMax.value = f && f.maxV > 0 ? Math.min(255, f.maxV) : 255;
   if (skyRoot) skyRoot.visible = gameLook;
+  for (const s of Object.values(skyViews)) if (s) s.view.visible = gameLook;
   renderer.setClearColor(gameLook && env && env.bg ? gsColor(env.bg)
     : getComputedStyle(document.documentElement).getPropertyValue('--view').trim());
   $('look').checked = gameLook;
+  lightLookChanged();
   // the grid: black lines on the light theme's background, white on the dark one and over the stage's own (Game look)
   const t = document.documentElement.dataset.theme;
   const light = t === 'light' || (t === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
@@ -395,22 +473,73 @@ function setupDrawing(gltf) {
   gltf.scene.traverse((o) => { if (!sky && o.userData && o.userData.sky) sky = o; });
   if (sky) {
     scene.add(sky);     // out of the stage: clicks, Drop and framing never meet it
-    let n = 0;
-    sky.traverse((o) => {
-      if (!o.isMesh) return;
-      o.material = [].concat(o.material).map((m) => {
-        const c = m.clone();   // clone() leaves out onBeforeCompile and customProgramCacheKey
-        c.onBeforeCompile = m.onBeforeCompile;
-        c.customProgramCacheKey = m.customProgramCacheKey;
-        c.depthTest = false; c.depthWrite = false; c.fog = false; c.transparent = false;
-        return c;
-      });
-      if (o.material.length === 1) o.material = o.material[0];
-      o.renderOrder = -1e6 + n++;
-      o.frustumCulled = false;
-    });
+    skyDrawing(sky, false);
   }
   return sky;
+}
+
+// A sky is drawn first, with no depth test and no fog, around the camera, in the order of the game's traversal: renderOrder base + 0, 1,
+// 2... both: draw the inside and the outside of its faces (a model of the mod's, whose faces the game wants turned inward). step: the
+// distance between two meshes' orders (a model's fits in the slot of the part it replaces)
+function skyDrawing(sky, both, base = -1e6, step = 1) {
+  let n = 0;
+  sky.traverse((o) => {
+    if (!o.isMesh) return;
+    o.material = [].concat(o.material).map((m) => {
+      const c = m.clone();   // clone() leaves out onBeforeCompile and customProgramCacheKey
+      c.onBeforeCompile = m.onBeforeCompile;
+      c.customProgramCacheKey = m.customProgramCacheKey;
+      c.depthTest = false; c.depthWrite = false; c.fog = false; c.transparent = false;
+      if (both) c.side = THREE.DoubleSide;
+      return c;
+    });
+    if (o.material.length === 1) o.material = o.material[0];
+    o.renderOrder = base + (n++) * step;
+    o.frustumCulled = false;
+  });
+}
+
+// What the stage's sky node says about a mesh (extras.obj, its OBJECT's address, and extras.clouds under a CHAR_INSTANCE): the tags sit
+// on the glTF node, which is the Group above the meshes when the object has more than one material
+function skyTag(o) {
+  for (let n = o; n; n = n.parent) if (n.userData && n.userData.obj) return n.userData;
+  return {};
+}
+// The meshes of the stage's own dome or cloud layer that a model replaces: the OBJECTs the game swaps (skyParts, /api/stage "sky"; a
+// CHAR_INSTANCE after the first keeps its clouds). Without skyParts (an older server), every mesh of that kind.
+function skyStock(kind) {
+  const out = [], set = skyParts && skyParts[kind] ? new Set(skyParts[kind]) : null;
+  if (skyRoot) skyRoot.traverse((o) => {
+    if (!o.isMesh) return;
+    const t = skyTag(o);
+    if (set ? t.obj && set.has(t.obj) : !!t.clouds === (kind === 'clouds')) out.push(o);
+  });
+  return out;
+}
+
+// The models the patch swaps into the sky (props entries {model, sky: true} for the dome and {model, sky: "clouds"} for the cloud layer):
+// their previews, drawn in the place of the stage's own part: they hide it, and take its place in the draw order (the game draws the sky
+// in the tree's order, so which was picked last does not matter). A part the game cannot replace keeps its own and gets no model. Game
+// look shows them, as it does the stage's own. The view draws the cloud layer still, with no animation.
+function updateSkyView() {
+  for (const [kind, key] of [['dome', skyModel], ['clouds', cloudsModel]]) {
+    const pm = key ? propModels.get(key) : null, stock = skyStock(kind), cur = skyViews[kind];
+    const want = pm && pm.scene && (!skyParts || stock.length) ? pm.scene : null;
+    const base = stock.length ? Math.min(...stock.map((o) => o.renderOrder)) : kind === 'dome' ? -1e6 - 1 : -1e6 + 500;
+    if (cur && cur.from === want && cur.base === base) continue;     // else the model changed, or its files were made again
+    if (cur) scene.remove(cur.view);
+    skyViews[kind] = null;
+    if (want) {
+      const view = want.clone(true);
+      let meshes = 0;
+      view.traverse((o) => { if (o.isMesh) meshes++; });
+      skyDrawing(view, true, base, 0.9 / Math.max(1, meshes));
+      scene.add(view);
+      skyViews[kind] = { from: want, view, base };
+    }
+  }
+  for (const kind of ['dome', 'clouds']) for (const o of skyStock(kind)) o.visible = !skyViews[kind];
+  applyLook();
 }
 
 // ------------------------------------------------------------------ camera: fly (WASD, default) or orbit; V switches
@@ -483,11 +612,13 @@ canvas.addEventListener('wheel', (e) => {
 window.addEventListener('blur', () => fly.keys.clear());
 window.addEventListener('keyup', (e) => fly.keys.delete(e.key.toLowerCase()));
 
+const frameHooks = [];    // what the features further down do once a frame (the ruler, the minimap)
 function loop() {
   requestAnimationFrame(loop);
   flyStep();
+  for (const h of frameHooks) h();
   if (orbit.enabled) orbit.update();
-  if (skyRoot) skyRoot.position.copy(camera.position);   // the sky moves with the camera (it turns with the view, not the stage)
+  for (const s of [skyRoot, ...Object.values(skyViews).map((v) => v && v.view)]) if (s) s.position.copy(camera.position);   // the sky moves with the camera (it turns with the view, not the stage)
   hoverStep();
   syncBoxes();
   renderer.render(scene, camera);
@@ -507,12 +638,22 @@ const HINTS = {
   peds: 'Click a group or a sidewalk · Add them from the toolbar',
   pedSeg: 'Drag an end to stretch it · Drag the middle to move it',
   pedGroup: 'Drag the arrows to move it · End to drop · Ctrl+D to copy · Del to delete',
+  mk: 'Click a marker to select it · Add puts a new one where the view looks · The other layers are faint',
+  mkSel: 'Drag the arrows to move it · End to drop · Ctrl+D to copy · Del to delete · Ctrl+Z to undo · Esc to deselect',
+  mkNet: 'Drag the arrows to move it · K to link it to other nodes · Ctrl+D to copy · Del to delete · Esc to deselect',
+  link: 'Click a node to link or cut · Shift+click: one way · Click the ground: new node · Esc stops',
+  linkPick: 'Link tool: click the node to start from · Esc stops',
 };
 const hint = { key: '', timer: 0 };
 function hintKey() {
   if (band && !$('band').hidden) return 'band';
   if (gizmo.dragging) return 'gizmo';
   if (editMode === 'peds') return pedSel ? (pedSel.kind === 'group' ? 'pedGroup' : 'pedSeg') : 'peds';
+  if (layerOf()) {
+    const L = lay(layerOf());
+    if (L.net && linkTool.on) return L.sel >= 0 ? 'link' : 'linkPick';
+    return L.sel >= 0 ? (L.net ? 'mkNet' : 'mkSel') : 'mk';
+  }
   if (isDeleted(sel)) return 'deleted';
   if (group.length > 1) return 'many';
   if (sel) return gizmo.getMode() === 'rotate' ? 'turn' : 'one';
@@ -532,7 +673,41 @@ function showHint() {
 // rec: one object of the stage (handle). item: what can be selected, the object itself or one of its copies.
 // group: every selected item; sel: the one the gizmo and the fields act on (the last picked), the others follow it.
 let stageBases = {};     // a custom stage's name -> the game stage it is built on (its files, its handles, its props)
+let stageMeta = {};      // a custom stage's name -> its listing entry (id, title, base, mod, narrator, random)
 const baseOf = (n) => stageBases[n] || n;
+let marker = { on: false };     // the gizmo is on a start point, a power-up or a net node (markerProxy), not on an object
+// The four marker layers' drafts (the block "the marker layers" further down edits them): what the server's /api/spt gave, edited in place
+// by the page and saved by the mode's Save. pt: start points and power-ups; nets: the AI net and the vehicle net (they keep their view,
+// selection and saved copy inside). A draft is outside the patch and its Undo; layHist is each layer's own.
+const ptEmpty = (kind) => ({ points: [], caps: kind === 'SPT' ? [1, 2, 20, 20] : [100], lists: [], source: 'disc', file: '' });
+const pt = { SPT: ptEmpty('SPT'), PUP: ptEmpty('PUP') };
+const ptSaved = { SPT: '[]', PUP: '[]' };      // the points as JSON when they were last read or saved (null: not in this mod yet)
+const ptSelOf = { SPT: -1, PUP: -1 };
+const ptViews = { SPT: null, PUP: null };
+const newNet = (caps) => ({ points: [], caps, source: 'disc', file: '', lists: [], saved: '[]', sel: -1, view: null });
+const nets = { AIP: newNet([255, 450, 6]), FOP: newNet([255, 0, 6]) };
+const layLoadId = { SPT: 0, PUP: 0, AIP: 0, FOP: 0 };
+const layHist = Object.fromEntries(KINDS.map((k) => [k, { past: [], future: [] }]));
+// Display > Overlays: a layer is drawn faint over the stage while another mode is open, unless its switch is off (the layer's own mode draws it full, always)
+const OVERLAY_ID = { SPT: 'sptOn', PUP: 'pupOn', AIP: 'aipOn', FOP: 'fopOn' };
+const OVERLAY_KEY = { SPT: 'sptOn', PUP: 'pupOn', AIP: 'aipOn', FOP: 'fop' };
+const overlayOn = Object.fromEntries(KINDS.map((k) => [k, store.get(OVERLAY_KEY[k], k === 'FOP' ? '0' : '1') === '1']));
+// one face for the four layers: lay('SPT').points, .sel, .saved, .dirty ... (take it fresh each time: a load replaces the object under it)
+function lay(kind) {
+  const net = isNet(kind), d = net ? nets[kind] : pt[kind];
+  return {
+    kind, net, d,
+    get points() { return d.points; }, set points(v) { d.points = v; },
+    get lists() { return d.lists; }, get caps() { return d.caps; }, get source() { return d.source; },
+    get sel() { return net ? d.sel : ptSelOf[kind]; }, set sel(v) { if (net) d.sel = v; else ptSelOf[kind] = v; },
+    get saved() { return net ? d.saved : ptSaved[kind]; }, set saved(v) { if (net) d.saved = v; else ptSaved[kind] = v; },
+    get view() { return net ? d.view : ptViews[kind]; }, set view(v) { if (net) d.view = v; else ptViews[kind] = v; },
+    get dirty() { return this.saved === null || JSON.stringify(d.points) !== this.saved; },
+  };
+}
+const dirtyLayers = () => KINDS.filter((k) => lay(k).dirty);
+const layersDirty = () => KINDS.some((k) => lay(k).dirty);
+let fileStamp = 0;     // when the mod's file for this stage last changed, as the server told (Save sends it back: a file that changed meanwhile is asked about)
 let cfg = {}, stageName = '', recs = [], byHandle = new Map(), itemOf = new Map(), sel = null, group = [], dirty = false;
 // undo and redo: {p: the patch as JSON before the change, label}; savedJson: the patch the mod's file holds
 let history = [], future = [], savedJson = '';
@@ -542,19 +717,49 @@ let modNow = '', stageTitles = {};   // modNow: the mod the scene was loaded wit
 // props whose model the mod does not have for this stage
 const ENTRY_KEYS = new Set(['handle', 'from', 'pos', 'heading', 'delete', 'copies']);
 const PEDS_KEYS = new Set(['off', 'segments', 'groups']);
-const PROP_KEYS = new Set(['id', 'model', 'pos', 'heading', 'name']);
+const PROP_KEYS = new Set(['id', 'model', 'pos', 'heading', 'pitch', 'roll', 'name']);
 let keep = { top: {}, objects: [], names: {}, peds: {}, pedsRaw: null, props: [] };
-let skyModel = '';   // the model that replaces the sky dome: the patch's props entry {model, sky: true} (MODS.md, "Sky"); shows in the game only
+let skyModel = '', cloudsModel = '';   // the models that replace the sky dome and the cloud layer: the patch's props entries {model, sky: true} and {model, sky: "clouds"} (MODS.md, "Sky"); the view draws them with Game look (updateSkyView)
 // New props (the patch's "props", MODS.md): the models of the mod's props/ folder (tools/lvlprop.py), drawn from their preview with
 // the stage's textures. Each entry is a rec like a stage object's, with rec.prop = {id, model}; propRoot holds their nodes, inside
 // stageRoot so that clicks and Drop meet them.
 let propModels = new Map();   // MODEL -> {info: the /api/props entry, scene: the preview's scene, or null}
 let propRecs = [], propRoot = null, stageTex = new Map();   // stageTex: texId -> the stage's texture
 
-function setWorld(node, posGame, heading, rec) {
-  const qWorld = new THREE.Quaternion().setFromAxisAngle(Y, THREE.MathUtils.degToRad(heading - rec.h0)).multiply(rec.q0);
-  const m = new THREE.Matrix4().compose(toThree(posGame), qWorld, rec.s0);
+// A new prop's turn is pitch, roll and heading (tilt_math.js: the game's matrix, which lvl.py and the hook write too). The view's
+// quaternion maps the view's axes: its X is the game's X, its Y the game's Z and its Z the game's -Y, so the columns are where those
+// land, which row j of the matrix says (model axis j lands there).
+function propQuat(heading, pitch, roll) {
+  const [ex, ey, ez] = propRows(heading, pitch, roll);
+  return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(toThree(ex), toThree(ez), toThree(ey).negate()));
+}
+// {h, p, r} (degrees) of a rotation made by propQuat
+function propAngles(q) {
+  return propAngles_([[1, 0, 0], [0, 1, 0], [0, 0, 1]].map((axis) => toGame(toThree(axis).applyQuaternion(q))));
+}
+const tiltOf = (item) => {
+  if (!item.rec.prop) return [0, 0];
+  const a = propAngles(item.node.getWorldQuaternion(new THREE.Quaternion()));
+  return [Math.abs(a.p) < 0.005 ? 0 : a.p, Math.abs(a.r) < 0.005 ? 0 : a.r];
+};
+// tilt: [pitch, roll] of a new prop; left out, the node keeps the tilt it has
+function setWorld(node, posGame, heading, rec, tilt) {
+  let qWorld;
+  if (rec.prop) {
+    const t = tilt || (() => { const a = propAngles(node.getWorldQuaternion(new THREE.Quaternion())); return [a.p, a.r]; })();
+    qWorld = propQuat(heading, t[0], Math.max(-89, Math.min(89, t[1])));
+  } else qWorld = new THREE.Quaternion().setFromAxisAngle(Y, THREE.MathUtils.degToRad(heading - rec.h0)).multiply(rec.q0);
+  // the patch's "scale" grows the object about its handle: the node's scale is the disc's times it (a new prop has none)
+  const it = rec.prop ? null : itemOf.get(node);
+  const m = new THREE.Matrix4().compose(toThree(posGame), qWorld, it ? rec.s0.clone().multiplyScalar(effScale(it)) : rec.s0);
   setWorldMatrix(node, m);
+}
+// The scale an item has: its own, else (a copy) its original's, else 1
+const effScale = (it) => it.scale ?? (it.copy ? it.rec.item.scale ?? 1 : 1);
+// Draws the item's scale again where it stands (after its scale, or its original's, changed)
+function refreshScale(rec) {
+  if (rec.prop) return;
+  for (const it of [rec.item, ...rec.copies]) setWorld(it.node, posOf(it), headingOf(it), rec);
 }
 function setWorldMatrix(node, m) {
   node.parent.updateWorldMatrix(true, false);
@@ -564,15 +769,24 @@ function setWorldMatrix(node, m) {
 }
 function posOf(item) { return toGame(item.node.getWorldPosition(new THREE.Vector3())); }
 function headingOf(item) {
+  if (item.rec.prop) return wrapDeg(propAngles(item.node.getWorldQuaternion(new THREE.Quaternion())).h);
   const q = item.node.getWorldQuaternion(new THREE.Quaternion()).multiply(item.rec.q0.clone().invert());
   return wrapDeg(item.rec.h0 + THREE.MathUtils.radToDeg(2 * Math.atan2(q.y, q.w)));
 }
 
-function makeCopy(rec, pos, heading, iname = '') {
+// A building's hit points and a car pickup's type are the item's own (an original's or a copy's): null leaves what the disc has, and a
+// copy with null takes what its original says (lvl.py, "hp" and "traffic")
+const HP_MAX = 32767;
+const okHp = (v) => Number.isInteger(v) && v >= 1 && v <= HP_MAX;
+// "scale": the object grows about its handle (a number from 0.1 to 8; the runtime does the same, lvl.py SCALE_MIN/SCALE_MAX)
+const SCALE_MIN = 0.1, SCALE_MAX = 8;
+const okScale = (v) => typeof v === 'number' && v >= SCALE_MIN && v <= SCALE_MAX;
+function makeCopy(rec, pos, heading, iname = '', own = {}) {
   const node = rec.node.clone(true);
   rec.node.parent.add(node);
   node.visible = true;
-  const item = { rec, node, copy: true, attached: [], iname };
+  const item = { rec, node, copy: true, attached: [], iname, hp: okHp(own.hp) ? own.hp : null, traffic: typeof own.traffic === 'boolean' ? own.traffic : null,
+    scale: okScale(own.scale) ? own.scale : null };
   itemOf.set(node, item);
   rec.copies.push(item);
   setWorld(node, pos, heading, rec);
@@ -585,16 +799,49 @@ function removeCopy(item) {
   for (const a of item.attached) if (a.copy) removeCopy(a);
 }
 
+// ------------------------------------------------------------------ the mod's pictures in the view
+// The stage's textures take the mod's PNG where it has one (Textures, Fight HUD and sky) and the disc's picture back where it has not.
+// A texture keeps the disc's image the first time it is swapped. What draws the texture follows: the objects, the sky, the props.
+const texOrig = new WeakMap();
+let picGen = 0;
+async function syncPictures() {
+  const gen = ++picGen, name = stageName, mod = modNow;
+  if (!name || !stageTex.size) return;
+  let rows;
+  try { rows = (await api(`/api/texs?stage=${encodeURIComponent(name)}&mod=${encodeURIComponent(mod || '')}`)).rows || []; } catch (e) { return; }
+  for (const r of rows) {
+    const t = r.file === 'tex' ? stageTex.get(r.tex) : null;
+    if (!t) continue;
+    if (!texOrig.has(t)) texOrig.set(t, t.image);
+    const orig = texOrig.get(t);
+    let img = orig;
+    if (r.mod) {
+      try {
+        const res = await fetch(`/api/hudimg?src=mod&stage=${encodeURIComponent(name)}&mod=${encodeURIComponent(mod)}&png=${encodeURIComponent(r.png)}&t=${Date.now().toString(36)}`, { cache: 'no-store' });
+        if (!res.ok) continue;
+        const blob = await res.blob();
+        img = typeof ImageBitmap !== 'undefined' && orig instanceof ImageBitmap
+          ? await createImageBitmap(blob, { imageOrientation: 'flipY', premultiplyAlpha: 'none', colorSpaceConversion: 'none' })
+          : await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = URL.createObjectURL(blob); });
+      } catch (e) { continue; }
+    }
+    if (gen !== picGen || name !== stageName) return;      // a newer sync or another stage took over
+    if (t.image !== img) { t.image = img; t.dispose(); t.needsUpdate = true; }
+  }
+}
+
 // ------------------------------------------------------------------ new props
 // The mod's models (/api/props) and, for this stage's, the preview's scene; its materials name the stage texture (tex<id>)
+let propLoadGen = 0;       // a load that is no longer the newest writes into its own map and leaves the view's alone
 async function loadPropModels(mod) {
-  propModels = new Map();
-  if (!mod) return;
+  const gen = ++propLoadGen, map = new Map();
+  propModels = map;
+  if (!mod) { refreshSkySelects(); return; }
   let list = [];
   try { list = (await api(`/api/props?mod=${encodeURIComponent(mod)}`)).props || []; } catch (e) { msg(`Couldn't list the props of mod "${mod}": ${cleanError(e).text}`, { level: 'warn' }); }
   await Promise.all(list.map(async (p) => {
     const pm = { info: p, scene: null };
-    propModels.set(p.model, pm);
+    map.set(p.model, pm);
     if (p.error || !p.preview || p.stage !== baseOf(stageName)) return;
     try {
       const gltf = await new GLTFLoader().loadAsync(`/api/propglb?mod=${encodeURIComponent(mod)}&model=${encodeURIComponent(p.model)}`);
@@ -609,6 +856,11 @@ async function loadPropModels(mod) {
       pm.scene = gltf.scene;
     } catch (e) { p.error = `its preview does not load (${cleanError(e).text})`; }
   }));
+  if (gen === propLoadGen) refreshSkySelects();      // the models are new: what lists them follows, whoever asked for them
+}
+// the sky selects follow the mod's models (not while one is open)
+function refreshSkySelects() {
+  if (stageName && !document.activeElement?.matches?.('#pmSky, #pmClouds')) fillSkySelects();
 }
 const propKey = (m) => String(m || '').toUpperCase();
 // e: a "props" entry {id, model, pos, heading, name}; null (and nothing made) when the model is not one of this stage in the mod
@@ -630,7 +882,7 @@ function makeProp(e) {
   rec.item = { rec, node, copy: false, attached: [], iname: e.name ? String(e.name) : '' };
   itemOf.set(node, rec.item);
   propRecs.push(rec);
-  setWorld(node, pos, +e.heading || 0, rec);
+  setWorld(node, pos, +e.heading || 0, rec, [+e.pitch || 0, +e.roll || 0]);
   return rec.item;
 }
 function removeProp(rec) {
@@ -648,12 +900,12 @@ function newPropId() {
   }
   return 'prop' + (n + 1);
 }
-function addProp(model) {
+function addProp(model, at = null) {   // at: where it goes (else where the view looks)
   if (!propModels.get(model)?.scene) return;
   showPropMenu(false);
   if (editMode !== 'objects') enterMode('objects');
   snapshot('add prop ' + model);
-  const p = viewPoint(), it = makeProp({ id: newPropId(), model, pos: p });
+  const p = at || viewPoint(), it = makeProp({ id: newPropId(), model, pos: p });
   msg(`Added ${nameOf(it)} (${model})`, { level: 'ok', toast: ['Undo', undo] });
   select(it);
 }
@@ -669,7 +921,13 @@ function buildPatch() {
       if (Math.abs(wrapDeg(h - rec.h0)) > 0.05) e.heading = r1(h);
     }
     if (rec.copies.length) {
-      e.copies = rec.copies.map((c) => Object.assign({ pos: posOf(c).map(r1), heading: r1(headingOf(c)) }, c.iname ? { name: c.iname } : {}));
+      e.copies = rec.copies.map((c) => Object.assign({ pos: posOf(c).map(r1), heading: r1(headingOf(c)) }, c.iname ? { name: c.iname } : {},
+        c.hp != null ? { hp: c.hp } : {}, c.traffic != null ? { traffic: c.traffic } : {}, c.scale != null ? { scale: c.scale } : {}));
+    }
+    if (!rec.deleted) {
+      if (rec.item.hp != null) e.hp = rec.item.hp;
+      if (rec.item.traffic != null) e.traffic = rec.item.traffic;
+      if (rec.item.scale != null) e.scale = rec.item.scale;
     }
     if (rec.extra) Object.assign(e, rec.extra);
     if (Object.keys(e).length > 2) objects.push(e);
@@ -682,10 +940,14 @@ function buildPatch() {
   const props = propRecs.map((r) => {
     const e = { id: r.prop.id, model: r.prop.model, pos: posOf(r.item).map(r1) }, h = headingOf(r.item);
     if (Math.abs(h) > 0.05) e.heading = r1(h);
+    const [pitch, roll] = tiltOf(r.item);
+    if (Math.abs(pitch) > 0.05) e.pitch = r1(pitch);
+    if (Math.abs(roll) > 0.05) e.roll = r1(roll);
     if (r.item.iname) e.name = r.item.iname;
     return Object.assign(e, r.extra || {});
   }).concat(keep.props);
   if (skyModel) props.push({ model: skyModel, sky: true });
+  if (cloudsModel) props.push({ model: cloudsModel, sky: 'clouds' });
   if (props.length) out.props = props;
   const pp = keep.pedsRaw || (discPeds ? peds.patch() : null);
   if (pp || Object.keys(keep.peds).length) out.peds = Object.assign({}, pp, keep.peds);
@@ -693,11 +955,12 @@ function buildPatch() {
 }
 
 function resetAll() {
-  skyModel = '';
+  skyModel = cloudsModel = '';
   for (const r of [...propRecs]) removeProp(r);
   for (const rec of recs) {
     for (const c of [...rec.copies]) removeCopy(c);
     rec.item.iname = '';
+    rec.item.hp = rec.item.traffic = rec.item.scale = null;
     rec.deleted = false;
     rec.node.visible = true;
     setWorldMatrix(rec.node, rec.m0);
@@ -710,20 +973,26 @@ function applyPatch(patch) {
   keep = { top: {}, objects: [], names: {}, peds: {}, pedsRaw: null, props: [] };
   for (const [k, v] of Object.entries(patch)) if (!['objects', 'names', 'peds', 'props'].includes(k)) keep.top[k] = v;
   if (patch.props !== undefined && !Array.isArray(patch.props)) keep.top.props = patch.props;
-  skyModel = '';
+  skyModel = cloudsModel = '';
   for (const e of Array.isArray(patch.props) ? patch.props : []) {
     if (e && typeof e === 'object' && e.sky === true && typeof e.model === 'string' && e.model) { skyModel = propKey(e.model); continue; }
+    if (e && typeof e === 'object' && e.sky === 'clouds' && typeof e.model === 'string' && e.model) { cloudsModel = propKey(e.model); continue; }
     if (!makeProp(e)) keep.props.push(e);
   }
-  for (const rec of recs) rec.extra = null;
+  for (const rec of recs) { rec.extra = null; rec.item.hp = rec.item.traffic = rec.item.scale = null; }
   for (const e of Array.isArray(patch.objects) ? patch.objects : []) {
     const rec = e && typeof e === 'object' ? byHandle.get(normHandle(e.handle)) : null;
     if (!rec) { keep.objects.push(e); continue; }
     const extra = Object.fromEntries(Object.entries(e).filter(([k]) => !ENTRY_KEYS.has(k)));
+    // "hp", "traffic" and "scale" the editor can show are the item's own; anything else under those keys stays as the file has it
+    if (okHp(extra.hp)) { rec.item.hp = extra.hp; delete extra.hp; }
+    if (typeof extra.traffic === 'boolean') { rec.item.traffic = extra.traffic; delete extra.traffic; }
+    if (okScale(extra.scale)) { rec.item.scale = extra.scale; delete extra.scale; }
     rec.extra = Object.keys(extra).length ? extra : null;
-    for (const c of e.copies || []) makeCopy(rec, c.pos, c.heading ?? rec.h0, c.name || '');
+    for (const c of e.copies || []) makeCopy(rec, c.pos, c.heading ?? rec.h0, c.name || '', c);
     if (e.delete) { rec.deleted = true; rec.node.visible = false; }
     else if (e.pos || e.heading !== undefined) setWorld(rec.node, e.pos || rec.pw, e.heading ?? rec.h0, rec);
+    if (rec.item.scale != null && !e.delete && !(e.pos || e.heading !== undefined)) refreshScale(rec);
   }
   for (const [h, n] of Object.entries(patch.names || {})) {
     const rec = byHandle.get(normHandle(h));
@@ -734,12 +1003,14 @@ function applyPatch(patch) {
   if (pp && !discPeds) keep.pedsRaw = pp;
   else if (pp) for (const [k, v] of Object.entries(pp)) if (!PEDS_KEYS.has(k)) keep.peds[k] = v;
   updateGridView();
+  updateSkyView();
+  updateClearView();
   pedSel = null;     // the markers are made again
   peds.load(discPeds, keep.pedsRaw ? null : pp);
-  applyPedsView();
+  applyModeView();
   showPedCounts();
   return { entries: keep.objects.length + Object.keys(keep.names).length, props: keep.props.length,
-           keys: Object.keys(keep.top).filter((k) => k !== 'grid').concat(Object.keys(keep.peds).map((k) => 'peds.' + k)) };
+           keys: Object.keys(keep.top).filter((k) => k !== 'grid' && k !== 'walls').concat(Object.keys(keep.peds).map((k) => 'peds.' + k)) };
 }
 // the note over the view about what the file keeps that the editor does not show
 function showKeep(k) {
@@ -768,6 +1039,7 @@ function snapshot(label = 'change') {
 function staleCheck() { if (ui.check.state === 'ok' || ui.check.state === 'bad') ui.check.state = 'stale'; }
 const whatSel = () => (group.length > 1 ? `${group.length} objects` : sel ? nameOf(sel) : pedSel ? pedTitle(pedSel).toLowerCase() : 'objects');
 function restoreTo(p) {
+  lastNudge = -Infinity;      // an arrow after Undo is a new step, not the tail of the burst Undo just took back
   const again = group.filter((it) => !it.copy).map((it) => it.rec.item);
   resetAll();
   applyPatch(JSON.parse(p));
@@ -778,25 +1050,37 @@ function restoreTo(p) {
   showUndo();
 }
 function undo() {
+  if (layerOf()) { layerUndo(); return; }      // in a marker mode Undo is that layer's own
   if (!history.length) return;
   const h = history.pop();
   future.push({ p: JSON.stringify(buildPatch()), label: h.label });
   restoreTo(h.p);
 }
 function redo() {
+  if (layerOf()) { layerRedo(); return; }
   if (!future.length) return;
   const f = future.pop();
   history.push({ p: JSON.stringify(buildPatch()), label: f.label });
   restoreTo(f.p);
 }
-function showUndo() {
-  const u = history[history.length - 1], r = future[future.length - 1];
+// the top bar's Undo and Redo: the patch's history, or in a marker mode the layer's own
+function showUndoButtons() {
+  const lk = layerOf(), lh = lk ? layHist[lk] : null;
+  const u = lh ? lh.past[lh.past.length - 1] : history[history.length - 1], r = lh ? lh.future[lh.future.length - 1] : future[future.length - 1];
+  const of = lk ? ` in ${LAYERS[lk].noun}` : '';
   $('undo').disabled = !u;
-  $('undo').title = u ? `Undo: ${u.label} (Ctrl+Z)` : 'Nothing to undo (Ctrl+Z)';
+  $('undo').title = u ? `Undo${of}: ${u.label} (Ctrl+Z)` : `Nothing to undo${of} (Ctrl+Z)`;
   $('redo').disabled = !r;
-  $('redo').title = r ? `Redo: ${r.label} (Ctrl+Y)` : 'Nothing to redo (Ctrl+Y)';
-  $('save').classList.toggle('dirty', dirty);
+  $('redo').title = r ? `Redo${of}: ${r.label} (Ctrl+Y)` : `Nothing to redo${of} (Ctrl+Y)`;
+}
+function showUndo() {
+  showUndoButtons();
+  $('save').classList.toggle('dirty', isDirty());
+  refreshSkySelects();
+  queueDraft();
   showStatus();
+  queueBudget();
+  queueColl();
 }
 
 // ------------------------------------------------------------------ the status bar: last message, save, check, game, counts
@@ -812,29 +1096,132 @@ function stField(cls, text, state, title) {
 function showStatus(changedN) {
   if (changedN !== undefined) ui.changed = changedN;
   const where = modNow ? `mods/${modNow}/levels/${stageName}.json` : '';
-  stField('save', dirty ? 'Unsaved changes' : ui.savedAt ? `Saved ${hhmm(ui.savedAt)}` : 'No unsaved changes',
-          dirty ? 'dirty' : ui.savedAt ? 'saved' : '', where ? `Saves to ${where} (Ctrl+S)` : 'Choose a mod to save into (Mod, at the top)');
+  stField('save', isDirty() ? 'Unsaved changes' : ui.savedAt ? `Saved ${hhmm(ui.savedAt)}` : 'No unsaved changes',
+          isDirty() ? 'dirty' : ui.savedAt ? 'saved' : '', where ? `Saves to ${where} (Ctrl+S)` : 'Choose a mod to save into (Mod, at the top)');
   const c = ui.check;
   const ck = stField('check', c.state === 'ok' ? 'Check passed' : c.state === 'bad' ? `${c.n} ${c.n === 1 ? 'problem' : 'problems'}`
                      : c.state === 'stale' ? 'Not checked since the last change' : 'Not checked',
-                     { ok: 'ok', bad: 'err' }[c.state] || 'idle');
+                     { ok: 'ok', bad: 'err' }[c.state] || 'idle',
+                     c.state === 'none' || c.state === 'stale' ? 'Run the check (File > Check collision)' : 'Opens the Check tab');
   ck.querySelector('.ic').style.setProperty('--ic', `url(vendor/mdi/${c.state === 'bad' ? 'alert-circle-outline' : c.state === 'ok' ? 'check-circle-outline' : 'shield-check-outline'}.svg)`);
+  showBudget();
   const n = group.length || (pedSel ? 1 : 0);
   stField('count', `${ui.changed} changed` + (n ? ` · ${n} selected` : ''));
   showGame();
 }
 
+// The stage's fixed room the patch uses: the 8 MB arena (copies, props, a bigger grid) and the 1024 Interactives slots (every building,
+// pickup and breakable prop). Asked of the server (/api/budget, the patch applied without the collision check) a moment after each edit.
+let budgetTimer = 0, budgetKey = '', budgetSeq = 0;
+const kb = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+function queueBudget() {
+  clearTimeout(budgetTimer);
+  if (!stageName) return;
+  budgetTimer = setTimeout(refreshBudget, 500);
+}
+async function refreshBudget() {
+  const body = { name: stageName, mod: modNow, patch: buildPatch() };
+  const key = JSON.stringify(body);
+  if (key === budgetKey && ui.budget) return;
+  const seq = ++budgetSeq;
+  try {
+    const res = await api('/api/budget', body);
+    if (seq !== budgetSeq || body.name !== stageName) return;   // a newer edit or another stage came meanwhile
+    ui.budget = res;
+    budgetKey = key;
+  } catch (e) {
+    if (seq !== budgetSeq) return;
+    ui.budget = null;
+  }
+  showStatus();
+}
+function showBudget() {
+  const b = document.querySelector('#status .budget'), r = ui.budget;
+  b.hidden = !r;
+  if (!r) return;
+  const sl = r.interactives, ar = r.arena;
+  const ps = sl.used / sl.total, pa = ar.used / ar.total;
+  const level = r.full || ps >= 1 || pa >= 1 ? 'err' : ps >= 0.8 || pa >= 0.8 ? 'warn' : 'idle';
+  stField('budget', `${sl.used}/${sl.total} slots · arena ${ar.used ? kb(ar.used) : '0'}` + (level === 'idle' ? '' : ' · nearly full'), level,
+          `Room this stage's patch uses.\nBreakable slots: ${sl.used} of ${sl.total} (${sl.disc} on the disc), as the patch counts them: ` +
+          `a copy of a building, a pickup or a breakable prop takes some, a delete does not give them back.\n` +
+          `Arena: ${ar.used.toLocaleString('en-US')} of ${ar.total.toLocaleString('en-US')} bytes (copies, props, a bigger grid).` +
+          (r.full ? `\nIt ran out: ${r.full}` : ''));
+}
+
+// The Collision layer: the server applies the patch to a fresh copy of the stage and sends the shapes the game collides with
+// (/api/collision, tools/level_editor/collview.py). Asked for when the layer is on, a moment after each edit; the paths that touch the
+// selection keep their color and the rest fade.
+let collOn = store.get('coll', '0') === '1', collTimer = 0, collKey = '', collSeq = 0, collFailed = false;
+function queueColl() {
+  clearTimeout(collTimer);
+  if (!collOn || !stageName) return;
+  collTimer = setTimeout(refreshColl, 600);
+}
+async function refreshColl() {
+  if (!collOn || !stageName) return;
+  const body = { name: stageName, mod: modNow, patch: buildPatch() };
+  const key = JSON.stringify(body);
+  if (key === collKey && coll.loaded) return;
+  const seq = ++collSeq;
+  $('collInfo').textContent = 'Reading the collision…';
+  try {
+    const res = await api('/api/collision', body);
+    if (seq !== collSeq || body.name !== stageName) return;   // a newer edit or another stage came meanwhile
+    coll.set(res);
+    collKey = key;
+    collFailed = false;
+    collHighlight();
+  } catch (e) {
+    if (seq !== collSeq) return;
+    coll.clear();
+    collKey = '';
+    if (!collFailed) msg(`Couldn't read the collision: ${cleanError(e).text}`, { level: 'warn', toast: true });
+    collFailed = true;
+  }
+  showColl();
+}
+function collHighlight() {
+  coll.highlight(isDeleted(sel) ? null : group.filter((it) => it.node.visible).map(gameBox));
+}
+function showColl() {
+  const i = coll.info;
+  $('collOn').checked = collOn;
+  $('collInfo').hidden = !collOn;
+  if (collOn && coll.loaded) {
+    $('collInfo').textContent = `${i.paths} collision paths · ${i.triangles} triangles · ${i.boxes} drawn as boxes`;
+  } else if (collOn && collFailed) $('collInfo').textContent = 'No collision to show';
+}
+function setColl(on) {
+  collOn = on;
+  store.set('coll', on ? '1' : '0');
+  coll.setVisible(on);
+  if (on) refreshColl(); else { clearTimeout(collTimer); collSeq++; }
+  showColl();
+}
+
 // ------------------------------------------------------------------ loading
+// the stage that did not open (the select shows it, nothing of it is on screen): Save, Check and Test refuse until it opens
+let openFailed = '';
 async function loadStage(name) {
+  draftHold = true; clearTimeout(draftTimer);      // no draft is written while the stage opens: the old stage's patch is not this one's
   $('busyText').textContent = `Loading ${title(name)}…`;
   $('busy').hidden = false;
+  openFailed = '';
+  $('openNote').hidden = true;
   hoverBox.visible = false;
   hover.item = null;
   try {
     select(null);
     for (const r of [stageRoot, skyRoot]) if (r) { scene.remove(r); r.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); }
     stageRoot = skyRoot = null;
+    lightClose();
+    resetLayers();       // the old stage's markers and drafts go; the new stage's files load after its patch
+    if (ruler.on) setRuler(false);       // its points were on the old stage
     stageName = name;
+    $('editStage').disabled = !stageMeta[name];
+    ui.budget = null; budgetKey = '';
+    coll.clear(); collKey = ''; collSeq++;
     $('keepNote').hidden = true;
     $('winNote').hidden = true;
     winHidden = false;
@@ -842,10 +1229,13 @@ async function loadStage(name) {
     const mod = modNow;
     const info = await api(`/api/stage?name=${encodeURIComponent(name)}&mod=${encodeURIComponent(mod)}`);
     stageHave = info.have || [];
+    fileStamp = info.stamp || 0;
     const gltf = await new GLTFLoader().loadAsync(`/api/glb?name=${encodeURIComponent(name)}`);
     env = info.env || null;
+    skyParts = info.sky && Array.isArray(info.sky.dome) && Array.isArray(info.sky.clouds) ? info.sky : null;
     discPeds = info.peds || null;
     stageGrid = info.grid || null;
+    stageWalls = info.walls || 0;
     setLights(env && env.lights);
     skyRoot = setupDrawing(gltf);
     stageRoot = gltf.scene;
@@ -864,7 +1254,7 @@ async function loadStage(name) {
         const q0 = new THREE.Quaternion(), s0 = new THREE.Vector3(), p = new THREE.Vector3();
         o.matrixWorld.decompose(p, q0, s0);
         const rec = { info: i, node: o, p0: i.pos, pw: toGame(p), m0: o.matrixWorld.clone(), h0: i.heading, q0, s0, copies: [], deleted: false };
-        rec.item = { rec, node: o, copy: false, attached: [], iname: '' };
+        rec.item = { rec, node: o, copy: false, attached: [], iname: '', hp: null, traffic: null, scale: null };
         recs.push(rec);
         byHandle.set(normHandle(i.handle), rec);
         itemOf.set(o, rec.item);
@@ -874,16 +1264,19 @@ async function loadStage(name) {
       if (rec.info.on) { const b = byHandle.get(normHandle(rec.info.on)); if (b) b.item.attached.push(rec.item); }
     }
     stageTex = new Map();
-    stageRoot.traverse((o) => {
+    // the sky left stageRoot (setupDrawing) but its textures are the stage's: a sky model names them too
+    for (const root of [stageRoot, skyRoot]) if (root) root.traverse((o) => {
       if (!o.isMesh) return;
       for (const m of [].concat(o.material)) { const t = /^tex(\d+)$/.exec(m.name || ''); if (t && m.map) stageTex.set(+t[1], m.map); }
     });
+    syncPictures();      // the mod's pictures over the disc's
     propRecs = [];
     propRoot = new THREE.Group();
     propRoot.name = 'new props';
     stageRoot.add(propRoot);
     await loadPropModels(mod);
     const kept = applyPatch(info.patch);
+    loadSpt();      // the stage's four marker files, for the mod in use (not part of the patch: Undo and Redo leave them alone)
     savedJson = JSON.stringify(buildPatch());
     dirty = false;
     ui.savedAt = 0;
@@ -899,13 +1292,29 @@ async function loadStage(name) {
     msg(`${title(name)}: ${recs.length} objects, ${pc.groups} pedestrian groups` +
         (n ? `; mod "${mod}" changes ${n} ${n === 1 ? 'object' : 'objects'}` : '') +
         (info.patch.peds ? (n ? ' and the pedestrians' : `; mod "${mod}" changes the pedestrians`) : ''));
+    draftHold = false;
+    offerDraft();
   } catch (e) {
     const er = cleanError(e);
+    draftHold = false;
+    // what was on screen is gone and what is half built is not a stage: nothing may be saved as if it were this one
+    for (const r of [stageRoot, skyRoot]) if (r) scene.remove(r);
+    stageRoot = skyRoot = null;
+    recs = []; byHandle = new Map(); itemOf = new Map(); propRecs = []; history = []; future = [];
+    select(null);
+    dirty = false;
+    try { savedJson = JSON.stringify(buildPatch()); } catch (x) { savedJson = ''; }
+    openFailed = name;
+    $('openText').textContent = `${title(name)} didn't open: ${er.text}`;
+    $('openNote').hidden = false;
+    showUndo();
+    refreshList();
     msg(`Couldn't open ${title(name)}: ${er.text}`, { level: 'err', detail: er.detail });
   } finally {
     $('busy').hidden = true;
   }
 }
+$('openRetry').onclick = () => { if (openFailed) loadStage(openFailed); };
 
 function frameAll() {
   const box = new THREE.Box3();
@@ -919,7 +1328,10 @@ function frameAll() {
 function focus(item) {
   const box = new THREE.Box3().setFromObject(item.node);
   if (box.isEmpty()) return;
-  const c = box.getCenter(new THREE.Vector3()), r = Math.max(150, box.getSize(new THREE.Vector3()).length());
+  focusAt(box.getCenter(new THREE.Vector3()), Math.max(150, box.getSize(new THREE.Vector3()).length()));
+}
+// the camera looks at c (a scene point) from r * 1.4 away, along the line it already had
+function focusAt(c, r) {
   const dir = fly.on ? camera.getWorldDirection(new THREE.Vector3()).negate() : camera.position.clone().sub(orbit.target).normalize();
   orbit.target.copy(c);
   camera.position.copy(c).addScaledVector(dir, r * 1.4);
@@ -934,7 +1346,7 @@ function items() {
   return out;
 }
 function changed(rec) {
-  if (rec.prop || rec.deleted || rec.copies.length) return true;
+  if (rec.prop || rec.deleted || rec.copies.length || rec.item.hp != null || rec.item.traffic != null || rec.item.scale != null) return true;
   const p = posOf(rec.item);
   return Math.hypot(p[0] - rec.pw[0], p[1] - rec.pw[1], p[2] - rec.pw[2]) > 0.05 || Math.abs(wrapDeg(headingOf(rec.item) - rec.h0)) > 0.05;
 }
@@ -967,6 +1379,24 @@ const SEC = Object.fromEntries(SECTIONS.map((s) => [s.id, s]));
 const secOf = (i) => (i.kind === 'newprop' ? 'newprops' : i.kind === 'destr' ? 'buildings' : i.kind === 'pickup' ? 'pickups' : i.rule === 'Terrain piece' ? 'terrain' : 'props');
 const secOpen = (id) => store.get('sec.' + id, id === 'terrain' ? '0' : '1') === '1';
 const setIc = (el, name) => el.style.setProperty('--ic', `url(vendor/mdi/${name}.svg)`);
+// The list with the keyboard: Up and Down walk the rows and the section headers, Home and End jump, Enter or Space selects (Shift or Ctrl
+// with it adds or takes away, as a click does)
+$('list').setAttribute('role', 'listbox');
+$('list').addEventListener('keydown', (e) => {
+  const li = e.target.closest && e.target.closest('li');
+  if (!li || e.altKey) return;
+  const rows = [...$('list').children], i = rows.indexOf(li);
+  const go = (j) => { const t = rows[Math.max(0, Math.min(rows.length - 1, j))]; if (t) { e.preventDefault(); e.stopPropagation(); t.focus(); } };
+  if (e.key === 'ArrowDown') go(i + 1);
+  else if (e.key === 'ArrowUp') go(i - 1);
+  else if (e.key === 'Home') go(0);
+  else if (e.key === 'End') go(rows.length - 1);
+  else if ((e.key === 'Enter' || e.key === ' ') && li._item) {
+    e.preventDefault(); e.stopPropagation();   // (the arrows would also nudge the selection: the window's keys must not see them)
+    if (e.shiftKey || e.ctrlKey) select(li._item, 'toggle');
+    else { select(li._item); if (li._item.node.visible) focus(li._item); }
+  }
+});
 // what changed in an original: moved, turned (copies and deleted are said apart)
 function moveState(rec) {
   if (rec.prop) return { moved: false, turned: false };   // a new prop has no disc place: it is said "New"
@@ -989,6 +1419,10 @@ function kindCounts(list) {
 function rowEl(it) {
   const i = it.rec.info, li = document.createElement('li');
   li.className = 'it';
+  li._item = it;                       // the arrow keys and Enter (the list's own keydown) act on it
+  li.tabIndex = -1;                    // reached with the arrows from a section header; Tab does not walk hundreds of rows
+  li.setAttribute('role', 'option');
+  li.setAttribute('aria-selected', String(it === sel || group.includes(it)));
   if (it.copy) li.classList.add('copy');
   else if (!it.iname && i.nameSrc === 'rule') li.classList.add('rule');
   if (it === sel) li.classList.add('sel');
@@ -1053,7 +1487,13 @@ function refreshList() {
     frag.appendChild(h);
     if (open) for (const it of list) frag.appendChild(rowEl(it));
   }
+  // the list is redrawn on every edit: the row that had the keyboard keeps it
+  const had = ul.contains(document.activeElement) ? (document.activeElement._item || document.activeElement.dataset.sec) : null;
   ul.replaceChildren(frag);
+  if (had) {
+    const again = [...ul.children].find((e) => (e._item || e.dataset.sec) === had);
+    if (again) again.focus({ preventScroll: true });
+  }
   $('listEmpty').hidden = !!shown.length || !all.length;
   // the chips' counts: every object of the kind in the stage (copies too), and the changed originals
   const byKind = { destr: 0, pickup: 0, prop: 0 };
@@ -1062,15 +1502,14 @@ function refreshList() {
   const nRecs = recs.filter(changed).length + propRecs.length;
   document.querySelector('.kinds .n[data-n="changed"]').textContent = nRecs;
   const bp = buildPatch(), nChanged = bp.objects.length + (bp.props || []).length;
-  $('count').textContent = (shown.length === all.length ? `${all.length} objects` : `${shown.length} of ${all.length} shown`) +
-    ` · ${nChanged} changed` + (group.length ? ` · ${group.length} selected` : '');
-  document.title = `WotM Level Editor — ${stageName}${dirty ? ' *' : ''}`;
-  $('save').classList.toggle('dirty', dirty);
+  document.title = `WotM Level Editor — ${stageName}${isDirty() ? ' *' : ''}`;
+  $('save').classList.toggle('dirty', isDirty());
   showStatus(nChanged);
   showSummary(nChanged);
   syncMarks();
   if (sel && !isDeleted(sel) && !$('props').hidden) { showBadge(); showActions(); }
   if (editMode === 'peds') refreshPedList();
+  else if (layerOf()) refreshMk();
 }
 // the right panel with nothing selected: the stage, how many objects the mod changes, where Save writes
 function showSummary(nChanged) {
@@ -1092,7 +1531,7 @@ function showSummary(nChanged) {
 const isDeleted = (it) => !!it && !it.copy && it.rec.deleted;
 function select(item, mode = 'set') {
   if (item && !item.node.visible && !isDeleted(item)) item = null;
-  if (item && editMode === 'peds') enterMode('objects');   // an object (from a Check problem, Resting on) takes the Objects mode
+  if (item && editMode !== 'objects') enterMode('objects');   // an object (from a Check problem, Resting on) takes the Objects mode
   if (isDeleted(item) || isDeleted(sel)) mode = 'set';   // a deleted original is selected alone (its panel offers Restore)
   if (mode === 'set' || item) pedSel = null;
   if (mode === 'set') group = item ? [item] : [];
@@ -1106,13 +1545,38 @@ function select(item, mode = 'set') {
 }
 function selectMany(list, add = false) {
   const vis = list.filter((it) => it.node.visible);
-  if (vis.length && editMode === 'peds') enterMode('objects');
+  if (vis.length && editMode !== 'objects') enterMode('objects');
   pedSel = null;
   group = add ? [...group, ...vis.filter((it) => !group.includes(it))] : vis;
   sel = group[group.length - 1] || null;
   showSel();
 }
+// The right panel's tabs: Selection (what is selected) and Stage (what belongs to the whole stage). Selecting something shows its tab.
+function showRightTab(name) {
+  const stage = name === 'stage';
+  $('selTab').hidden = stage;
+  $('stageTab').hidden = !stage;
+  for (const [id, on] of [['tabSel', !stage], ['tabStage', stage]]) {
+    $(id).classList.toggle('on', on);
+    $(id).setAttribute('aria-selected', String(on));
+    $(id).tabIndex = on ? 0 : -1;
+  }
+  store.set('rtab', name);
+  if (stage && typeof fillSkySelects === 'function' && stageName) fillSkySelects();
+}
+$('tabSel').onclick = () => showRightTab('selection');
+$('tabStage').onclick = () => showRightTab('stage');
+$('rtabs').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  e.preventDefault();
+  const to = e.target.id === 'tabSel' ? 'stage' : 'selection';
+  showRightTab(to);
+  $(to === 'stage' ? 'tabStage' : 'tabSel').focus();
+});
 function showSel() {
+  marker.on = false;     // (showSel detaches the gizmo below; an object, a pedestrian marker or a start point / power-up / net node takes it)
+  const lk = layerOf(), mkPoint = lk ? lay(lk).points[lay(lk).sel] : null;
+  if (sel || pedSel || mkPoint) { showRightTab('selection'); if (rightOff) setRightOff(false); }     // what is selected is shown
   gizmo.detach();
   if (sel) pedSel = null;
   peds.highlight(pedSel);
@@ -1120,8 +1584,11 @@ function showSel() {
   $('props').hidden = !sel || gone;
   $('delProps').hidden = !gone;
   $('pedProps').hidden = !pedSel;
-  $('noSel').hidden = pm || !!sel;
+  $('noSel').hidden = pm || !!lk || !!sel;
   $('pedNoSel').hidden = !pm || !!pedSel;
+  $('mkNoSel').hidden = !lk || !!mkPoint;
+  $('mkProps').hidden = !mkPoint;
+  if (lk) { if (mkPoint) showMarker(); else showMarkerLegend(lk); }
   if (pedSel) {
     if (gizmo.getMode() !== 'translate') setTool('translate');
     gizmo.attach(pedSel.node);
@@ -1136,17 +1603,20 @@ function showSel() {
     gizmo.attach(sel.node);
     showPropsPanel();
   }
-  $('focusSel').disabled = !sel && !pedSel;
-  $('tTurn').disabled = pm;   // pedestrian markers only move
-  $('tTurn').title = pm ? 'Pedestrian markers only move' : 'Turn tool (R)';
+  $('focusSel').disabled = !sel && !pedSel && !mkPoint;
+  $('tTurn').disabled = pm || !!lk;   // pedestrian markers and the point layers' markers only move
+  $('tTurn').title = pm ? 'Pedestrian markers only move' : lk ? 'Markers only move (a start point\'s heading is a field of the right panel)' : 'Turn tool (R)';
   syncBoxes();
+  if (collOn) collHighlight();
   refreshList();
+  syncMarkerGizmo();
+  showUndoButtons();
   showHint();
   hover.dirty = true;
-  const shown = sel || pedSel;
+  const shown = sel || pedSel || mkPoint;
   if (shown !== lastScrolled) {   // a pick in the view shows its row (a list click is in view already)
     lastScrolled = shown;
-    $(pm ? 'pedList' : 'list').querySelector('li.it.sel')?.scrollIntoView({ block: 'nearest' });
+    $(pm ? 'pedList' : lk ? 'mkList' : 'list').querySelector('li.it.sel')?.scrollIntoView({ block: 'nearest' });
   }
 }
 let lastScrolled = null;
@@ -1159,6 +1629,7 @@ function showPropsPanel() {
   $('pHandle').hidden = multi || !!sel.rec.prop;
   $('pGroup').hidden = !multi;
   $('secName').hidden = $('secDetails').hidden = multi;
+  showBehavior();
   const badge = $('pBadge');
   if (multi) {
     $('pTitle').textContent = `${group.length} objects selected`;
@@ -1253,6 +1724,36 @@ function showPropsPanel() {
   showActions();
   showProps();
 }
+// Behavior: a building's hit points and a car pickup's type (the patch's "hp" and "traffic"). A blank field is what the disc has; a copy
+// with a blank field takes what its original says
+function showBehavior() {
+  const i = sel.rec.info, hasHp = i.hp != null, hasCar = i.traffic != null, hasScale = i.kind !== 'pickup';
+  $('secBehavior').hidden = group.length > 1 || !!sel.rec.prop || !(hasHp || hasCar || hasScale);
+  $('hpRow').hidden = !hasHp;
+  $('trafRow').hidden = !hasCar;
+  $('scaleRow').hidden = !hasScale;
+  const note = [];
+  if (hasScale) {
+    // "scale" grows the object about its handle (its origin, often a corner): the drawing and the collision both follow it
+    const no = i.scaleNo || '';
+    $('pScale').disabled = !!no;
+    $('pScale').value = sel.scale ?? '';
+    $('pScale').placeholder = String(sel.copy ? sel.rec.item.scale ?? 1 : 1);
+    $('pScale').title = no ? `Can't be scaled: ${no}` : 'How many times bigger (or smaller) it is, about its handle: 0.1 to 8. Blank: its own size';
+    note.push(no ? `It can't be scaled: ${no}.` : 'It grows about its handle (its origin, often a corner of it); what rests on it does not follow.' +
+      (sel.copy ? ' A copy takes its original’s unless you set its own.' : ''));
+  }
+  if (hasHp) {
+    $('pHp').value = sel.hp ?? '';
+    $('pHp').placeholder = String(sel.copy ? sel.rec.item.hp ?? i.hp : i.hp);
+    note.push(`The disc gives it ${i.hp} hit points.${sel.copy ? ' A copy takes its original’s unless you set its own.' : ''}`);
+  }
+  if (hasCar) {
+    $('pTraffic').value = sel.traffic == null ? '' : sel.traffic ? 'traffic' : 'parked';
+    note.push(`On the disc it ${i.traffic ? 'drives in the traffic' : 'is parked'}.${sel.copy ? ' A copy takes its original’s unless you set its own.' : ''}`);
+  }
+  $('behNote').textContent = note.join(' ');
+}
 // the header's state: Copy, Moved, Turned, or how many copies it has
 function showBadge() {
   const badge = $('pBadge');
@@ -1280,6 +1781,7 @@ function showActions() {
   const rs = new Set();
   for (const it of group) { rs.add(it.rec); if (carryOn) for (const a of it.rec.item.attached) rs.add(a.rec); }
   $('reset').disabled = ![...rs].some((r) => !r.prop && changed(r));
+  arrange.changed();
   $('reset').title = $('reset').disabled ? 'Nothing to restore: it is where the disc has it'
     : "Back to the disc's place, copies removed (with Move objects on top, also the objects on it)";
 }
@@ -1393,11 +1895,20 @@ function deletedHit(ray, far = Infinity) {
 
 // Hover: what a click would pick, outlined in white, and the pointer as a hand over it. At most 30 raycasts a second, from the
 // render loop, and none while a button is down (drag, look, band, gizmo) or the gizmo has the pointer.
-const hover = { at: null, last: 0, item: null, n: 0, dirty: false };
-canvas.addEventListener('pointermove', (e) => { hover.at = ndc(e); hover.dirty = true; hover.buttons = e.buttons; });
+const hover = { at: null, last: 0, item: null, n: 0, dirty: false, marker: -1, row: -1, shown: -1, surf: null, shift: false, ctrl: false };   // marker: under the pointer; row: its list row under it; shown: the one outlined; surf: the stage's surface under it (Link tool)
+// the Link tool of the nets (K): on, and whether the node just linked becomes the selected one
+const linkTool = { on: false, chain: store.get('netChain', '1') === '1' };
+let newTypeOf = '';      // the node whose type the bar's type control last followed
+canvas.addEventListener('pointermove', (e) => {
+  hover.at = ndc(e); hover.client = [e.clientX, e.clientY]; hover.dirty = true; hover.buttons = e.buttons;
+  hover.shift = e.shiftKey; hover.ctrl = e.ctrlKey || e.metaKey;
+});
+for (const type of ['keydown', 'keyup']) window.addEventListener(type, (e) => { hover.shift = e.shiftKey; hover.ctrl = e.ctrlKey || e.metaKey; hover.dirty = true; });
+window.addEventListener('blur', () => { hover.shift = false; hover.ctrl = false; });
 canvas.addEventListener('pointerleave', () => { hover.at = null; hover.dirty = true; });
 // what is under the pointer at p (NDC): {item} an object, {ped} a pedestrian marker, {deleted} a dashed box, or null
 function pickAt(p, add = false) {
+  if (layerOf()) return null;   // the markers of a layer are picked by their screen place (pickMarker); the objects are scenery
   const ray = new THREE.Raycaster();
   ray.setFromCamera(p, camera);
   const hits = stageRoot ? ray.intersectObject(stageRoot, true).filter((h) => visibleChain(h.object)) : [];
@@ -1418,46 +1929,66 @@ function hoverStep() {
   const busy = hover.buttons || gizmo.dragging || look || band || !stageRoot;
   hover.dirty = false;
   hover.last = now;
-  let it = null;
+  let it = null, mk = -1;
   if (!busy && hover.at && gizmo.axis === null) {
     hover.n++;
-    const h = pickAt(hover.at);
-    it = h ? h.item || h.deleted || h.ped || null : null;
+    if (layerOf()) { if (hover.client) mk = pickMarker({ clientX: hover.client[0], clientY: hover.client[1] }); }
+    else {
+      const h = pickAt(hover.at);
+      it = h ? h.item || h.deleted || h.ped || null : null;
+    }
   }
   hover.item = it;
+  hover.marker = mk;
+  hover.surf = mk < 0 && !busy && hover.at && linkOn(hover.ctrl) && lay(layerOf()).sel >= 0 ? surfaceAt(hover.at) : null;   // where a click would put a new node
+  hover.shown = mk >= 0 ? mk : hover.row ?? -1;      // the pointer on a marker, or on its row in the list
+  showMarkerRing(hover.shown);
   const obj = it && !it.kind ? it : null;   // an object or a deleted original (pedestrian markers have a kind)
   hoverBox.visible = !!obj && obj.node.visible && !group.includes(obj);
   if (hoverBox.visible) hoverBox.setFromObject(obj.node);
-  canvas.style.cursor = gizmo.axis !== null && !busy ? 'move' : it ? 'pointer' : '';
+  canvas.style.cursor = gizmo.axis !== null && !busy ? 'move' : it || mk >= 0 ? 'pointer' : linkOn(hover.ctrl) ? 'crosshair' : '';
 }
 function showProps() {
   if (!sel || isDeleted(sel)) return;
   const p = posOf(sel), h = headingOf(sel);
   $('px').value = r1(p[0]); $('py').value = r1(p[1]); $('pz').value = r1(p[2]); $('ph').value = r1(h);
+  $('tiltRow').hidden = !sel.rec.prop;      // only a new prop tilts (the patch's "pitch" and "roll")
+  if (sel.rec.prop) { const [pitch, roll] = tiltOf(sel); $('pp').value = r1(pitch); $('pr').value = r1(roll); }
 }
+// the tilt the fields hold, for setWorld (a new prop only; the others keep the turn they have)
+const tiltFromInputs = () => (sel && sel.rec.prop ? [+$('pp').value || 0, +$('pr').value || 0] : undefined);
 
-// ------------------------------------------------------------------ the modes: Objects (1) and Pedestrians (2)
+// ------------------------------------------------------------------ the modes: Objects (1), Pedestrians (2), Start points (3), Power-ups (4), AI net (5), Vehicle net (6)
 // Objects: a click picks the stage's objects; the Pedestrians layer (P, or the Layers menu) shows the markers faint, not clickable.
 // Pedestrians: the left panel lists the groups and the sidewalks, a click picks a marker, the objects are scenery.
-let editMode = store.get('mode', 'objects') === 'peds' ? 'peds' : 'objects';
-let pedsOn = store.get('peds', '0') === '1';   // the Pedestrians layer, for the Objects mode
+// Start points, Power-ups, AI net, Vehicle net: one file each (the "layers"), a list on the left, a click picks a marker, the right panel holds
+// its numbers; the objects are scenery and the other layers are faint (Display > Overlays).
+const MODE_NAMES = ['objects', 'peds', ...KINDS.map((k) => LAYERS[k].mode)];
+const MODE_BUTTON = { objects: 'modeObjects', peds: 'modePeds', spt: 'modeSpt', pup: 'modePup', aip: 'modeAip', fop: 'modeFop' };
+let editMode = MODE_NAMES.includes(store.get('mode', 'objects')) ? store.get('mode', 'objects') : 'objects';
+let pedsOn = store.get('peds', '0') === '1';   // the Pedestrians layer, for the other modes
 const modeNow = () => editMode;
-function applyPedsView() {
-  const pm = editMode === 'peds';
+const layerOf = (m = editMode) => KIND_OF_MODE[m] || null;     // the kind of a marker mode, or null in Objects and Pedestrians
+function applyModeView() {
+  const pm = editMode === 'peds', lk = layerOf();
   peds.setVisible(pm || pedsOn);
   peds.setDim(!pm);
   $('pedsOn').checked = pm || pedsOn;
   $('pedsOn').disabled = pm;
   $('pedsOn').closest('.switch').classList.toggle('none', pm);
   $('pedBar').hidden = !pm;
-  $('propBar').hidden = pm;
-  if (pm) showPropMenu(false);
+  $('propBar').hidden = pm || !!lk;
+  $('mkBar').hidden = !lk;
+  if (pm || lk) showPropMenu(false);
   document.body.dataset.mode = editMode;
+  document.body.dataset.kind = lk || '';
+  syncLayerVisibility();
 }
-function setPeds(on) {   // the layer
+// the Pedestrians layer switch (P): the Objects mode and the marker modes
+function setPeds(on) {
   pedsOn = on;
   store.set('peds', on ? '1' : '0');
-  applyPedsView();
+  applyModeView();
   showHint();
   hover.dirty = true;
 }
@@ -1466,16 +1997,27 @@ function enterMode(m) {
   if (m === editMode) return false;
   editMode = m;
   store.set('mode', m);
-  if (m === 'peds') { group = []; sel = null; } else pedSel = null;
-  if (m === 'peds' && gizmo.getMode() === 'rotate') setTool('translate');
-  applyPedsView();
+  group = []; sel = null; pedSel = null;
+  for (const k of KINDS) lay(k).sel = -1;
+  linkTool.on = false;
+  syncLinkTool();
+  if ((m === 'peds' || layerOf(m)) && gizmo.getMode() === 'rotate') setTool('translate');
+  applyModeView();
+  updateLayerViews();          // the active layer is drawn full, the others faint
+  syncRailDots();
+  mkFillBar();
   showMode();
+  showUndoButtons();
   hover.dirty = true;
   return true;
 }
-function setMode(m) { if (enterMode(m)) showSel(); }
+// the rail's and the keys' way in: a marker mode needs its list, which lives in the left panel
+function setMode(m) {
+  if (layerOf(m) && leftOff) setLeftOff(false);
+  if (enterMode(m)) showSel();
+}
 function showMode() {
-  for (const [id, m] of [['modeObjects', 'objects'], ['modePeds', 'peds']]) {
+  for (const [m, id] of Object.entries(MODE_BUTTON)) {
     $(id).classList.toggle('on', editMode === m);
     $(id).setAttribute('aria-pressed', editMode === m);
   }
@@ -1499,6 +2041,8 @@ function showPedCounts() {
   const live = $('pedLive');
   live.checked = peds.live();
   live.disabled = !have || (!peds.live() && !peds.hasDiscGroups());
+  $('pedClearGroups').disabled = !have || !c.groups;
+  $('pedClearAll').disabled = !have || !(c.groups || c.segments);
   const ag = $('pedAddGroup'), as = $('pedAddSeg');
   const noNet = have && !peds.items().some((it) => it.kind === 'seg');
   ag.disabled = !have || c.groups >= c.maxGroups || noNet;
@@ -1625,10 +2169,11 @@ function groundAt(v) {   // the scene height of the first visible surface under 
   const hit = ray.intersectObject(stageRoot, true).find((h) => visibleChain(h.object));
   return hit ? hit.point.y : null;
 }
-function viewPoint() {   // where a new marker goes: the surface in the middle of the view, else a point ahead
+function viewPoint(strict = false) {   // where a new marker goes: the surface in the middle of the view, else a point ahead (strict: null)
   const ray = new THREE.Raycaster();
   ray.setFromCamera(new THREE.Vector2(0, 0), camera);
   const hit = stageRoot ? ray.intersectObject(stageRoot, true).find((h) => visibleChain(h.object)) : null;
+  if (strict && !hit) return null;
   return toGame(hit ? hit.point : camera.position.clone().addScaledVector(camera.getWorldDirection(new THREE.Vector3()), 600));
 }
 function pedEdit(fn, label = 'pedestrians') {   // one undo step, then the edit; a refused edit (limits) goes to the log
@@ -1663,6 +2208,23 @@ function setPedLive(on) {
   showSel();
   msg(on ? `The disc's pedestrian groups are back in ${title(stageName)}` : `No pedestrians in ${title(stageName)}: every group is out`,
       { level: 'ok', toast: on ? true : ['Undo', undo] });
+}
+// Clear groups / Clear all (groups and sidewalks): asks first, one undo step. Sidewalks never go alone: a group with no sidewalk walks nowhere.
+function clearPeds(withSidewalks) {
+  if (!discPeds) return;
+  const c = peds.counts();
+  if (!c.groups && !(withSidewalks && c.segments)) return;
+  const what = withSidewalks
+    ? [c.groups && `${c.groups} group${c.groups > 1 ? 's' : ''}`, c.segments && `${c.segments} sidewalk${c.segments > 1 ? 's' : ''}`].filter(Boolean).join(' and ')
+    : `${c.groups} group${c.groups > 1 ? 's' : ''}`;
+  ask(`Remove ${what}?`, `${title(stageName)} is left without ${withSidewalks ? 'pedestrians' : 'groups of people'} in the view. The mod's patch changes only when you save, and Ctrl+Z brings ${withSidewalks ? 'them' : 'the groups'} back.`,
+      [['cancel', 'Cancel'], ['go', 'Remove them', true]], (v) => {
+        if (v !== 'go') return;
+        pedEdit(() => { peds.setLive(false); if (withSidewalks) peds.clearSegments(); }, withSidewalks ? 'clear the pedestrians' : 'clear the pedestrian groups');
+        pedSel = null;
+        showSel();
+        msg(withSidewalks ? `${title(stageName)}: no groups and no sidewalks` : `${title(stageName)}: no pedestrian groups`, { level: 'ok', toast: ['Undo', undo] });
+      }, { icon: 'delete-outline' });
 }
 function pedFromInputs() {
   if (!pedSel) return;
@@ -1708,21 +2270,30 @@ function carry(start) {
   for (const [a, m0] of start.att) setWorldMatrix(a.node, delta.clone().multiply(m0));
 }
 
-let dragStart = null;
+let dragStart = null, dragPre = null;
 gizmo.addEventListener('dragging-changed', (e) => {
   orbit.enabled = !e.value && !fly.on;
   if (e.value) dragged = true;
   showHint();
+  if (marker.on) { if (e.value) layerSnap(layerOf(), 'move ' + markerLabel()); else markerDragEnd(); return; }
+  if (e.value && (pedSel || sel)) dragPre = { dirty, future, check: ui.check.state };   // what a click that moves nothing puts back
   if (e.value && pedSel) snapshot('move ' + pedTitle(pedSel).toLowerCase());
   else if (e.value && sel) {
     snapshot((gizmo.getMode() === 'rotate' ? 'turn ' : 'move ') + whatSel());
     dragStart = startMove();
   } else {
     dragStart = null;
+    if (dragPre && history.length && JSON.stringify(buildPatch()) === history[history.length - 1].p) {
+      history.pop();                         // a click on the gizmo that did not move anything is not an edit
+      future = dragPre.future; dirty = dragPre.dirty; ui.check.state = dragPre.check;
+      showUndo();
+    }
+    dragPre = null;
     refreshList();
   }
 });
 gizmo.addEventListener('objectChange', () => {
+  if (marker.on) { moveMarker(); return; }
   if (pedSel) { peds.moved(pedSel); showPed(); return; }
   if (!sel) return;
   if (gizmo.getMode() === 'rotate') setWorld(sel.node, posOf(sel), headingOf(sel), sel.rec);   // only about the game's Z
@@ -1731,7 +2302,7 @@ gizmo.addEventListener('objectChange', () => {
 });
 
 function setTool(mode) {
-  if ((pedSel || editMode === 'peds') && mode === 'rotate') return;   // pedestrian markers only move
+  if ((pedSel || editMode === 'peds' || layerOf()) && mode === 'rotate') return;   // pedestrian markers and the layers' markers only move
   gizmo.setMode(mode);
   gizmo.showX = gizmo.showZ = mode !== 'rotate';
   gizmo.showY = true;
@@ -1752,31 +2323,39 @@ function setSnap() {
 }
 // F and the view bar's button: look at the selection (an object, or a pedestrian marker)
 function focusSelection() {
+  if (layerOf()) { const p = markerSel(); if (p) focusAt(toThree(p.pos), 220); return; }
   if (sel) focus(sel);   // a deleted one too: where it was
   else if (pedSel) focus({ node: pedSel.kind === 'seg' ? pedSel.lane : pedSel.node });
 }
 
 function editFromInputs() {
   if (!sel || isDeleted(sel)) return;
+  // an emptied (or half-typed) field is not a 0: the number that was there comes back and nothing moves
+  if (['px', 'py', 'pz', 'ph'].some((id) => $(id).value.trim() === '' || !Number.isFinite(+$(id).value))) { showProps(); return; }
   snapshot('edit ' + whatSel());
   const start = startMove();
-  setWorld(sel.node, [+$('px').value, +$('py').value, +$('pz').value], +$('ph').value, sel.rec);
+  setWorld(sel.node, [+$('px').value, +$('py').value, +$('pz').value], +$('ph').value, sel.rec, tiltFromInputs());
   carry(start);
+  showProps();
   refreshList();
 }
 
 // arrows: along the world axis nearest to where the camera looks (Shift ×10); PageUp/PageDown: up and down
 let lastNudge = -Infinity;
 function nudge(fwd, side, up, big) {
-  if (!pedSel && (!sel || isDeleted(sel))) return;
+  if (layerOf()) { if (!markerSel()) return; }
+  else if (!pedSel && (!sel || isDeleted(sel))) return;
   const now = performance.now();
-  if (now - lastNudge > 700) snapshot('nudge ' + whatSel());   // one undo step per burst of key repeats
+  if (now - lastNudge > 700) {      // one undo step per burst of key repeats
+    if (layerOf()) layerSnap(layerOf(), 'nudge ' + markerLabel()); else snapshot('nudge ' + whatSel());
+  }
   lastNudge = now;
   const d = camera.getWorldDirection(new THREE.Vector3());
   const f = Math.abs(d.x) > Math.abs(d.z) ? new THREE.Vector3(Math.sign(d.x), 0, 0) : new THREE.Vector3(0, 0, Math.sign(d.z) || -1);
   const right = new THREE.Vector3(-f.z, 0, f.x);
   const step = ($('snap').checked ? snapMove() : 10) * (big ? 10 : 1);
   const v = f.multiplyScalar(fwd).addScaledVector(right, side).add(new THREE.Vector3(0, up, 0)).multiplyScalar(step);
+  if (layerOf()) { nudgeMarker(v); return; }
   if (pedSel) { nudgePed(v); return; }
   const start = startMove();
   setWorldMatrix(sel.node, new THREE.Matrix4().makeTranslation(v.x, v.y, v.z).multiply(sel.node.matrixWorld));
@@ -1789,6 +2368,7 @@ function visibleChain(o) { for (; o; o = o.parent) if (!o.visible) return false;
 
 // End: each selected item down (or up) onto the first surface under its middle, its own meshes and what it carries aside
 function dropToGround() {
+  if (layerOf()) { dropMarker(); return; }
   if (pedSel) { const it = pedSel; pedEdit(() => peds.drop(it, groundAt), 'drop ' + pedTitle(it).toLowerCase()); return; }
   if (!group.length || !stageRoot || isDeleted(sel)) return;
   snapshot('drop ' + whatSel());
@@ -1818,6 +2398,7 @@ function dropToGround() {
 }
 
 function duplicate() {
+  if (layerOf()) { duplicateMarker(); return; }
   if (pedSel && pedSel.kind === 'group') {
     const g = pedSel.group, it = pedEdit(() => peds.addGroup([g.pos[0] + 60, g.pos[1], g.pos[2]], g.count), 'copy a pedestrian group');
     if (it) selectPed(it);
@@ -1828,24 +2409,29 @@ function duplicate() {
   const box = new THREE.Box3();
   for (const it of group) box.expandByObject(it.node);
   const step = Math.max(40, box.getSize(new THREE.Vector3()).x + 20);
-  const made = [], done = new Set();
-  const copyOf = (it) => {
-    const p = posOf(it);
-    const at = [p[0] + step, p[1], p[2]];
-    const c = it.rec.prop ? makeProp(Object.assign({ id: newPropId(), model: it.rec.prop.model, pos: at, heading: headingOf(it) }, it.rec.extra || {}))
-      : makeCopy(it.rec, at, headingOf(it));
-    done.add(it);
-    return c;
-  };
-  for (const it of group) {
-    if (!it.node.visible || done.has(it)) continue;
-    const c = copyOf(it);
-    made.push(c);
-    if ($('carry').checked) for (const a of it.attached) if (a.node.visible && !group.includes(a)) c.attached.push(copyOf(a));
-  }
-  const on = done.size - made.length;
+  const { made, on } = copyGroup([(p, h) => [[p[0] + step, p[1], p[2]], h]]);
   msg(`Copied ${countText(made)}` + (on ? ` and ${on} ${on === 1 ? 'object' : 'objects'} on top` : ''), { level: 'ok', toast: true });
   selectMany(made);
+}
+// One copy of an item, placed by `place`: ([x, y, z], heading) -> [[x, y, z], heading] (a new prop for a new prop, else a copy of the object)
+function cloneItem(it, place) {
+  const [at, h] = place(posOf(it), headingOf(it)), [pitch, roll] = tiltOf(it);
+  return it.rec.prop ? makeProp(Object.assign({ id: newPropId(), model: it.rec.prop.model, pos: at, heading: h, pitch, roll }, it.rec.extra || {}))
+    : makeCopy(it.rec, at, h, '', it.copy ? it : {});     // a copy of a copy keeps the hit points and car type the copy was given
+}
+// The selection (and, with Move objects on top, what rests on it) copied once for each placer. made: the copies of the selected ones.
+function copyGroup(placers) {
+  const made = [];
+  let on = 0;
+  for (const place of placers) {
+    for (const it of group) {
+      if (!it.node.visible) continue;
+      const c = cloneItem(it, place);
+      made.push(c);
+      if ($('carry').checked) for (const a of it.attached) if (a.node.visible && !group.includes(a)) { c.attached.push(cloneItem(a, place)); on++; }
+    }
+  }
+  return { made, on };
 }
 // "Hotel", "3 buildings" or "5 objects"
 const KIND_WORDS = { destr: ['building', 'buildings'], pickup: ['pickup', 'pickups'], prop: ['prop', 'props'], newprop: ['new prop', 'new props'] };
@@ -1861,6 +2447,7 @@ function hideRec(it) {
   else { it.rec.deleted = true; it.node.visible = false; }
 }
 function remove() {
+  if (layerOf()) { removeMarker(); return; }
   if (pedSel) {
     const it = pedSel;
     pedSel = null;
@@ -1894,12 +2481,76 @@ function resetSel() {
   for (const r of rs) {
     if (r.prop) continue;   // a new prop has no disc place to go back to
     for (const c of [...r.copies]) removeCopy(c);
+    r.item.hp = r.item.traffic = r.item.scale = null;
     r.deleted = false;
     r.node.visible = true;
     setWorldMatrix(r.node, r.m0);
   }
   selectMany([...rs].map((r) => r.item));
 }
+
+// ------------------------------------------------------------------ Arrange (web/arrange.js): the selection copied or moved by rule
+const arrangeItems = () => (isDeleted(sel) ? [] : group.filter((it) => it.node.visible));
+function gameBox(it) {   // the item's box in the game's axes, and where it stands (its origin); an object without a mesh counts as its point
+  const b = new THREE.Box3().setFromObject(it.node);
+  const pos = posOf(it);
+  if (b.isEmpty()) return { min: pos, max: pos, pos };
+  return { min: [b.min.x, -b.max.z, b.min.y], max: [b.max.x, -b.min.z, b.max.y], pos };
+}
+const arrangeCarried = (it) => ($('carry').checked ? it.attached.filter((a) => a.node.visible && !group.includes(a)) : []);
+function placeItem(it, place) {
+  const [p, h] = place(posOf(it), headingOf(it));
+  setWorld(it.node, p, h, it.rec);
+}
+// One copy of the selection for each placer; the copies become the selection. Returns how many objects it made.
+function arrangeCopies(placers, what) {
+  const src = arrangeItems();
+  if (!src.length || !placers.length) return 0;
+  const label = countText(src);
+  snapshot(`${what} ${whatSel()}`);
+  const { made, on } = copyGroup(placers);
+  const n = made.length + on;
+  msg(`Made ${n} ${n === 1 ? 'copy' : 'copies'} of ${label}`, { level: 'ok', toast: ['Undo', undo] });
+  selectMany(made);
+  return n;
+}
+// The selection, and what it carries, moved by one rule
+function arrangeMove(place, what) {
+  const src = arrangeItems();
+  if (!src.length) return 0;
+  snapshot(`${what} ${whatSel()}`);
+  for (const it of src) { placeItem(it, place); for (const a of arrangeCarried(it)) placeItem(a, place); }
+  msg(`Moved ${countText(src)}`, { level: 'ok', toast: ['Undo', undo] });
+  showProps();
+  refreshList();
+  return src.length;
+}
+// shifts[k]: how far the k-th selected object goes along the axis (0 X, 1 Y, 2 Z)
+function arrangeShifts(axis, shifts, what) {
+  const src = arrangeItems();
+  if (!src.length) return 0;
+  if (!shifts.some((s) => Math.abs(s) > 0.05)) { msg('They are already in line', { level: 'info', toast: true }); return 0; }
+  snapshot(`${what} ${whatSel()}`);
+  src.forEach((it, k) => {
+    const place = (p, h) => { const q = p.slice(); q[axis] += shifts[k]; return [q, h]; };
+    placeItem(it, place);
+    for (const a of arrangeCarried(it)) placeItem(a, place);
+  });
+  msg(`${what === 'align' ? 'Aligned' : 'Spread'} ${countText(src)}`, { level: 'ok', toast: ['Undo', undo] });
+  showProps();
+  refreshList();
+  return src.length;
+}
+const arrange = initArrange($('secArrange'), {
+  boxes: () => arrangeItems().map(gameBox),
+  view: () => viewPoint(),
+  carryCount: () => arrangeItems().reduce((n, it) => n + arrangeCarried(it).length, 0),
+  copies: arrangeCopies,
+  moveAll: arrangeMove,
+  shifts: arrangeShifts,
+  scrub: (inp) => scrubField(inp),
+  msg,
+});
 
 // picking: a click that did not drag (Shift/Ctrl: add or take out); Shift + left drag: box select
 const ndc = (e) => {
@@ -1937,7 +2588,8 @@ canvas.addEventListener('pointerup', (e) => {
     const x0 = Math.min(a.x, z.x), x1 = Math.max(a.x, z.x), y0 = Math.min(a.y, z.y), y1 = Math.max(a.y, z.y);
     const kinds = shownKinds();
     const inside = items().filter((it) => {
-      if (!kinds.has(it.rec.info.kind) || !visibleChain(it.node)) return false;
+      // a new prop counts as a prop, as the list and Ctrl+A count it
+      if (!kinds.has(it.rec.info.kind === 'newprop' ? 'prop' : it.rec.info.kind) || !visibleChain(it.node)) return false;
       const bx = new THREE.Box3().setFromObject(it.node);
       if (bx.isEmpty()) return false;
       const p = bx.getCenter(new THREE.Vector3()).project(camera);
@@ -1953,6 +2605,18 @@ canvas.addEventListener('pointerup', (e) => {
     toast('In Fly view, hold the right button to look around (or press V for Orbit).', 'info');
   }
   if (!down || moved > 4 || gizmo.dragging || dragged || e.button !== 0) return;
+  if (ruler.on) { if (!ruler.click(ndc(e))) toast('Nothing there to measure: click the stage.', 'info'); return; }   // the ruler takes the clicks
+  // in a marker mode (start points, power-ups, a net): the marker near the pointer is selected; nothing near lets go of it. The objects
+  // are scenery there, so the click never falls through to them.
+  if (layerOf()) {
+    const L = lay(layerOf()), link = linkOn(e.ctrlKey || e.metaKey);
+    if (link && e.altKey) { const m = pickMarker(e); if (m >= 0) selectMarker(m); return; }      // Alt+click: select that node, tool still on
+    if (link && L.sel >= 0) { linkClick(e); return; }      // the Link tool: the click joins or cuts, or puts a new node on the ground
+    if (!link && (e.shiftKey || e.ctrlKey)) return;
+    const m = pickMarker(e);
+    if (m >= 0) selectMarker(m); else if (L.sel >= 0 && !linkTool.on) deselectMarker();
+    return;
+  }
   // the first visible thing under the pointer: an object, a pedestrian marker, a deleted one's dashed box; ground or a road: nothing
   const add = e.shiftKey || e.ctrlKey, h = pickAt(ndc(e), add);
   if (h && h.ped) selectPed(h.ped);
@@ -2078,15 +2742,42 @@ function showWinner() {
 }
 const FAILED = { check: 'Check failed', save: "Couldn't save", test: "Couldn't start the game", reload: "Couldn't reload the game" };
 // Check, Save, Test in game or Reload in game; true when the server did it. Saving with no mod chosen asks which one first.
+// One Save, Check, Test or Reload at a time: a second Ctrl+S or click while one is under way would write the same file twice at once
+let posting = '';
+const POSTING_LABEL = { save: 'Saving…', check: 'Checking…', test: 'Starting…', reload: 'Reloading…' };
 async function post(kind, save = true, extra = {}) {
-  const writes = kind === 'save' || kind === 'reload' || (kind === 'test' && save);
+  if (posting) return false;
+  posting = kind;
+  const btn = { save: $('save'), check: $('check') }[kind];
+  const lbl = btn && btn.querySelector('.lbl'), was = lbl && lbl.textContent;
+  if (btn) { btn.setAttribute('aria-busy', 'true'); lbl.textContent = POSTING_LABEL[kind]; }
+  try { return await postNow(kind, save, extra); }
+  finally {
+    posting = '';
+    if (btn) { btn.removeAttribute('aria-busy'); lbl.textContent = was; }
+  }
+}
+async function postNow(kind, save, extra) {
+  if (openFailed || !stageRoot) {       // a patch built from nothing would be saved over this stage's file
+    msg(openFailed ? `${FAILED[kind] || kind}: ${title(openFailed)} didn't open, so there is nothing to ${kind}. Use Retry on the note over the view.`
+                   : `${FAILED[kind] || kind}: no stage is open yet.`, { level: 'err', toast: true });
+    return false;
+  }
+  const writes = kind === 'save' || (kind === 'reload' && save) || (kind === 'test' && save);
   if (writes && !modNow) {
     const m = await pickMod('save', { save: 'Save', test: 'Save and test', reload: 'Save and reload' }[kind]);
     if (!m) return false;
     moveTo(m, false);
   }
   const mod = modNow;
-  const body = Object.assign({ name: stageName, mod, patch: buildPatch(), training: true, save }, extra);
+  if (writes && lightDirty()) await lightSave();       // the open Light and fog panel's file goes with the stage's
+  // so do the marker layers' (start points, power-ups, the nets): an error in one shows in its panel. A plain Save still writes the patch,
+  // but nothing goes on from a layer that did not save (Test, Reload, and the switches that drop the draft read the false)
+  let layersOk = true, layersWrote = false;
+  if (writes && layersDirty()) { layersWrote = true; layersOk = await saveLayers(); }
+  if (!layersOk && kind !== 'save') return false;
+  const { here, ...rest } = extra;       // here: Test from here / Reload from here (the view's aim as the start point)
+  const body = Object.assign({ name: stageName, mod, patch: buildPatch(), save, since: writes ? fileStamp : undefined }, testBody(here ? aimStart() : null), rest);
   const wasRunning = game.running;
   if (kind === 'test') setGameState('starting');
   if (kind === 'reload') setGameState('reloading');
@@ -2116,7 +2807,9 @@ async function post(kind, save = true, extra = {}) {
     const rel = `mods/${mod}/levels/${stageName}.json`;
     if (res.saved) {
       savedJson = JSON.stringify(body.patch);
+      if (res.stamp !== undefined) fileStamp = res.stamp;
       dirty = JSON.stringify(buildPatch()) !== savedJson;   // an edit made while saving stays unsaved
+      if (!dirty) removeDraft(); else queueDraft();
       ui.savedAt = Date.now();
       const removed = /^removed /.test(res.saved);
       const text = removed ? `Removed ${rel}: your mod no longer changes ${title(stageName)}` : `Saved to ${rel}`;
@@ -2125,12 +2818,17 @@ async function post(kind, save = true, extra = {}) {
                   toast: bad ? false : kind === 'save' });
       if (bad) toast(`Saved, but the check found ${chk.n} ${chk.n === 1 ? 'problem' : 'problems'}`, 'warn', ['Show', () => openOutput('check')]);
     } else if (kind === 'save') {
-      msg(`Nothing to save: your mod has no changes for ${title(stageName)}`, { toast: true });
+      // the server wrote no stage file: the patch is what the mod already has (an empty patch moved to a mod without a file, for one)
+      savedJson = JSON.stringify(body.patch);
+      if (res.stamp !== undefined) fileStamp = res.stamp;
+      dirty = JSON.stringify(buildPatch()) !== savedJson;
+      if (!dirty) removeDraft(); else queueDraft();
+      if (!layersWrote) msg(`Nothing to save: your mod has no changes for ${title(stageName)}`, { toast: true });
     }
     if (res.launched) {
       game.seen = ''; game.stage = stageName; game.result = null;
       setGameState('starting');
-      msg(`Starting the game on ${title(stageName)} (training, as Togera)`, { level: 'ok', detail: res.launched });
+      msg(`Starting the game on ${title(stageName)}: ${testSummary()}${here ? ', from the view\'s aim' : ''}`, { level: 'ok', detail: res.launched });
       watchGame(0, true);
     }
     if (res.reloading) {
@@ -2140,14 +2838,21 @@ async function post(kind, save = true, extra = {}) {
     }
     showUndo();
     refreshList();
-    return true;
+    return layersOk;
   } catch (e) {
     game.pending = false;
     if (kind === 'test' || kind === 'reload') setGameState(wasRunning ? 'running' : 'closed');
-    if (kind === 'test' && e.code === 'running') { game.stage = e.data.stage || game.stage; setRunning(true); askRunning(save); return false; }
+    if (kind === 'test' && e.code === 'running') { game.stage = e.data.stage || game.stage; setRunning(true); askRunning(save, extra); return false; }
+    if (e.code === 'changed') {      // the mod's file changed on disk after the editor read it: never overwritten without asking
+      ask('The file changed on disk', `${e.message} Saving now replaces what is there with your version.`,
+          [['cancel', 'Cancel'], ['go', 'Overwrite', true]],
+          (v) => { if (v === 'go') post(kind, save, Object.assign({}, extra, { overwrite: true })); }, { icon: 'alert-outline' });
+      return false;
+    }
     const er = cleanError(e);
     const where = /wotm\.exe/.test(er.text) ? 'game' : /disc image/.test(er.text) ? 'iso' : '';
     const action = e.code === 'mod' ? ['Choose mod', () => $('mod').focus()]
+      : e.code === 'offline' ? ['Copy patch', async () => toast(await copyText(JSON.stringify(buildPatch(), null, 1)) ? 'Patch copied' : "Couldn't copy the patch", 'info')]
       : e.code === 'settings' || /Settings/.test(er.text) ? ['Open settings', () => openSettings(where)] : undefined;
     msg(`${FAILED[kind] || kind}: ${er.text}`, { level: 'err', detail: er.detail, toast: action });
     return false;
@@ -2156,8 +2861,10 @@ async function post(kind, save = true, extra = {}) {
 
 // a question: a title, a text and buttons [value, label, primary]; o.icon (an MDI name, amber), o.note (an amber line under the
 // text). then(value) runs once: on a button's click, or when the dialog closes otherwise (Esc, the close button: 'cancel').
+let askPrev = null;       // ends the question the dialog held last, if it is still waiting for its close event
 function ask(head, text, buttons, then, o = {}) {
   const dlg = $('askDlg');
+  if (askPrev) askPrev();       // (a question closed by Esc answers 'cancel' when its close event comes: that event must not answer for this one)
   if (dlg.open) dlg.close();
   $('askTitle').textContent = head;
   $('askText').textContent = text;
@@ -2185,8 +2892,15 @@ function ask(head, text, buttons, then, o = {}) {
   }
   dlg.returnValue = '';
   dlg.addEventListener('close', onClose);
+  askPrev = () => finish('cancel');
   dlg.showModal();
   (main || $('askBtns').lastElementChild)?.focus();
+}
+// Something that writes into the mod needs one chosen: true when there is, else says why it is needed, with a button to choose
+function requireMod(why) {
+  if (modNow) return true;
+  msg(`Choose a mod first: ${why}`, { level: 'warn', toast: ['Choose mod', () => $('mod').focus()] });
+  return false;
 }
 const changesText = (n) => `${n} unsaved ${n === 1 ? 'change' : 'changes'}`;
 // How many things differ from the saved file: entries by handle, the instance names, the pedestrians, the rest of the file
@@ -2201,21 +2915,30 @@ function unsavedCount() {
   for (const h of A.keys()) if (!B.has(h)) n++;
   const rest = (p) => JSON.stringify(Object.assign({}, p, { objects: undefined }));
   if (rest(a) !== rest(b)) n++;
-  return Math.max(n, dirty ? 1 : 0);
+  return Math.max(n, dirty ? 1 : 0) + (lightDirty() ? 1 : 0) + dirtyLayers().length;
 }
+// the stage's patch has changes, or the open Light and fog panel does, or a marker layer has a draft (their files are saved with Save too)
+function isDirty() { return dirty || lightDirty() || layersDirty(); }
 // unsaved changes in the way: Cancel, Discard, or save first (then gets 'cancel', 'discard' or 'save')
 function askUnsaved(text, saveLabel, then) {
   ask('Unsaved changes', text, [['cancel', 'Cancel'], ['discard', 'Discard'], ['save', saveLabel, true]], then,
       { icon: 'content-save-alert-outline' });
 }
 // Test with the game open: reload this stage in it, or close it and open it again
-function askRunning(save) {
+function askRunning(save, ex = {}) {
   const on = gameStage(), same = !on || on === stageName;
   ask('The game is already open',
-      same ? `It is on ${title(stageName)}. Reload this stage in it, or restart the game?`
+      same ? `It is on ${title(stageName)}. Reload this stage in it, or restart the game? Only a restart applies the Test options' monsters and CPUs.`
            : `It is on ${title(on)}. Restart it on ${title(stageName)}?`,
       [['cancel', 'Cancel'], ['restart', 'Restart game', !same]].concat(same ? [['reload', 'Reload in game', true]] : []),
-      (v) => { if (v === 'restart') post('test', save, { restart: true }); else if (v === 'reload') post('reload'); });
+      (v) => { if (v === 'restart') post('test', save, Object.assign({}, ex, { restart: true })); else if (v === 'reload') post('reload', save, ex.here ? { here: true } : {}); });   // "Test without them": the file on disk, not a save
+}
+// Where "Test from here" starts you: the surface the middle of the view meets, and the game heading the view looks along (0 is +Y and 90 is
+// +X, as the start points' heading counts)
+function aimStart(strict = false) {
+  const p = viewPoint(strict), d = camera.getWorldDirection(new THREE.Vector3());
+  if (!p || (strict && d.y > 0.02)) return null;      // nothing under the middle of the view, or looking up (what is up there is no place to stand)
+  return [r1(p[0]), r1(p[1]), r1(p[2]), r1(wrapDeg(Math.atan2(d.x, -d.z) * 180 / Math.PI))];
 }
 function reloadGame() {
   const on = gameStage();
@@ -2235,7 +2958,8 @@ async function stopGame() {
 // One [fase] line of the game's log (native/runtime/wotm_levelpatch.inc and wotm_levelreload.inc) in words:
 // {text, cls, stage, end, more, last}; end: the line settles what the editor waits for (applied, ignored or dropped), more: the
 // load's own lines follow it (up to "depois:", last). null: a line shown as it is.
-const STAT_WORDS = { moved: 'moved', copies: 'copies', deleted: 'deleted', skipped: 'not applied', 'ped segments': 'sidewalks',
+const STAT_WORDS = { moved: 'moved', copies: 'copies', deleted: 'deleted', skipped: 'not applied', 'hit points set': 'buildings with their own hit points',
+                     'traffic set': 'cars with their own type', scaled: 'objects scaled', 'ped segments': 'sidewalks',
                      'ped groups changed': 'pedestrian groups changed', 'ped groups added': 'pedestrian groups added',
                      'ped groups deleted': 'pedestrian groups deleted', 'ped groups off': 'pedestrian groups off' };
 function statsText(s) {
@@ -2334,6 +3058,8 @@ function setGameState(s) {
   game.running = s !== 'closed';
   showGame();
   hudGameChanged();
+  texGameChanged();
+  lightGameChanged();
 }
 function showGame() {
   const s = game.state, where = title(gameStage() || stageName);
@@ -2350,17 +3076,18 @@ function showGame() {
   }
   ind.title = s === 'running' ? `The game the editor opened is running, on ${where}` : '';
   const test = $('test'), rl = $('reload');
-  test.disabled = s === 'starting';
+  test.disabled = $('testHere').disabled = $('testMenuBtn').disabled = s === 'starting';
   test.classList.toggle('primary', s === 'closed');
   rl.disabled = s !== 'running';
+  rl.hidden = s === 'closed';        // there is nothing to reload until a game is open (Test in game opens one)
   rl.classList.toggle('primary', s === 'running' || s === 'reloading');
-  const label = dirty ? 'Save & reload' : 'Reload in game';
+  const label = isDirty() ? 'Save & reload' : 'Reload in game';
   rl.querySelector('.lbl').textContent = label;
   rl.setAttribute('aria-label', label);
   rl.title = s === 'closed' ? 'Start the game with Test in game first'
     : s === 'starting' ? 'The game is starting'
     : s === 'reloading' ? 'The game is reloading this stage'
-    : (dirty ? 'Save your changes and reload' : 'Reload') + ' this stage in the open game (F10 in the game does the same)';
+    : (isDirty() ? 'Save your changes and reload' : 'Reload') + ' this stage in the open game (F10 in the game does the same)';
   $('stop').hidden = s === 'closed';
   const res = game.result;
   const [text, state] = s === 'closed' ? ['Game closed', 'idle']
@@ -2378,7 +3105,7 @@ setInterval(async () => noteGame(await gameLog()), 4000);
 $('stage').onchange = (e) => {
   const to = e.target.value;
   e.target.blur();
-  if (!dirty) { loadStage(to); return; }
+  if (!isDirty()) { loadStage(to); return; }
   e.target.value = stageName;      // until the answer
   askUnsaved(`${title(stageName)} has ${changesText(unsavedCount())}.`, 'Save and switch', async (v) => {
     if (v === 'cancel' || (v === 'save' && !(await post('save')))) return;
@@ -2407,11 +3134,14 @@ function fillMods() {
   f.classList.toggle('none', !modNow);
   f.title = modNow ? `Your changes are saved into mods/${modNow}/levels/` : 'Choose the mod your changes are saved into, or make a new one';
 }
-// the mod in use from now on (the config keeps it); the scene is not loaded again here
-function setMod(v) {
+// the mod in use from now on (the config keeps it); the scene is not loaded again here. keepDrafts: the marker layers with unsaved changes
+// keep them (moveTo); the others read the new mod's files
+function setMod(v, keepDrafts = false) {
   modNow = v;
   cfg.mod = v;
   winHidden = false;
+  loadSpt(keepDrafts);      // each mod keeps its own marker files
+  syncPictures();
   fillMods();
   showWinner();
   api('/api/config', { mod: v }).catch((err) => msg(`Couldn't keep the mod in the settings: ${cleanError(err).text}`, { level: 'err' }));
@@ -2419,7 +3149,7 @@ function setMod(v) {
 // the scene's changes go into mod v without loading its file: unsaved until Save writes them there
 function moveTo(v, say = true) {
   const p = JSON.stringify(buildPatch());
-  setMod(v);
+  setMod(v, true);
   // the new props draw from the new mod's models; an entry whose model it lacks stays in the file, unseen
   loadPropModels(v).then(() => {
     if (!propRecs.length && !keep.props.length) return;
@@ -2444,7 +3174,7 @@ function switchMod(v) {
       done(modNow);
       return;
     }
-    if (!dirty) { setMod(v); loadStage(stageName); done(modNow); return; }
+    if (!isDirty()) { setMod(v); loadStage(stageName); done(modNow); return; }
     const n = unsavedCount();
     ask(`Switch to mod "${v}"?`,
         modNow ? `You have ${changesText(n)} for ${modNow}.` : `You have ${changesText(n)}, not saved in any mod yet.`,
@@ -2531,11 +3261,9 @@ $('clearFilters').onclick = () => {
   refreshList();
 };
 document.querySelectorAll('.kinds input').forEach((x) => (x.onchange = refreshList));
-$('modeObjects').onclick = () => setMode('objects');
-$('modePeds').onclick = () => setMode('peds');
 // Name and Details open or closed as last time
-for (const id of ['secName', 'secDetails']) {
-  $(id).open = store.get('fold.' + id, '0') === '1';
+for (const id of ['secName', 'secDetails', 'secBehavior']) {
+  $(id).open = store.get('fold.' + id, id === 'secBehavior' ? '1' : '0') === '1';
   $(id).addEventListener('toggle', () => store.set('fold.' + id, $(id).open ? '1' : '0'));
 }
 $('pHandle').onclick = async () => {
@@ -2636,7 +3364,7 @@ function scrubField(inp, o = {}) {
   let start = null;
   const live = () => {
     if (!start || !sel || isDeleted(sel)) return;
-    setWorld(sel.node, [+$('px').value, +$('py').value, +$('pz').value], +$('ph').value, sel.rec);
+    setWorld(sel.node, [+$('px').value, +$('py').value, +$('pz').value], +$('ph').value, sel.rec, tiltFromInputs());
     carry(start);
   };
   const hooks = (turn) => ({
@@ -2647,7 +3375,17 @@ function scrubField(inp, o = {}) {
   });
   for (const id of ['px', 'py', 'pz']) scrubField($(id), hooks(false));
   scrubField($('ph'), hooks(true));
+  for (const id of ['pp', 'pr']) scrubField($(id), hooks(true));
 }
+$('tiltOff').onclick = () => {
+  if (!sel || isDeleted(sel) || !sel.rec.prop) return;
+  snapshot('level ' + whatSel());
+  const start = startMove();
+  setWorld(sel.node, posOf(sel), headingOf(sel), sel.rec, [0, 0]);
+  carry(start);
+  showProps();
+  refreshList();
+};
 // a pedestrian group's or segment's fields: People and Width through their sliders, X, Y, Z moving the marker
 scrubField($('pdCount'), { live: () => { $('pdCountR').value = $('pdCount').value; slideInput('count'); }, end: slideDone });
 scrubField($('pdWidth'), { live: () => { $('pdWidthR').value = $('pdWidth').value; slideInput('width'); }, end: slideDone });
@@ -2674,19 +3412,34 @@ $('keepClose').onclick = () => { $('keepNote').hidden = true; };
 $('winClose').onclick = () => { winHidden = true; $('winNote').hidden = true; };
 $('check').onclick = () => post('check');
 $('save').onclick = () => post('save');
-$('test').onclick = () => {
-  if (!dirty) { post('test', false); return; }
+// the top bar's menus: File (stages, pack, check) and the Test button's chevron (from here, options)
+popover({ button: $('fileBtn'), menu: $('fileMenu'), place: true, closeOnItem: true });
+popover({ button: $('testMenuBtn'), menu: $('testMenu'), place: true, closeOnItem: true });
+function testGame(here) {
+  if (here && !aimStart(true)) {
+    msg("Test from here starts you where the middle of the view meets the stage: aim the view at the ground or a roof first", { level: 'warn', toast: true });
+    return;
+  }
+  const ex = here ? { here: true } : {};
+  if (!isDirty()) { post('test', false, ex); return; }
   const n = unsavedCount();
   ask('Save before testing?',
       `The game loads the saved file. Your last ${n === 1 ? 'change is' : `${n} changes are`} not saved yet.`,
       [['cancel', 'Cancel'], ['nosave', 'Test without them'], ['save', 'Save and test', true]],
-      (v) => { if (v === 'save' || v === 'nosave') post('test', v === 'save'); },
+      (v) => { if (v === 'save' || v === 'nosave') post('test', v === 'save', ex); },
       { icon: 'content-save-alert-outline' });
-};
+}
+$('test').onclick = () => testGame(false);
+$('testHere').onclick = () => testGame(true);
+const testTitle = () => { $('test').title = `Open the game on this stage: ${testSummary()}`; };
+$('testOpts').onclick = () => openTestOpts({ api, aim: () => aimStart(true), run: testGame, changed: testTitle });
+loadTestOpts(api).then(testTitle);
 $('reload').onclick = reloadGame;
 // the Output: tabs, Copy, Clear, hide; the status bar's fields open it on their tab (or close it when it is there already)
 document.querySelectorAll('#output .tab').forEach((b) => (b.onclick = () => openOutput(b.dataset.tab)));
 document.querySelectorAll('#status .st').forEach((b) => (b.onclick = () => {
+  // "Not checked" in the status bar runs the check (its result shows in the Check tab); a result already there is opened or closed
+  if (b.classList.contains('check') && (ui.check.state === 'none' || ui.check.state === 'stale') && stageName) { post('check'); return; }
   if (!$('output').hidden && outTab === b.dataset.tab) closeOutput(); else openOutput(b.dataset.tab);
 }));
 $('outToggle').onclick = () => ($('output').hidden ? openOutput() : closeOutput());
@@ -2726,25 +3479,20 @@ setGrid(store.get('grid', '0') === '1');
 $('grid').onchange = (e) => { setGrid(e.target.checked); store.set('grid', e.target.checked ? '1' : '0'); };
 $('look').onchange = (e) => setLook(e.target.checked);
 $('pedsOn').onchange = (e) => setPeds(e.target.checked);
+$('collOn').onchange = (e) => setColl(e.target.checked);
+coll.setVisible(collOn);
+showColl();
 // the view bar: fly or orbit, focus, the layers menu, the shortcuts
 $('vFly').onclick = () => { if (!fly.on) setView(true); };
 $('vOrbit').onclick = () => { if (fly.on) setView(false); };
 $('focusSel').onclick = focusSelection;
-function showLayers(open) {
-  $('layersMenu').hidden = !open;
-  $('layersBtn').classList.toggle('on', open);
-  $('layersBtn').setAttribute('aria-expanded', open);
-}
-$('layersBtn').onclick = () => showLayers($('layersMenu').hidden);
-document.addEventListener('pointerdown', (e) => {   // a click anywhere else closes the layers menu
-  if (!$('layersMenu').hidden && !e.target.closest('#layersMenu, #layersBtn')) showLayers(false);
-}, true);
+const layersPop = popover({ button: $('layersBtn'), menu: $('layersMenu') });
+function showLayers(open) { layersPop.set(open); }
 function showKeys() {
-  if (document.querySelector('dialog[open]')) return;
+  if (document.querySelector('dialog:modal')) return;
   showLayers(false);
   $('keysDlg').showModal();
 }
-$('keysBtn').onclick = showKeys;
 $('help').onclick = showKeys;
 $('pedAddGroup').onclick = () => addPed('group');
 $('pedAddSeg').onclick = () => addPed('seg');
@@ -2753,21 +3501,25 @@ $('pdCountR').oninput = () => slideInput('count');
 $('pdWidthR').oninput = () => slideInput('width');
 $('pdCountR').onchange = $('pdWidthR').onchange = slideDone;
 $('pedLive').onchange = (e) => setPedLive(e.target.checked);
+$('pedClearGroups').onclick = () => clearPeds(false);
+$('pedClearAll').onclick = () => clearPeds(true);
 $('pdDrop').onclick = dropToGround;
 $('pdDup').onclick = duplicate;
 $('pdDel').onclick = remove;
 
 // Add prop: the mod's models made for this stage, and Import .glb (lvlprop.py on the server; the model lands in mods/<mod>/props/)
-function showPropMenu(open = $('propMenu').hidden) {
-  $('propMenu').hidden = !open;
-  if (open) {   // under the button
-    const r = $("addProp").getBoundingClientRect(), pr = $("propMenu").offsetParent?.getBoundingClientRect();
-    if (pr) $("propMenu").style.left = `${Math.max(8, Math.round(r.left - pr.left))}px`;
+document.body.append($('propMenu'));        // out of the view: it opens from the left panel and floats over both
+const propPop = popover({ button: $('addProp'), menu: $('propMenu'), onOpen: fillPropMenu });
+$('pmFind').onclick = () => openPalette();
+$('pmBrowse').onclick = () => { showPropMenu(false); openPalette(); };
+function showPropMenu(open = !propPop.isOpen) { propPop.set(open); }
+function fillPropMenu() {
+  {   // under the button, over the page (the menu lives in the body: the panel it opens from scrolls and clips)
+    const r = $('addProp').getBoundingClientRect(), m = $('propMenu');
+    m.style.left = `${Math.max(8, Math.round(r.left))}px`;
+    m.style.top = `${Math.round(r.bottom + 4)}px`;
+    m.style.maxHeight = `${Math.max(240, innerHeight - r.bottom - 40)}px`;
   }
-  $('addProp').classList.toggle('on', open);
-  $('addProp').setAttribute('aria-expanded', open);
-  if (!open) return;
-  showLayers(false);
   $('pmMod').textContent = modNow ? `mod "${modNow}"` : 'no mod';
   const list = $('pmList'), all = [...propModels.values()], here = all.filter((pm) => pm.info.stage === baseOf(stageName));
   list.textContent = '';
@@ -2791,28 +3543,251 @@ function showPropMenu(open = $('propMenu').hidden) {
     : !here.length ? `No props for ${title(stageName)} yet.` + (other ? ` ${other} of this mod ${other === 1 ? 'is' : 'are'} for other stages.` : '') : '';
   $('pmNone').textContent = none;
   $('pmNone').hidden = !none;
-  const sky = $('pmSky');     // the sky dome: one of the models, or the stage's own
-  sky.textContent = '';
-  sky.append(new Option('The stage\'s own', ''));
-  for (const pm of here) if (!pm.info.error) sky.append(new Option(pm.info.model, pm.info.model));
-  if (skyModel && ![...sky.options].some((o) => o.value === skyModel)) sky.append(new Option(`${skyModel} (not in this mod)`, skyModel));
-  sky.value = skyModel;
-  (list.querySelector('button:not(:disabled)') || $('pmImport')).focus();
+  renderPrefabs();
+  refreshPrefabs();
+  (list.querySelector('button:not(:disabled)') || $('pmBrowse')).focus();
 }
-$('pmSky').onchange = (e) => {
-  const v = e.target.value;
-  if (v === skyModel) return;
-  snapshot(v ? `sky ${v}` : 'stock sky');
-  skyModel = v;
-  msg(v ? `The sky dome is now ${v}. It shows in the game (Reload in game); give it faces turned inward and a texture.` : 'The sky dome is the stage\'s own again.',
+// the sky dome and the cloud layer (the Stage tab's Environment): one of the mod's models for this stage, or the stage's own
+const SKY_IMPORT = '@import';      // the option that opens the import dialog (a model's name is letters, digits and _)
+const SKY_WHAT = { dome: 'sky dome', clouds: 'cloud layer' };
+function fillSkySelects() {
+  const here = [...propModels.values()].filter((pm) => pm.info.stage === baseOf(stageName));
+  const nothing = { dome: !!skyParts && !skyParts.dome.length, clouds: !!skyParts && !skyParts.clouds.length };
+  let usable = 0;
+  for (const [id, kind, cur, other] of [['pmSky', 'dome', skyModel, cloudsModel], ['pmClouds', 'clouds', cloudsModel, skyModel]]) {
+    const sky = $(id), what = SKY_WHAT[kind], none = nothing[kind] && !cur;
+    sky.textContent = '';
+    sky.append(new Option(none ? `This stage has no ${what}` : 'The stage\'s own', ''));
+    sky.disabled = none;
+    if (!none) {
+      for (const pm of here) {
+        const m = pm.info.model;
+        // a model the game or the view cannot use is listed with the reason, so the list explains what it leaves out
+        const bad = pm.info.error ? 'broken' : !pm.info.preview || !pm.scene ? 'no preview' : pm.info.destructible ? 'destructible' : '';
+        const why = bad || (m === other ? `used as the ${SKY_WHAT[kind === 'dome' ? 'clouds' : 'dome']}` : '');
+        const o = new Option(why ? `${m} (${why})` : m, m);
+        o.disabled = !!why && m !== cur;
+        if (pm.info.error) o.title = pm.info.error;
+        sky.append(o);
+        if (!bad) usable++;
+      }
+      if (cur && ![...sky.options].some((o) => o.value === cur)) sky.append(new Option(`${cur} (not in this mod)`, cur));
+      sky.append(new Option('Import a .glb…', SKY_IMPORT));
+    }
+    sky.value = cur;
+  }
+  const bothNone = nothing.dome && nothing.clouds && !skyModel && !cloudsModel;
+  const note = bothNone ? `${title(stageName)}'s sky can't be replaced.` : !modNow ? 'Choose a mod first: its props folder holds the sky models.'
+    : usable < 1 ? `No models for ${title(stageName)} in mod "${modNow}". A sky model has faces turned inward, around the origin, with a texture.` : '';
+  $('pmSkyNote').textContent = note;
+  $('pmSkyNote').hidden = !note;
+}
+// ------------------------------------------------------------------ prefabs
+// A prefab is a saved selection (mods/<mod>/prefabs/<name>.json, editor.py save_prefab): each object's place relative to the group's
+// middle (prefab_math.js), as a copy of a stage object (its handle) or a new prop (its model), for the stage it was made on and any
+// stage built on the same game stage. Pasting makes the copies and new props where the view looks and selects them.
+let prefabs = [];
+async function refreshPrefabs() {
+  if (!modNow) { prefabs = []; return; }
+  try { prefabs = (await api(`/api/prefabs?mod=${encodeURIComponent(modNow)}`)).prefabs || []; }
+  catch (e) { prefabs = []; msg(`Couldn't list the prefabs of mod "${modNow}": ${cleanError(e).text}`, { level: 'warn' }); }
+  if (!$('propMenu').hidden) renderPrefabs();
+}
+function renderPrefabs() {
+  const list = $('pfList'), here = prefabs.filter((p) => p.stage === baseOf(stageName));
+  list.textContent = '';
+  // this game stage's first, then the others (they build their objects as props of this stage when pasted)
+  for (const p of [...here, ...prefabs.filter((q) => !here.includes(q))]) {
+    const row = document.createElement('div'), b = document.createElement('button'), x = document.createElement('button');
+    row.className = 'pf-row';
+    b.type = 'button';
+    b.className = 'ghost pm-row';
+    b.setAttribute('role', 'menuitem');
+    b.innerHTML = '<span class="pm-name"></span><span class="pm-meta"></span>';
+    b.querySelector('.pm-name').textContent = p.name;
+    const props = p.entries.filter((e) => e.kind === 'prop').length;
+    const away = p.stage !== baseOf(stageName);
+    b.querySelector('.pm-meta').textContent = (away ? `${title(p.stage)} · ` : '') + `${p.entries.length} ${p.entries.length === 1 ? 'object' : 'objects'}` + (props ? `, ${props} new` : '');
+    b.title = away ? `Put ${p.name} where the view looks: its objects are built as props of this stage from ${title(p.stage)}'s (pickups and vehicles stay out)`
+      : `Put ${p.name} where the view looks`;
+    b.onclick = () => pastePrefab(p);
+    x.type = 'button';
+    x.className = 'icon ghost';
+    x.title = `Delete the prefab ${p.name} (its file in the mod)`;
+    x.setAttribute('aria-label', `Delete the prefab ${p.name}`);
+    x.innerHTML = '<i class="ic" style="--ic:url(vendor/mdi/delete-outline.svg)"></i>';
+    x.onclick = () => deletePrefab(p);
+    row.append(b, x);
+    list.appendChild(row);
+  }
+  const none = !modNow ? 'Choose a mod first: the prefabs live in its prefabs folder.'
+    : !prefabs.length ? `No prefabs yet: select some objects and save them.` : '';
+  $('pfNone').textContent = none;
+  $('pfNone').hidden = !none;
+  $('pfSave').disabled = !modNow || !group.some((it) => it.node.visible && !isDeleted(it));
+}
+// The selection (and, with Move objects on top, what rests on it) as prefab entries: where each is, what it is and what it rests on
+function prefabItems() {
+  const items = group.filter((it) => it.node.visible && !isDeleted(it));
+  if ($('carry').checked) for (const it of [...items]) for (const a of it.attached) if (a.node.visible && !items.includes(a)) items.push(a);
+  return items.map((it) => {
+    const [pitch, roll] = tiltOf(it), e = { pos: posOf(it), heading: r1(headingOf(it)) };
+    if (it.rec.prop) Object.assign(e, { kind: 'prop', model: it.rec.prop.model }, pitch ? { pitch: r1(pitch) } : {}, roll ? { roll: r1(roll) } : {});
+    else Object.assign(e, { kind: 'object', handle: it.rec.info.handle, from: it.rec.p0 });
+    if (it.iname) e.name = it.iname;
+    const up = items.findIndex((o) => o !== it && o.attached.includes(it));
+    if (up >= 0) e.on = up;
+    return e;
+  });
+}
+function openPrefabSave() {
+  if (!requireMod('the prefab is saved in its folder')) return;
+  const items = prefabItems();
+  if (!items.length) { msg('Select the objects to save first.', { level: 'warn', toast: true }); return; }
+  showPropMenu(false);
+  $('pfIntro').textContent = `${items.length} ${items.length === 1 ? 'object' : 'objects'} of ${title(stageName)}, kept by where they stand relative to each other.`;
+  $('pfWhere').textContent = `mods/${modNow}/prefabs/`;
+  $('pfName').value = '';
+  $('pfErr').hidden = true;
+  $('pfDlg').showModal();
+  $('pfName').focus();
+}
+async function savePrefab(overwrite = false) {
+  const name = $('pfName').value.trim(), items = prefabItems();
+  const perr = (t) => { $('pfErr').hidden = !t; $('pfErr').querySelector('span').textContent = t || ''; };
+  if (!name) { perr('Give it a name.'); $('pfName').focus(); return; }
+  if (!items.length) { perr('Nothing is selected any more.'); return; }
+  let res;
+  try {
+    res = await api('/api/prefab', { mod: modNow, name, stage: baseOf(stageName), overwrite, entries: toPrefabEntries(items) });
+  } catch (e) {
+    if (e.code === 'exists') {
+      $('pfDlg').close();
+      ask('Replace the prefab?', `${name} is saved already in this mod.`, [['cancel', 'Keep it'], ['replace', 'Replace it', true]],
+          (v) => { if (v === 'replace') { $('pfName').value = name; savePrefab(true); } });
+      return;
+    }
+    perr(cleanError(e).text);
+    return;
+  }
+  if ($('pfDlg').open) $('pfDlg').close();
+  await refreshPrefabs();
+  msg(`Saved the prefab ${res.name}: ${res.entries.length} ${res.entries.length === 1 ? 'object' : 'objects'}, in mods/${modNow}/prefabs/`, { level: 'ok', toast: true });
+}
+$('pfOk').onclick = () => savePrefab(false);
+$('pfName').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); savePrefab(false); } };
+$('pfSave').onclick = openPrefabSave;
+function deletePrefab(p) {
+  ask('Delete the prefab?', `${p.name} (${p.entries.length} ${p.entries.length === 1 ? 'object' : 'objects'}) is deleted from the mod's prefabs folder.`,
+      [['cancel', 'Cancel'], ['delete', 'Delete', true]], async (v) => {
+        if (v !== 'delete') return;
+        try { await api('/api/prefab/delete', { mod: modNow, file: p.file }); } catch (e) { msg(cleanError(e).text, { level: 'warn', toast: true }); }
+        await refreshPrefabs();
+        showPropMenu(true);
+      });
+}
+// A prefab made on another game stage cannot copy its objects (a handle is an address in that stage's file), so each becomes a prop of
+// this mod built for this stage, as the palette does it (/api/props/original: the model, its textures, its broken state). Returns,
+// for each entry, the model it became ('' for one that cannot: a pickup, a vehicle, a Blender prop of the other stage).
+async function bringPrefab(p) {
+  const base = baseOf(stageName), done = new Map(), out = [];
+  const make = async (from, handle) => {
+    const key = `${from}:${handle}`;
+    if (!done.has(key)) {
+      let m = '';
+      try { m = (await api('/api/props/original', { mod: modNow, stage: stageName, from, handle })).prop?.model || ''; } catch (e) { m = ''; }
+      done.set(key, m);
+    }
+    return done.get(key);
+  };
+  for (const e of p.entries) {
+    if (e.kind === 'object') { out.push(await make(p.stage, e.handle)); continue; }
+    const info = propModels.get(propKey(e.model))?.info;      // a prop of the mod: made for this stage already, or from an original object
+    out.push(info && info.stage === base && !info.error ? info.model : info && info.origin && info.origin.stage ? await make(info.origin.stage, info.origin.handle) : '');
+  }
+  return out;
+}
+// Puts the prefab where the view looks, turned by the Turn field. An entry whose object is not in this stage (the same handle somewhere
+// else) or whose prop model is missing is left out and counted. A prefab of another game stage first brings its objects (bringPrefab).
+async function pastePrefab(p) {
+  const cross = p.stage !== baseOf(stageName);
+  showPropMenu(false);
+  if (cross && !requireMod('the objects of another stage are built into it as props')) return;
+  let models = null;
+  if (cross) {
+    msg(`Building the objects of ${p.name} (from ${title(p.stage)}) for ${title(stageName)}…`);
+    models = await bringPrefab(p);
+    if (models.some(Boolean)) {
+      const snap = JSON.stringify(buildPatch());
+      await loadPropModels(modNow);
+      restoreTo(snap);
+    }
+  }
+  if (editMode !== 'objects') enterMode('objects');
+  const at = viewPoint(), turn = +$('pfTurn').value || 0;
+  snapshot('put ' + p.name);
+  const made = [], skipped = [];
+  p.entries.forEach((e, k) => {
+    const to = placeEntry(e, at, turn);
+    let it = null;
+    if (e.kind === 'object' && !cross) {
+      const rec = byHandle.get(normHandle(e.handle));
+      if (rec && rec.p0.every((v, i) => Math.abs(v - e.from[i]) < 1)) it = makeCopy(rec, to.pos, to.heading, e.name || '');
+    } else if (!cross || models[k]) {
+      it = makeProp({ id: newPropId(), model: cross ? models[k] : e.model, pos: to.pos, heading: to.heading, pitch: e.pitch || 0, roll: e.roll || 0, name: e.name || '' });
+    }
+    made[k] = it;
+    if (!it) skipped.push(e);
+  });
+  p.entries.forEach((e, k) => { if (made[k] && e.on != null && made[e.on]) made[e.on].attached.push(made[k]); });   // what rests on what travels with it
+  const ok = made.filter(Boolean);
+  if (!ok.length) {
+    history.pop();
+    showUndo();
+    msg(`Nothing of ${p.name} fits this stage: ${skipped.length} ${skipped.length === 1 ? 'object is' : 'objects are'} not here (the stage or the mod's props changed).`, { level: 'warn', toast: true });
+    return;
+  }
+  selectMany(ok);
+  const sk = skipped.length ? `; ${skipped.length} left out (not in this stage or no model for them)` : '';
+  msg(`Put ${p.name}: ${countText(ok)}${sk}`, { level: skipped.length ? 'warn' : 'ok', toast: ['Undo', undo] });
+}
+// kind: 'dome' or 'clouds'
+function pickSky(kind, v) {
+  const dome = kind === 'dome', cur = dome ? skyModel : cloudsModel, other = dome ? cloudsModel : skyModel, what = SKY_WHAT[kind];
+  if (v === SKY_IMPORT) { fillSkySelects(); openImport(kind); return; }
+  if (v === cur) return;
+  if (v && v === other) {      // lvl.py: a model cannot be both
+    fillSkySelects();
+    msg(`${v} is the ${SKY_WHAT[dome ? 'clouds' : 'dome']} already; a model can't be both`, { level: 'warn', toast: true });
+    return;
+  }
+  snapshot(v ? `${what} ${v}` : `stock ${what}`);
+  if (dome) skyModel = v; else cloudsModel = v;
+  const look = !!v && !gameLook;      // the view draws a sky with Game look only
+  if (look) setLook(true);
+  updateSkyView();
+  fillSkySelects();
+  msg(v ? `The ${what} is now ${v}.${look ? ' Game look is on to show it.' : ''}` : `The ${what} is the stage's own again.`,
     { level: 'ok', toast: ['Undo', undo] });
-};
-$('addProp').onclick = () => showPropMenu();
-document.addEventListener('pointerdown', (e) => {   // a click anywhere else closes it
-  if (!$('propMenu').hidden && !e.target.closest('#propMenu, #addProp')) showPropMenu(false);
-}, true);
+}
+$('pmSky').onchange = (e) => pickSky('dome', e.target.value);
+$('pmClouds').onchange = (e) => pickSky('clouds', e.target.value);
 let ipData = null, ipTitle = '';
 const ipInput = Object.assign(document.createElement('input'), { type: 'file', accept: '.glb,model/gltf-binary' });
+// The patch's "clear": the meshes the server tagged bare (the stage's scenery with no handle) leave the view
+function updateClearView() {
+  const off = keep.top.clear === 'scenery';
+  if (stageRoot) stageRoot.traverse((o) => { if (o.isMesh && o.userData && o.userData.bare) o.visible = !off; });
+}
+// Delete every original object (the dialog's button): one Undo step
+$('gdDelAll').onclick = () => {
+  const todo = recs.filter((r) => !r.deleted);
+  if (!todo.length) { gdErr('Every object is already deleted.'); return; }
+  snapshot('delete every object');
+  for (const r of todo) { r.deleted = true; r.item.node.visible = false; }
+  refreshList();
+  msg(`Deleted ${todo.length} objects. Save when the stage is as you want it`, { level: 'ok', toast: ['Undo', undo] });
+};
 // The collision grid's rectangle on the ground: the disc's in grey, the patch's bigger one in blue
 let gridView = null;
 function updateGridView() {
@@ -2846,37 +3821,1227 @@ function gdInfo() {
   const cols = Math.floor((hi[0] - lo[0]) / c) + 1, rows = Math.floor((hi[1] - lo[1]) / c) + 1;
   $('gdInfo').textContent = `${cols} × ${rows} cells of ${c} units (${cols * rows} of 65536 allowed).`;
 }
-$('gridBtn').onclick = () => {
+$('gridBtn').onclick = () => openTool(() => {
   if (!stageGrid) { msg('This stage has no collision grid to resize', { level: 'warn', toast: true }); return; }
   const g = stageGrid;
   $('gdText').textContent = `The disc's grid is x ${Math.round(g.min[0])} to ${Math.round(g.max[0])}, y ${Math.round(g.min[1])} to ${Math.round(g.max[1])} (${g.cols} × ${g.rows} cells). ` +
     'The game only collides, shoots and sees across what is inside it, so a prop or a copy placed outside needs a bigger one. It can only grow.';
   gdFill(gridNow());
+  $('gdWallsRow').hidden = !stageWalls;
+  $('gdWallsTxt').textContent = `Turn off the ${stageWalls} invisible boundary wall${stageWalls === 1 ? '' : 's'}`;
+  $('gdWalls').checked = keep.top.walls === 'off';
+  $('gdClear').checked = keep.top.clear === 'scenery';
   $('gdErr').hidden = true;
-  $('gridDlg').showModal();
-};
+  $('gridDlg').show();
+});
 for (const id of ['gdMinX', 'gdMinY', 'gdMaxX', 'gdMaxY']) $(id).oninput = () => { gdInfo(); $('gdErr').hidden = true; };
 $('gdGrow').onclick = () => { const [lo, hi] = gdVals(); gdFill({ min: lo.map((v) => v - 1000), max: hi.map((v) => v + 1000) }); };
 $('gdReset').onclick = () => gdFill(null);
-$('gdOk').onclick = () => {
-  const [lo, hi] = gdVals(), g = stageGrid, err = (t) => { $('gdErr').hidden = false; $('gdErr').querySelector('span').textContent = t; };
-  if (![...lo, ...hi].every(Number.isFinite)) { err('Type the four numbers.'); return; }
-  if (lo[0] > g.min[0] || lo[1] > g.min[1] || hi[0] < g.max[0] || hi[1] < g.max[1]) { err("The rectangle must hold the disc's grid (it can only grow)."); return; }
+const gdErr = (t) => { $('gdErr').hidden = false; $('gdErr').querySelector('span').textContent = t; };
+// Apply the dialog's numbers and the walls box to the patch. False (with the dialog's own error showing) when they are not good.
+function gdApply() {
+  const [lo, hi] = gdVals(), g = stageGrid, err = gdErr;
+  if (![...lo, ...hi].every(Number.isFinite)) { err('Type the four numbers.'); return false; }
+  if (lo[0] > g.min[0] || lo[1] > g.min[1] || hi[0] < g.max[0] || hi[1] < g.max[1]) { err("The rectangle must hold the disc's grid (it can only grow)."); return false; }
   const cols = Math.floor((hi[0] - lo[0]) / g.cell) + 1, rows = Math.floor((hi[1] - lo[1]) / g.cell) + 1;
-  if (cols * rows > 65536) { err(`${cols} × ${rows} cells is over the 65536 the game allows.`); return; }
+  if (cols * rows > 65536) { err(`${cols} × ${rows} cells is over the 65536 the game allows.`); return false; }
   const same = lo[0] === Math.round(g.min[0]) && lo[1] === Math.round(g.min[1]) && hi[0] === Math.round(g.max[0]) && hi[1] === Math.round(g.max[1]);
   snapshot(same ? "stage size back to the disc's" : 'stage size');
   if (same) delete keep.top.grid; else keep.top.grid = { min: lo, max: hi };
+  if (stageWalls && $('gdWalls').checked) keep.top.walls = 'off'; else if (keep.top.walls === 'off') delete keep.top.walls;
+  if ($('gdClear').checked) keep.top.clear = 'scenery'; else if (keep.top.clear === 'scenery') delete keep.top.clear;
   $('gridDlg').close();
   updateGridView();
+  updateClearView();
   refreshList();
   msg(same ? "The stage size is the disc's again" : `Stage size ${cols} × ${rows} cells. Check it, then Save`, { level: 'ok', toast: true });
+  return true;
+}
+$('gdOk').onclick = gdApply;
+// ------------------------------------------------------------------ the marker layers: start points, power-ups, AI net, vehicle net
+// Four files of the stage, each a mode of the rail (3 to 6) like Pedestrians: the left panel lists the markers and holds Add and the file's
+// Save, the right panel holds the selected marker's numbers, a click in the view picks one (only in its own mode: elsewhere the layers are
+// faint scenery) and the gizmo moves it. Each layer is a draft in memory (pt, nets) saved as mods/<mod>/PTS/<STAGE>.<ext> (editor.py
+// stage_spt / save_spt, kinds SPT, PUP, AIP, FOP; tools/lvl.py has the codecs): by the mode's Save, or by Save (Ctrl+S) with the patch.
+// The drafts count as unsaved changes (isDirty), stay when Undo or Redo touches the patch, and have an Undo of their own while the mode is open.
+//   SPT: where the monsters appear, four lists (lvl.SPT_LISTS), each with its room; a cone and a line for the way it faces.
+//   PUP: the health, stamina and other pickups (lvl.PUP_TYPES), each at its rest height; a ball.
+//   AIP: the paths the computer monsters walk; a node type splits the net into sub-nets, a link's width is the lane (times 10 each side).
+//   FOP: the roads of the cars, helicopters, flying saucers and tanks; the node type says who drives there, a link has a width and a drop
+//        (how far below the path a helicopter may fly, times 10).
+const MARKER_LIFT = { SPT: 25, PUP: 14, AIP: 6, FOP: 6 };       // where the cone, the ball and the road end are drawn above the point
+const markerProxy = new THREE.Object3D();
+scene.add(markerProxy);
+const netDefaults = { AIP: { width: 20, drop: 0 }, FOP: { width: 10, drop: 0 } };     // the numbers a new link takes
+const netAttrs = (kind) => (kind === 'FOP' ? { width: netDefaults.FOP.width, drop: netDefaults.FOP.drop } : { width: netDefaults[kind].width });
+const clamp255 = (v) => Math.max(0, Math.min(255, Math.round(+v) || 0));
+
+// ---- loading
+// a load that a newer one overtakes waits for the newer one (its caller draws with the newer numbers); one that a reset or a kept draft
+// overtook (no newer load) just ends. layLoadOf: the id of the load whose promise layLoading holds.
+const layLoading = {}, layLoadOf = {};
+function loadLayer(kind) {
+  const p = loadLayerNow(kind);
+  layLoadOf[kind] = layLoadId[kind];
+  return (layLoading[kind] = p);
+}
+const laterLoad = (kind, id) => (layLoadOf[kind] !== id ? layLoading[kind] : undefined);
+async function loadLayerNow(kind) {
+  if (!stageName) return;
+  const id = ++layLoadId[kind];
+  try {
+    const r = await api(`/api/spt?name=${encodeURIComponent(stageName)}&mod=${encodeURIComponent(modNow || '')}&kind=${kind}`);
+    if (id !== layLoadId[kind]) return laterLoad(kind, id);
+    layerTake(kind, r);
+  } catch (e) {
+    if (id !== layLoadId[kind]) return laterLoad(kind, id);
+    const L = lay(kind);
+    layerTake(kind, { points: [], caps: L.caps, source: 'disc', file: '', lists: L.lists });
+  }
+  layHist[kind] = { past: [], future: [] };
+  layerLoaded(kind);
+}
+// a server reply becomes the layer's draft and its saved copy
+function layerTake(kind, r, keepSel = false) {
+  const sel = lay(kind).sel, d = { points: r.points, caps: r.caps, source: r.source, file: r.file || '', lists: r.lists || [] };
+  if (isNet(kind)) Object.assign(nets[kind], d, { saved: JSON.stringify(r.points), sel: -1 });
+  else { pt[kind] = d; ptSaved[kind] = JSON.stringify(r.points); ptSelOf[kind] = -1; }
+  if (keepSel && lay(kind).points[sel]) lay(kind).sel = sel;
+}
+function loadSpt(keepDrafts = false) {
+  for (const k of KINDS) {
+    if (keepDrafts && lay(k).dirty) keepDraft(k); else loadLayer(k);
+  }
+}
+// a draft that goes to another mod: it stays, and it is not in that mod yet. Whether the mod has its own file is asked for the panel's foot.
+function keepDraft(kind) {
+  ++layLoadId[kind];          // a load under way would put the old file over it
+  lay(kind).saved = null;
+  layerLoaded(kind);
+  api(`/api/spt?name=${encodeURIComponent(stageName)}&mod=${encodeURIComponent(modNow || '')}&kind=${kind}`).then((r) => {
+    const L = lay(kind);
+    if (L.saved !== null) return;
+    Object.assign(L.d, { source: r.source, file: r.file || '' });
+    if (layerOf() === kind) mkFoot(kind);
+  }).catch(() => {});
+}
+// the old stage's markers and drafts go (loadStage); the new stage's files load after its patch
+function resetLayers() {
+  for (const k of KINDS) {
+    ++layLoadId[k];
+    const L = lay(k);
+    if (L.net) Object.assign(L.d, { points: [], saved: '[]', sel: -1, source: 'disc', file: '' });
+    else { pt[k] = Object.assign(ptEmpty(k), { caps: L.caps, lists: L.lists }); ptSaved[k] = '[]'; ptSelOf[k] = -1; }
+    layHist[k] = { past: [], future: [] };
+    updateLayerView(k);
+  }
+  syncRailDots();
+  mkErrSet('');
+  if (layerOf()) refreshMk();
+}
+function layerLoaded(kind) {
+  updateLayerView(kind);
+  syncRailDots();
+  $('save').classList.toggle('dirty', isDirty());
+  showStatus();
+  if (layerOf() === kind) { mkFillBar(); showSel(); }
+}
+
+// ---- the views: a cone for each start point (a line for the way it faces), a ball for a power-up (a cube for the cloak), balls and lines for a
+// net. The layer of the open mode is full, the others faint. Every marker keeps its own color; the selected one is bigger and ringed, a
+// selected node's links are amber and the others dimmer, and a one-way link has an arrow. A marker grows with its distance from the camera
+// (marker_math.js markerScale), so that it stays readable over the whole stage; the click picks by the same size (pickMarker).
+function disposeView(g) {
+  if (!g) return;
+  scene.remove(g);
+  g.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); });
+}
+function updateLayerView(kind) {
+  const L = lay(kind);
+  disposeView(L.view);
+  L.view = L.points.length ? (L.net ? netGroup(kind, L) : pointGroup(kind, L)) : null;
+  if (L.view) { L.view.visible = layerOf() === kind || overlayOn[kind]; scene.add(L.view); }
+}
+const updateLayerViews = () => KINDS.forEach(updateLayerView);
+function syncLayerVisibility() {
+  for (const k of KINDS) {
+    const v = lay(k).view, on = layerOf() === k, c = $(OVERLAY_ID[k]);
+    if (v) v.visible = on || overlayOn[k];
+    c.checked = on || overlayOn[k];
+    c.disabled = on;
+    c.closest('.switch').classList.toggle('none', on);
+  }
+}
+const extentOf = (kind) => (kind === 'SPT' ? EXTENT.SPT : kind === 'PUP' ? EXTENT.PUP : EXTENT.NODE);
+// how much bigger than the rest marker i is drawn: the selected one, and a net node next to it (the layer of the open mode only)
+function markerFactor(kind, L, i) {
+  if (layerOf() !== kind || L.sel < 0) return 1;
+  if (i === L.sel) return SEL_GROW;
+  return L.net && L.points[L.sel] && (L.points[L.sel].links.some((l) => l.to === i) || L.points[i].links.some((l) => l.to === L.sel)) ? 1.2 : 1;
+}
+const MARKER_EDGE = 0x222831;      // the outline of the cloak's cube, dark so that the gray reads over the buildings
+function pointGroup(kind, L) {
+  const g = new THREE.Group(), on = layerOf() === kind, opacity = on ? 0.9 : 0.4;
+  g.userData.f = [];
+  L.points.forEach((p, k) => {
+    const col = markerColor(kind, p), shape = markerShape(kind, p), f = markerFactor(kind, L, k);
+    const mat = new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true, opacity });
+    const base = toThree(p.pos);
+    const geo = shape === 'cone' ? new THREE.ConeGeometry(14, 50, 14) : shape === 'cube' ? new THREE.BoxGeometry(16, 16, 16) : new THREE.SphereGeometry(10, 12, 8);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(base).add(new THREE.Vector3(0, MARKER_LIFT[kind], 0));
+    mesh.renderOrder = 998;
+    mesh.raycast = () => {};
+    mesh.userData.mk = { i: k, f };
+    mesh.userData.shape = shape;
+    g.userData.f[k] = f;
+    if (shape === 'cube') {
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: MARKER_EDGE, depthTest: false, transparent: true, opacity }));
+      edges.renderOrder = 999;
+      edges.raycast = () => {};
+      mesh.add(edges);
+    }
+    g.add(mesh);
+    if (kind === 'SPT') {
+      const h = (p.heading * Math.PI) / 180, fwd = toThree([p.pos[0] + Math.sin(h) * 60, p.pos[1] + Math.cos(h) * 60, p.pos[2] + 25]);
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([base.clone().add(new THREE.Vector3(0, 25, 0)), fwd]),
+                                  new THREE.LineBasicMaterial({ color: col, depthTest: false, transparent: true, opacity }));
+      line.renderOrder = 998;
+      line.raycast = () => {};
+      g.add(line);
+    }
+  });
+  if (kind === 'SPT') g.userData.names = L.points.map((p, i) => sptViewLabel(L.points, i, L.caps));
+  return g;
+}
+const AMBER = 0xFFC233;
+function netGroup(kind, L) {
+  const g = new THREE.Group(), on = layerOf() === kind, opacity = on ? 1 : 0.4, up = new THREE.Vector3(0, MARKER_LIFT[kind], 0), byColor = new Map();
+  const sel = on ? L.sel : -1, arrows = [];
+  g.userData.f = [];
+  L.points.forEach((p, i) => p.links.forEach((l) => {
+    const two = netTwoWay(L.points, i, l.to), touches = i === sel || l.to === sel;
+    const a = toThree(p.pos).add(up), b = toThree(L.points[l.to].pos).add(up), c = touches ? AMBER : markerColor(kind, p);
+    if (!two) arrows.push({ a, b, c });
+    if (two && l.to < i) return;
+    const key = c + (sel >= 0 && !touches ? ':dim' : '');
+    if (!byColor.has(key)) byColor.set(key, { color: c, dim: sel >= 0 && !touches, pts: [] });
+    byColor.get(key).pts.push(a, b);
+  }));
+  for (const { color, dim, pts } of byColor.values()) {
+    const o = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true, opacity: dim ? opacity * 0.4 : opacity }));
+    o.renderOrder = 997;
+    o.raycast = () => {};
+    g.add(o);
+  }
+  if (arrows.length) {
+    const m = new THREE.InstancedMesh(new THREE.ConeGeometry(3, 10, 8), new THREE.MeshBasicMaterial({ depthTest: false, transparent: true, opacity }), arrows.length);
+    arrows.forEach((r, k) => m.setColorAt(k, new THREE.Color(r.c)));
+    m.renderOrder = 998;
+    m.raycast = () => {};
+    m.frustumCulled = false;
+    g.userData.arrows = { mesh: m, links: arrows, at: null };
+    g.add(m);
+  }
+  L.points.forEach((p, i) => {
+    const f = markerFactor(kind, L, i);
+    const m = new THREE.Mesh(new THREE.SphereGeometry(7, 10, 8), new THREE.MeshBasicMaterial({ color: markerColor(kind, p), depthTest: false, transparent: true, opacity }));
+    m.position.copy(toThree(p.pos)).add(up);
+    m.renderOrder = 998;
+    m.raycast = () => {};
+    m.userData.mk = { i, f };
+    g.userData.f[i] = f;
+    g.add(m);
+  });
+  return g;
+}
+// the arrows of the one-way links: a cone a bit past the middle of the link, pointing the way it goes, one size on the screen like the balls
+const _q = new THREE.Quaternion(), _m4 = new THREE.Matrix4(), _va = new THREE.Vector3(), _vb = new THREE.Vector3(), _vs = new THREE.Vector3(), _Y = new THREE.Vector3(0, 1, 0);
+function placeArrows(g) {
+  const A = g.userData.arrows;
+  if (!A || (A.at && A.at.equals(camera.position))) return;
+  A.at = (A.at || new THREE.Vector3()).copy(camera.position);
+  A.links.forEach((r, k) => {
+    _va.copy(r.b).sub(r.a);
+    const len = _va.length();
+    _va.multiplyScalar(1 / (len || 1));
+    _vb.copy(r.a).addScaledVector(_va, len * 0.62);
+    _q.setFromUnitVectors(_Y, _va);
+    _m4.compose(_vb, _q, _vs.setScalar(markerScale(camera.position.distanceTo(_vb))));
+    A.mesh.setMatrixAt(k, _m4);
+  });
+  A.mesh.instanceMatrix.needsUpdate = true;
+}
+// the world size of a marker as drawn now, and its place and radius on the screen
+function markerRadius(kind, L, i, c) {
+  return extentOf(kind).r * markerScale(camera.position.distanceTo(c)) * (L.view?.userData.f?.[i] ?? 1);
+}
+function markerCenter(kind, p) {
+  const c = toThree(p.pos);
+  c.y += MARKER_LIFT[kind] || 0;
+  return c;
+}
+// the rings: the pointer (or the list row) is on a marker; and the selected marker. They face the camera.
+function makeRing(opacity, n = 1) {
+  const g = new THREE.Group();
+  for (let k = 0; k < n; k++) {
+    const l = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 40 }, (_, a) => new THREE.Vector3(Math.cos(a / 40 * Math.PI * 2), Math.sin(a / 40 * Math.PI * 2), 0))),
+                                 new THREE.LineBasicMaterial({ color: 0xFFFFFF, depthTest: false, transparent: true, opacity }));
+    l.scale.setScalar(1 + k * 0.1);
+    l.renderOrder = 999;
+    l.raycast = () => {};
+    g.add(l);
+  }
+  g.visible = false;
+  g.raycast = () => {};
+  scene.add(g);
+  return g;
+}
+const mkRing = makeRing(0.75), mkSelRing = makeRing(1, 2);
+let ringIdx = -1;
+function ringAt(ring, i, mult) {
+  const k = layerOf(), L = k && lay(k), p = L && i >= 0 ? L.points[i] : null;
+  ring.visible = !!p;
+  if (!p) return;
+  const c = markerCenter(k, p);
+  ring.position.copy(c);
+  ring.quaternion.copy(camera.quaternion);
+  ring.scale.setScalar(markerRadius(k, L, i, c) * mult);
+}
+function showMarkerRing(i) {
+  ringIdx = i;
+  ringAt(mkRing, i, 1.3);
+}
+function ringsStep() {
+  const k = layerOf();
+  ringAt(mkRing, ringIdx, 1.3);
+  ringAt(mkSelRing, k ? lay(k).sel : -1, 1.3);
+}
+
+// ---- the text over the markers: which start point it is, a node's number, the name of the one the pointer is on
+const markerLabels = createMarkerLabels(canvas.parentElement);
+const _lv = new THREE.Vector3();
+// A start point is labeled with its place in its list, in the file's order (sptLabel); a net node with the number its row shows; a
+// power-up only while it is hovered or selected. In the Objects and Pedestrians modes' faint overlay only a short list of start points is labeled.
+const OVERLAY_LABELS_MAX = 12;
+function markerLabelItems(w, h) {
+  const items = [], mode = layerOf();
+  for (const kind of KINDS) {
+    const L = lay(kind), g = L.view;
+    if (!g || !g.visible) continue;
+    const own = mode === kind;
+    if (!own && !(mode === null && kind === 'SPT' && L.points.length <= OVERLAY_LABELS_MAX)) continue;
+    const ext = extentOf(kind), hot = own ? hover.shown : -1;
+    for (let i = 0; i < L.points.length; i++) {
+      const p = L.points[i], isSel = own && i === L.sel, isHot = i === hot, f = g.userData.f?.[i] ?? 1;
+      let text, prio = 3, cls = own ? '' : 'dim', wide = 0;
+      if (isHot) prio = 0; else if (isSel) prio = 1; else if (f > 1) prio = 2;
+      if (kind === 'SPT') text = g.userData.names[i];
+      else if (kind === 'PUP') { if (!isHot && !isSel) continue; text = markerName(kind, L.points, i, L.lists); }
+      else if (isHot || isSel) text = `${i + 1} · ${kind === 'FOP' ? L.lists[p.type] || `Type ${p.type}` : `Type ${p.type}`}`;
+      else { text = String(i + 1); cls += ' num'; wide = text.length * 6.4 + 12; }
+      if (isSel) cls += ' sel';
+      if (isHot) cls += ' hot';
+      if (kind === 'SPT' && text.endsWith('past room')) cls += ' warn';
+      const c = markerCenter(kind, p), d = camera.position.distanceTo(c);
+      _lv.copy(c);
+      _lv.y += ext.top * markerScale(d) * f;
+      _lv.project(camera);
+      if (_lv.z > 1) continue;
+      items.push({ key: kind + i, text, x: (_lv.x + 1) / 2 * w, y: (1 - _lv.y) / 2 * h - 4, prio: prio + (prio >= 3 ? Math.min(d / 1e5, 0.99) : 0), color: hexColor(markerColor(kind, p)), cls, w: wide || 0, stack: kind === 'SPT' });
+    }
+  }
+  return items;
+}
+// once a frame: the markers grow with the distance, the arrows turn, the rings and the labels follow
+function markerFrame() {
+  for (const kind of KINDS) {
+    const g = lay(kind).view;
+    if (!g || !g.visible) continue;
+    const at = g.userData.at;
+    if (!at || !at.equals(camera.position)) {
+      g.userData.at = (at || new THREE.Vector3()).copy(camera.position);
+      for (const m of g.children) {
+        const mk = m.userData.mk;
+        if (mk) m.scale.setScalar(markerScale(camera.position.distanceTo(m.position)) * mk.f);
+      }
+    }
+    placeArrows(g);
+  }
+  ringsStep();
+  const host = canvas.parentElement;
+  markerLabels.set(markerLabelItems(host.clientWidth, host.clientHeight), host.clientWidth, host.clientHeight);
+}
+frameHooks.push(markerFrame);
+
+// ---- picking, the gizmo
+const markerSel = () => { const k = layerOf(); if (!k) return null; const L = lay(k); return L.points[L.sel] || null; };
+// the layer of the open mode as {kind, pts, sel}, or null (what the tests and scripts read)
+function markerCtx() {
+  const kind = layerOf();
+  if (!kind) return null;
+  const L = lay(kind);
+  return { kind, pts: L.points, get sel() { return L.sel; }, set sel(v) { L.sel = v; } };
+}
+const markerLabel = () => { const k = layerOf(), L = k && lay(k); return L && L.points[L.sel] ? markerName(k, L.points, L.sel, L.lists).toLowerCase() : 'marker'; };
+// the screen place of a marker, in client pixels (null behind the camera)
+function markerScreen(kind, p) {
+  const v = toThree(p.pos);
+  v.y += MARKER_LIFT[kind] || 0;
+  v.project(camera);
+  if (v.z > 1) return null;
+  const r = canvas.getBoundingClientRect();
+  return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height];
+}
+// The marker of the open layer under the pointer, or -1. Each marker takes clicks within its own size on the screen plus a margin (12 to 64
+// px, marker_math.js pickRadius); of the markers that reach the pointer, the one whose surface it is nearest to wins.
+// where marker i of the open layer is on the screen, in client pixels, and how big: {x, y, rPx}, or null behind the camera
+function markerPx(i, r = canvas.getBoundingClientRect()) {
+  const kind = layerOf(), L = kind && lay(kind), p = L && L.points[i];
+  if (!p) return null;
+  const c = markerCenter(kind, p), a = c.clone().project(camera);
+  if (a.z > 1) return null;
+  const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+  const b = c.clone().addScaledVector(up, markerRadius(kind, L, i, c)).project(camera);
+  return { x: r.left + (a.x + 1) / 2 * r.width, y: r.top + (1 - a.y) / 2 * r.height, rPx: Math.hypot((b.x - a.x) * r.width / 2, (b.y - a.y) * r.height / 2) };
+}
+function pickMarker(e) {
+  const kind = layerOf();
+  if (!kind) return -1;
+  camera.updateMatrixWorld();
+  const r = canvas.getBoundingClientRect(), cands = [];
+  lay(kind).points.forEach((p, i) => {
+    const m = markerPx(i, r);
+    if (m) cands.push({ i, d: Math.hypot(m.x - e.clientX, m.y - e.clientY), rPx: m.rPx });
+  });
+  return pickBest(cands);
+}
+function selectMarker(i) {
+  const kind = layerOf();
+  if (!kind) return;
+  lay(kind).sel = i;
+  hover.dirty = true;
+  updateLayerView(kind);
+  showSel();
+}
+function deselectMarker() { selectMarker(-1); }
+// the gizmo follows the selected marker (its place, and a move of the marker by anything else puts it there)
+function syncMarkerGizmo() {
+  const p = markerSel();
+  if (!p || sel || pedSel || linkTool.on) {      // (the Link tool clicks the nodes: the gizmo's arrows would be in the way)
+    if (marker.on) { gizmo.detach(); marker.on = false; }
+    return;
+  }
+  if (gizmo.dragging) return;
+  markerProxy.position.copy(toThree(p.pos));
+  markerProxy.updateMatrixWorld(true);
+  if (!marker.on || gizmo.object !== markerProxy) {
+    if (gizmo.getMode() !== 'translate') setTool('translate');
+    gizmo.attach(markerProxy);
+    marker.on = true;
+  }
+}
+// the gizmo moves the marker: only the view follows while it drags (the list and the numbers are redrawn when it lets go)
+function moveMarker() {
+  const kind = layerOf(), p = markerSel();
+  if (!p) return;
+  p.pos = toGame(markerProxy.position).map(r1);
+  updateLayerView(kind);
+  fillMarkerFields();
+  if (!gizmo.dragging) layerChanged(kind);       // not a drag (a script moved it): nothing else will say it changed
+}
+function markerDragEnd() {
+  const kind = layerOf();
+  if (!kind) return;
+  const h = layHist[kind], top = h.past[h.past.length - 1];
+  if (top && top.p === JSON.stringify(lay(kind).points)) h.past.pop();       // a click on the gizmo that moved nothing is not an edit
+  layerChanged(kind);
+  showMarker();
+}
+
+// ---- a layer's history: JSON copies of its points (at most 255, 100 steps), outside the patch's
+const LAYER_HIST_MAX = 100;
+function layerPush(kind, before, sel0, label) {
+  const h = layHist[kind];
+  h.past.push({ p: before, sel: sel0, label });
+  if (h.past.length > LAYER_HIST_MAX) h.past.shift();
+  h.future = [];
+  showUndoButtons();
+}
+const layerSnap = (kind, label) => layerPush(kind, JSON.stringify(lay(kind).points), lay(kind).sel, label);
+function layerStep(from, to) {
+  const kind = layerOf();
+  if (!kind) return;
+  const h = layHist[kind], L = lay(kind), s = h[from].pop();
+  if (!s) return;
+  h[to].push({ p: JSON.stringify(L.points), sel: L.sel, label: s.label });
+  L.points = JSON.parse(s.p);
+  L.sel = L.points[s.sel] ? s.sel : -1;
+  layerChanged(kind);
+  showSel();
+}
+const layerUndo = () => layerStep('past', 'future');
+const layerRedo = () => layerStep('future', 'past');
+
+// ---- edits: one undo step around fn(point, layer), only when it changed something
+function markerEdit(label, fn) {
+  const kind = layerOf(), L = kind && lay(kind), p = L && L.points[L.sel];
+  if (!p) return false;
+  const before = JSON.stringify(L.points), sel0 = L.sel;
+  fn(p, L);
+  if (JSON.stringify(L.points) === before) return false;
+  layerPush(kind, before, sel0, label);
+  layerChanged(kind);
+  showMarker();
+  syncMarkerGizmo();
+  return true;
+}
+// something about the layer changed: its view, the rail's dot, Save, the status, the list and meters of the open mode
+function layerChanged(kind) {
+  updateLayerView(kind);
+  syncRailDots();
+  document.title = `WotM Level Editor — ${stageName}${isDirty() ? ' *' : ''}`;
+  $('save').classList.toggle('dirty', isDirty());
+  showStatus();
+  showUndoButtons();
+  if (layerOf() === kind) refreshMk();
+}
+function syncRailDots() {
+  for (const k of KINDS) {
+    const b = $(MODE_BUTTON[LAYERS[k].mode]), d = lay(k).dirty;
+    b.classList.toggle('dirty', d);
+    b.title = b.dataset.title ??= b.title;
+    if (d) b.title += ' · unsaved changes';
+    b.setAttribute('aria-label', LAYERS[k].title + (d ? ', unsaved changes' : ''));
+  }
+}
+function addMarker() {
+  const kind = layerOf();
+  if (!kind) return;
+  const L = lay(kind), w = LAYERS[kind];
+  if (L.points.length >= FILE_MAX) { mkErrSet(`A stage holds at most ${FILE_MAX} ${w.many}.`); return; }
+  const a = aimStart(), pos = a.slice(0, 3);
+  const v = kind === 'AIP' ? clamp255($('mkNewNum').value) : (parseInt($('mkNewType').value, 10) || 0);
+  const before = JSON.stringify(L.points), sel0 = L.sel;
+  const p = kind === 'SPT' ? { list: v, pos, heading: a[3], snap: true, w: 0, sel: 0 }
+    : kind === 'PUP' ? { type: v, pos, flags: 7, w: 0, sel: 0 }
+    : { pos, type: v, links: [], w: 0, sel: 0, tail: '' };
+  L.points.push(p);
+  const k = L.points.length - 1;
+  if (L.net && sel0 >= 0 && sel0 < k && !linkBoth(L.points, sel0, k, netAttrs(kind), L.caps[2])) {
+    L.points.pop();
+    mkErrSet(`Node ${sel0 + 1} already has ${L.caps[2]} links.`);
+    return;
+  }
+  layerPush(kind, before, sel0, `add a ${w.one}`);
+  L.sel = k;
+  mkErrSet('');
+  layerChanged(kind);
+  showSel();
+}
+function duplicateMarker() {
+  const kind = layerOf(), L = kind && lay(kind), p = markerSel();
+  if (!p) return;
+  if (L.points.length >= FILE_MAX) { mkErrSet(`A stage holds at most ${FILE_MAX} ${LAYERS[kind].many}.`); return; }
+  const before = JSON.stringify(L.points), sel0 = L.sel, label = markerLabel();
+  const c = JSON.parse(JSON.stringify(p));
+  c.pos[0] = r1(c.pos[0] + 60);
+  if (L.net) c.links = [];
+  L.points.push(c);
+  layerPush(kind, before, sel0, `copy ${label}`);
+  L.sel = L.points.length - 1;
+  mkErrSet('');
+  layerChanged(kind);
+  showSel();
+}
+function removeMarker() {
+  const kind = layerOf(), L = kind && lay(kind), p = markerSel();
+  if (!p) return;
+  const before = JSON.stringify(L.points), sel0 = L.sel, label = markerLabel();
+  if (L.net) removeNode(L.points, L.sel); else L.points.splice(L.sel, 1);
+  layerPush(kind, before, sel0, `delete ${label}`);
+  L.sel = -1;
+  mkErrSet('');
+  layerChanged(kind);
+  showSel();
+}
+function dropMarker() {
+  const p = markerSel();
+  if (!p) return;
+  const y = groundAt(toThree(p.pos));
+  if (y === null) { msg(`Nothing under the ${markerLabel()} to drop onto`, { level: 'warn', toast: true }); return; }
+  markerEdit(`drop ${markerLabel()}`, (q) => { q.pos[2] = r1(y); });
+}
+function nudgeMarker(v) {          // v: a scene vector; the burst's undo step was taken by nudge()
+  const kind = layerOf(), p = markerSel();
+  if (!p) return;
+  p.pos = [r1(p.pos[0] + v.x), r1(p.pos[1] - v.z), r1(p.pos[2] + v.y)];
+  syncMarkerGizmo();
+  fillMarkerFields();
+  layerChanged(kind);
+}
+
+// ---- Save, Back to the disc's, Revert, Clear all
+async function layerPost(kind, body, keepSel = false) {
+  try {
+    const r = await api('/api/spt', Object.assign({ mod: modNow || '', name: stageName, kind }, body));
+    layerTake(kind, r, keepSel);
+    layerChanged(kind);
+    if (layerOf() === kind) { mkFillBar(); showSel(); }
+    return r;
+  } catch (e) {
+    const t = cleanError(e).text;
+    if (layerOf() === kind) mkErrSet(t);
+    msg(`${LAYERS[kind].title}: ${t}`, { level: 'err', toast: true });
+    return null;
+  }
+}
+const savedText = (kind, r) => `Saved ${r.points.length} ${LAYERS[kind].many} in the mod` + (r.warnings.length ? '. ' + r.warnings.join(' ') : '. Restart the stage to see them');
+async function saveLayer(kind) {
+  mkErrSet('');
+  const r = await layerPost(kind, { points: lay(kind).points }, true);
+  if (r) msg(savedText(kind, r), { level: r.warnings.length ? 'warn' : 'ok', toast: true });
+  return r;
+}
+// the layers with changes, one after the other; an error in one does not hold back the others. True when all went in.
+async function saveLayers(kinds = dirtyLayers()) {
+  let ok = true;
+  for (const k of kinds) if (!await saveLayer(k)) ok = false;
+  return ok;
+}
+function resetLayer(kind) {
+  const w = LAYERS[kind];
+  ask(`Take the mod's ${w.many} out?`,
+      `This deletes the ${w.noun} file ${title(stageName)} has in mod "${modNow}" and puts the stage's own back. It can't be undone.`,
+      [['cancel', 'Cancel'], ['go', 'Delete the file', true]], async (v) => {
+        if (v !== 'go') return;
+        mkErrSet('');
+        const r = await layerPost(kind, { reset: true });
+        if (r) { layHist[kind] = { past: [], future: [] }; showUndoButtons(); msg(`The stage's own ${w.many} are back (the mod's file is gone)`, { level: 'ok', toast: true }); }
+      }, { icon: 'delete-outline' });
+}
+function revertLayer(kind) {
+  mkErrSet('');
+  loadLayer(kind);
+}
+// Clear all: every marker of the layer out (start points, power-ups, nodes of a net); one undo step, the file stays until Save
+function clearLayer(kind) {
+  const L = lay(kind), w = LAYERS[kind];
+  if (!L.points.length) return;
+  const clear = () => {
+    const before = JSON.stringify(L.points), sel0 = L.sel;
+    L.points = [];
+    L.sel = -1;
+    layerPush(kind, before, sel0, `clear the ${w.noun}`);
+    mkErrSet('');
+    layerChanged(kind);
+    showSel();
+    msg(`${w.title}: all ${w.many} are out of the view. Save to keep it in the mod`, { level: 'ok', toast: ['Undo', undo] });
+  };
+  ask(`Remove all ${L.points.length} ${L.net ? 'nodes' : w.many}?`,
+      `The ${w.noun} in the view is emptied. The mod's file stays as it is until you save, and Ctrl+Z brings ${L.net ? 'the nodes' : 'them'} back.`,
+      [['cancel', 'Cancel'], ['go', 'Remove them', true]], (v) => { if (v === 'go') clear(); }, { icon: 'delete-outline' });
+}
+
+// ---- the left panel: Add, the meters, the list, the foot
+const mkErrSet = (t) => { $('mkErr').hidden = !t; if (t) $('mkErr').querySelector('span').textContent = t; };
+function mkFillBar() {
+  const kind = layerOf();
+  if (!kind) return;
+  const L = lay(kind), w = LAYERS[kind], sl = $('mkNewType');
+  $('mkNewNumF').hidden = kind !== 'AIP';
+  sl.hidden = kind === 'AIP';
+  const key = kind + ':' + L.lists.length;
+  if (sl.dataset.key !== key) {
+    sl.textContent = '';
+    L.lists.forEach((n, i) => { const o = new Option(kind === 'SPT' ? SPT_SHORT[i] || n : n, i); o.title = n; sl.append(o); });
+    sl.value = kind === 'SPT' ? '2' : '0';
+    sl.dataset.key = key;
+  }
+  sl.title = kind === 'SPT' ? 'The list of the new start point: Story, Player, CPU or Respawn' : kind === 'PUP' ? 'The type of the new power-up' : 'The type of the new node: who drives there';
+  const add = $('mkAdd');
+  add.title = L.net ? `Add a node where the view looks (with a node selected, the new one is linked to it, both ways)` : `Add a ${w.one} where the view looks`;
+  const d = $('mkDefaults');
+  d.hidden = !L.net;
+  $('mkLinkRow').hidden = !L.net;
+  $('mkLinkHow').hidden = !L.net;
+  if (L.net) {
+    $('mkDropLbl').hidden = kind !== 'FOP';
+    $('mkWidth').value = netDefaults[kind].width;
+    $('mkDropN').value = netDefaults[kind].drop;
+  }
+}
+function mkMeters(kind, L) {
+  const m1 = $('mkM1'), m2 = $('mkM2');
+  const set = (m, label, n, max, tip) => { m.querySelector('.m-l').textContent = label; meter(m.id, n, max); m.title = tip; };
+  set(m1, kind === 'SPT' ? 'Start points' : kind === 'PUP' ? 'Power-ups' : 'Nodes', L.points.length, kind === 'PUP' ? L.caps[0] : FILE_MAX,
+      kind === 'SPT' ? `A stage holds ${FILE_MAX} start points at most; each list has its own room, on its header`
+        : kind === 'PUP' ? `The game keeps ${L.caps[0]} power-ups at a time; the file holds ${FILE_MAX}`
+        : `A net holds ${FILE_MAX} nodes at most, ${L.caps[2]} links each`);
+  m2.hidden = kind !== 'AIP';
+  if (kind === 'AIP') set(m2, 'Paths', netPaths(L.points), L.caps[1], `The game keeps ${L.caps[1]} paths and ignores the rest; a two-way link is one path`);
+}
+function mkFoot(kind) {
+  const L = lay(kind), dirty = L.dirty, w = LAYERS[kind];
+  $('mkState').classList.toggle('dirty', dirty);
+  $('mkState').querySelector('.tx').textContent = dirty ? (L.saved === null ? 'Not in this mod yet' : 'Unsaved changes') : 'No unsaved changes';
+  $('mkSrc').textContent = L.source === 'mod' ? `This mod keeps its own ${w.noun} for ${title(stageName)}.` : `${title(stageName)}'s own ${w.noun}; Save keeps your version in the mod.`;
+  $('mkSrc').title = L.d.file || '';
+  $('mkReset').disabled = L.source !== 'mod';
+  $('mkRevert').hidden = !dirty;
+  $('mkClear').disabled = !L.points.length;
+  $('mkSave').classList.toggle('primary', dirty);
+}
+const NONE_TEXT = {
+  SPT: 'This stage has no start points. Add puts one where the view looks.',
+  PUP: 'This stage has no power-ups. Add puts one where the view looks.',
+  AIP: 'This stage has no AI net. Add puts a node where the view looks; with a node selected, the new one links to it.',
+  FOP: 'This stage has no vehicle net. Add puts a node where the view looks; with a node selected, the new one links to it.',
+};
+// the marker as the view draws it, small: its shape and its color (the rows and the legend)
+function shapeSwatch(kind, p) {
+  const s = document.createElement('i');
+  s.className = 'shape ' + markerShape(kind, p);
+  s.style.setProperty('--c', hexColor(markerColor(kind, p)));
+  return s;
+}
+function mkRow(kind, L, i) {
+  const p = L.points[i], li = document.createElement('li');
+  li.className = 'it' + (i === L.sel ? ' sel' : '');
+  li._mk = i;
+  li.tabIndex = -1;                    // reached with the arrows from a section header
+  li.setAttribute('role', 'option');
+  li.setAttribute('aria-selected', String(i === L.sel));
+  const k = document.createElement('span'), h = document.createElement('span'), bd = document.createElement('span'), hd = document.createElement('span');
+  k.className = 'k';
+  k.append(shapeSwatch(kind, p));
+  h.className = 'h'; bd.className = 'bd'; hd.className = 'hd num';
+  h.textContent = markerName(kind, L.points, i, L.lists);
+  if (kind === 'SPT') {
+    hd.textContent = `${Math.round(p.heading)}°`;
+    hd.title = 'Heading';
+    if (sptOver(L.points, i, L.caps)) {
+      const b = icon('alert-circle-outline');
+      b.classList.add('dl');
+      b.title = "Past the room of its list: the game overwrites the list's last point with it";
+      bd.append(b);
+    }
+  } else if (kind === 'PUP') {
+    hd.textContent = `z ${Math.round(p.pos[2])}`;
+    hd.title = 'Rest height';
+  } else {
+    hd.textContent = `${p.links.length} ${p.links.length === 1 ? 'link' : 'links'}`;
+  }
+  li.title = `${h.textContent} · x ${Math.round(p.pos[0])}, y ${Math.round(p.pos[1])}, z ${Math.round(p.pos[2])}`;
+  li.append(k, h, bd, hd);
+  li.onclick = (e) => mkPick(i, e.shiftKey);
+  li.onmouseenter = () => { hover.row = i; hover.dirty = true; };
+  li.onmouseleave = () => { if (hover.row === i) hover.row = -1; hover.dirty = true; };
+  return li;
+}
+function refreshMk() {
+  const kind = layerOf();
+  if (!kind) return;
+  hover.row = -1;
+  const L = lay(kind), ul = $('mkList'), frag = document.createDocumentFragment();
+  mkMeters(kind, L);
+  mkFoot(kind);
+  const secs = mkSections(kind, L.points, L.lists, L.caps).filter((s) => kind === 'SPT' || s.n);
+  for (const s of secs) {
+    const id = `mk.${kind}.${s.id}`, open = secOpen(id), h = document.createElement('li'), n = document.createElement('span');
+    h.className = 'sec';
+    h.dataset.sec = id;
+    h.tabIndex = 0;
+    h.setAttribute('role', 'button');
+    h.setAttribute('aria-expanded', open);
+    h.title = (s.tip ? s.tip + '. ' : '') + (open ? `Hide the ${s.title.toLowerCase()}` : `Show the ${s.title.toLowerCase()}`);
+    h.append(icon(open ? 'chevron-down' : 'chevron-right'), s.title);
+    if (!open && s.rows.includes(L.sel)) {
+      const d = document.createElement('span');
+      d.className = 'has'; d.title = 'Holds the selection';
+      h.appendChild(d);
+    }
+    n.className = 'n' + (s.cap !== undefined && s.n > s.cap ? ' over' : '');
+    n.textContent = s.cap !== undefined ? `${s.n} / ${s.cap}` : s.n;
+    if (s.cap !== undefined) n.title = `${s.n} of the room for ${s.cap} in this list` + (s.n > s.cap ? ': the extra ones overwrite the last' : '');
+    h.appendChild(n);
+    const flip = () => { store.set('sec.' + id, open ? '0' : '1'); refreshMk(); };
+    h.onclick = flip;
+    h.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); ul.querySelector(`li.sec[data-sec="${id}"]`)?.focus(); } };
+    frag.appendChild(h);
+    if (!open) continue;
+    if (!s.rows.length) { const li = document.createElement('li'); li.className = 'none'; li.textContent = 'None'; frag.appendChild(li); }
+    for (const i of s.rows) frag.appendChild(mkRow(kind, L, i));
+  }
+  // the list is redrawn on every edit: the row that had the keyboard keeps it
+  const had = ul.contains(document.activeElement) ? (document.activeElement._mk ?? document.activeElement.dataset.sec) : null;
+  ul.replaceChildren(frag);
+  if (had !== null && had !== undefined) {
+    const again = [...ul.children].find((e) => (e._mk ?? e.dataset.sec) === had);
+    if (again) again.focus({ preventScroll: true });
+  }
+  ul.hidden = !L.points.length;
+  $('mkNone').hidden = !!L.points.length || !stageName;
+  $('mkNoneTx').textContent = NONE_TEXT[kind];
+  setIc($('mkNoneIc'), LAYERS[kind].icon);
+  const add = $('mkAdd');
+  add.disabled = L.points.length >= FILE_MAX;
+  if (add.disabled) add.title = `A stage holds at most ${FILE_MAX} ${LAYERS[kind].many}`;
+}
+// the list with the keyboard, as the objects' list: Up and Down walk rows and headers, Home and End jump, Enter or Space selects
+$('mkList').addEventListener('keydown', (e) => {
+  const li = e.target.closest && e.target.closest('li');
+  if (!li || e.altKey) return;
+  const rows = [...$('mkList').children].filter((x) => !x.classList.contains('none')), i = rows.indexOf(li);
+  const go = (j) => { const t = rows[Math.max(0, Math.min(rows.length - 1, j))]; if (t) { e.preventDefault(); e.stopPropagation(); t.focus(); } };
+  if (e.key === 'ArrowDown') go(i + 1);
+  else if (e.key === 'ArrowUp') go(i - 1);
+  else if (e.key === 'Home') go(0);
+  else if (e.key === 'End') go(rows.length - 1);
+  else if ((e.key === 'Enter' || e.key === ' ') && li._mk !== undefined) {
+    e.preventDefault(); e.stopPropagation();
+    mkPick(li._mk, e.shiftKey);
+  }
+});
+
+// ---- the right panel: nothing selected (what the colors are), and the selected marker
+const MK_HELP = {
+  SPT: 'Click a start point, in the view or in the list. The label over a cone is its place in its list, in the order of the file: Player for the first life of the players, CPU for the computer monsters, Respawn after a fall.',
+  PUP: 'Click a power-up, in the view or in the list. Health is green, stamina blue, the special weapon red, the cloak a gray cube. The game keeps 100 at a time; the file holds 255.',
+  AIP: 'Click a node, in the view or in the list. A computer monster walks the links between nodes; a two-way link is one path of the 450 the game keeps. The numbers are the ones in the list; an arrow marks a one-way link; the links of the selected node are amber. To join two nodes, select one, press Link (K) and click the other.',
+  FOP: 'Click a node, in the view or in the list. Cars, helicopters, flying saucers and tanks drive the links between nodes of their type. The numbers are the ones in the list; an arrow marks a one-way link; the links of the selected node are amber. To join two nodes, select one, press Link (K) and click the other.',
+};
+function showMarkerLegend(kind) {
+  const L = lay(kind), ul = $('mkLegend');
+  setIc($('mkNoSelIc'), LAYERS[kind].icon);
+  $('mkNoSelTx').textContent = MK_HELP[kind];
+  $('mkNoSelHelp').textContent = 'Add, on the bar at the top of the left panel, puts a new one where the view looks. Drag the arrows to move it. Ctrl+Z undoes while this mode is open; Save to mod writes the file.';
+  const rows = kind === 'SPT' ? SPT_SHORT.map((t, l) => [{ list: l }, `${t}${L.lists[l] ? ` · ${L.lists[l]}` : ''}`])
+    : kind === 'PUP' ? PUP_GROUPS.map((g) => [{ type: g.types[0] }, g.title])
+    : kind === 'AIP' ? [[{ type: 0 }, 'Type 0, the main net'], [{ type: 1 }, 'Any other type']]
+    : (L.lists.length ? L.lists : ['Car street', 'Helicopter', 'Flying saucer', 'Tank and truck']).map((t, i) => [{ type: i }, t]);
+  ul.replaceChildren(...rows.map(([p, t]) => {
+    const li = document.createElement('li');
+    li.append(shapeSwatch(kind, p), t);
+    return li;
+  }));
+}
+function fillMarkerFields() {
+  const p = markerSel();
+  if (!p) return;
+  $('mkx').value = r1(p.pos[0]); $('mky').value = r1(p.pos[1]); $('mkz').value = r1(p.pos[2]);
+  if (layerOf() === 'SPT') $('mkh').value = r1(p.heading);
+}
+// the selected marker: its header, Type, Position (and Heading, Ground or Shadow), a node's Links, Actions
+function showMarker() {
+  const kind = layerOf(), p = markerSel();
+  if (!kind || !p) return;
+  const L = lay(kind), w = LAYERS[kind], i = L.sel;
+  setIc($('mkIcon').firstElementChild, w.icon);
+  $('mkIcon').style.color = hexColor(markerColor(kind, p));
+  $('mkTitle').textContent = markerName(kind, L.points, i, L.lists);
+  $('mkSub').textContent = kind === 'SPT' ? `Start point ${i + 1} of ${L.points.length}` : kind === 'PUP' ? `Power-up ${i + 1} of ${L.points.length}` : `${w.title}, ${L.points.length} nodes`;
+  // Type: a list of choices, or a number for the AI net
+  const sl = $('mkType'), num = $('mkTypeNum'), key = kind + ':' + L.lists.length;
+  sl.hidden = kind === 'AIP';
+  num.hidden = kind !== 'AIP';
+  $('mkTypeTitle').textContent = kind === 'SPT' ? 'List' : 'Type';
+  if (kind !== 'AIP') {
+    if (sl.dataset.key !== key) {
+      sl.textContent = '';
+      L.lists.forEach((n, t) => sl.append(new Option(kind === 'SPT' ? `${SPT_SHORT[t]} · ${n}` : n, t)));
+      sl.dataset.key = key;
+    }
+    sl.value = String(kind === 'SPT' ? p.list : p.type);
+  } else num.value = p.type;
+  $('mkTypeHelp').textContent = kind === 'SPT' ? `The room of this list: ${L.caps[p.list]}` : kind === 'AIP' ? 'A node type splits the net into sub-nets: the links join nodes of the same net.' : '';
+  fillMarkerFields();
+  $('mkHeadRow').hidden = kind !== 'SPT';
+  const flag = kind === 'SPT' || kind === 'PUP';
+  $('mkFlagRow').hidden = !flag;
+  if (kind === 'SPT') {
+    $('mkFlag').checked = !!p.snap;
+    $('mkFlagTx').textContent = 'Drop to the floor when a monster appears';
+    $('mkFlagRow').title = 'Ground: the point drops to the floor (or roof) under it when a monster appears';
+  } else if (kind === 'PUP') {
+    $('mkFlag').checked = (p.flags & 1) !== 0;
+    $('mkFlagTx').textContent = 'Shadow under the power-up';
+    $('mkFlagRow').title = 'Shadow under the power-up (the game then keeps it on the floor)';
+  }
+  $('mkLinks').hidden = !L.net;
+  if (L.net) {
+    showLinks(kind, L, i);
+    // Add makes a node of the selected node's type (the type of the new node, on the bar, follows the selection until it is changed)
+    if (newTypeOf !== kind + ':' + i) {
+      newTypeOf = kind + ':' + i;
+      if (kind === 'AIP') $('mkNewNum').value = p.type;
+      else if ([...$('mkNewType').options].some((o) => +o.value === p.type)) $('mkNewType').value = String(p.type);
+    }
+  } else newTypeOf = '';
+}
+function showLinks(kind, L, k) {
+  const p = L.points[k], ul = $('mkLinkList'), fop = kind === 'FOP';
+  $('mkLinkCount').textContent = `${p.links.length} of ${L.caps[2]}`;
+  const rows = [];
+  const num = (v, label, set) => {
+    const inp = Object.assign(document.createElement('input'), { type: 'number', min: 0, max: 255, step: 1, value: v });
+    inp.setAttribute('aria-label', label);
+    inp.title = label;
+    inp.onchange = () => markerEdit(`edit a link of ${markerLabel()}`, () => set(clamp255(inp.value)));
+    return inp;
+  };
+  for (const l of p.links) {
+    const li = document.createElement('li');
+    li.className = fop ? 'fop' : '';
+    const to = document.createElement('button');
+    to.type = 'button'; to.className = 'ghost to';
+    to.textContent = `→ Node ${l.to + 1}`;
+    to.title = `Select node ${l.to + 1}`;
+    to.onclick = () => { selectMarker(l.to); focusSelection(); };
+    const two = document.createElement('label'), tc = Object.assign(document.createElement('input'), { type: 'checkbox', checked: netTwoWay(L.points, k, l.to) });
+    two.className = 'two';
+    two.title = 'Two-way: the other node links back to this one';
+    two.append(tc, 'Two-way');
+    tc.onchange = () => {
+      const q = L.points[l.to];
+      if (tc.checked && q.links.length >= L.caps[2]) { tc.checked = false; mkErrSet(`Node ${l.to + 1} already has ${L.caps[2]} links.`); return; }
+      markerEdit(`${tc.checked ? 'link back' : 'cut the link back'} ${markerLabel()}`, () => {
+        if (tc.checked) q.links.push(Object.assign({}, l, { to: k })); else q.links = q.links.filter((m) => m.to !== k);
+      });
+    };
+    const cut = document.createElement('button');
+    cut.type = 'button'; cut.className = 'icon ghost';
+    cut.title = `Cut the link to node ${l.to + 1} (both directions)`;
+    cut.setAttribute('aria-label', cut.title);
+    cut.append(icon('close'));
+    cut.onclick = () => markerEdit(`cut a link of ${markerLabel()}`, () => unlink(L.points, k, l.to));
+    li.append(to, num(l.width, `Width of the link to node ${l.to + 1}`, (v) => { l.width = v; }));
+    if (fop) li.append(num(l.drop || 0, `Drop of the link to node ${l.to + 1}`, (v) => { l.drop = v; }));
+    li.append(two, cut);
+    rows.push(li);
+  }
+  if (!p.links.length) { const li = document.createElement('li'); li.className = 'in'; li.innerHTML = '<span class="none">No links yet. Press Link and click another node, or Add a node while this one is selected.</span>'; rows.push(li); }
+  for (const { from } of oneWayIn(L.points, k)) {
+    const li = document.createElement('li'), b = document.createElement('button');
+    li.className = 'in inlink';
+    b.type = 'button'; b.className = 'ghost small-btn';
+    b.textContent = `Node ${from + 1} links here, one way. Link back`;
+    b.title = 'Make the link two-way';
+    b.onclick = () => markerEdit(`link back ${markerLabel()}`, () => {
+      if (p.links.length >= L.caps[2]) { mkErrSet(`Node ${k + 1} already has ${L.caps[2]} links.`); return; }
+      p.links.push(Object.assign({ to: from }, netAttrs(kind)));
+    });
+    const cutIn = document.createElement('button');
+    cutIn.type = 'button'; cutIn.className = 'icon ghost';
+    cutIn.title = `Cut the link from node ${from + 1}`;
+    cutIn.setAttribute('aria-label', cutIn.title);
+    cutIn.append(icon('close'));
+    cutIn.onclick = () => markerEdit(`cut a link of ${markerLabel()}`, () => { L.points[from].links = L.points[from].links.filter((m) => m.to !== k); });
+    li.append(b, cutIn);
+    rows.push(li);
+  }
+  ul.replaceChildren(...rows);
+}
+
+// ---- wiring
+for (const k of KINDS) {
+  const w = LAYERS[k], c = $(OVERLAY_ID[k]);
+  c.checked = overlayOn[k];
+  c.onchange = (e) => { overlayOn[k] = e.target.checked; store.set(OVERLAY_KEY[k], overlayOn[k] ? '1' : '0'); syncLayerVisibility(); };
+  $(MODE_BUTTON[w.mode]).onclick = () => setMode(w.mode);
+}
+$('modeObjects').onclick = () => setMode('objects');
+$('modePeds').onclick = () => setMode('peds');
+$('mkAdd').onclick = addMarker;
+$('mkSave').onclick = () => { const k = layerOf(); if (k && requireMod('the file is saved in it')) saveLayer(k); };
+$('mkReset').onclick = () => { const k = layerOf(); if (k && requireMod('the file is in it')) resetLayer(k); };
+$('mkRevert').onclick = () => { const k = layerOf(); if (k) revertLayer(k); };
+$('mkClear').onclick = () => { const k = layerOf(); if (k) clearLayer(k); };
+for (const [id, key] of [['mkWidth', 'width'], ['mkDropN', 'drop']]) $(id).oninput = () => { const k = layerOf(); if (k && netDefaults[k]) netDefaults[k][key] = clamp255($(id).value); };
+$('mkDrop').onclick = dropMarker;
+$('mkDup').onclick = duplicateMarker;
+$('mkDel').onclick = removeMarker;
+$('mkAim').onclick = () => markerEdit(`move ${markerLabel()} to the aim`, (p) => { p.pos = viewPoint().map(r1); });
+$('mkType').onchange = () => markerEdit(`change the ${layerOf() === 'SPT' ? 'list' : 'type'} of ${markerLabel()}`, (p) => { p[layerOf() === 'SPT' ? 'list' : 'type'] = parseInt($('mkType').value, 10); });
+$('mkTypeNum').onchange = () => markerEdit(`change the type of ${markerLabel()}`, (p) => { p.type = clamp255($('mkTypeNum').value); });
+$('mkFlag').onchange = () => markerEdit(`change ${markerLabel()}`, (p) => {
+  if (layerOf() === 'SPT') p.snap = $('mkFlag').checked;
+  else p.flags = $('mkFlag').checked ? p.flags | 1 : p.flags & ~1;      // only the shadow bit: the others change how the game settles the power-up
+});
+$('mkRotL').onclick = () => markerEdit(`turn ${markerLabel()}`, (p) => { p.heading = r1(wrapDeg(p.heading + 90)); });
+$('mkRotR').onclick = () => markerEdit(`turn ${markerLabel()}`, (p) => { p.heading = r1(wrapDeg(p.heading - 90)); });
+// X, Y, Z (and the heading) typed: an emptied or half-typed field gives its number back
+for (const id of ['mkx', 'mky', 'mkz', 'mkh']) {
+  $(id).onchange = () => {
+    const p = markerSel();
+    if (!p) return;
+    const ids = layerOf() === 'SPT' ? ['mkx', 'mky', 'mkz', 'mkh'] : ['mkx', 'mky', 'mkz'];
+    if (ids.some((i) => $(i).value.trim() === '' || !Number.isFinite(+$(i).value))) { fillMarkerFields(); return; }
+    markerEdit(`edit ${markerLabel()}`, (q) => {
+      q.pos = [+$('mkx').value, +$('mky').value, +$('mkz').value].map(r1);
+      if (layerOf() === 'SPT') q.heading = r1(wrapDeg(+$('mkh').value));
+    });
+  };
+}
+// dragging a letter or the number sideways: the marker follows, the whole drag is one undo step
+{
+  let from = null;
+  const live = () => {
+    const kind = layerOf(), p = markerSel();
+    if (!from || !p) return;
+    p.pos = [+$('mkx').value, +$('mky').value, +$('mkz').value].map(r1);
+    if (kind === 'SPT') p.heading = r1(wrapDeg(+$('mkh').value));
+    updateLayerView(kind);
+    syncMarkerGizmo();
+  };
+  const hooks = (turn) => ({
+    step: () => ($('snap').checked ? (turn ? snapTurn() : snapMove()) : 1),
+    begin: () => { const k = layerOf(), L = k && lay(k); if (L && markerSel()) from = { p: JSON.stringify(L.points), sel: L.sel, label: `edit ${markerLabel()}` }; },
+    live,
+    end: () => {
+      const k = layerOf();
+      if (from && k && JSON.stringify(lay(k).points) !== from.p) layerPush(k, from.p, from.sel, from.label);
+      from = null;
+      if (k) { layerChanged(k); showMarker(); syncMarkerGizmo(); }
+    },
+  });
+  for (const id of ['mkx', 'mky', 'mkz']) scrubField($(id), hooks(false));
+  scrubField($('mkh'), hooks(true));
+}
+
+// ---- the Link tool (K) of the nets
+// With a node selected, a click on another node joins the two both ways, or cuts the link they have; Shift+click does it for the link
+// out of the selected node only (one way); a click on the ground puts a new node there, linked. A rubber band and a chip at the pointer
+// say what the click will do. Ctrl held is the tool for as long as the key is down. The pure rules are markers.js linkPlan / applyLink.
+const linkOn = (ctrl) => { const k = layerOf(); return !!k && lay(k).net && (linkTool.on || !!ctrl); };
+function syncLinkTool() {
+  for (const id of ['mkLinkTool', 'mkLink']) {
+    const b = $(id);
+    b.classList.toggle('on', linkTool.on);
+    b.setAttribute('aria-pressed', String(linkTool.on));
+  }
+  $('mkChain').checked = linkTool.chain;
+  syncMarkerGizmo();
+  hover.dirty = true;
+  showHint();
+}
+function setLinkTool(on) {
+  const k = layerOf();
+  linkTool.on = !!on && !!k && lay(k).net;
+  syncLinkTool();
+}
+function linkRefuse(text) {
+  mkErrSet(text);
+  toast(text, 'warn');
+}
+// the stage's surface under p (NDC), the first visible hit, or null
+function surfaceAt(p) {
+  if (!stageRoot) return null;
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(p, camera);
+  const hit = ray.intersectObject(stageRoot, true).find((h) => visibleChain(h.object));
+  return hit ? hit.point : null;
+}
+// node a (the selected one) and node b: joined or cut as linkPlan says; the node linked to becomes the selected one when "Go on" is on
+function linkNodes(a, b, oneWay) {
+  const kind = layerOf(), L = kind && lay(kind);
+  if (!L || !L.net || !L.points[a] || !L.points[b]) return;
+  const max = L.caps[2], plan = linkPlan(L.points, a, b, oneWay, max);
+  if (plan.action === 'none') return;
+  if (plan.action === 'full') { linkRefuse(linkWords(plan, a, b, max)); return; }
+  if (L.sel !== a) selectMarker(a);
+  markerEdit(`${plan.action.startsWith('cut') ? 'cut' : 'link'} node ${a + 1} and node ${b + 1}`, () => { applyLink(L.points, a, b, netAttrs(kind), oneWay, max); });
+  mkErrSet(kind === 'AIP' && netPaths(L.points) > L.caps[1] ? `The game keeps ${L.caps[1]} paths and ignores the rest.` : '');
+  if (linkTool.chain && (plan.action === 'link' || plan.action === 'one-way')) selectMarker(b);
+}
+// a new node on the ground at pos (game coordinates), of the selected node's type, linked to it (one way out of it with oneWay)
+function linkNewNode(pos, oneWay) {
+  const kind = layerOf(), L = kind && lay(kind), a = L ? L.sel : -1;
+  if (!L || !L.net || a < 0) return;
+  const max = L.caps[2], pa = L.points[a];
+  if (L.points.length >= FILE_MAX) { linkRefuse(`A stage holds at most ${FILE_MAX} ${LAYERS[kind].many}.`); return; }
+  if (pa.links.length >= max) { linkRefuse(linkWords({ action: 'full', full: a }, a, a, max)); return; }
+  const before = JSON.stringify(L.points), k = L.points.length, attrs = netAttrs(kind);
+  L.points.push({ pos: pos.map(r1), type: pa.type, links: oneWay ? [] : [Object.assign({ to: a }, attrs)], w: 0, sel: 0, tail: '' });
+  pa.links.push(Object.assign({ to: k }, attrs));
+  layerPush(kind, before, a, 'add a node');
+  L.sel = linkTool.chain ? k : a;
+  mkErrSet('');
+  layerChanged(kind);
+  showSel();
+}
+// a click in the view with the tool on and a node selected
+function linkClick(e) {
+  const L = lay(layerOf()), a = L.sel, b = pickMarker(e);
+  if (b === a) return;
+  if (b >= 0) { linkNodes(a, b, e.shiftKey); return; }
+  const hit = surfaceAt(ndc(e));
+  if (hit) linkNewNode(toGame(hit), e.shiftKey);
+}
+// a click or Enter on a row of the list: with the tool on and another node selected it links, otherwise it selects
+function mkPick(i, oneWay) {
+  const L = lay(layerOf());
+  if (L.net && linkTool.on && L.sel >= 0 && i !== L.sel) { linkNodes(L.sel, i, oneWay); return; }
+  selectMarker(i);
+  focusSelection();
+}
+// the rubber band from the selected node to where the click would land, and the chip that says what it would do
+const netRubber = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+                                 new THREE.LineBasicMaterial({ color: AMBER, depthTest: false, transparent: true, opacity: 0.95 }));
+netRubber.renderOrder = 999;
+netRubber.frustumCulled = false;
+netRubber.raycast = () => {};
+netRubber.visible = false;
+scene.add(netRubber);
+const linkChip = $('linkChip');
+let chipText = '';
+function linkPreview() {
+  const kind = layerOf(), L = kind && lay(kind);
+  let plan = null, a = -1, b = -1, end = null, max = 0;
+  if (L && L.net && L.points[L.sel] && linkOn(hover.ctrl) && hover.at && hover.client && !hover.buttons) {
+    a = L.sel; b = hover.marker; max = L.caps[2];
+    if (b >= 0 && b !== a && L.points[b]) { plan = linkPlan(L.points, a, b, hover.shift, max); end = markerCenter(kind, L.points[b]); }
+    else if (b < 0 && hover.surf) {
+      plan = L.points[a].links.length >= max ? { action: 'full', full: a } : { action: 'new' };
+      end = hover.surf.clone();
+      end.y += MARKER_LIFT[kind] || 0;
+    }
+  }
+  const show = !!plan && plan.action !== 'none';
+  netRubber.visible = show;
+  if (show) {
+    const pos = netRubber.geometry.attributes.position, s = markerCenter(kind, L.points[a]);
+    pos.setXYZ(0, s.x, s.y, s.z);
+    pos.setXYZ(1, end.x, end.y, end.z);
+    pos.needsUpdate = true;
+    netRubber.material.color.setHex(plan.action === 'full' || plan.action.startsWith('cut') ? 0xF0605A : AMBER);
+  }
+  const text = show ? (plan.action === 'new' && hover.shift ? 'New node, one way' : linkWords(plan, a, b, max)) : '';
+  if (text !== chipText) {
+    chipText = text;
+    linkChip.hidden = !text;
+    linkChip.textContent = text;
+    linkChip.classList.toggle('bad', show && plan.action === 'full');
+  }
+  if (text) {
+    const r = canvas.parentElement.getBoundingClientRect();
+    linkChip.style.transform = `translate(${Math.round(hover.client[0] - r.left + 16)}px, ${Math.round(hover.client[1] - r.top + 18)}px)`;
+  }
+}
+frameHooks.push(linkPreview);
+$('mkLinkTool').onclick = () => setLinkTool(!linkTool.on);
+$('mkLink').onclick = () => setLinkTool(!linkTool.on);
+$('mkChain').onchange = () => { linkTool.chain = $('mkChain').checked; store.set('netChain', linkTool.chain ? '1' : '0'); };
+
+// ------------------------------------------------------------------ ruler (M), minimap (N), screenshot and Pack mod
+// The ruler (web/ruler.js): two clicks on the stage's surface; the first visible hit under the pointer, as viewPoint takes it.
+const ruler = createRuler({
+  THREE, scene, camera, host: canvas.parentElement, toGame,
+  surface: surfaceAt,
+});
+function setRuler(on) {
+  ruler.setOn(on);
+  $('rulerBtn').classList.toggle('on', ruler.on);
+  $('rulerBtn').setAttribute('aria-pressed', String(ruler.on));
+  if (ruler.on) msg('Ruler: click two points of the stage (Esc or M to stop)', { level: 'info', toast: true });
+}
+$('rulerBtn').onclick = () => setRuler(!ruler.on);
+// The minimap (web/minimap.js)
+const MINI_DOT = { destr: ['#8a8f98', 2], pickup: ['#ffd24a', 2], prop: ['#6fb8ff', 1.5], newprop: ['#4ae08a', 2] };
+const miniItems = () => items().filter((it) => it.node.visible && !isDeleted(it));
+const minimap = createMinimap({
+  canvas: $('minimap'),
+  bounds: () => {
+    const g = gridNow() || stageGrid;
+    if (g) return { min: [g.min[0], g.min[1]], max: [g.max[0], g.max[1]] };
+    const ps = miniItems().map(posOf);
+    return ps.length ? { min: [Math.min(...ps.map((p) => p[0])) - 200, Math.min(...ps.map((p) => p[1])) - 200],
+                         max: [Math.max(...ps.map((p) => p[0])) + 200, Math.max(...ps.map((p) => p[1])) + 200] } : null;
+  },
+  dots: () => miniItems().map((it) => {
+    const p = posOf(it), [c, r] = MINI_DOT[it.rec.info.kind] || ['#8a8f98', 2];
+    return { x: p[0], y: p[1], c, r, sel: group.includes(it) || it === sel };
+  }),
+  cam: () => {
+    const d = camera.getWorldDirection(new THREE.Vector3()), p = toGame(camera.position);
+    return { x: p[0], y: p[1], heading: ((Math.atan2(d.x, -d.z) * 180) / Math.PI + 360) % 360 };
+  },
+  go: (x, y) => {      // the camera (and what it orbits) to that spot, at the height it has
+    const at = fly.on ? camera.position : orbit.target, d = toThree([x, y, 0]).sub(new THREE.Vector3(at.x, 0, at.z)).setY(0);
+    camera.position.add(d);
+    if (!fly.on) orbit.target.add(d);
+  },
+});
+function setMini(on) {
+  minimap.setOn(on);
+  $('miniOn').checked = minimap.on;
+  store.set('mini', minimap.on ? '1' : '0');
+}
+$('miniOn').onchange = (e) => setMini(e.target.checked);
+let miniLast = 0;
+frameHooks.push(() => {
+  ruler.update();
+  const now = performance.now();
+  if (minimap.on && now - miniLast > 100) { miniLast = now; minimap.draw(); }
+});
+setMini(store.get('mini', '0') === '1');
+// Screenshot: the view as a PNG download; the gizmo is left out of it
+$('shotBtn').onclick = () => {
+  if (!stageRoot) return;
+  const gv = gizmo.visible, hv = hoverBox.visible, rv = mkRing.visible, sv = mkSelRing.visible;
+  gizmo.visible = false;
+  hoverBox.visible = false;
+  mkRing.visible = false;
+  mkSelRing.visible = false;
+  let url = '';
+  try {
+    renderer.render(scene, camera);          // the canvas keeps no frame between renders: read it right after one
+    url = renderer.domElement.toDataURL('image/png');
+  } finally { gizmo.visible = gv; hoverBox.visible = hv; mkRing.visible = rv; mkSelRing.visible = sv; }
+  const d = new Date(), z = (n) => String(n).padStart(2, '0');
+  const name = `${stageName}_${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}.png`;
+  const a = Object.assign(document.createElement('a'), { href: url, download: name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  msg(`Screenshot ${name} saved to your downloads`, { level: 'ok', toast: true });
+};
+// Pack mod: mods/<mod>/ as a .zip (editor.py pack_mod)
+$('packMod').onclick = async () => {
+  if (!requireMod('Pack mod zips its folder')) return;
+  try {
+    const r = await fetch(`/api/pack?mod=${encodeURIComponent(modNow)}`);
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `The server answered ${r.status}`);
+    const url = URL.createObjectURL(await r.blob());
+    const a = Object.assign(document.createElement('a'), { href: url, download: `${modNow}.zip` });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    msg(`Packed ${modNow}.zip` + (isDirty() ? '. The changes you have not saved are not in it' : ''), { level: isDirty() ? 'warn' : 'ok', toast: true });
+  } catch (e) { msg(e.message || String(e), { level: 'err', toast: true }); }
+};
+// A floor over the new rectangle: a prop of the mod (a visible plate and a coll_ slab), placed at the rectangle's center
+$('gdFloor').onclick = async () => {
+  if (!modNow) { gdErr('Choose a mod first: the floor is a prop saved in it.'); return; }
+  if (!gdApply()) return;
+  const g = gridNow();
+  if (!g) { msg("The stage size is the disc's: there is nothing to put a floor over", { level: 'warn', toast: true }); return; }
+  let res;
+  try { res = await api('/api/props/floor', { mod: modNow, stage: stageName, min: g.min, max: g.max }); }
+  catch (e) { msg(cleanError(e).text, { level: 'err', toast: true }); return; }
+  const p = JSON.parse(JSON.stringify(buildPatch()));
+  p.props = (p.props || []).filter((e) => propKey(e.model) !== propKey(res.model) && e.id !== 'floor');
+  p.props.push({ id: 'floor', model: res.model, pos: res.pos, name: 'Floor' });
+  await loadPropModels(modNow);
+  restoreTo(JSON.stringify(p));
+  msg(`Floor ${res.model} over the new size${res.prop?.error ? `, but ${res.prop.error}` : ''}. Check it, then Save`, { level: res.prop?.error ? 'warn' : 'ok', toast: true });
 };
 
 // Stage picture: the view's middle 2:1 band, 512x256, into mods/<mod>/levelpics/ (the stage select's picture)
 $('picBtn').onclick = async () => {
   if (!stageName) return;
-  if (!modNow) { msg('Choose a mod first: the picture is saved in it', { level: 'warn', toast: true }); return; }
+  if (!requireMod('the picture is saved in it')) return;
   renderer.render(scene, camera);          // the canvas keeps no frame between renders: read it right after one
   const src = renderer.domElement, w = src.width, h = src.height, cw = Math.min(w, h * 2), ch = cw / 2;
   const c = document.createElement('canvas');
@@ -2895,7 +5060,7 @@ function propThumb(pm) {
   if (pm.thumb !== undefined) return pm.thumb;
   pm.thumb = null;
   if (!pm.scene) return null;
-  const S = 96, sc = new THREE.Scene(), prev = renderer.getRenderTarget();
+  const S = 192, sc = new THREE.Scene(), prev = renderer.getRenderTarget();
   try {
     const obj = pm.scene.clone(true);
     sc.add(obj);
@@ -2920,88 +5085,391 @@ function propThumb(pm) {
   return pm.thumb;
 }
 
-// Ctrl+P palette: the stage's objects (select and frame) and the mod's props for this stage (add)
-let palIdx = 0, palRows = [];
+// The original models of the other stages (/api/originals, built by the server in the background): a search result makes the model a
+// prop of the mod (/api/props/original) and adds it. Their pictures load as the rows show (/api/origglb).
+let origIdx = null, origTimer = 0, origBy = new Map();   // origBy: "STAGE:kind:sig" -> the index entry (a stage's own object finds its picture by its model)
+const origPics = new Map();   // "STAGE:handle" -> {pic: data URL or null}
+async function origEnsure() {
+  clearTimeout(origTimer);
+  if (!$('palDlg').open || (origIdx && origIdx.ready)) return;
+  try { origIdx = await api('/api/originals'); } catch (e) { origIdx = { ready: true, items: [], done: 0, total: 0 }; return; }
+  origBy = new Map(origIdx.items.map((it) => [`${it.stage}:${it.kind}:${it.sig}`, it]));
+  fillPalStages();
+  if ($('palDlg').open) palRender();
+  if (!origIdx.ready) origTimer = setTimeout(origEnsure, 1500);
+}
+// A model's picture: the PNG the server kept from an earlier render; without one, the page renders the model (its .glb, a few at a
+// time) and sends the PNG to be kept, so each model is rendered once for good.
+const origQ = [];
+let origBusy = 0;
+function origPump() {
+  while (origBusy < 3 && origQ.length) { origBusy++; origQ.shift()().finally(() => { origBusy--; origPump(); }); }
+}
+function origPic(it) {
+  const key = `${it.stage}:${it.handle}`, q = `stage=${encodeURIComponent(it.stage)}&handle=${encodeURIComponent(it.handle)}`;
+  let e = origPics.get(key);
+  if (e) return e.pic;
+  origPics.set(key, e = { pic: null });
+  const done = () => { if (e.pic && $('palDlg').open) palRender(); };
+  origQ.push(() => new Promise((res) => {
+    const im = new Image();
+    im.onload = () => { e.pic = im.src; it.pic = true; done(); res(); };
+    im.onerror = () => origRender(it).then((p) => { e.pic = p; done(); }).finally(res);
+    im.src = `/api/origpic?${q}`;
+  }));
+  origPump();
+  return null;
+}
+// Renders one model (its .glb from the server) into a small picture, sends the PNG to be kept and returns it as a data URL (null on failure)
+function origRender(it) {
+  return new GLTFLoader().loadAsync(`/api/origglb?stage=${encodeURIComponent(it.stage)}&handle=${encodeURIComponent(it.handle)}`).then(async (gltf) => {
+    gltf.scene.traverse((o) => {
+      if (o.userData && o.userData.hidden) o.visible = false;
+      if (o.isMesh) for (const m of [].concat(o.material)) gsMaterial(m);
+    });
+    const pic = propThumb({ scene: gltf.scene });
+    if (pic) { it.pic = true; await api('/api/origpic', { stage: it.stage, handle: it.handle, png: pic.replace(/^data:[^,]*,/, '') }).catch(() => {}); }
+    gltf.scene.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); for (const m of [].concat(o.material)) { if (m.map) m.map.dispose(); m.dispose(); } } });
+    return pic;
+  }).catch(() => null);
+}
+// Renders the pictures that are not kept yet, every stage's, three at a time (the scene of a stage is read once for all its models);
+// ?bake=1 does it on load. Progress in the palette's footer.
+const bake = { on: false, done: 0, total: 0, failed: 0 };
+async function bakeOriginals() {
+  if (bake.on) return;
+  bake.on = true; bake.done = bake.total = bake.failed = 0;
+  try {
+    let idx = await api('/api/originals');
+    while (!idx.ready) { await sleep(1000); idx = await api('/api/originals'); }
+    const todo = idx.items.filter((i) => !i.pic).sort((a, b) => a.stage.localeCompare(b.stage) || a.handle.localeCompare(b.handle));
+    bake.total = todo.length;
+    document.title = `Baking pictures 0/${bake.total}`;
+    const worker = async () => {
+      for (let it = todo.shift(); it; it = todo.shift()) {
+        const p = await origRender(it);
+        bake.done++;
+        if (!p) bake.failed++;
+        if (bake.done % 10 === 0 || bake.done === bake.total) { document.title = `Baking pictures ${bake.done}/${bake.total}`; if ($('palDlg').open) palRender(); }
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    msg(`Rendered ${bake.done - bake.failed} of ${bake.total} pictures for the palette${bake.failed ? `, ${bake.failed} failed` : ''}`, { level: bake.failed ? 'warn' : 'ok', toast: true });
+    origIdx = null; origPics.clear();
+  } catch (e) { msg(`Rendering the pictures stopped: ${cleanError(e).text}`, { level: 'err', toast: true }); }
+  finally { bake.on = false; if ($('palDlg').open) origEnsure(); }
+}
+async function addOriginal(it) {
+  if (!requireMod('the prop is built into it')) return;
+  msg(`Building ${it.name} from ${it.title}…`);
+  let res;
+  try { res = await api('/api/props/original', { mod: modNow, stage: stageName, from: it.stage, handle: it.handle }); }
+  catch (e) { msg(cleanError(e).text, { level: 'err', toast: true }); return; }
+  const m = res.prop || {};
+  if (!propModels.get(m.model)?.scene) {
+    const p = JSON.stringify(buildPatch());
+    await loadPropModels(modNow);
+    restoreTo(p);
+  }
+  if (!propModels.get(m.model)?.scene) { msg(`${m.model}: ${m.error || 'its preview does not load'}`, { level: 'warn', toast: true }); return; }
+  addProp(m.model);
+}
+
+// A copy of one of this stage's own models where the view looks (the stage's object is copied, as Copy does)
+function addStageModel(it) {
+  const rec = byHandle.get(normHandle(it.handle));
+  if (!rec) { msg(`${it.name}: this stage has no such object any more`, { level: 'warn', toast: true }); return; }
+  if (editMode !== 'objects') enterMode('objects');
+  snapshot('add ' + it.name);
+  const c = makeCopy(rec, viewPoint(), headingOf(rec.item));
+  msg(`Added a copy of ${it.name}`, { level: 'ok', toast: ['Undo', undo] });
+  select(c);
+}
+
+// Ctrl+P palette, two tabs. Add: cards of the mod's props for this stage and of every model of the game's stages (this stage's first):
+// a card of this stage's copies the object, one of another stage builds it as a prop of the mod (addOriginal) and adds it.
+// Find: the stage's objects, one card per model (select and frame).
+let palIdx = 0, palRows = [], palTab = 'add', palStageSel = '';
+let ORIG_ROWS = 16;        // models per page: the grid's columns (cards of at least PAL_CARD px, as the CSS lays them) times the rows that fit
+const PAL_CARD = 170;
+let palPropsOpen = true;   // the "This mod's props" group; kept between sessions
+try { palPropsOpen = localStorage.getItem('palProps') !== 'closed'; } catch (e) { /* no storage: open */ }
+function fitPage() {
+  const w = $('palList').clientWidth;
+  if (!w) return;
+  const cols = Math.max(2, Math.floor((w + 8) / (PAL_CARD + 8))), card = (w - 8 * (cols - 1)) / cols;
+  ORIG_ROWS = cols * Math.max(2, Math.floor((window.innerHeight - 260) / (card + 50)));
+}
+let origPage = 0, origTotal = 0;
+function origResults(q) {
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  origTotal = 0;
+  if (palTab !== 'add' || !origIdx) return [];
+  const here = baseOf(stageName), isHere = (it) => baseOf(it.stage) === here;
+  const all = origIdx.items.filter((it) => !palStageSel || it.stage === palStageSel)
+    .filter((it) => { const t = `${it.name} ${it.title} ${it.stage} ${it.kind === 'destr' ? 'breakable destructible' : 'prop'}`.toLowerCase(); return words.every((w) => t.includes(w)); })
+    .sort((a, b) => isHere(b) - isHere(a) || a.stage.localeCompare(b.stage) || b.count - a.count || a.name.localeCompare(b.name));
+  origTotal = all.length;
+  origPage = Math.min(origPage, Math.max(0, Math.ceil(all.length / ORIG_ROWS) - 1));
+  return all.slice(origPage * ORIG_ROWS, (origPage + 1) * ORIG_ROWS)
+    .map((it) => ({ kind: 'orig', orig: it, label: it.name,
+                    meta: `${isHere(it) ? 'This stage' : it.title}${it.kind === 'destr' ? ' · breakable' : ''} · ${it.dims.map((x) => Math.round(x)).join('×')}`,
+                    run: () => (isHere(it) ? addStageModel(it) : addOriginal(it)) }));
+}
+function setPalTab(t) {
+  palTab = t;
+  palIdx = 0;
+  origPage = 0;
+  $('palTabAdd').setAttribute('aria-pressed', t === 'add');
+  $('palTabFind').setAttribute('aria-pressed', t === 'find');
+  $('palStage').hidden = t !== 'add';
+  $('palQ').placeholder = t === 'add' ? 'Search the models to add…' : 'Search this stage’s objects (name or handle)…';
+  palRender(true);
+  $('palQ').focus();
+}
+function fillPalStages() {            // the stages that have models, in the stage list's order
+  const sel = $('palStage'), have = new Set((origIdx ? origIdx.items : []).map((i) => i.stage)), keep = palStageSel;
+  sel.innerHTML = `<option value="">All stages</option>` + Object.keys(stageTitles).filter((n) => have.has(n))
+    .map((n) => `<option value="${n}">${stageTitles[n]}${n === stageName || n === baseOf(stageName) ? ' (this stage)' : ''}</option>`).join('');
+  sel.value = have.has(keep) ? keep : '';
+  palStageSel = sel.value;
+}
+function origGo(d) {
+  const pages = Math.max(1, Math.ceil(origTotal / ORIG_ROWS)), p = Math.max(0, Math.min(pages - 1, origPage + d));
+  if (p === origPage) return;
+  origPage = p;
+  palRender();                       // the new page's rows; the first of them gets the selection
+  palIdx = Math.max(0, palRows.findIndex((r) => r.kind === 'orig'));
+  palRender(true);
+}
 function palResults(q) {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean), fits = (t) => words.every((w) => t.toLowerCase().includes(w));
-  const props = [...propModels.values()].filter((pm) => pm.info.stage === baseOf(stageName) && pm.scene)
-    .map((pm) => ({ kind: 'prop', text: `${pm.info.name || pm.info.model} ${pm.info.model}`, label: `Add ${pm.info.name && pm.info.name.toUpperCase() !== pm.info.model ? pm.info.name + ' · ' : ''}${pm.info.model}`,
+  const props = palTab !== 'add' || palStageSel ? [] : [...propModels.values()].filter((pm) => pm.info.stage === baseOf(stageName) && pm.scene)
+    .map((pm) => ({ kind: 'prop', text: `${pm.info.name || pm.info.model} ${pm.info.model}`, label: `${pm.info.name && pm.info.name.toUpperCase() !== pm.info.model ? pm.info.name : pm.info.model}`,
                     meta: pm.info.triangles ? `${pm.info.triangles} triangles` : '', pm, run: () => addProp(pm.info.model) }))
     .filter((r) => fits(r.text));
-  const objs = items().filter((it) => !it.rec.deleted).map((it) => ({ it, name: it.copy ? it.iname || `Copy ${it.rec.copies.indexOf(it) + 1}` : nameOf(it) }))
-    .filter((o) => fits(`${o.name} ${o.it.rec.info.handle}`)).slice(0, 40)
-    .map((o) => ({ kind: 'obj', label: o.name, meta: o.it.rec.info.handle, run: () => { select(o.it); focusSelection(); } }));
-  return { props, objs };
+  // one card per model (name and signature): the first match is what it selects, with how many there are
+  const groups = new Map();
+  for (const it of palTab === 'find' ? items() : []) {
+    if (it.rec.deleted) continue;
+    const name = it.copy ? it.iname || `Copy ${it.rec.copies.indexOf(it) + 1}` : nameOf(it);
+    if (!fits(`${name} ${it.rec.info.handle}`)) continue;
+    const k = `${name}|${it.rec.info.sig || ''}`, g = groups.get(k);
+    if (g) g.n++; else groups.set(k, { it, name, n: 1 });
+  }
+  const objs = [...groups.values()].slice(0, 40)
+    .map((o) => ({ kind: 'obj', label: o.name, meta: o.n > 1 ? `${o.n} in this stage` : o.it.rec.info.handle,
+                   key: `${baseOf(stageName)}:${o.it.rec.info.kind}:${o.it.rec.info.sig}`, run: () => { select(o.it); focusSelection(); } }));
+  return { props, objs, origs: origResults(q) };
 }
-function palRender() {
-  const { props, objs } = palResults($('palQ').value);
-  palRows = [...props, ...objs];
+// follow: scroll to the selected row (a key, a page, a new search); a redraw for a picture that arrived keeps the list where it is
+function palRender(follow = false) {
+  fitPage();
+  const { props, objs, origs } = palResults($('palQ').value);
+  palRows = [...(palPropsOpen ? props : []), ...objs, ...origs];
   palIdx = Math.min(palIdx, Math.max(0, palRows.length - 1));
-  const list = $('palList');
+  const list = $('palList'), top = list.scrollTop;
   list.textContent = '';
-  const head = (t) => { const d = document.createElement('div'); d.className = 'pal-h'; d.textContent = t; list.appendChild(d); };
-  let n = 0;
+  const head = (t, pager, fold) => {
+    const d = document.createElement('div');
+    d.className = 'pal-h';
+    const s = document.createElement('span');
+    s.textContent = t;
+    d.append(s);
+    if (fold) {
+      d.classList.add('pal-fold');
+      d.setAttribute('role', 'button');
+      d.onmousedown = (e) => e.preventDefault();      // the search keeps the focus
+      d.onclick = fold;
+    }
+    if (pager) d.append(...pager);
+    list.appendChild(d);
+  };
+  let n = 0, grid = null;
+  const group = (t, pager, fold) => { head(t, pager, fold); grid = document.createElement('div'); grid.className = 'pal-grid'; list.appendChild(grid); return grid; };
   const add = (r) => {
     const i = n++, b = document.createElement('button');
-    b.type = 'button'; b.className = 'ghost'; b.setAttribute('role', 'option'); b.setAttribute('aria-selected', i === palIdx);
-    const pic = r.pm && propThumb(r.pm);
+    b.type = 'button'; b.className = 'ghost pal-card'; b.setAttribute('role', 'option'); b.setAttribute('aria-selected', i === palIdx);
+    b.title = `${r.label} · ${r.meta}`;
+    const pic = r.pm ? propThumb(r.pm) : r.orig ? origPic(r.orig) : r.key && origBy.get(r.key) ? origPic(origBy.get(r.key)) : null;
     if (pic) { const im = document.createElement('img'); im.src = pic; im.alt = ''; im.className = 'pal-pic'; b.append(im); }
-    else b.append(icon(r.kind === 'prop' ? 'shape-plus-outline' : 'cube-outline'));
+    else { const ph = document.createElement('span'); ph.className = 'pal-pic pal-nopic'; ph.append(icon(r.kind === 'obj' ? 'cube-outline' : 'shape-plus-outline')); b.append(ph); }
     const l = document.createElement('span'), m = document.createElement('span');
-    l.textContent = r.label; m.className = 'pal-meta'; m.textContent = r.meta;
+    l.className = 'pal-name'; l.textContent = r.label; m.className = 'pal-meta'; m.textContent = r.meta;
     b.append(l, m);
     b.onclick = () => palPick(r);
-    list.appendChild(b);
+    grid.appendChild(b);
   };
-  if (props.length) { head('Props'); props.forEach(add); }
-  if (objs.length) { head('Objects'); objs.forEach(add); }
-  if (!palRows.length) { const d = document.createElement('div'); d.className = 'pm-none'; d.textContent = 'Nothing matches.'; list.appendChild(d); }
-  list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+  if (props.length) {
+    const fold = () => {
+      palPropsOpen = !palPropsOpen;
+      try { localStorage.setItem('palProps', palPropsOpen ? 'open' : 'closed'); } catch (e) { /* ignore */ }
+      palIdx = 0;
+      palRender(true);
+    };
+    if (palPropsOpen) { group(`▾ This mod's props · ${props.length}`, null, fold); props.forEach(add); }
+    else head(`▸ This mod's props · ${props.length}`, null, fold);
+  }
+  if (objs.length) { group('Objects in this stage'); objs.forEach(add); }
+  if (origs.length) {
+    const pages = Math.ceil(origTotal / ORIG_ROWS), pg = (txt, d, off) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'ghost pal-pg'; b.textContent = txt; b.disabled = off; b.title = d < 0 ? 'Previous page (PageUp)' : 'Next page (PageDown)';
+      b.onmousedown = (e) => e.preventDefault();      // the search keeps the focus
+      b.onclick = () => origGo(d);
+      return b;
+    };
+    group(`Models from the game's stages · ${origPage * ORIG_ROWS + 1}–${origPage * ORIG_ROWS + origs.length} of ${origTotal}`,
+          pages > 1 ? [pg('‹', -1, origPage === 0), pg('›', 1, origPage >= pages - 1)] : null);
+    origs.forEach(add);
+  }
+  if (palTab === 'add' && origIdx && origIdx.ready) {         // pictures not rendered yet: all of them in one go, or as the rows show
+    const missing = origIdx.items.filter((i) => !i.pic).length;
+    if (bake.on || missing) {
+      const d = document.createElement('div');
+      d.className = 'pal-h';
+      const s = document.createElement('span');
+      s.textContent = bake.on ? `Rendering the pictures… ${bake.done} of ${bake.total}` : `${missing} pictures not rendered yet`;
+      d.append(s);
+      if (!bake.on) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'ghost pal-pg'; b.textContent = 'Render all'; b.style.width = 'auto'; b.style.padding = '0 8px';
+        b.title = 'Renders every model once and keeps the pictures (a few minutes)';
+        b.onmousedown = (e) => e.preventDefault();
+        b.onclick = () => { bakeOriginals(); palRender(); };
+        d.append(b);
+      }
+      list.appendChild(d);
+    }
+  }
+  if (palTab === 'add' && !(origIdx && origIdx.ready)) {
+    const d = document.createElement('div');
+    d.className = 'pm-none';
+    d.textContent = `Looking through the other stages' objects… ${origIdx ? origIdx.done + ' of ' + origIdx.total : ''}`;
+    list.appendChild(d);
+  }
+  if (!palRows.length && !(origIdx && !origIdx.ready)) { const d = document.createElement('div'); d.className = 'pm-none'; d.textContent = 'Nothing matches.'; list.appendChild(d); }
+  if (follow) list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+  else list.scrollTop = top;
 }
 function palPick(r) { $('palDlg').close(); r.run(); }
 function openPalette() {
-  if (!stageName || document.querySelector('dialog[open]')) return;
-  palIdx = 0;
+  if (!stageName || document.querySelector('dialog:modal')) return;
   $('palQ').value = '';
-  palRender();
+  palTab = 'add';
+  setPalTab('add');
+  fillPalStages();
   $('palDlg').showModal();
+  palRender(true);                      // again, now that the grid has a width: the page holds as many cards as fit
   $('palQ').focus();
+  origEnsure();
 }
-$('palQ').oninput = () => { palIdx = 0; palRender(); };
+window.addEventListener('resize', () => { if ($('palDlg').open) palRender(); });
+$('palTabAdd').onclick = () => setPalTab('add');
+$('palTabFind').onclick = () => setPalTab('find');
+$('palStage').onchange = () => { palStageSel = $('palStage').value; palIdx = 0; origPage = 0; palRender(true); $('palQ').focus(); };
+$('palQ').oninput = () => { palIdx = 0; origPage = 0; palRender(true); };
 $('palQ').onkeydown = (e) => {
+  const t = e.target, atEnd = t.selectionStart === t.selectionEnd && t.selectionStart === t.value.length, atStart = t.selectionStart === t.selectionEnd && t.selectionStart === 0;
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
-    palIdx = (palIdx + (e.key === 'ArrowDown' ? 1 : -1) + palRows.length) % Math.max(1, palRows.length);
-    palRender();
+    // the card nearest below or above, in the next row of the grid
+    const cards = [...$('palList').querySelectorAll('button[role="option"]')], cur = cards[palIdx];
+    if (!cur) return;
+    const c = cur.getBoundingClientRect(), cx = c.left + c.width / 2, cy = c.top + c.height / 2, dir = e.key === 'ArrowDown' ? 1 : -1;
+    let best = -1, bd = Infinity;
+    cards.forEach((b, i) => {
+      const r = b.getBoundingClientRect(), dy = (r.top + r.height / 2 - cy) * dir;
+      if (dy < 8) return;
+      const d = dy * 1000 + Math.abs(r.left + r.width / 2 - cx);        // the nearest row first, then the nearest column
+      if (d < bd) { bd = d; best = i; }
+    });
+    if (best >= 0) { palIdx = best; palRender(true); }
+  } else if ((e.key === 'ArrowRight' && atEnd) || (e.key === 'ArrowLeft' && atStart)) {
+    e.preventDefault();
+    palIdx = Math.max(0, Math.min(palRows.length - 1, palIdx + (e.key === 'ArrowRight' ? 1 : -1)));
+    palRender(true);
+  } else if (e.key === 'Tab') {
+    e.preventDefault();
+    setPalTab(palTab === 'add' ? 'find' : 'add');
+  } else if (e.key === 'PageDown' || e.key === 'PageUp') {
+    e.preventDefault();
+    origGo(e.key === 'PageDown' ? 1 : -1);
   } else if (e.key === 'Enter') { e.preventDefault(); if (palRows[palIdx]) palPick(palRows[palIdx]); }
 };
 
 // New stage…
 const NS_BASES = ['CENTRAL', 'VEGAS', 'CANYON2', 'METRO', 'UFO', 'CAPITOL', 'CANYON1', 'MINISF', 'TOKYODM'];
 const nsErr = (t) => { $('nsErr').hidden = !t; $('nsErr').querySelector('span').textContent = t || ''; };
-const nsWhere = () => { $('nsWhere').textContent = modNow ? `mods/${modNow}/stages/${($('nsId').value.trim() || '<id>').toLowerCase()}/` : '(choose a mod first)'; };
-$('newStage').onclick = () => {
-  if (!stageName) return;
-  if (!modNow) { msg('Choose a mod first: the new stage is saved in it', { level: 'warn', toast: true }); return; }
+let nsEdit = '';         // the custom stage the dialog edits; empty = New stage
+const nsWhere = () => {
+  const m = nsEdit ? stageMeta[nsEdit] : null;
+  $('nsWhere').textContent = m ? `mods/${m.mod}/stages/` : modNow ? `mods/${modNow}/stages/${($('nsId').value.trim() || '<id>').toLowerCase()}/` : '(choose a mod first)';
+};
+function nsOpen(edit) {
+  nsEdit = edit;
+  const m = edit ? stageMeta[edit] : null;
+  $('nsTitle').textContent = m ? 'Edit stage' : 'New stage';
+  $('nsIntro').textContent = m ? 'The entry on the stage select. The id names the stage\'s patch and files, so it stays.'
+    : 'Another entry on the stage select, built on a game stage, with its own level patch.';
+  $('nsOk').textContent = m ? 'Save' : 'Create';
+  $('nsId').disabled = !!m;
+  $('nsCopyRow').hidden = !!m;
+  $('nsBaseNote').hidden = true;
   const b = $('nsBase');
   b.innerHTML = NS_BASES.filter((x) => stageTitles[x]).map((x) => `<option value="${x}">${stageTitles[x]} (${x})</option>`).join('');
-  b.value = NS_BASES.includes(baseOf(stageName)) ? baseOf(stageName) : (b.options[0] || {}).value;
-  $('nsId').value = $('nsName').value = '';
+  b.value = m ? m.base : NS_BASES.includes(baseOf(stageName)) ? baseOf(stageName) : (b.options[0] || {}).value;
+  $('nsId').value = m ? m.id : '';
+  $('nsName').value = m ? m.title : '';
+  $('nsNarr').value = m ? m.narrator || '' : '';
+  $('nsRandom').checked = m ? m.random !== false : true;
   $('nsCopy').checked = true;
   nsErr('');
   nsWhere();
   $('stageDlg').showModal();
-  $('nsId').focus();
+  (m ? $('nsName') : $('nsId')).focus();
+}
+$('newStage').onclick = () => {
+  if (!stageName) return;
+  if (!requireMod('the new stage is saved in it')) return;
+  nsOpen('');
 };
+$('editStage').onclick = () => { if (stageMeta[stageName]) nsOpen(stageName); };
+$('nsBase').onchange = () => { $('nsBaseNote').hidden = !nsEdit || $('nsBase').value === stageMeta[nsEdit].base; };
 $('nsId').oninput = () => { nsWhere(); nsErr(''); };
+async function nsSave() {
+  const old = stageMeta[nsEdit], base = $('nsBase').value;
+  if (base !== old.base && isDirty()) { nsErr('Save or undo your changes first: the stage reloads on its new base.'); return; }
+  let res;
+  try {
+    res = await api('/api/stage/edit', { stage: nsEdit, name: $('nsName').value.trim(), base, narrator: $('nsNarr').value.trim(), random: $('nsRandom').checked });
+  } catch (e) { nsErr(cleanError(e).text); return; }
+  $('stageDlg').close();
+  const o = [...$('stage').options].find((x) => x.value === res.name);
+  if (o) o.textContent = `${res.title} (custom, on ${res.base})`;
+  stageTitles[res.name] = res.title;
+  stageBases[res.name] = res.base;
+  stageMeta[res.name] = res;
+  if (res.baseChanged) await loadStage(res.name);
+  msg(`Saved ${res.title}${res.baseChanged ? `, now on ${stageTitles[res.base] || res.base}: Check it` : ''}. The game reads its stages at start-up`, { level: res.baseChanged ? 'warn' : 'ok', toast: true });
+}
 $('nsOk').onclick = async () => {
+  if (nsEdit) { await nsSave(); return; }
   const id = $('nsId').value.trim();
   if (!/^[A-Za-z][A-Za-z0-9]{0,7}$/.test(id)) { nsErr('The id is 1 to 8 letters and digits, starting with a letter.'); $('nsId').focus(); return; }
   const base = $('nsBase').value;
   // the patch carries the base's handles: it comes along only when the open stage has that base
   const withPatch = $('nsCopy').checked && baseOf(stageName) === base;
+  if ((isDirty() && !withPatch) || layersDirty() || lightDirty()) {
+    // the open stage is replaced by the new one: its changes go nowhere unless they are saved first (the copy carries the patch, not the marker drafts or the light panel)
+    const v = await new Promise((r) => askUnsaved(`${title(stageName)} has ${changesText(unsavedCount())}, and the new stage does not take ${withPatch ? 'the ones in Light and fog, start points, power-ups and nets' : 'them'}.`, 'Save and create', r));
+    if (v === 'cancel' || (v === 'save' && !(await post('save')))) return;
+  }
   let res;
-  try { res = await api('/api/stage/new', { mod: modNow, id, name: $('nsName').value.trim(), base, patch: withPatch ? buildPatch() : null }); }
+  try {
+    res = await api('/api/stage/new', { mod: modNow, id, name: $('nsName').value.trim(), base, narrator: $('nsNarr').value.trim(),
+                                        random: $('nsRandom').checked, patch: withPatch ? buildPatch() : null });
+  }
   catch (e) { nsErr(cleanError(e).text); return; }
   $('stageDlg').close();
   cfg = Object.assign({}, cfg);
@@ -3011,6 +5479,7 @@ $('nsOk').onclick = async () => {
   $('stage').appendChild(o);
   stageTitles[res.name] = res.title;
   stageBases[res.name] = res.base;
+  stageMeta[res.name] = res;
   dirty = false;
   $('stage').value = res.name;
   await loadStage(res.name);
@@ -3020,24 +5489,28 @@ $('nsOk').onclick = async () => {
 const ipErr = (t) => { $('ipErr').hidden = !t; $('ipErr').querySelector('span').textContent = t || ''; };
 const ipRadio = (n) => document.querySelector(`#propDlg input[name="${n}"]:checked`)?.value;
 const ipWhere = () => { $('ipWhere').textContent = `mods/${modNow}/props/${$('ipName').value.trim().toUpperCase() || 'NAME'}/`; };
-async function openImport() {
+let ipSky = null;      // 'dome' or 'clouds' while the dialog imports a sky model (it takes that place when imported); else null
+async function openImport(sky = null) {
   showPropMenu(false);
   if (!modNow) {
     const m = await pickMod('save', 'Choose');
     if (!m) return;
     moveTo(m, false);
   }
+  ipSky = sky === 'dome' || sky === 'clouds' ? sky : null;
   ipData = null;
   ipTitle = '';
   $('ipFile').textContent = 'No file chosen';
-  $('ipName').value = $('ipHeight').value = '';
+  $('ipName').value = ipSky === 'dome' ? 'SKY' : ipSky === 'clouds' ? 'CLOUDS' : '';
+  $('ipHeight').value = '';
   ipErr('');
-  $('ipText').textContent = `A Blender model exported as glTF Binary (.glb), for ${title(stageName)}.`;
+  $('ipText').textContent = `A Blender model exported as glTF Binary (.glb), for ${title(stageName)}.` +
+    (ipSky ? ` It becomes the ${SKY_WHAT[ipSky]}: faces turned inward, around the origin, with a texture.` : '');
   ipWhere();
   $('propDlg').showModal();
   $('ipPick').focus();
 }
-$('pmImport').onclick = openImport;
+$('pmImport').onclick = () => openImport();
 $('ipPick').onclick = () => ipInput.click();
 $('ipName').oninput = () => { ipWhere(); ipErr(''); };
 // the .glb, from Choose .glb… or dropped on the dialog
@@ -3083,27 +5556,122 @@ async function doImport(replace = false) {
   const m = res.prop || {};
   msg(`${res.replaced ? 'Replaced' : 'Imported'} ${m.model || name}: ${m.triangles} triangles` + (m.error ? `, but ${m.error}` : ''),
       { level: m.error ? 'warn' : 'ok' });
-  if (!res.replaced && !m.error) addProp(m.model || name);
+  const sky = ipSky;
+  ipSky = null;
+  if (sky) { if (!m.error) pickSky(sky, m.model || name); }      // a sky model is not placed in the stage
+  else if (!res.replaced && !m.error) addProp(m.model || name);
 }
 $('ipOk').onclick = () => doImport(false);
+// New terrain (web/terrain.js): a prop built from a heightmap, placed at the middle of the stage's rectangle (the grid's, else where the view looks)
+async function openTerrainDlg() {
+  showPropMenu(false);
+  if (!stageName) return;
+  if (!modNow) {
+    const m = await pickMod('save', 'Choose');
+    if (!m) return;
+    moveTo(m, false);
+  }
+  const g = gridNow();
+  openTerrain({ stage: stageName, title: title(stageName), mod: modNow, api, ask, msg,
+                existing: () => [...propModels.values()].filter((p) => p.info.terrain && !p.info.error && p.info.stage === baseOf(stageName)).map((p) => p.info.model),
+                size: () => (g ? [g.max[0] - g.min[0] - 100, g.max[1] - g.min[1] - 100] : [2000, 2000]),
+                done: async (res, replaced) => {
+                  const p = JSON.stringify(buildPatch());
+                  await loadPropModels(modNow);
+                  restoreTo(p);
+                  const m2 = res.prop || {};
+                  msg(`${replaced ? 'Replaced' : 'Built'} ${m2.model}: ${res.terrain.cells[0]} × ${res.terrain.cells[1]} cells, ${m2.triangles} triangles` + (m2.error ? `, but ${m2.error}` : ''),
+                      { level: m2.error ? 'warn' : 'ok' });
+                  if (!replaced && !m2.error) addProp(m2.model, g ? [(g.min[0] + g.max[0]) / 2, (g.min[1] + g.max[1]) / 2, 0] : null);
+                } });
+}
+$('pmTerrain').onclick = openTerrainDlg;
 $('ipName').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); doImport(false); } };
 // the Fight HUD dialog (web/hud.js): it writes into the mod at once; its messages show as toasts over it
 function openHudDialog() {
   if (!stageName) return;
-  openHud({ stage: stageName, title: title(stageName), titleOf: title, mod: modNow, api, log, msg, ask,
+  openHud({ stage: stageName, title: title(stageName), titleOf: title, mod: modNow, api, log, msg, ask, changed: syncPictures,
             mods: () => modList, newMod: NEW_MOD, chooseMod,
             game: () => ({ running: game.state === 'running', dirty }), reload: reloadGame });
 }
 $('hud').onclick = openHudDialog;
+// The Light and fog panel (web/light.js): the file's numbers as the view's env, as editor.py stage_env makes it (fog's FA and FB as
+// fogCalcFogValues does, the background the fog's color, each light's direction toward the light in game axes)
+function envFromRaw(r) {
+  const fog = r.fog ? { ...r.fog } : null;
+  if (fog && fog.maxR > fog.minR) {
+    const fb = (fog.maxV - 1) * fog.minR * fog.maxR / (fog.maxR - fog.minR);
+    fog.fa = 1 - fb / fog.maxR;
+    fog.fb = fb;
+  }
+  const lights = (r.lights || []).map((l) => {
+    const h = l.h * Math.PI / 180, p = l.p * Math.PI / 180;
+    return { rgb: l.rgb, h: l.h, p: l.p, dir: [Math.cos(p) * Math.sin(h), Math.cos(p) * Math.cos(h), Math.sin(p)] };
+  });
+  return { file: env ? env.file : '', fog, bg: fog && fog.fa !== undefined ? fog.rgb : r.bg ? r.bg.slice(0, 3) : null, lights };
+}
+function previewEnv(r) { env = envFromRaw(r); setLights(env.lights); applyLook(); }
+async function restoreEnv(name, mod) {   // the panel closed with numbers nobody saved: the view goes back to the file's
+  try {
+    const info = await api(`/api/stage?name=${encodeURIComponent(name)}&mod=${encodeURIComponent(mod)}`);
+    if (name !== stageName) return;
+    env = info.env || null;
+    setLights(env && env.lights);
+    applyLook();
+  } catch (e) { /* the stage load shows its own errors */ }
+}
+$('lightBtn').onclick = () => openTool(() => {
+  if (!stageName) return;
+  const name = stageName;
+  openLight({ stage: name, title: title(name), mod: modNow, api, msg, ask, changed: showUndo, mods: () => modList, newMod: NEW_MOD, chooseMod,
+              preview: previewEnv, restore: () => restoreEnv(name, modNow), look: () => gameLook, setLook,
+              game: () => ({ running: game.state === 'running', dirty }), reload: reloadGame });
+});
+// the Textures dialog (web/tex.js): every picture of the stage; it writes into the mod at once, like the HUD's
+$('texBtn').onclick = () => {
+  if (!stageName) return;
+  openTex({ stage: stageName, title: title(stageName), mod: modNow, api, msg, ask, changed: syncPictures, mods: () => modList, newMod: NEW_MOD, chooseMod,
+            scene: () => [...stageTex.keys()], game: () => ({ running: game.state === 'running', dirty }), reload: reloadGame });
+};
 $('drop').onclick = dropToGround;
 $('dup').onclick = duplicate;
 $('del').onclick = remove;
 $('reset').onclick = resetSel;
-for (const id of ['px', 'py', 'pz', 'ph']) $(id).onchange = editFromInputs;
+for (const id of ['px', 'py', 'pz', 'ph', 'pp', 'pr']) $(id).onchange = editFromInputs;
 $('pName').onchange = () => {
   if (!sel) return;
   snapshot('rename ' + whatSel());
   sel.iname = $('pName').value.trim();
+  showSel();
+};
+$('pHp').onchange = () => {
+  if (!sel || sel.rec.prop) return;
+  const raw = $('pHp').value.trim();
+  let v = raw === '' ? null : Number(raw);
+  if (v !== null && !okHp(v)) { msg(`Hit points are a whole number from 1 to ${HP_MAX}`, { level: 'warn' }); showSel(); return; }
+  if (v === (sel.copy ? sel.rec.item.hp ?? sel.rec.info.hp : sel.rec.info.hp)) v = null;     // what it would have anyway: nothing to say
+  snapshot('hit points ' + whatSel());
+  sel.hp = v;
+  showSel();
+};
+$('pScale').onchange = () => {
+  if (!sel || sel.rec.prop) return;
+  const raw = $('pScale').value.trim();
+  let v = raw === '' ? null : Number(raw);
+  if (v !== null && !okScale(v)) { msg(`Scale is a number from ${SCALE_MIN} to ${SCALE_MAX}`, { level: 'warn' }); showSel(); return; }
+  if (v !== null) v = Math.round(v * 1000) / 1000;
+  if (v === (sel.copy ? sel.rec.item.scale ?? 1 : 1)) v = null;       // what it would have anyway: nothing to say
+  snapshot('scale ' + whatSel());
+  sel.scale = v;
+  refreshScale(sel.rec);
+  showSel();
+};
+$('pTraffic').onchange = () => {
+  if (!sel || sel.rec.prop) return;
+  let v = { parked: false, traffic: true }[$('pTraffic').value] ?? null;
+  if (v === (sel.copy ? sel.rec.item.traffic ?? sel.rec.info.traffic : sel.rec.info.traffic)) v = null;
+  snapshot('car type ' + whatSel());
+  sel.traffic = v;
   showSel();
 };
 // A new prop's model, changed in its folder (/api/props/edit): every entry of it in the stage is made again from the new files
@@ -3153,7 +5721,7 @@ const ADVANCED = new Set(['elf', 'cwd', 'iso']);
 let canBrowse = false, isClone = false;
 const themePicked = () => document.querySelector('#sTheme input:checked')?.value || 'dark';
 function openSettings(focusKey = '') {
-  if (document.querySelector('dialog[open]')) return;
+  if (document.querySelector('dialog:modal')) return;
   for (const [k, id] of Object.entries(PATHS)) $(id).value = cfg[k] || '';
   const t = document.documentElement.dataset.theme;
   document.querySelectorAll('#sTheme input').forEach((r) => (r.checked = r.value === t));
@@ -3206,6 +5774,91 @@ document.querySelectorAll('#dlg .browse').forEach((b) => (b.onclick = async () =
 }));
 $('settings').onclick = () => openSettings();
 document.querySelectorAll('#sTheme input').forEach((r) => (r.onchange = () => applyTheme(r.value)));   // a preview; Cancel goes back
+
+// ---- the two side panels: the right one's width is the user's (drag its edge, the arrows on it, double click puts it back), both can be
+// hidden (the rail's and the top bar's buttons), and the tool panels (docks) fill the right one's place. A dock is a non-modal dialog: the
+// view, the camera and the objects stay in use while it is open (Aim takes the point the camera looks at now). While one is open the
+// right panel is at least DOCK_MIN wide, shown even when hidden; the user's width and choice come back when it closes.
+const RIGHT_DEFAULT = 304, RIGHT_MIN = 280, DOCK_MIN = 440, LEFT_W = 272;
+const rightMax = () => Math.max(RIGHT_MIN, Math.min(720, Math.floor(innerWidth * 0.5)));
+const clampRight = (w) => Math.max(RIGHT_MIN, Math.min(rightMax(), Math.round(w) || RIGHT_DEFAULT));
+let rightW = clampRight(+store.get('rightW', RIGHT_DEFAULT));
+let rightOff = store.get('rightOff', '0') === '1';
+let leftOff = store.get('leftOff', innerWidth < 1100 ? '1' : '0') === '1';     // a small window starts with the list hidden
+function syncDockBox() {
+  const r = $('right').getBoundingClientRect(), s = document.documentElement.style;
+  s.setProperty('--dock-top', `${Math.round(r.top)}px`);
+  s.setProperty('--dock-w', `${Math.round(r.width)}px`);
+  s.setProperty('--dock-h', `${Math.round(r.height)}px`);
+}
+function paintPanels() {
+  const dock = !!document.querySelector('dialog.dock[open]');
+  const right = dock ? Math.min(Math.max(rightW, DOCK_MIN), Math.max(RIGHT_MIN, innerWidth - 120)) : rightOff ? 0 : rightW;
+  const s = document.documentElement.style, main = document.querySelector('main');
+  s.setProperty('--right-w', `${right}px`);
+  s.setProperty('--left-w', `${leftOff ? 0 : LEFT_W}px`);
+  main.classList.toggle('left-off', leftOff);
+  main.classList.toggle('right-off', right === 0);
+  $('rightGrip').hidden = right === 0;
+  for (const [id, off] of [['toggleLeft', leftOff], ['toggleRight', right === 0]]) {
+    if (id === 'toggleRight') $(id).classList.toggle('on', !off);
+    $(id).setAttribute('aria-pressed', String(!off));
+  }
+  syncDockBox();
+}
+const setRightW = (w) => { rightW = clampRight(w); store.set('rightW', String(rightW)); paintPanels(); };
+const setRightOff = (off) => { rightOff = off; store.set('rightOff', off ? '1' : '0'); paintPanels(); };
+const setLeftOff = (off) => { leftOff = off; store.set('leftOff', off ? '1' : '0'); paintPanels(); };
+$('toggleLeft').onclick = () => setLeftOff(!leftOff);
+$('toggleRight').onclick = () => { if (document.querySelector('dialog.dock[open]')) return; setRightOff(!rightOff); };
+new MutationObserver(paintPanels).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['open'] });
+new ResizeObserver(syncDockBox).observe($('right'));
+window.addEventListener('resize', paintPanels);
+{
+  const grip = $('rightGrip');
+  grip.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    grip.classList.add('drag');
+  });
+  grip.addEventListener('pointermove', (e) => { if (grip.classList.contains('drag')) { rightW = clampRight(innerWidth - e.clientX); paintPanels(); } });
+  const end = () => { if (grip.classList.contains('drag')) { grip.classList.remove('drag'); store.set('rightW', String(rightW)); } };
+  grip.addEventListener('pointerup', end);
+  grip.addEventListener('pointercancel', end);
+  grip.addEventListener('dblclick', () => setRightW(RIGHT_DEFAULT));
+  grip.addEventListener('keydown', (e) => {
+    const step = e.shiftKey ? 64 : 16;
+    if (e.key === 'ArrowLeft') setRightW(rightW + step); else if (e.key === 'ArrowRight') setRightW(rightW - step);
+    else if (e.key === 'Home') setRightW(RIGHT_DEFAULT); else return;
+    e.preventDefault();
+  });
+  paintPanels();
+}
+// Esc, and the close button, on a dock: an unsaved draft is asked about first
+function requestDockClose(dlg, then) {
+  if (dlg.id === 'lightDlg') { lightRequestClose().then(() => { if (!dlg.open && then) then(); }); return; }
+  dlg.close('cancel');
+  if (then) then();
+}
+$('gridDlg').addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || e.defaultPrevented) return;
+  e.preventDefault(); e.stopPropagation();
+  requestDockClose($('gridDlg'));
+});
+// Enter in a field of a form dialog takes its main button (the buttons are type="button", so that Enter never closes the dialog by itself)
+for (const [dlg, btn] of [['stageDlg', 'nsOk'], ['propDlg', 'ipOk'], ['pfDlg', 'pfOk']]) {
+  $(dlg).addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.defaultPrevented || !e.target.matches('input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file])')) return;
+    e.preventDefault();
+    $(btn).click();
+  });
+}
+// Open a tool: if another one is open, that one is closed first (asking about an unsaved draft)
+function openTool(fn) {
+  const cur = document.querySelector('dialog.dock[open]');
+  if (!cur) { fn(); return; }
+  requestDockClose(cur, fn);
+}
 // a Cancel or close button of a dialog (type="button", so that Enter takes the main one)
 document.querySelectorAll('dialog [data-close]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close('cancel')));
 $('dlg').addEventListener('close', () => {
@@ -3218,7 +5871,7 @@ $('dlg').addEventListener('close', () => {
     try { init(await api('/api/config', next), reload || !stageName); }
     catch (e) { applyTheme(cfg.theme || 'dark'); msg(`Couldn't keep the settings: ${cleanError(e).text}`, { level: 'err' }); }
   };
-  if (!reload || !dirty || !stageName) { apply(); return; }
+  if (!reload || !isDirty() || !stageName) { apply(); return; }
   askUnsaved(`${title(stageName)} opens again with the new ${next.disc !== (cfg.disc || '') ? 'game disc' : 'mods folder'}, and has ` +
              `${changesText(unsavedCount())}.`, 'Save and apply', async (v) => {
     if (v === 'cancel' || (v === 'save' && !(await post('save')))) { applyTheme(cfg.theme || 'dark'); msg('Settings not changed', { level: 'muted' }); return; }
@@ -3232,8 +5885,8 @@ const FLY_CODES = { KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd', KeyQ: 'q', KeyE:
 window.addEventListener('keyup', (e) => { if (FLY_CODES[e.code]) fly.keys.delete(FLY_CODES[e.code]); });
 window.addEventListener('keydown', (e) => {
   const k = (e.key || '').toLowerCase(), ctrl = e.ctrlKey || e.metaKey, field = typing(e.target);
-  if (ctrl && !e.altKey && k === 'p') { e.preventDefault(); openPalette(); return; }   // the browser's print dialog never opens
-  if (document.querySelector('dialog[open]')) {   // a dialog has the keys (Esc closes it, the selection stays)
+  if (ctrl && !e.altKey && k === 'p') { e.preventDefault(); if (!$('askDlg').open) openPalette(); return; }   // the browser's print dialog never opens; a question is answered first
+  if (document.querySelector('dialog:modal')) {   // a modal dialog has the keys (Esc closes it, the selection stays); the Light panel is not one
     if (ctrl && k === 's') e.preventDefault();
     return;
   }
@@ -3255,17 +5908,15 @@ window.addEventListener('keydown', (e) => {
   }
   if (field) return;
   if (k === '?' && !ctrl && !e.altKey) { e.preventDefault(); showKeys(); return; }
-  if (k === 'escape' && !$('layersMenu').hidden) { showLayers(false); return; }   // the menu first, the selection stays
-  if (k === 'escape' && !$('propMenu').hidden) { showPropMenu(false); return; }
   if (ctrl && k === 'd') { e.preventDefault(); duplicate(); }
   else if (e.ctrlKey && k === 'a') { e.preventDefault(); if (editMode === 'objects') selectMany(listed()); }
   else if (k === 'delete') remove();
   else if (e.ctrlKey || e.altKey || e.metaKey) return;
-  else if (k.startsWith('arrow') && (sel || pedSel)) {
+  else if (k.startsWith('arrow') && (sel || pedSel || markerSel())) {
     e.preventDefault();
     nudge(k === 'arrowup' ? 1 : k === 'arrowdown' ? -1 : 0, k === 'arrowright' ? 1 : k === 'arrowleft' ? -1 : 0, 0, e.shiftKey);
   }
-  else if ((k === 'pageup' || k === 'pagedown') && (sel || pedSel)) { e.preventDefault(); nudge(0, 0, k === 'pageup' ? 1 : -1, e.shiftKey); }
+  else if ((k === 'pageup' || k === 'pagedown') && (sel || pedSel || markerSel())) { e.preventDefault(); nudge(0, 0, k === 'pageup' ? 1 : -1, e.shiftKey); }
   else if (k === 'end') { e.preventDefault(); dropToGround(); }
   else if (k === 'home') { e.preventDefault(); frameAll(); }
   else if (fly.on && FLY_CODES[e.code]) { e.preventDefault(); fly.keys.add(FLY_CODES[e.code]); }
@@ -3275,12 +5926,25 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'r') setTool('rotate');
   else if (k === 'f') focusSelection();
   else if (k === 'l') setLook(!gameLook);
-  else if (k === 'p') { if (editMode === 'objects') setPeds(!pedsOn); }
+  else if (k === 'p') { if (editMode !== 'peds') setPeds(!pedsOn); }
+  else if (k === 'c') setColl(!collOn);
+  else if (k === 'm') setRuler(!ruler.on);
+  else if (k === 'k') { if (layerOf() && lay(layerOf()).net) setLinkTool(!linkTool.on); }
+  else if (k === 'n') setMini(!minimap.on);
   else if (k === '1') setMode('objects');
   else if (k === '2') setMode('peds');
-  else if (k === 'escape') select(null);
+  else if (/^[3-6]$/.test(k)) setMode(LAYERS[KINDS[+k - 3]].mode);
+  else if (k === 'escape') {
+    e.preventDefault();      // (a question opened by this very key would otherwise get the browser's own Esc and close at once)
+    const lk = layerOf(), dock = document.querySelector('dialog.dock[open]');
+    if (ruler.on) setRuler(false);
+    else if (linkTool.on) setLinkTool(false);                                       // the Link tool first,
+    else if (lk && lay(lk).sel >= 0) deselectMarker();                              // then a layer's marker,
+    else if (dock && !sel && !pedSel) requestDockClose(dock);                      // then the tool panel (the focus was in the view)
+    else select(null);
+  }
 });
-window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', (e) => { if (dirty) writeDraft(); if (isDirty()) { e.preventDefault(); e.returnValue = ''; } });
 
 // /api/init or /api/config's reply. load: open the stage (again); Settings without a new disc or mods folder leaves the scene alone
 function init(r, load = true) {
@@ -3298,6 +5962,7 @@ function init(r, load = true) {
   s.innerHTML = r.stages.map((x) => `<option value="${x.name}">${x.title}${x.custom ? ` (custom, on ${x.base})` : x.title.toUpperCase() === x.name ? '' : ` (${x.name})`}</option>`).join('');
   stageTitles = Object.fromEntries(r.stages.map((x) => [x.name, x.title]));
   stageBases = Object.fromEntries(r.stages.filter((x) => x.custom).map((x) => [x.name, x.base]));
+  stageMeta = Object.fromEntries(r.stages.filter((x) => x.custom).map((x) => [x.name, x]));
   game.stage = r.gameStage || '';
   setRunning(!!r.gameRunning);
   if (r.discError || !r.stages.length) {
@@ -3313,20 +5978,23 @@ function init(r, load = true) {
 setTool('translate');
 orbit.enabled = false;
 setView(fly.on);
-applyPedsView();
+applyModeView();
 showMode();
+syncRailDots();
+mkFillBar();
+showUndoButtons();
 // the editor program quits a few seconds after its page closes (a reload asks again at once and keeps it)
 window.addEventListener('pagehide', () => { try { navigator.sendBeacon('/api/bye', '{}'); } catch (e) { /* ignore */ } });
 if (new URLSearchParams(location.search).has('debug')) {
-  window.wotmDebug = { camera, fly, flyStep, setView, select, selectMany, items, listed, dropToGround, nudge, duplicate, remove,
+  window.wotmDebug = { syncPictures, aimStart, nets, selectMarker, addMarker, loadLayer, saveLayers, layersDirty, dirtyLayers, layerUndo, layerRedo, lay, get layer() { return layerOf(); }, camera, fly, flyStep, setView, select, selectMany, items, listed, dropToGround, nudge, duplicate, remove,
                        undo, buildPatch, posOf, setLook, scene, renderer, gsLights, peds, selectPed, setPeds, addPed, pedFromInputs,
-                       redo, resetAll, applyPatch, frameAll, resetSel, gameLine, post, setRunning, applyTheme, refreshList,
+                       redo, resetAll, applyPatch, frameAll, resetSel, gameLine, post, setRunning, applyTheme, refreshList, gameBox,
                        msg, toast, openOutput, closeOutput, showStatus, setGameState, readCheck, gameResult,
                        setMode, turnBy, showSummary, secOf, SECTIONS, get mode() { return modeNow(); },
                        refreshPedList, setPedLive, slideInput, slideDone, showPed, pedOfEntry, openHudDialog, chooseMod,
-                       get pedsLayer() { return pedsOn; },
+                       get pedsLayer() { return pedsOn; }, coll, setColl, refreshColl, get collOn() { return collOn; },
                        ask, askUnsaved, unsavedCount, switchMod, setMod, moveTo, fillMods, pickMod, openSettings, checkPaths, showPaths,
-                       showWinner, winnerOf, checkFromServer, init, addProp, showPropMenu, openImport, doImport, ipRead, loadPropModels,
+                       showWinner, winnerOf, checkFromServer, init, loadStage, get openFailed() { return openFailed; }, addProp, showPropMenu, openImport, doImport, ipRead, loadPropModels, openTerrainDlg,
                        get propRecs() { return propRecs; }, get propModels() { return propModels; },
                        get stageHave() { return stageHave; }, set stageHave(v) { stageHave = v; },
                        get modList() { return modList; }, set modList(v) { modList = v; }, get savedJson() { return savedJson; },
@@ -3334,12 +6002,17 @@ if (new URLSearchParams(location.search).has('debug')) {
                        boxCenter: (o) => new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()), setGrid, setTool, setSnap, showKeys, showHint,
                        focusSelection, HINTS, get hintKey() { return hint.key; }, get hoverCount() { return hover.n; },
                        get gridMinor() { return gridMinor; }, get gridMajor() { return gridMajor; },
-                       get ui() { return ui; }, get outTab() { return outTab; },
+                       get ui() { return ui; }, get pt() { return pt; }, get ptViews() { return ptViews; }, layersReady: () => Promise.all(Object.values(layLoading)), markerScreen, pickMarker, markerPx, linkTool, setLinkTool, linkNodes, linkPreview, netRubber, get chipText() { return chipText; }, markerFrame, markerLabels: () => markerLabels.shown(), mkRing, mkSelRing, get marker() { return marker; }, markerCtx, get ptSaved() { return ptSaved; }, get outTab() { return outTab; },
                        get history() { return history; }, get future() { return future; }, get dirty() { return dirty; },
                        get modNow() { return modNow; }, get keep() { return keep; }, get game() { return game; },
                        get gizmoObject() { return gizmo.object || null; }, get gizmoMode() { return gizmo.getMode(); },
                        get pedSel() { return pedSel; }, get group() { return group; }, get sel() { return sel; },
-                       get env() { return env; }, get skyRoot() { return skyRoot; }, get stageRoot() { return stageRoot; } };
+                       get env() { return env; }, get skyRoot() { return skyRoot; }, get skyViews() { return skyViews; }, get stageRoot() { return stageRoot; },
+                       get skyParts() { return skyParts; }, get stageTex() { return stageTex; }, skyStock, skyTag, pickSky };
 }
+showRightTab(store.get('rtab', 'selection') === 'stage' ? 'stage' : 'selection');
+// --vt: the height of the bars over the view (they wrap onto a second row when it is narrow); the menus and the notes sit under them
+new ResizeObserver(() => $('view').style.setProperty('--vt', $('viewTop').offsetHeight + 'px')).observe($('viewTop'));
 loop();
+if (new URLSearchParams(location.search).has('bake')) bakeOriginals();
 api('/api/init').then(init).catch((e) => msg(`Couldn't reach the editor program: ${cleanError(e).text}`, { level: 'err' }));
