@@ -193,17 +193,33 @@ class Stages:
                 self.info[key] = (st, objs, on)
             return self.info[key]
 
-    def walls(self, disc, name):
-        """How many invisible boundary walls the stage has (lvl.py LevelPatch.boundary_walls), on its own copy of the stage."""
-        key = (disc, name, "walls")
+    def plans(self, disc, name):
+        """What the patch can reach on the stage, on its own copy of the stage (the shared one is never patched): "walls", how many
+        invisible boundary walls it has (lvl.py LevelPatch.boundary_walls), and "sky", the OBJECT addresses (hex, as the scene names them
+        in extras.obj) that a sky model replaces: {"dome": [...], "clouds": [...]}, empty for a part the game cannot replace."""
+        key = (disc, name, "plans")
         with self.lock:
             if key in self.info:
                 return self.info[key]
         with contextlib.redirect_stdout(io.StringIO()):
-            n = len(lvl.LevelPatch(lvl.Stage(name, stage_root(disc, name))).boundary_walls())
+            lp = lvl.LevelPatch(lvl.Stage(name, stage_root(disc, name)))
+            n = len(lp.boundary_walls())
+            sky = {}
+            for kind, plan in (("dome", lp.sky_plan), ("clouds", lp.sky_clouds_plan)):
+                try:
+                    sky[kind] = sorted({"%x" % (lp.img.u32(s) & lvl.MASK) for _, s in plan(None)})
+                except lvl.PatchError:
+                    sky[kind] = []
+        out = {"walls": n, "sky": sky}
         with self.lock:
-            self.info[key] = n
-        return n
+            self.info[key] = out
+        return out
+
+    def walls(self, disc, name):
+        return self.plans(disc, name)["walls"]
+
+    def sky(self, disc, name):
+        return self.plans(disc, name)["sky"]
 
     def facts(self, disc, name):
         """lvlnames.facts per object (signature, size, rule inputs), kept on disk next to the scene (1 to 10 s per stage)."""
@@ -1908,7 +1924,7 @@ class Handler(BaseHTTPRequestHandler):
                                        "env": stage_env(cfg, cfg["disc"], q["name"], mod),
                                        "grid": {"min": [st.grid.min_x, st.grid.min_y], "max": [st.grid.max_x, st.grid.max_y],
                                                 "cell": st.grid.cell, "cols": st.grid.cols, "rows": st.grid.rows} if st.grid else None,
-                                       "walls": STAGES.walls(cfg["disc"], base),
+                                       "walls": STAGES.walls(cfg["disc"], base), "sky": STAGES.sky(cfg["disc"], base),
                                        "peds": pedsapi.stage_peds(st, points_root(cfg, q["name"]) or stage_root(cfg["disc"], base)),
                                        "have": have, "winner": winner, "others": [m for m in have if m != mod],
                                        "stamp": file_stamp(patch_path(cfg, q["mod"], q["name"])) if q.get("mod") and not bad_mod(q["mod"]) else 0})

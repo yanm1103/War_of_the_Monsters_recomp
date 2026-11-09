@@ -731,7 +731,7 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   The sky is drawn around the camera with the dome's blend state, so build the model around its origin with its faces turned
   inward and a texture (a material `tex<texId>` of the stage's sky, or an image; an untextured sky is not drawn); the stock domes
   have bounding spheres of radius 9000 to 12000, and `--scale`/`--height` size the model. Its `hull_*`, `coll_*` and automatic box are never used. A model with `state<N>_*` meshes is refused; so
-  is a stage with no dome (CANYON1, MINISF). Log: `[fase]   sky: modelo SKYDOME (1 objetos) troca 1 domo (estilo do OBJECT 0fc8120)`.
+  is a stage with no dome (BIGSHOT, CANYON1, CANYON2, MINISF, TOKYODM and TRAINING). Log: `[fase]   sky: modelo SKYDOME (1 objetos) troca 1 domo (estilo do OBJECT 0fc8120)`.
   **Clouds:** `{"model": "SKYCLOUDS", "sky": "clouds"}` replaces the cloud layer the same way: the OBJECTs under the first `CHAR_INSTANCE`
   of a sky node, through its `ANIM_XFORM`, so the model gets whatever the stage's animation does to the layer (build it around its
   origin; the stock layer is a bowl 22000 across and 3500 high, its z from 0 up), and the game turns it: the model drifts around the
@@ -1046,10 +1046,16 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   place, without the question. The new prop is placed at the middle of the
   grid's rectangle, else where the view looks. `python tools/lvlterrain.py <heights.png> <out.glb> --size X Y --height H [--cells N]
   [--colors colors.png] [--brightness P]` writes the `.glb` alone. **Sky dome** and **Cloud layer** (Stage tab ▸ Environment) take: the stage's own, or one of the mod's
-  models for this stage (the `sky` entries of `props`, above; undoable, counted by Check as a replaced dome or cloud layer, and
-  refused there for a stage with no such part); with Game look (**L**) the view draws the model in the place of the stage's own
-  part (the scene tells them apart: the meshes under a `CHAR_INSTANCE` are the layer), both faces of it. The view draws the layer
-  still, with no animation.
+  models for this stage (the `sky` entries of `props`, above; undoable, counted by Check as a replaced dome or cloud layer), or
+  **Import a .glb…**, which opens the import dialog and makes the new model the dome or the layer instead of placing it. The
+  two are independent: choosing or removing one never touches the other, and a model cannot be both (the other select lists it as
+  taken). A stage the game cannot replace a part of (see "Sky", above) has that select disabled and says so; a mod with no model for the
+  stage gets a line about what a sky model needs (faces turned inward, around the origin, with a texture). A model that is broken, has no
+  preview or is destructible is listed with the reason and cannot be picked. Picking a model turns Game look on, because the view draws
+  a sky with it only: **L** shows the model in the place of the stage's own part, both faces of it, in the stock part's draw slot
+  (the game draws the sky in the tree's order, so the pick order does not matter). Only the stock OBJECTs the game replaces are
+  hidden (`/api/stage` "sky" lists them; CAPITOL's other cloud layers stay). A model made of the stage's own picture (a material
+  `tex<texId>`, the sky's included) shows it. The view draws the layer still, with no animation.
 - **Prefabs** (the Add menu's **Prefabs** section): **Save selection…** keeps the selected objects, and with Move objects on top
   what rests on them, as `mods/<mod>/prefabs/<name>.json` (`{"format": 1, "name", "stage", "entries"}`; the name is 1 to 40
   characters and its file name is the name in lower case with dashes; a name the mod already has asks before replacing). `stage` is

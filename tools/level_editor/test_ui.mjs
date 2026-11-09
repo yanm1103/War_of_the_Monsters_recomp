@@ -334,6 +334,9 @@ await check('Add lives at the top of the left panel: Browse models and the searc
   await esc();
   await ev(`document.getElementById('tabStage').click()`);
   must(await ev(`document.getElementById('stageTab').contains(document.getElementById('pmSky')) && document.getElementById('pmSky').options.length >= 1`), 'the sky select is not filled on the Stage tab');
+  // a mod with no model for the stage: the select offers the stage's own and the import, and the note says why there is no more (test_sky.mjs does the rest)
+  must(await ev(`[...document.getElementById('pmSky').options].map((o) => o.value).join('|') === '|@import' && !document.getElementById('pmSkyNote').hidden`),
+    'the sky select of an empty mod: ' + await ev(`[...document.getElementById('pmSky').options].map((o) => o.value).join('|') + ' / ' + document.getElementById('pmSkyNote').textContent`));
   await ev(`document.getElementById('tabSel').click()`);
   await ev(`document.getElementById('modePeds').click()`);
   must(await ev(`!document.getElementById('pedBar').hidden && document.getElementById('propBar').hidden && document.getElementById('leftHead').contains(document.getElementById('pedAddGroup'))`), 'Peds mode does not show Add group in the left head');

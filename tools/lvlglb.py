@@ -168,8 +168,10 @@ def export(st, objs, disc, out, lod=99, on=None):
             mi = mesh(node, gs)
             stats["sky objects"] += bool(sky and mi is not None)
             if mi is not None:
-                # a mesh under a CHAR_INSTANCE of the sky is the cloud layer (the editor shows it apart from the dome: extras.clouds)
-                ex = {"clouds": True} if sky and in_clouds[0] else {"bare": True} if bare and not img.u32(node) >> 6 else None
+                # a mesh under a CHAR_INSTANCE of the sky is the cloud layer (the editor shows it apart from the dome: extras.clouds);
+                # extras.obj is its OBJECT's address, which the patch's sky models name (editor.py Stages.plans)
+                ex = ({"obj": "%x" % node, **({"clouds": True} if in_clouds[0] else {})} if sky
+                      else {"bare": True} if bare and not img.u32(node) >> 6 else None)
                 new_node({"mesh": mi, "matrix": gl_matrix(m), **({"extras": ex} if ex else {})}, owner_node(owner, state))
                 stats["instances"] += 1
         elif op == 1:

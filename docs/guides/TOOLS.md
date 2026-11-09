@@ -26,7 +26,8 @@
   - `lvlglb.py <STAGE> <out.glb>`: the stage as a binary glTF for the level editor, one top-level node per `lvl.py` object (named by
     its handle, extras with kind, from, heading, states and `on`), its broken states as hidden `stateN` children, the rest under
     `rootN` (extras `ident`: 1 the world). The sky, the subtree of the node with id 2 at any depth, hangs under `sky` (extras
-    `sky`) without the transforms above it. Meshes are shared between instances. Colors are the GS's raw bytes (asset extras
+    `sky`) without the transforms above it; each sky mesh's node carries extras `obj` (its OBJECT's address, hex) and, under a `CHAR_INSTANCE`,
+    `clouds`. Meshes are shared between instances. Colors are the GS's raw bytes (asset extras
     `gsRaw`): `COLOR_0` is the vertex RGBA / 255 and the textures keep the GS alpha (0x80 = 1.0, up to 0xFF), for a viewer that
     does the GS's modulation itself. Each material carries the GS state inherited from the nodes' ctx (`ngp.gs_apply`): extras
     `gs` (`blend`: ALPHA_1 when the mesh has ABE, else null; `aref`: alpha test ref or -1), `zmsk`, `fog` (the OBJECT's

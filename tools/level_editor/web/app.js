@@ -318,6 +318,7 @@ let gridMinor = gridHelper(20000, 200, 0.10), gridMinorStep = 100;
 const gridMajor = gridHelper(20000, 20, 0.28);
 let gridOn = false;
 let skyViews = { dome: null, clouds: null };   // the models swapped into the sky: {from: the preview scene, view: its copy in the view} (updateSkyView)
+let skyParts = null;   // {dome: [addr], clouds: [addr]}: the OBJECTs of the stage's sky that a model replaces in the game (/api/stage "sky"); empty for a part it cannot replace
 let stageRoot = null, skyRoot = null, env = null;   // env: the stage's fog, background and lights (/api/stage, RST/<STAGE>.MRS)
 // pedestrians (web/peds.js): a layer shown with P; pedSel is the marker the gizmo holds (never together with an object)
 const peds = createPeds({ THREE, scene, toThree, toGame });
@@ -472,9 +473,10 @@ function setupDrawing(gltf) {
   return sky;
 }
 
-// A sky is drawn first, with no depth test and no fog, around the camera. both: draw the inside and the outside of its faces
-// (a model of the mod's, whose faces the game wants turned inward)
-function skyDrawing(sky, both) {
+// A sky is drawn first, with no depth test and no fog, around the camera, in the order of the game's traversal: renderOrder base + 0, 1,
+// 2... both: draw the inside and the outside of its faces (a model of the mod's, whose faces the game wants turned inward). step: the
+// distance between two meshes' orders (a model's fits in the slot of the part it replaces)
+function skyDrawing(sky, both, base = -1e6, step = 1) {
   let n = 0;
   sky.traverse((o) => {
     if (!o.isMesh) return;
@@ -487,28 +489,51 @@ function skyDrawing(sky, both) {
       return c;
     });
     if (o.material.length === 1) o.material = o.material[0];
-    o.renderOrder = -1e6 + n++;
+    o.renderOrder = base + (n++) * step;
     o.frustumCulled = false;
   });
 }
 
+// What the stage's sky node says about a mesh (extras.obj, its OBJECT's address, and extras.clouds under a CHAR_INSTANCE): the tags sit
+// on the glTF node, which is the Group above the meshes when the object has more than one material
+function skyTag(o) {
+  for (let n = o; n; n = n.parent) if (n.userData && n.userData.obj) return n.userData;
+  return {};
+}
+// The meshes of the stage's own dome or cloud layer that a model replaces: the OBJECTs the game swaps (skyParts, /api/stage "sky"; a
+// CHAR_INSTANCE after the first keeps its clouds). Without skyParts (an older server), every mesh of that kind.
+function skyStock(kind) {
+  const out = [], set = skyParts && skyParts[kind] ? new Set(skyParts[kind]) : null;
+  if (skyRoot) skyRoot.traverse((o) => {
+    if (!o.isMesh) return;
+    const t = skyTag(o);
+    if (set ? t.obj && set.has(t.obj) : !!t.clouds === (kind === 'clouds')) out.push(o);
+  });
+  return out;
+}
+
 // The models the patch swaps into the sky (props entries {model, sky: true} for the dome and {model, sky: "clouds"} for the cloud layer):
-// their previews, drawn in the place of the stage's own part (the meshes of the stage's sky that sit under a CHAR_INSTANCE carry
-// userData.clouds). Game look shows them, as it does the stage's own. The view draws the cloud layer still, with no animation.
+// their previews, drawn in the place of the stage's own part: they hide it, and take its place in the draw order (the game draws the sky
+// in the tree's order, so which was picked last does not matter). A part the game cannot replace keeps its own and gets no model. Game
+// look shows them, as it does the stage's own. The view draws the cloud layer still, with no animation.
 function updateSkyView() {
   for (const [kind, key] of [['dome', skyModel], ['clouds', cloudsModel]]) {
-    const pm = key ? propModels.get(key) : null, want = pm && pm.scene ? pm.scene : null, cur = skyViews[kind];
-    if ((cur ? cur.from : null) === want) continue;     // else the model changed, or its files were made again
+    const pm = key ? propModels.get(key) : null, stock = skyStock(kind), cur = skyViews[kind];
+    const want = pm && pm.scene && (!skyParts || stock.length) ? pm.scene : null;
+    const base = stock.length ? Math.min(...stock.map((o) => o.renderOrder)) : kind === 'dome' ? -1e6 - 1 : -1e6 + 500;
+    if (cur && cur.from === want && cur.base === base) continue;     // else the model changed, or its files were made again
     if (cur) scene.remove(cur.view);
     skyViews[kind] = null;
     if (want) {
       const view = want.clone(true);
-      skyDrawing(view, true);
+      let meshes = 0;
+      view.traverse((o) => { if (o.isMesh) meshes++; });
+      skyDrawing(view, true, base, 0.9 / Math.max(1, meshes));
       scene.add(view);
-      skyViews[kind] = { from: want, view };
+      skyViews[kind] = { from: want, view, base };
     }
   }
-  if (skyRoot) skyRoot.traverse((o) => { if (o.isMesh) o.visible = !skyViews[o.userData.clouds ? 'clouds' : 'dome']; });
+  for (const kind of ['dome', 'clouds']) for (const o of skyStock(kind)) o.visible = !skyViews[kind];
   applyLook();
 }
 
@@ -732,7 +757,7 @@ function removeCopy(item) {
 // The mod's models (/api/props) and, for this stage's, the preview's scene; its materials name the stage texture (tex<id>)
 async function loadPropModels(mod) {
   propModels = new Map();
-  if (!mod) return;
+  if (!mod) { refreshSkySelects(); return; }
   let list = [];
   try { list = (await api(`/api/props?mod=${encodeURIComponent(mod)}`)).props || []; } catch (e) { msg(`Couldn't list the props of mod "${mod}": ${cleanError(e).text}`, { level: 'warn' }); }
   await Promise.all(list.map(async (p) => {
@@ -752,6 +777,11 @@ async function loadPropModels(mod) {
       pm.scene = gltf.scene;
     } catch (e) { p.error = `its preview does not load (${cleanError(e).text})`; }
   }));
+  refreshSkySelects();      // the models are new: what lists them follows, whoever asked for them
+}
+// the sky selects follow the mod's models (not while one is open)
+function refreshSkySelects() {
+  if (stageName && !document.activeElement?.matches?.('#pmSky, #pmClouds')) fillSkySelects();
 }
 const propKey = (m) => String(m || '').toUpperCase();
 // e: a "props" entry {id, model, pos, heading, name}; null (and nothing made) when the model is not one of this stage in the mod
@@ -960,7 +990,7 @@ function showUndo() {
   $('redo').disabled = !r;
   $('redo').title = r ? `Redo: ${r.label} (Ctrl+Y)` : 'Nothing to redo (Ctrl+Y)';
   $('save').classList.toggle('dirty', isDirty());
-  if (!$('stageTab').hidden && stageName && !document.activeElement?.matches?.('#pmSky, #pmClouds')) fillSkySelects();
+  refreshSkySelects();
   queueDraft();
   showStatus();
   queueBudget();
@@ -1115,6 +1145,7 @@ async function loadStage(name) {
     fileStamp = info.stamp || 0;
     const gltf = await new GLTFLoader().loadAsync(`/api/glb?name=${encodeURIComponent(name)}`);
     env = info.env || null;
+    skyParts = info.sky && Array.isArray(info.sky.dome) && Array.isArray(info.sky.clouds) ? info.sky : null;
     discPeds = info.peds || null;
     stageGrid = info.grid || null;
     stageWalls = info.walls || 0;
@@ -1146,7 +1177,8 @@ async function loadStage(name) {
       if (rec.info.on) { const b = byHandle.get(normHandle(rec.info.on)); if (b) b.item.attached.push(rec.item); }
     }
     stageTex = new Map();
-    stageRoot.traverse((o) => {
+    // the sky left stageRoot (setupDrawing) but its textures are the stage's: a sky model names them too
+    for (const root of [stageRoot, skyRoot]) if (root) root.traverse((o) => {
       if (!o.isMesh) return;
       for (const m of [].concat(o.material)) { const t = /^tex(\d+)$/.exec(m.name || ''); if (t && m.map) stageTex.set(+t[1], m.map); }
     });
@@ -3333,16 +3365,39 @@ function fillPropMenu() {
   (list.querySelector('button:not(:disabled)') || $('pmBrowse')).focus();
 }
 // the sky dome and the cloud layer (the Stage tab's Environment): one of the mod's models for this stage, or the stage's own
+const SKY_IMPORT = '@import';      // the option that opens the import dialog (a model's name is letters, digits and _)
+const SKY_WHAT = { dome: 'sky dome', clouds: 'cloud layer' };
 function fillSkySelects() {
   const here = [...propModels.values()].filter((pm) => pm.info.stage === baseOf(stageName));
-  for (const [id, cur] of [['pmSky', skyModel], ['pmClouds', cloudsModel]]) {
-    const sky = $(id);
+  const nothing = { dome: !!skyParts && !skyParts.dome.length, clouds: !!skyParts && !skyParts.clouds.length };
+  let usable = 0;
+  for (const [id, kind, cur, other] of [['pmSky', 'dome', skyModel, cloudsModel], ['pmClouds', 'clouds', cloudsModel, skyModel]]) {
+    const sky = $(id), what = SKY_WHAT[kind], none = nothing[kind] && !cur;
     sky.textContent = '';
-    sky.append(new Option('The stage\'s own', ''));
-    for (const pm of here) if (!pm.info.error) sky.append(new Option(pm.info.model, pm.info.model));
-    if (cur && ![...sky.options].some((o) => o.value === cur)) sky.append(new Option(`${cur} (not in this mod)`, cur));
+    sky.append(new Option(none ? `This stage has no ${what}` : 'The stage\'s own', ''));
+    sky.disabled = none;
+    if (!none) {
+      for (const pm of here) {
+        const m = pm.info.model;
+        // a model the game or the view cannot use is listed with the reason, so the list explains what it leaves out
+        const bad = pm.info.error ? 'broken' : !pm.info.preview || !pm.scene ? 'no preview' : pm.info.destructible ? 'destructible' : '';
+        const why = bad || (m === other ? `used as the ${SKY_WHAT[kind === 'dome' ? 'clouds' : 'dome']}` : '');
+        const o = new Option(why ? `${m} (${why})` : m, m);
+        o.disabled = !!why && m !== cur;
+        if (pm.info.error) o.title = pm.info.error;
+        sky.append(o);
+        if (!bad) usable++;
+      }
+      if (cur && ![...sky.options].some((o) => o.value === cur)) sky.append(new Option(`${cur} (not in this mod)`, cur));
+      sky.append(new Option('Import a .glb…', SKY_IMPORT));
+    }
     sky.value = cur;
   }
+  const bothNone = nothing.dome && nothing.clouds && !skyModel && !cloudsModel;
+  const note = bothNone ? `${title(stageName)}'s sky can't be replaced.` : !modNow ? 'Choose a mod first: its props folder holds the sky models.'
+    : usable < 1 ? `No models for ${title(stageName)} in mod "${modNow}". A sky model has faces turned inward, around the origin, with a texture.` : '';
+  $('pmSkyNote').textContent = note;
+  $('pmSkyNote').hidden = !note;
 }
 // ------------------------------------------------------------------ prefabs
 // A prefab is a saved selection (mods/<mod>/prefabs/<name>.json, editor.py save_prefab): each object's place relative to the group's
@@ -3515,12 +3570,21 @@ async function pastePrefab(p) {
 }
 // kind: 'dome' or 'clouds'
 function pickSky(kind, v) {
-  const dome = kind === 'dome', cur = dome ? skyModel : cloudsModel, what = dome ? 'sky dome' : 'cloud layer';
+  const dome = kind === 'dome', cur = dome ? skyModel : cloudsModel, other = dome ? cloudsModel : skyModel, what = SKY_WHAT[kind];
+  if (v === SKY_IMPORT) { fillSkySelects(); openImport(kind); return; }
   if (v === cur) return;
+  if (v && v === other) {      // lvl.py: a model cannot be both
+    fillSkySelects();
+    msg(`${v} is the ${SKY_WHAT[dome ? 'clouds' : 'dome']} already; a model can't be both`, { level: 'warn', toast: true });
+    return;
+  }
   snapshot(v ? `${what} ${v}` : `stock ${what}`);
   if (dome) skyModel = v; else cloudsModel = v;
+  const look = !!v && !gameLook;      // the view draws a sky with Game look only
+  if (look) setLook(true);
   updateSkyView();
-  msg(v ? `The ${what} is now ${v}. The view shows it with Game look (L); give it faces turned inward and a texture.` : `The ${what} is the stage's own again.`,
+  fillSkySelects();
+  msg(v ? `The ${what} is now ${v}.${look ? ' Game look is on to show it.' : ''}` : `The ${what} is the stage's own again.`,
     { level: 'ok', toast: ['Undo', undo] });
 }
 $('pmSky').onchange = (e) => pickSky('dome', e.target.value);
@@ -4671,24 +4735,28 @@ $('nsOk').onclick = async () => {
 const ipErr = (t) => { $('ipErr').hidden = !t; $('ipErr').querySelector('span').textContent = t || ''; };
 const ipRadio = (n) => document.querySelector(`#propDlg input[name="${n}"]:checked`)?.value;
 const ipWhere = () => { $('ipWhere').textContent = `mods/${modNow}/props/${$('ipName').value.trim().toUpperCase() || 'NAME'}/`; };
-async function openImport() {
+let ipSky = null;      // 'dome' or 'clouds' while the dialog imports a sky model (it takes that place when imported); else null
+async function openImport(sky = null) {
   showPropMenu(false);
   if (!modNow) {
     const m = await pickMod('save', 'Choose');
     if (!m) return;
     moveTo(m, false);
   }
+  ipSky = sky === 'dome' || sky === 'clouds' ? sky : null;
   ipData = null;
   ipTitle = '';
   $('ipFile').textContent = 'No file chosen';
-  $('ipName').value = $('ipHeight').value = '';
+  $('ipName').value = ipSky === 'dome' ? 'SKY' : ipSky === 'clouds' ? 'CLOUDS' : '';
+  $('ipHeight').value = '';
   ipErr('');
-  $('ipText').textContent = `A Blender model exported as glTF Binary (.glb), for ${title(stageName)}.`;
+  $('ipText').textContent = `A Blender model exported as glTF Binary (.glb), for ${title(stageName)}.` +
+    (ipSky ? ` It becomes the ${SKY_WHAT[ipSky]}: faces turned inward, around the origin, with a texture.` : '');
   ipWhere();
   $('propDlg').showModal();
   $('ipPick').focus();
 }
-$('pmImport').onclick = openImport;
+$('pmImport').onclick = () => openImport();
 $('ipPick').onclick = () => ipInput.click();
 $('ipName').oninput = () => { ipWhere(); ipErr(''); };
 // the .glb, from Choose .glb… or dropped on the dialog
@@ -4734,7 +4802,10 @@ async function doImport(replace = false) {
   const m = res.prop || {};
   msg(`${res.replaced ? 'Replaced' : 'Imported'} ${m.model || name}: ${m.triangles} triangles` + (m.error ? `, but ${m.error}` : ''),
       { level: m.error ? 'warn' : 'ok' });
-  if (!res.replaced && !m.error) addProp(m.model || name);
+  const sky = ipSky;
+  ipSky = null;
+  if (sky) { if (!m.error) pickSky(sky, m.model || name); }      // a sky model is not placed in the stage
+  else if (!res.replaced && !m.error) addProp(m.model || name);
 }
 $('ipOk').onclick = () => doImport(false);
 // New terrain (web/terrain.js): a prop built from a heightmap, placed at the middle of the stage's rectangle (the grid's, else where the view looks)
@@ -5204,7 +5275,8 @@ if (new URLSearchParams(location.search).has('debug')) {
                        get modNow() { return modNow; }, get keep() { return keep; }, get game() { return game; },
                        get gizmoObject() { return gizmo.object || null; }, get gizmoMode() { return gizmo.getMode(); },
                        get pedSel() { return pedSel; }, get group() { return group; }, get sel() { return sel; },
-                       get env() { return env; }, get skyRoot() { return skyRoot; }, get skyViews() { return skyViews; }, get stageRoot() { return stageRoot; } };
+                       get env() { return env; }, get skyRoot() { return skyRoot; }, get skyViews() { return skyViews; }, get stageRoot() { return stageRoot; },
+                       get skyParts() { return skyParts; }, get stageTex() { return stageTex; }, skyStock, skyTag, pickSky };
 }
 showRightTab(store.get('rtab', 'selection') === 'stage' ? 'stage' : 'selection');
 // --vt: the height of the bars over the view (they wrap onto a second row when it is narrow); the menus and the notes sit under them
