@@ -832,7 +832,7 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   with the game open, **Reload in game** sits at the bottom. `python tools/level_editor/test_textures.py` is its server-side test.
 - **Stage size** (the expand button): the rectangle of the collision grid (`grid` in the patch), four numbers and "Grow every side by 1000"; the view draws the disc's rectangle in grey and the patch's in blue;
   it can only grow. Check reports a rectangle the game would skip. For a stage with boundary walls (CENTRAL, VEGAS, CAPITOL) the dialog also has
-  a checkbox that sets `"walls": "off"`. "Apply and add a floor over it" also builds a prop `FL_<stage>` in the mod (a visible plate 0.6 under
+  a checkbox that sets `"walls": "off"`. "Apply and add a floor over it" also builds a prop `FL_<stage>` in the mod (a dark gray visible plate 0.6 under
   the stage's floor and a `coll_` slab of two triangles at z 0, both 50 units inside the rectangle) and places it at the rectangle's center as
   the entry `floor`; doing it again after a size change builds it again. The slab is at z 0, where the floor's collision is in CENTRAL, VEGAS and CAPITOL (one flat path, its top at z 0); for the other stages check the height of their floor first.
   The dialog also has "Take out the stage's bare scenery" (`"clear": "scenery"`; the view hides the meshes the scene file tags `extras.bare`) and

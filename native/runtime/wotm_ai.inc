@@ -4,6 +4,7 @@
 //   - "... counter acertou|falhou": fim de cada AiCounterReflex, pela vida do alvo no comeco e no fim.
 //   - "... oponentes: m<slot>... trava N": a cada 10 s por IA, a lista de oponentes dela e o *m_gate (0 = qualquer acao comeca).
 //   - "[ai] <field> m<slot> pos x,y,z": a cada 2 s por IA, onde ela esta.
+//   - WOTM_CARLOG=1: "[carro] ..." e "[heli] <field> <endereco> pos x,y,z" a cada 2 s por carro e helicoptero do transito (abaixo).
 
 namespace wotm_ai
 {
@@ -242,8 +243,51 @@ void counterExitHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     g_counterExit.orig(rdram, ctx, runtime);
 }
 
+// WOTM_CARLOG=1: "[carro] <field> <endereco> pos x,y,z" a cada 2 s por CarPickup e "[heli] ..." por HeliPickup (o carro do
+// transito anda pela rede .FOP, os estacionados ficam onde estao). O _cs fica em +0xC do pickup e a posicao em +0x10 dele.
+struct PosLog
+{
+    Hook hook;
+    const char *tag;
+    uint32_t addr[64], last[64];
+};
+PosLog g_carLog{{fn::update__9CarPickup, {}}, "carro", {}, {}}, g_heliLog{{fn::update__10HeliPickup, {}}, "heli", {}, {}};
+void posLogStep(PosLog &l, uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    if (ctx->pc == l.hook.addr)
+    {
+        const uint32_t car = GPR_U32(ctx, 4) & 0x1FFFFFFFu, now = static_cast<uint32_t>(field(rdram));
+        int k = 0;
+        while (k < 64 && l.addr[k] && l.addr[k] != car)
+            ++k;
+        if (k < 64)
+        {
+            if (!l.addr[k])
+                l.addr[k] = car;
+            if (now - l.last[k] >= 120 || !l.last[k])
+            {
+                l.last[k] = now ? now : 1;
+                const uint32_t cs = rd32(rdram, car + 0xC) & 0x1FFFFFFFu;
+                if (cs)
+                    std::fprintf(stderr, "[%s] %u %x pos %.0f,%.0f,%.0f\n", l.tag, now, car, rdF(rdram, cs + 0x10), rdF(rdram, cs + 0x14), rdF(rdram, cs + 0x18));
+            }
+        }
+    }
+    l.hook.orig(rdram, ctx, runtime);
+}
+void carHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { posLogStep(g_carLog, rdram, ctx, runtime); }
+void heliHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { posLogStep(g_heliLog, rdram, ctx, runtime); }
+
 void install(PS2Runtime &runtime)
 {
+    if (const char *e = std::getenv("WOTM_CARLOG"); e && *e && *e != '0')
+    {
+        if ((g_carLog.hook.orig = runtime.lookupFunction(g_carLog.hook.addr)))
+            runtime.registerFunction(g_carLog.hook.addr, &carHook);
+        if ((g_heliLog.hook.orig = runtime.lookupFunction(g_heliLog.hook.addr)))
+            runtime.registerFunction(g_heliLog.hook.addr, &heliHook);
+        std::fprintf(stderr, "[carro] log da posicao dos carros e helicopteros do transito\n");
+    }
     if (const char *e = std::getenv("WOTM_AIVSAI"); e && *e && *e != '0')
         g_sidesEnv = true;
     // sempre: os bots da escolha de controles (wotm_padsel.inc) ligam os lados na hora; sem bots, a original direto

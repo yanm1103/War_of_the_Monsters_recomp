@@ -1623,6 +1623,7 @@ def preview(prop, st, disc, out, textures=False):
 # ---------------------------------------------------------------- generated floor
 
 FLOOR_DROP = 0.6      # the visible plate sits this far under the stage's own floor, so the two never fight for the pixel
+FLOOR_COLOR = (0.09, 0.09, 0.1)     # the plate's COLOR_0 (linear, Blender; the game gets 0.34 of full light): a dark asphalt gray
 
 
 def floor_glb(half_x, half_y):
@@ -1635,17 +1636,22 @@ def floor_glb(half_x, half_y):
     tris = [0, 2, 1, 0, 3, 2]
     blob, views, accs, ms, nodes = b"", [], [], [], []
     for name, pts in meshes:
-        for data, ctype, count, typ, target, mm in (
-                (struct.pack("<12f", *[c for p in pts for c in p]), 5126, 4, "VEC3", 34962,
-                 ([min(p[i] for p in pts) for i in range(3)], [max(p[i] for p in pts) for i in range(3)])),
-                (struct.pack("<6H", *tris), 5123, 6, "SCALAR", 34963, None)):
+        parts = [(struct.pack("<12f", *[c for p in pts for c in p]), 5126, 4, "VEC3", 34962,
+                  ([min(p[i] for p in pts) for i in range(3)], [max(p[i] for p in pts) for i in range(3)])),
+                 (struct.pack("<6H", *tris), 5123, 6, "SCALAR", 34963, None)]
+        if name == "vis":       # a color: with none the game draws the plate white (an untextured vertex color of 0x80 is full light)
+            parts.append((struct.pack("<12f", *FLOOR_COLOR * 4), 5126, 4, "VEC3", 34962, None))
+        for data, ctype, count, typ, target, mm in parts:
             views.append({"buffer": 0, "byteOffset": len(blob), "byteLength": len(data), "target": target})
             blob += data + bytes((-len(data)) % 4)
             acc = {"bufferView": len(views) - 1, "componentType": ctype, "count": count, "type": typ}
             if mm:
                 acc["min"], acc["max"] = mm
             accs.append(acc)
-        ms.append({"primitives": [{"attributes": {"POSITION": len(accs) - 2}, "indices": len(accs) - 1}]})
+        attrs = {"POSITION": len(accs) - len(parts)}
+        if name == "vis":
+            attrs["COLOR_0"] = len(accs) - 1
+        ms.append({"primitives": [{"attributes": attrs, "indices": len(accs) - len(parts) + 1}]})
         nodes.append({"mesh": len(ms) - 1, "name": name})
     js = json.dumps({"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": list(range(len(nodes)))}], "nodes": nodes,
                      "meshes": ms, "accessors": accs, "bufferViews": views, "buffers": [{"byteLength": len(blob)}]}).encode()

@@ -1,11 +1,12 @@
 """Prova no jogo dos arquivos de pontos do mod (PTS/CENTRAL.SPT, .PUP, .AIP, .FOP). Precisa do disco, do wotm.exe e de uma tela.
 
-    python tools/test_points_game.py [spt] [aip] [fop]      (sem argumento: os três)
+    python tools/test_points_game.py [spt] [aip] [fop] [car]      (sem argumento: todos)
 
 Cada cenário monta um mod temporário, abre o jogo por editor.launch_game, lê o log e confere:
   spt  o monstro nasce no ponto do mod (WOTM_MOVELOG) e a foto guarda os power-ups do mod (olhe a foto em $TEMP/wotm_points_*.png);
   aip  a CPU, com uma rede em U pela rua do norte, passa por ela (WOTM_AILOG, "[ai] ... pos"); a rede do disco a leva em diagonal;
-  fop  o exército (WOTM_ARMY) acorda os veículos nos nós da rede do mod ("[exercito] ... acordado no no").
+  fop  o exército (WOTM_ARMY) acorda os veículos nos nós da rede do mod ("[exercito] ... acordado no no");
+  car  o trânsito (WOTM_CARLOG, "[carro] ... pos") termina quase todo nas ruas de uma rede .FOP do mod.
 """
 import glob
 import math
@@ -35,7 +36,8 @@ def spt(human, cpu):
 
 def scenario(what):
     """(training, opts, files {ext: bytes}, env) of a scenario."""
-    env = {"WOTM_MUTE": "1", "WOTM_MONITOR": "1", "WOTM_RES": "720", "WOTM_SETTINGS": "0"}
+    # no sound, no gamepad vibration, and the window gives the focus back to what had it: the test runs while someone works
+    env = {"WOTM_MUTE": "1", "WOTM_MONITOR": "1", "WOTM_RES": "720", "WOTM_SETTINGS": "0", "WOTM_VIBRATION": "0", "WOTM_NOFOCUS": "1"}
     fight = {"monster": {"monster": "3"}, "players": [], "cpus": [{"monster": "1"}], "dummy": 0}
     if what == "spt":
         env.update({"WOTM_MOVELOG": "1", "WOTM_SHOTS": "30"})
@@ -58,7 +60,17 @@ def scenario(what):
         for k, x in enumerate((-900, -700, -500)):
             nodes.append({"pos": [x, 700, 9], "type": 0, "links": [{"to": 4 + k + d, "width": 8} for d in (-1, 1) if 0 <= k + d < 3]})
         return False, fight, {"SPT": spt([11, 319, 9, 90], [-640, 326, 9, 90]), "FOP": lvl.build_fop(nodes)}, env
-    raise SystemExit("spt, aip or fop")
+    if what == "car":
+        # the car streets (type 0) are a rectangle along the north street: the traffic drives there
+        env["WOTM_CARLOG"] = "1"
+        pts = [(-640, 1080), (-640, 700), (570, 700), (570, 1080)]
+        net = [{"pos": [x, y, 9], "type": 0, "links": [{"to": (k + 1) % 4, "width": 8}, {"to": (k + 3) % 4, "width": 8}]} for k, (x, y) in enumerate(pts)]
+        # and the helicopters' route (type 1), a rectangle in the south at 500
+        hel = [(-900, -900), (-300, -900), (-300, -1100), (-900, -1100)]
+        net += [{"pos": [x, y, 500], "type": 1, "links": [{"to": 4 + (k + 1) % 4, "width": 12}, {"to": 4 + (k + 3) % 4, "width": 12}]}
+                for k, (x, y) in enumerate(hel)]
+        return False, fight, {"SPT": spt([11, 319, 9, 90], [-640, 326, 9, 90]), "FOP": lvl.build_fop(net)}, env
+    raise SystemExit("spt, aip, fop or car")
 
 
 def play(what, secs):
@@ -105,6 +117,7 @@ def run_spt():
     mv = [re.search(r"\[move\] g=(\d+) p0 .* pos=(-?\d+),(-?\d+),(-?\d+) ang=([+-][\d.]+)", l) for l in lines if "[move]" in l]
     mv = [m for m in mv if m]
     good = check(any("PTS/CENTRAL.SPT <- pts" in l for l in lines) and any("PTS/CENTRAL.PUP <- pts" in l for l in lines), "the game reads the mod's .SPT and .PUP")
+    check(any("foco devolvido" in l for l in lines), "the window gave the focus back (needs a window with the focus when the test starts; not an error)")
     if not check(mv, "the monster's [move] lines"):
         return False
     x, y, _z = int(mv[0].group(2)), int(mv[0].group(3)), int(mv[0].group(4))
@@ -136,8 +149,31 @@ def run_fop():
     return good
 
 
+def run_car():
+    lines = play("car", 65)
+    last = {}
+    for m in (re.search(r"\[carro\] (\d+) (\w+) pos (-?\d+),(-?\d+)", l) for l in lines):
+        if m:
+            last[m.group(2)] = (int(m.group(3)), int(m.group(4)))
+    good = check(any("PTS/CENTRAL.FOP <- pts" in l for l in lines), "the game reads the mod's .FOP")
+    if not check(len(last) >= 20, "the traffic cars' positions (%d cars)" % len(last)):
+        return False
+    inside = [p for p in last.values() if -790 <= p[0] <= 720 and 550 <= p[1] <= 1230]
+    # the disc's net spreads the cars over the whole stage; in a minute of the mod's, almost all are on its rectangle
+    good &= check(len(inside) >= 0.8 * len(last), "%d of %d cars end on the mod's streets (the rectangle along y 700 to 1080)" % (len(inside), len(last)))
+    heli = {}
+    for m in (re.search(r"\[heli\] (\d+) (\w+) pos (-?\d+),(-?\d+),(-?\d+)", l) for l in lines):
+        if m:
+            heli[m.group(2)] = (int(m.group(3)), int(m.group(4)), int(m.group(5)))
+    if not check(heli, "the helicopters' positions (%d)" % len(heli)):
+        return False
+    near = [p for p in heli.values() if -1250 <= p[0] <= 100 and -1450 <= p[1] <= -600]
+    good &= check(len(near) >= max(1, 0.75 * len(heli)), "%d of %d helicopters end over the mod's flight route (the rectangle in the south): %s" % (len(near), len(heli), sorted(heli.values())))
+    return good
+
+
 if __name__ == "__main__":
-    runs = {"spt": run_spt, "aip": run_aip, "fop": run_fop}
+    runs = {"spt": run_spt, "aip": run_aip, "fop": run_fop, "car": run_car}
     want = sys.argv[1:] or list(runs)
-    results = [runs[w]() if w in runs else sys.exit("spt, aip or fop") for w in want]
+    results = [runs[w]() if w in runs else sys.exit("spt, aip, fop or car") for w in want]
     sys.exit(0 if all(results) else 1)
