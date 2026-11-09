@@ -15,6 +15,7 @@
 #include <cctype>
 #include <filesystem>
 #include <mutex>
+#include <sstream>
 #include <thread>
 #include "wotm_training.h"
 
@@ -31,6 +32,10 @@ PS2Runtime::RecompiledFunction g_origTime = nullptr, g_origDialog = nullptr;
 // a thread do arquivo vive ate o fim do processo: o mutex e a string dela nunca sao destruidos
 std::mutex &g_mu = *new std::mutex;
 std::string &g_fileStage = *new std::string;   // fase do ultimo pedido do arquivo (vazio: nenhum)
+// "Testar daqui" do editor: onde o jogador 1 nasce em vez de no ponto da fase (WOTM_SPAWN=x,y,z,heading na partida; no arquivo da
+// recarga "<FASE> <contador> x y z heading"; sem os quatro numeros, os pontos da fase). Heading em graus, 0 = +Y, anti-horario (o do .SPT).
+struct Spawn { bool on = false; float x = 0, y = 0, z = 0, heading = 0; };
+Spawn &g_spawn = *new Spawn;   // sob g_mu: a thread do arquivo grava, a do EE le
 unsigned g_fileLoads = 0;          // wotm_levelpatch::g_loads quando ele chegou
 int64_t g_fileMs = 0, g_keyMs = 0;   // quando cada pedido chegou (thread do EE)
 bool g_pending = false;            // rtReturnToShell(2) ja pedido: o proximo displayDialog(0) e a recarga
@@ -164,16 +169,69 @@ void watch(std::filesystem::path file)
         last = t;
         if (text == lastText) continue;
         lastText = text;
+        Spawn sp;
+        {
+            std::istringstream is(text);
+            std::string s0, s1;
+            float v[4];
+            is >> s0 >> s1;
+            if (is >> v[0] >> v[1] >> v[2] >> v[3]) sp = Spawn{true, v[0], v[1], v[2], v[3]};
+        }
         std::lock_guard<std::mutex> lk(g_mu);
+        g_spawn = sp;
         g_fileStage = stage;
         g_fileLoads = wotm_levelpatch::g_loads.load();
     }
+}
+
+// Fim do TheGame::gameGetStartPoint(m) (o gancho dos jogadores sob IA, wotm_overrides.cpp): o jogador 1 vai para o ponto pedido, de pe no
+// chao embaixo dele (20 acima do chao achado de 1000 acima do ponto; sem chao, no ponto), de frente para o heading. Vale em todo
+// nascimento dele, o renascimento tambem.
+void placeAtSpawn(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m)
+{
+    Spawn sp;
+    {
+        std::lock_guard<std::mutex> lk(g_mu);
+        sp = g_spawn;
+    }
+    m &= PS2_RAM_MASK;
+    if (!sp.on || m < 0x1000u || (rd32(rdram, kGame + 0x120380) & PS2_RAM_MASK) != m) return;
+    const uint32_t cs = rd32(rdram, m + 0xC) & PS2_RAM_MASK;
+    if (cs < 0x1000u) return;
+    using wotm_coop::kVec;
+    wotm_coop::wrF(rdram, kVec, sp.x);
+    wotm_coop::wrF(rdram, kVec + 4, sp.y);
+    wotm_coop::wrF(rdram, kVec + 8, sp.z + 1000.f);
+    wotm_coop::wrF(rdram, kVec + 12, 0.f);
+    const float d = wotm_coop::hatTest(rdram, ctx, runtime, kVec, kVec + 0x10);
+    const float z = d > 0.f && d < 2000.f ? sp.z + 1000.f - d + 20.f : sp.z;
+    wotm_coop::wrF(rdram, kVec + 8, z);
+    wotm_modes4::call(rdram, ctx, runtime, wotm::fn::setTrans__7MonsterR8_fvector, {m, kVec});
+    wotm_coop::callF(rdram, ctx, runtime, wotm::fn::setRot__7Monsterfff, {m}, {sp.heading * 0.017453292f, 0.f, 0.f});
+    wotm_modes4::call(rdram, ctx, runtime, wotm::fn::hdReparentCsGrid__FP3_cs, {cs});
+    std::fprintf(stderr, "[fase] largada pedida: jogador 1 em (%.0f, %.0f, %.0f), heading %.0f%s\n", sp.x, sp.y, z, sp.heading,
+                 d > 0.f && d < 2000.f ? "" : " (sem chao embaixo do ponto)");
 }
 } // namespace wotm_levelreload
 
 void wotmLevelReloadInstall(PS2Runtime &runtime)
 {
     using namespace wotm_levelreload;
+    if (const char *s = std::getenv("WOTM_SPAWN"); s && *s)
+    {
+        std::istringstream is(s);
+        std::string tok;
+        float v[4];
+        int n = 0;
+        while (n < 4 && std::getline(is, tok, ',')) v[n++] = float(std::atof(tok.c_str()));
+        if (n == 4)
+        {
+            g_spawn = Spawn{true, v[0], v[1], v[2], v[3]};
+            std::fprintf(stderr, "[fase] largada do jogador 1 em (%.0f, %.0f, %.0f), heading %.0f (WOTM_SPAWN)\n", v[0], v[1], v[2], v[3]);
+        }
+        else
+            std::fprintf(stderr, "[fase] WOTM_SPAWN invalido (\"%s\"; use x,y,z,heading)\n", s);
+    }
     if (const char *e = std::getenv("WOTM_LEVELPATCH"); e && std::atoi(e) <= 0) return;
     if (!(g_origTime = runtime.lookupFunction(wotm::fn::rtTimeToReturnToShell__Fv)) || !(g_origDialog = runtime.lookupFunction(wotm::fn::displayDialog__Fi)))
     {

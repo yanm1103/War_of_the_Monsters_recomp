@@ -1330,25 +1330,116 @@ class SettingsError(RuntimeError):
     """A setting is missing or wrong: the page offers to open Settings (code "settings")."""
 
 
-def reload_game(name):
+def reload_game(name, here=None):
+    """Asks the running game to reload `name`; with here ([x, y, z, heading]) player 1 starts there, else on the stage's start points."""
     if not game_running():
         raise RuntimeError("no game opened by the editor is running: use Test in game")
+    spawn = spawn_numbers(here) if here is not None else []
     GAME["count"] += 1
     with open(RELOAD_FILE + ".tmp", "w", encoding="utf-8") as f:
-        f.write("%s %d\n" % (name, GAME["count"]))
+        f.write(" ".join([name, str(GAME["count"])] + spawn) + "\n")
     os.replace(RELOAD_FILE + ".tmp", RELOAD_FILE)
 
 
-def launch_game(cfg, name, training):
-    if not cfg.get("game") or not os.path.exists(cfg["game"]):
-        raise SettingsError("Can't find the game (wotm.exe).")
-    env = dict(os.environ)
-    os.makedirs(CACHE, exist_ok=True)
-    env.update({"WOTM_MODS": os.path.abspath(cfg["mods"]), "WOTM_MATCH": ("3,1,@" + custom_stages(cfg)[name.upper()]["id"]) if name.upper() in custom_stages(cfg)
-                else "3,%d" % LEVEL_NUM.get(name, 1),
-                "WOTM_FULLSCREEN": "0", "WOTM_LEVELPATCH": "1", "WOTM_LEVELRELOAD": RELOAD_FILE})
+# The monsters a test can play (WOTM_MATCH numbers; 6 and 12 have no files on the disc, 13..15 are bosses): index, the game's name, the
+# lowercase name and the file prefix a skin.json "monster" may use
+TEST_MONSTERS = ((1, "Congar", "congar", "monkey"), (2, "Robo-47", "robo-47", "robot"), (3, "Togera", "togera", "lizard"),
+                 (4, "Ultra V", "ultra-v", "shogun"), (5, "Preytor", "preytor", "mantis"), (7, "Kineticlops", "kineticlops", "energy"),
+                 (8, "Magmo", "magmo", "lava"), (9, "Raptros", "raptros", "dragon"), (10, "Agamo", "agamo", "rock"),
+                 (11, "Zorgulon", "zorgulon", "alien"))
+TEST_MAX_CPUS = 7
+TEST_ID = re.compile(r"^[a-z0-9_]{1,24}$")
+
+
+def test_options(cfg):
+    """What the Test dialog offers: {"monsters": [{id, name}], "customs": [{id, name, mod, ai}], "skins": [{monster, id, name, mod, ai}]}.
+    The customs and skins come from every mod folder (monsters/<id>/monster.json, skins/<id>/skin.json); a skin's "monster" is the
+    disc monster's index as a string, or a custom's id. Files that do not read are left out."""
+    keys = {}
+    for idx, _name, low, pre in TEST_MONSTERS:
+        keys[low] = keys[pre] = str(idx)
+    out = {"monsters": [{"id": str(i), "name": n} for i, n, _l, _p in TEST_MONSTERS], "customs": [], "skins": []}
+    mods = cfg.get("mods") or ""
+    for mod in list_mods(cfg):
+        for kind, fname in (("monsters", "monster.json"), ("skins", "skin.json")):
+            for path in sorted(glob.glob(os.path.join(mods, mod, kind, "*", fname))):
+                try:
+                    with open(path, encoding="utf-8") as f:
+                        j = json.load(f)
+                    folder = os.path.basename(os.path.dirname(path))
+                    cid = str(j.get("id") or folder).lower()
+                    if not TEST_ID.match(cid):
+                        continue
+                    ent = {"id": cid, "name": str(j.get("name") or cid), "mod": mod, "ai": bool(j.get("ai"))}
+                    if kind == "monsters":
+                        out["customs"].append(ent)
+                    else:
+                        who = str(j.get("monster") or "").lower()
+                        out["skins"].append(dict(ent, monster=keys.get(who, who)))
+                except (OSError, ValueError, AttributeError):
+                    continue
+    return out
+
+
+def match_token(sel, what, customs):
+    """One WOTM_MATCH field for a monster choice {"monster": "3" or a custom's id, "skin": "" | "0".."99" | a skin's id}."""
+    sel = sel if isinstance(sel, dict) else {}
+    mon, skin = str(sel.get("monster") or ""), str(sel.get("skin") or "")
+    if mon.isdigit():
+        if int(mon) not in [m[0] for m in TEST_MONSTERS]:
+            raise ValueError("%s: monster %s is not one the game can play." % (what, mon))
+    elif mon not in customs:
+        raise ValueError("%s: there is no custom monster \"%s\" in your mods." % (what, mon))
+    if skin and not (int(skin) <= 99 if skin.isdigit() else TEST_ID.match(skin)):
+        raise ValueError("%s: the costume is a number or a skin's id." % what)
+    return mon + (":" + skin if skin else "")
+
+
+def test_env(cfg, name, training, opts):
+    """The environment variables the Test options make (WOTM_MATCH, WOTM_TRAINING, WOTM_TRAINING_DUMMY, WOTM_SPAWN). opts (all optional):
+    {"monster": sel, "cpus": [sel...] (up to 7), "dummy": 0..4 (the CPUs in training), "here": [x, y, z, heading] (where player 1
+    starts)}; none: Togera alone, as before."""
+    opts = opts if isinstance(opts, dict) else {}
+    customs = {c["id"] for c in test_options(cfg)["customs"]} if (opts.get("monster") or opts.get("cpus")) else set()
+    cpus = opts.get("cpus") or []
+    if not isinstance(cpus, list) or len(cpus) > TEST_MAX_CPUS:
+        raise ValueError("A test has up to %d CPUs." % TEST_MAX_CPUS)
+    toks = [match_token(opts.get("monster") or {"monster": "3"}, "Your monster", customs)]
+    toks += [match_token(c, "CPU %d" % (k + 1), customs) for k, c in enumerate(cpus)]
+    custom = custom_stages(cfg).get(name.upper())
+    toks.append("@" + custom["id"] if custom else str(LEVEL_NUM.get(name, 1)))
+    env = {"WOTM_MATCH": ",".join(toks)}
     if training:
         env["WOTM_TRAINING"] = "1"
+        dummy = opts.get("dummy")
+        if dummy is not None and cpus:
+            if not isinstance(dummy, int) or isinstance(dummy, bool) or not 0 <= dummy <= 4:
+                raise ValueError("The CPUs' behavior is 0 to 4.")
+            env["WOTM_TRAINING_DUMMY"] = str(dummy)
+    here = opts.get("here")
+    if here is not None:
+        env["WOTM_SPAWN"] = ",".join(spawn_numbers(here))
+    return env
+
+
+def spawn_numbers(here):
+    """["x", "y", "z", "heading"] for a start point [x, y, z, heading] (finite numbers), as the game's WOTM_SPAWN and the reload file take them."""
+    if not (isinstance(here, (list, tuple)) and len(here) == 4 and all(
+            isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in here)):
+        raise ValueError("The start point is x, y, z and a heading.")
+    return ["%.2f" % v for v in here]
+
+
+def launch_game(cfg, name, training, opts=None):
+    if not cfg.get("game") or not os.path.exists(cfg["game"]):
+        raise SettingsError("Can't find the game (wotm.exe).")
+    extra = test_env(cfg, name, training, opts)       # before anything starts: a bad option is refused first
+    env = dict(os.environ)
+    os.makedirs(CACHE, exist_ok=True)
+    for k in ("WOTM_TRAINING", "WOTM_TRAINING_DUMMY", "WOTM_SPAWN"):
+        env.pop(k, None)        # the editor's own shell may have them: the options decide
+    env.update({"WOTM_MODS": os.path.abspath(cfg["mods"]), "WOTM_FULLSCREEN": "0", "WOTM_LEVELPATCH": "1", "WOTM_LEVELRELOAD": RELOAD_FILE})
+    env.update(extra)
     if cfg.get("elf"):
         # the clone's runtime run as run_live.ps1 does: the disc image, native movies and drawing, no emulated VU1/VIF1/GS
         iso = cfg.get("iso") or (cfg["disc"] if is_iso(cfg["disc"]) else "")
@@ -1521,6 +1612,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(200, stage_spt(cfg, q.get("mod", ""), q.get("name", ""), point_kind(q.get("kind"))))
                 except (ValueError, OSError) as e:
                     return self.send(400, {"error": str(e)})
+            if u.path == "/api/testopts":       # the monsters, custom monsters and skins the Test dialog offers
+                return self.send(200, test_options(cfg))
             if u.path == "/api/mrs":            # the stage's fog, background and lights as the game reads them with this mod
                 try:
                     return self.send(200, stage_mrs(cfg, q.get("mod", ""), q.get("name", "")))
@@ -1693,16 +1786,16 @@ class Handler(BaseHTTPRequestHandler):
                 if self.path == "/api/test" and game_running() and not b.get("restart"):
                     return self.send(409, {"error": "the game is already open", "code": "running", "stage": GAME["stage"]})
                 if self.path == "/api/test" and not b.get("save", True):
-                    return self.send(200, {"ok": True, "lines": [], "launched": launch_game(cfg, name, b.get("training", True))})
+                    return self.send(200, {"ok": True, "lines": [], "launched": launch_game(cfg, name, b.get("training", True), b.get("options"))})
                 res = check_patch(cfg["disc"], base_of(cfg, name), b["patch"], mod_folder(cfg, mod), points_root(cfg, name))
                 res["saved"] = save_patch(cfg, mod, name, b["patch"])
                 # another mod with this stage's file that loads later wins in the game: the page says so (not a check problem)
                 res["winner"] = patch_winner(cfg, mod, name)
                 res["have"] = [m for m in list_mods(cfg) if os.path.isfile(patch_path(cfg, m, name))]
                 if self.path == "/api/test":
-                    res["launched"] = launch_game(cfg, name, b.get("training", True))
+                    res["launched"] = launch_game(cfg, name, b.get("training", True), b.get("options"))
                 if self.path == "/api/reload":
-                    reload_game(name)
+                    reload_game(name, (b.get("options") or {}).get("here"))
                     res["reloading"] = True
                 return self.send(200, res)
             return self.send(404, {"error": "not found"})

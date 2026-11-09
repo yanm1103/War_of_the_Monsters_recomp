@@ -725,7 +725,8 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   A`). A file that does not parse is read once more 200 ms later (the editor may be writing it). So editing during a fight and
   reloading the stage applies the new patch, without restarting the game. Three ways to reload it: the pause's **RESTART** (YES) or, in
   training, **RESET POSITIONS**; **F10** in the fight (no pause menu); and the file named by `WOTM_LEVELRELOAD=<arquivo>`, where
-  writing `<STAGE> <counter>` (new content each time) asks for the reload if that stage is loaded. The reload is the retail RESTART: the
+  writing `<STAGE> <counter>` (new content each time; `<STAGE> <counter> x y z heading` also puts player 1 at that point, as
+  `WOTM_SPAWN`) asks for the reload if that stage is loaded. The reload is the retail RESTART: the
   whole stage loads again (the `LOAD` screen), the fight starts over and the continues are restored. A request waits for a frame where
   the game could pause (in the pause, until the fight resumes; during a movie or a dialog, until it ends; time in the pause does not
   count) and is dropped after 10 s of running game without one, or if a stage load came after it, since that load already read the
@@ -751,15 +752,21 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   for handles the stage does not have, stay in the file as they are, and a note over the view says so when the file loads) and
   **Test in game** (opens the game in the stage in training mode with Togera: `WOTM_MATCH=3,<stage>`, `WOTM_TRAINING=1`,
   `WOTM_MODS=<mods folder>`, windowed; with unsaved changes it asks **Save before testing?**, since the game loads the file, and
-  offers to test without them; with the game already open it asks to reload the stage in it or to restart it). Next to these
-  buttons, the game's state:
+  offers to test without them; with the game already open it asks to reload the stage in it or to restart it). The **Test
+  options** button (sliders) next to it chooses who plays: your monster and costume (the ten the game plays, and the custom
+  monsters and skins of every mod), 0 to 7 CPUs with theirs (only the custom monsters and skins marked `"ai": true`), training mode
+  and, in it, what the CPUs do (stand still, the game AI, always block, block after the first hit, jump); the choices stay in the
+  browser, and the server turns them into `WOTM_MATCH` (`<monster>[:<costume or skin>],<CPU>...,<stage>`), `WOTM_TRAINING`
+  and `WOTM_TRAINING_DUMMY`. **Test from here** (the pin, or in that dialog) starts you where the middle of the view meets the stage,
+  facing where the view looks (`WOTM_SPAWN`; a respawn goes there too); with the game already open, it asks to reload or restart, and a reload carries the
+  start point in the reload file, while a plain **Reload in game** goes back to the stage's own points. Only a restart applies a changed monster or CPUs. Next to these buttons, the game's state:
   starting, then "Game running" and its stage. **Reload in game** (on while a game opened by Test runs; "Save & reload" with
   unsaved changes) saves and has that game load the stage again, as **F10** does there; with the game on another stage it offers a
   restart on this one. **Stop** (the square, while the game runs) closes the game the editor opened. In a window narrower than
   1440 px, Check, Save, Test and Reload show only their icon. The **?** button (or **?**, or **F1**) lists every shortcut.
 - **Custom stages:** the stage list also shows the valid custom stages of every mod (`stages/<folder>/stage.json`, "Custom stages")
   as "MY CITY (custom, on CENTRAL)". One opens with its base's objects, scene and handles and saves its patch as
-  `levels/<ID>.json`; Test in game opens it with `WOTM_MATCH=3,1,@<id>`. The **+** button next to the stage list (**New stage…**)
+  `levels/<ID>.json`; Test in game opens it with `WOTM_MATCH=3,@<id>`. The **+** button next to the stage list (**New stage…**)
   asks for an id, a name and a base among the nine the game allows, and writes `stages/<id>/stage.json`; "Start with the changes I
   have now" also writes them as the new stage's patch when the open stage has that base. A stage with points of its own
   (`.SPT`, `.PED`...) in its folder shows those in the pedestrian panel and the check (the other kinds from the base). The Fight HUD
@@ -820,7 +827,7 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   moves one to the aim ("Aim") and draws a cone for each point in the view (color by list) with a line for the way it faces. Save writes the
   file into the mod (`mods/<mod>/PTS/<STAGE>.SPT` for a game stage; for a custom stage the `.SPT` in its folder, `<ID>.SPT` when it has none):
   a game that loads the mod reads it in place of the disc's file; "Back to the disc's" deletes it. Points past a list's room overwrite the
-  list's last one (the dialog warns). The heading is kept to 1.41 degrees and is drawn as 0 = facing +Y, growing counter-clockwise.
+  list's last one (the dialog warns). The heading is kept to 1.41 degrees and is drawn as 0 = facing +Y, growing clockwise seen from above (90 faces +X, as in the game).
   The box button next to it opens the same dialog for the stage's **power-ups** (`.PUP`): the 20 types (health 25/50/100, stamina 25/50/100,
   health 10, stamina 10, special weapon, cloak, story items 10 to 19, which only appear in story mode), a position (z is the height the
   power-up rests at; the rotation is random in the game) and a Shadow box. The game keeps 100 at a time (the dialog warns past that).

@@ -12,6 +12,7 @@ import { openLight, lightGameChanged, lightLookChanged, lightClose } from './lig
 import { initArrange } from './arrange.js';
 import { openTerrain } from './terrain.js';
 import { initColl } from './coll.js';
+import { testBody, openTestOpts, loadTestOpts, testSummary } from './testopts.js';
 
 // The GS modulates and blends the bytes as they are: no color management (texture, vertex and interface colors stay raw).
 THREE.ColorManagement.enabled = false;
@@ -1765,10 +1766,11 @@ function groundAt(v) {   // the scene height of the first visible surface under 
   const hit = ray.intersectObject(stageRoot, true).find((h) => visibleChain(h.object));
   return hit ? hit.point.y : null;
 }
-function viewPoint() {   // where a new marker goes: the surface in the middle of the view, else a point ahead
+function viewPoint(strict = false) {   // where a new marker goes: the surface in the middle of the view, else a point ahead (strict: null)
   const ray = new THREE.Raycaster();
   ray.setFromCamera(new THREE.Vector2(0, 0), camera);
   const hit = stageRoot ? ray.intersectObject(stageRoot, true).find((h) => visibleChain(h.object)) : null;
+  if (strict && !hit) return null;
   return toGame(hit ? hit.point : camera.position.clone().addScaledVector(camera.getWorldDirection(new THREE.Vector3()), 600));
 }
 function pedEdit(fn, label = 'pedestrians') {   // one undo step, then the edit; a refused edit (limits) goes to the log
@@ -2294,7 +2296,8 @@ async function post(kind, save = true, extra = {}) {
     moveTo(m, false);
   }
   const mod = modNow;
-  const body = Object.assign({ name: stageName, mod, patch: buildPatch(), training: true, save }, extra);
+  const { here, ...rest } = extra;       // here: Test from here / Reload from here (the view's aim as the start point)
+  const body = Object.assign({ name: stageName, mod, patch: buildPatch(), save }, testBody(here ? aimStart() : null), rest);
   const wasRunning = game.running;
   if (kind === 'test') setGameState('starting');
   if (kind === 'reload') setGameState('reloading');
@@ -2338,7 +2341,7 @@ async function post(kind, save = true, extra = {}) {
     if (res.launched) {
       game.seen = ''; game.stage = stageName; game.result = null;
       setGameState('starting');
-      msg(`Starting the game on ${title(stageName)} (training, as Togera)`, { level: 'ok', detail: res.launched });
+      msg(`Starting the game on ${title(stageName)}: ${testSummary()}${here ? ', from the view\'s aim' : ''}`, { level: 'ok', detail: res.launched });
       watchGame(0, true);
     }
     if (res.reloading) {
@@ -2352,7 +2355,7 @@ async function post(kind, save = true, extra = {}) {
   } catch (e) {
     game.pending = false;
     if (kind === 'test' || kind === 'reload') setGameState(wasRunning ? 'running' : 'closed');
-    if (kind === 'test' && e.code === 'running') { game.stage = e.data.stage || game.stage; setRunning(true); askRunning(save); return false; }
+    if (kind === 'test' && e.code === 'running') { game.stage = e.data.stage || game.stage; setRunning(true); askRunning(save, extra); return false; }
     const er = cleanError(e);
     const where = /wotm\.exe/.test(er.text) ? 'game' : /disc image/.test(er.text) ? 'iso' : '';
     const action = e.code === 'mod' ? ['Choose mod', () => $('mod').focus()]
@@ -2417,13 +2420,20 @@ function askUnsaved(text, saveLabel, then) {
       { icon: 'content-save-alert-outline' });
 }
 // Test with the game open: reload this stage in it, or close it and open it again
-function askRunning(save) {
+function askRunning(save, ex = {}) {
   const on = gameStage(), same = !on || on === stageName;
   ask('The game is already open',
-      same ? `It is on ${title(stageName)}. Reload this stage in it, or restart the game?`
+      same ? `It is on ${title(stageName)}. Reload this stage in it, or restart the game? Only a restart applies the Test options' monsters and CPUs.`
            : `It is on ${title(on)}. Restart it on ${title(stageName)}?`,
       [['cancel', 'Cancel'], ['restart', 'Restart game', !same]].concat(same ? [['reload', 'Reload in game', true]] : []),
-      (v) => { if (v === 'restart') post('test', save, { restart: true }); else if (v === 'reload') post('reload'); });
+      (v) => { if (v === 'restart') post('test', save, Object.assign({}, ex, { restart: true })); else if (v === 'reload') post('reload', true, ex.here ? { here: true } : {}); });
+}
+// Where "Test from here" starts you: the surface the middle of the view meets, and the game heading the view looks along (0 is +Y and 90 is
+// +X, as the start points' heading counts)
+function aimStart(strict = false) {
+  const p = viewPoint(strict), d = camera.getWorldDirection(new THREE.Vector3());
+  if (!p || (strict && d.y > 0.02)) return null;      // nothing under the middle of the view, or looking up (what is up there is no place to stand)
+  return [r1(p[0]), r1(p[1]), r1(p[2]), r1(wrapDeg(Math.atan2(d.x, -d.z) * 180 / Math.PI))];
 }
 function reloadGame() {
   const on = gameStage();
@@ -2560,7 +2570,7 @@ function showGame() {
   }
   ind.title = s === 'running' ? `The game the editor opened is running, on ${where}` : '';
   const test = $('test'), rl = $('reload');
-  test.disabled = s === 'starting';
+  test.disabled = $('testHere').disabled = s === 'starting';
   test.classList.toggle('primary', s === 'closed');
   rl.disabled = s !== 'running';
   rl.classList.toggle('primary', s === 'running' || s === 'reloading');
@@ -2885,15 +2895,25 @@ $('keepClose').onclick = () => { $('keepNote').hidden = true; };
 $('winClose').onclick = () => { winHidden = true; $('winNote').hidden = true; };
 $('check').onclick = () => post('check');
 $('save').onclick = () => post('save');
-$('test').onclick = () => {
-  if (!dirty) { post('test', false); return; }
+function testGame(here) {
+  if (here && !aimStart(true)) {
+    msg("Test from here starts you where the middle of the view meets the stage: aim the view at the ground or a roof first", { level: 'warn', toast: true });
+    return;
+  }
+  const ex = here ? { here: true } : {};
+  if (!dirty) { post('test', false, ex); return; }
   const n = unsavedCount();
   ask('Save before testing?',
       `The game loads the saved file. Your last ${n === 1 ? 'change is' : `${n} changes are`} not saved yet.`,
       [['cancel', 'Cancel'], ['nosave', 'Test without them'], ['save', 'Save and test', true]],
-      (v) => { if (v === 'save' || v === 'nosave') post('test', v === 'save'); },
+      (v) => { if (v === 'save' || v === 'nosave') post('test', v === 'save', ex); },
       { icon: 'content-save-alert-outline' });
-};
+}
+$('test').onclick = () => testGame(false);
+$('testHere').onclick = () => testGame(true);
+const testTitle = () => { $('test').title = `Open the game on this stage: ${testSummary()}`; };
+$('testOpts').onclick = () => openTestOpts({ api, aim: () => aimStart(true), run: testGame, changed: testTitle });
+loadTestOpts(api).then(testTitle);
 $('reload').onclick = reloadGame;
 // the Output: tabs, Copy, Clear, hide; the status bar's fields open it on their tab (or close it when it is there already)
 document.querySelectorAll('#output .tab').forEach((b) => (b.onclick = () => openOutput(b.dataset.tab)));
@@ -3161,7 +3181,7 @@ function updatePtView(kind) {
     mesh.raycast = () => {};
     g.add(mesh);
     if (kind === 'SPT') {
-      const h = (p.heading * Math.PI) / 180, fwd = toThree([p.pos[0] - Math.sin(h) * 60, p.pos[1] + Math.cos(h) * 60, p.pos[2] + 25]);
+      const h = (p.heading * Math.PI) / 180, fwd = toThree([p.pos[0] + Math.sin(h) * 60, p.pos[1] + Math.cos(h) * 60, p.pos[2] + 25]);
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([base.clone().add(new THREE.Vector3(0, 25, 0)), fwd]),
                                   new THREE.LineBasicMaterial({ color: col, depthTest: false }));
       line.renderOrder = 998;
@@ -4290,7 +4310,7 @@ showMode();
 // the editor program quits a few seconds after its page closes (a reload asks again at once and keeps it)
 window.addEventListener('pagehide', () => { try { navigator.sendBeacon('/api/bye', '{}'); } catch (e) { /* ignore */ } });
 if (new URLSearchParams(location.search).has('debug')) {
-  window.wotmDebug = { nets, openNet, loadNet, camera, fly, flyStep, setView, select, selectMany, items, listed, dropToGround, nudge, duplicate, remove,
+  window.wotmDebug = { aimStart, nets, openNet, loadNet, camera, fly, flyStep, setView, select, selectMany, items, listed, dropToGround, nudge, duplicate, remove,
                        undo, buildPatch, posOf, setLook, scene, renderer, gsLights, peds, selectPed, setPeds, addPed, pedFromInputs,
                        redo, resetAll, applyPatch, frameAll, resetSel, gameLine, post, setRunning, applyTheme, refreshList, gameBox,
                        msg, toast, openOutput, closeOutput, showStatus, setGameState, readCheck, gameResult,

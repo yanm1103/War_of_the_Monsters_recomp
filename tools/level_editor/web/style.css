@@ -755,6 +755,18 @@ button.small-btn { height: 22px; padding: 0 8px; font-size: 12px; flex: none; }
 #texDlg .dlg-foot { align-items: center; }
 #texDlg .tx-game { margin-right: auto; font-size: 12px; }
 
+/* the Test options (web/testopts.js) */
+#testDlg { width: 560px; max-width: calc(100vw - 32px); }
+#testDlg .dlg-body { padding: 8px 20px 12px; }
+#testDlg .sec-title { margin: 14px 0 6px; }
+#testDlg .sec-title:first-child { margin-top: 4px; }
+#testDlg .to-row { display: grid; grid-template-columns: 96px minmax(0, 1.4fr) minmax(0, 1fr); gap: 8px; align-items: center; margin: 6px 0; }
+#testDlg .to-row .to-lbl { color: var(--fg-2); margin: 0; }
+#testDlg .to-row select, #testDlg .to-row input[type=number] { min-width: 0; width: 100%; margin: 0; }
+#testDlg .to-row input[type=number] { width: 5em; }
+#testDlg .to-here { margin-top: 12px; }
+#testDlg .dlg-foot { align-items: center; }
+
 /* the Light and fog panel (web/light.js): a dialog docked at the right, not modal, so the view stays in sight */
 #lightDlg { position: fixed; inset: 56px 16px auto auto; margin: 0; width: 360px; max-width: calc(100vw - 32px); max-height: calc(100vh - 120px); }
 #lightDlg > form { max-height: calc(100vh - 120px); }
