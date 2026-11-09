@@ -870,9 +870,12 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   it both ways), its meters, its list in sections (click a row and the camera goes to it), and a foot with the file's state, **Revert**
   (throws away what is not saved), **Back to the disc's** (deletes the mod's file, the stage's own comes back) and **Save to mod**. The
   right panel's Selection tab holds the selected marker: its list or type, X, Y and Z, and what is particular to the layer; Aim, Drop
-  (**End**), Duplicate (**Ctrl+D**) and Delete (**Del**) act on it. In the view a marker is picked by a click near it (a ring shows the
-  one under the pointer), the gizmo moves it, the arrows and **PageUp** and **PageDown** nudge it, **Esc** lets go of it; the objects are
-  scenery in these modes, so a click on nothing picks nothing. In the other modes the layers are drawn faint, unless their switch under
+  (**End**), Duplicate (**Ctrl+D**) and Delete (**Del**) act on it. In the view a marker is picked by a click on it or near it (the reach
+  is the marker's size on the screen plus a margin of 6 px, at least 12 and at most 64 px; of several in reach, the one the click is nearest
+  to wins), in the fly and in the orbit camera alike. A marker is drawn bigger the farther the camera is (up to 3.5 times), so it stays
+  readable over the whole stage. A ring and a text label name the marker under the pointer, or the one whose row is under it in the list; the
+  selected marker keeps its color and gets a bigger size and two rings. The gizmo moves it, the arrows and **PageUp** and **PageDown** nudge
+  it, **Esc** lets go of it; the objects are scenery in these modes, so a click on nothing picks nothing. In the other modes the layers are drawn faint, unless their switch under
   **Display ▸ Overlays** is off (the layer of the open mode is drawn in full whatever the switch says); a layer is picked only in its own mode.
   A layer is a draft of its own file: it is not in the patch, **Ctrl+Z** and **Ctrl+Y** (and the top bar's buttons) undo and redo the draft of
   the layer whose mode is open, the patch's Undo leaves it alone, and the rail button shows a dot while the layer has changes that are not saved.
@@ -883,18 +886,25 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   - **Start points** (`.SPT`, `FORMATS.md`, "Stage points"): where the monsters appear, in four lists (0 story, first life of the player;
     1 first life of the players, room for 2; 2 first life of a CPU, 20; 3 respawn, 20), shown as Story, Player, CPU and Respawn. Each point
     has x, y, z, a heading and "Drop to the floor when a monster appears" (`Ground`: the point falls to the floor or roof under it). A cone
-    in the view for each point (color by list) with a line for the way it faces. Each list's header says how many points it holds of its
+    in the view for each point (color by list) with a line for the way it faces, and a label over it with its place in its list, in the
+    file's order: Story, Player 1, Player 2, CPU 1 to 20, Respawn 1 to 20 (the game takes a list's points in that order; a point past the
+    room reads "past room"). The labels hide behind the camera, keep clear of each other, and show in the other modes too, dimmed, when the
+    stage has at most 12 start points. Each list's header says how many points it holds of its
     room, and a point past the room is marked: the game overwrites the list's last one with it. The heading is kept to 1.41 degrees and
     counts 0 = facing +Y, growing clockwise seen from above (90 faces +X, as in the game).
   - **Power-ups** (`.PUP`): the 20 types (health 25/50/100, stamina 25/50/100, health 10, stamina 10, special weapon, cloak, story items 10
     to 19, which only appear in story mode), shown in groups; a position (z is the height the power-up rests at; the rotation is random in
-    the game) and a Shadow switch. The game keeps 100 at a time (the meter and the file's warning go red past that); the file holds 255.
+    the game) and a Shadow switch. The view and the list draw health as a green ball, stamina as a blue ball, the special weapon as a red
+    ball, the cloak as a gray cube and the story items as amber balls; the legend in the right panel (nothing selected) shows the same.
+    The selected or hovered power-up is labeled with its type. The game keeps 100 at a time (the meter and the file's warning go red past that); the file holds 255.
   - **AI net** (`.AIP`): the paths the computer monsters walk. Each node has a position and a type (0 for nearly all; the AI only follows
     paths of the type it stands on, so a type splits the net into sub-nets), each link a width (the lane is width x 10 to each side; the
     disc's are 12 to 24). The right panel lists the selected node's links, each with its width, a **Two-way** switch (adds or takes away the
     link back) and a cut (both directions); the one-way links that end at the node are listed with a button to link back, and "To" plus
     **Link** joins the node and the number typed both ways with the width under **New links** in the left panel. The view draws the links
-    (amber around the selected node). Limits: 255 nodes, 6 links per node and 450 paths (a two-way link is one path; the game ignores the
+    and numbers every node as the list does (the nodes in reach of the screen, clear of each other; the selected node and the hovered
+    one show their type too). The selected node is bigger and ringed, its links are amber and the other links dimmer, its neighbours are
+    bigger, and a one-way link has an arrow pointing the way it goes. A row under the pointer in the list outlines its node in the view. Limits: 255 nodes, 6 links per node and 450 paths (a two-way link is one path; the game ignores the
     rest). A stage without its own net gives the CPUs nowhere to go: CAPITOL and TRAINING have 2 nodes, METRO none (a METRO-based custom
     stage leaves the CPU lists unless it brings its own). **Clear net** asks first and **Ctrl+Z** brings the nodes back.
   - **Vehicle net** (`.FOP`): the roads and flight paths of the cars, helicopters, flying saucers and tanks (`FORMATS.md`, "Path nets"). The
@@ -902,7 +912,7 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
     a drop (how far below the path a helicopter may fly when it chases a target, times 10; the disc's car streets all have 0, its helicopters'
     links 0 to 26 and its saucers' up to 101; the widths run 5 to 12 for cars, 7 to 29 for helicopters and 8 to 111 for saucers). A road is
     two-way when both ends link to each other. Limits: 255 nodes and 6 links per node. The view colors the roads by who drives them (yellow
-    cars, green helicopters, pink saucers, orange tanks) and draws them faint in the other modes only with **Display ▸ Vehicle net** on.
+    cars, green helicopters, pink saucers, orange tanks) and draws them faint in the other modes only with **Display ▸ Vehicle net** on. Nodes are numbered, and one-way links have arrows, as in the AI net.
     A net of one node gives the vehicles nowhere to drive, and none at all brings back the game's 2 default nodes.
 - **Stage picture:** Stage tab ▸ Pictures ▸ Stage picture saves the middle 2:1 band of the view, 512x256, as
   `mods/<mod>/levelpics/<name>.png` for a custom stage (`<id>`) and for Training, Lake Powell and Tokyo DM; the other game stages have

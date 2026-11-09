@@ -47,7 +47,8 @@ export const pupGroup = (type) => (PUP_GROUPS.find((g) => g.types.includes(type)
 
 // ---- colors: one table for the view, the list and the legend
 const SPT_COLORS = [0xFFC233, 0x4AE08A, 0xF0605A, 0x36C5F0];
-const PUP_COLORS = { health: 0xF0605A, stamina: 0x4AE08A, special: 0x36C5F0, cloak: 0x36C5F0, story: 0x36C5F0 };
+// power-ups: health green, stamina blue, special weapon red, cloak a gray cube, the story items amber
+const PUP_COLORS = { health: 0x4AE08A, stamina: 0x36C5F0, special: 0xF0605A, cloak: 0xA8B0BC, story: 0xFFC233 };
 const FOP_COLORS = [0xFFD24A, 0x5EE0A0, 0xFF6FB5, 0xFF8A3D];      // car street, helicopter, flying saucer, tank and truck
 export const netColor = (kind, type) => (kind === 'AIP' ? (type ? 0x36C5F0 : 0xB57BFF) : (FOP_COLORS[type] ?? 0xFFFFFF));
 export function markerColor(kind, p) {
@@ -56,6 +57,15 @@ export function markerColor(kind, p) {
   return netColor(kind, p.type);
 }
 export const hexColor = (c) => '#' + c.toString(16).padStart(6, '0');
+// the shape in the view, in the list and in the legend: a cone (start point), a cube (cloak), a ball (the rest)
+export function markerShape(kind, p) {
+  if (kind === 'SPT') return 'cone';
+  return kind === 'PUP' && pupGroup(p.type) === 'cloak' ? 'cube' : 'ball';
+}
+// the text over a start point in the view: its name, and that it is past its list's room
+export function sptViewLabel(points, i, caps) {
+  return sptLabel(points, i) + (sptOver(points, i, caps) ? ' · past room' : '');
+}
 
 // ---- the list's sections for a layer: [{id, title, rows: [index...], n, cap}] (cap: the room, when there is one)
 export function sections(kind, points, lists, caps) {

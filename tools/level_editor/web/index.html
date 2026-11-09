@@ -200,8 +200,8 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <label class="switch" title="Pedestrian groups (violet cones) and their sidewalks (cyan lanes), faint, while you edit objects (P). The Pedestrians mode edits them."><input type="checkbox" id="pedsOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/walk.svg)"></i><span class="tx">Pedestrians</span><kbd>P</kbd></label>
       <label class="switch" title="What the game collides with, with your changes applied: triangles green (buildings, a prop's coll_ meshes), convex hulls cyan (hull_ meshes), trigger volumes and animated parts as orange boxes; dimmer is a broken state of a building. What touches the selection stays bright."><input type="checkbox" id="collOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/cube-scan.svg)"></i><span class="tx">Collision</span><kbd>C</kbd></label>
       <div class="help" id="collInfo" hidden></div>
-      <label class="switch" title="Start points: a cone for each place a monster appears, with a line for the way it faces. Faint while you edit something else; the Start points mode (3) edits them."><input type="checkbox" id="sptOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/flag-outline.svg)"></i><span class="tx">Start points</span></label>
-      <label class="switch" title="Power-ups: a ball for each pickup lying in the stage. Faint while you edit something else; the Power-ups mode (4) edits them."><input type="checkbox" id="pupOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/heart-plus-outline.svg)"></i><span class="tx">Power-ups</span></label>
+      <label class="switch" title="Start points: a cone for each place a monster appears, labeled with its place in its list, with a line for the way it faces. Faint while you edit something else; the Start points mode (3) edits them."><input type="checkbox" id="sptOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/flag-outline.svg)"></i><span class="tx">Start points</span></label>
+      <label class="switch" title="Power-ups: a ball for each pickup lying in the stage: green health, blue stamina, red special weapon, amber story items; a gray cube for the cloak. Faint while you edit something else; the Power-ups mode (4) edits them."><input type="checkbox" id="pupOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/heart-plus-outline.svg)"></i><span class="tx">Power-ups</span></label>
       <label class="switch" title="The AI net: the paths the computer monsters walk. Faint while you edit something else; the AI net mode (5) edits it."><input type="checkbox" id="aipOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/graph-outline.svg)"></i><span class="tx">AI net</span></label>
       <label class="switch" title="The vehicle net drawn in the view, its roads colored by who drives them: yellow cars, green helicopters, pink flying saucers, orange tanks. Faint while you edit something else; the Vehicle net mode (6) edits it."><input type="checkbox" id="fopOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/road-variant.svg)"></i><span class="tx">Vehicle net</span></label>
     </div>
@@ -597,7 +597,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
         </dl>
         <h3>Start points, power-ups, nets</h3>
         <dl class="kl">
-          <dt>Click</dt><dd>Select a marker (in its own mode)</dd>
+          <dt>Click</dt><dd>Select a marker (in its own mode); the pointer on one outlines it and names it</dd>
           <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo in this layer; Save writes its file</dd>
         </dl>
       </div>

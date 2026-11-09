@@ -54,6 +54,24 @@ t('one color for the view, the list and the legend', () => {
   assert.equal(M.hexColor(0x0000FF), '#0000ff');
 });
 
+t('power-ups: health green, stamina blue, special weapon red, the cloak a gray cube', () => {
+  const col = (type) => M.hexColor(M.markerColor('PUP', { type }));
+  for (const t of [0, 1, 2, 6]) assert.equal(col(t), '#4ae08a');
+  for (const t of [3, 4, 5, 7]) assert.equal(col(t), '#36c5f0');
+  assert.equal(col(8), '#f0605a');
+  assert.equal(col(9), '#a8b0bc');
+  for (const t of [10, 15, 19]) assert.equal(col(t), '#ffc233');
+  for (const t of [0, 3, 8, 10]) assert.equal(M.markerShape('PUP', { type: t }), 'ball');
+  assert.equal(M.markerShape('PUP', { type: 9 }), 'cube');
+  assert.equal(M.markerShape('SPT', { list: 1 }), 'cone');
+  assert.equal(M.markerShape('AIP', { type: 0 }), 'ball');
+});
+
+t('the text over a start point is its place in its list; one past the room says so', () => {
+  const caps = [1, 2, 20, 20], p = [{ list: 1 }, { list: 2 }, { list: 1 }, { list: 0 }, { list: 1 }, { list: 3 }];
+  assert.deepEqual(p.map((_, i) => M.sptViewLabel(p, i, caps)), ['Player 1', 'CPU 1', 'Player 2', 'Story', 'Player 3 · past room', 'Respawn 1']);
+});
+
 t('the list sections', () => {
   const lists = ['story', 'players', 'cpu', 'respawn'], caps = [1, 2, 20, 20], p = spt(2, 2, 1);
   const s = M.sections('SPT', p, lists, caps);

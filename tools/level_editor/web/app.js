@@ -19,7 +19,9 @@ import { testBody, openTestOpts, loadTestOpts, testSummary } from './testopts.js
 import { createRuler } from './ruler.js';
 import { createMinimap } from './minimap.js';
 import { KINDS, isNet, LAYERS, KIND_OF_MODE, FILE_MAX, SPT_SHORT, sptOver, PUP_GROUPS, markerColor, hexColor, sections as mkSections,
-         markerName, netTwoWay, netPaths, removeNode, linkBoth, unlink, oneWayIn } from './markers.js';
+         markerName, netTwoWay, netPaths, removeNode, linkBoth, unlink, oneWayIn, markerShape, sptViewLabel } from './markers.js';
+import { markerScale, EXTENT, SEL_GROW, pickBest } from './marker_math.js';
+import { createMarkerLabels } from './markerlabels.js';
 
 // The GS modulates and blends the bytes as they are: no color management (texture, vertex and interface colors stay raw).
 THREE.ColorManagement.enabled = false;
@@ -1851,7 +1853,7 @@ function deletedHit(ray, far = Infinity) {
 
 // Hover: what a click would pick, outlined in white, and the pointer as a hand over it. At most 30 raycasts a second, from the
 // render loop, and none while a button is down (drag, look, band, gizmo) or the gizmo has the pointer.
-const hover = { at: null, last: 0, item: null, n: 0, dirty: false };
+const hover = { at: null, last: 0, item: null, n: 0, dirty: false, marker: -1, row: -1, shown: -1 };   // marker: under the pointer; row: its list row under it; shown: the one outlined
 canvas.addEventListener('pointermove', (e) => { hover.at = ndc(e); hover.client = [e.clientX, e.clientY]; hover.dirty = true; hover.buttons = e.buttons; });
 canvas.addEventListener('pointerleave', () => { hover.at = null; hover.dirty = true; });
 // what is under the pointer at p (NDC): {item} an object, {ped} a pedestrian marker, {deleted} a dashed box, or null
@@ -1888,7 +1890,8 @@ function hoverStep() {
   }
   hover.item = it;
   hover.marker = mk;
-  showMarkerRing(mk);
+  hover.shown = mk >= 0 ? mk : hover.row ?? -1;      // the pointer on a marker, or on its row in the list
+  showMarkerRing(hover.shown);
   const obj = it && !it.kind ? it : null;   // an object or a deleted original (pedestrian markers have a kind)
   hoverBox.visible = !!obj && obj.node.visible && !group.includes(obj);
   if (hoverBox.visible) hoverBox.setFromObject(obj.node);
@@ -3857,8 +3860,10 @@ function layerLoaded(kind) {
   if (layerOf() === kind) { mkFillBar(); showSel(); }
 }
 
-// ---- the views: a cone for each start point (a line for the way it faces), a ball for a power-up, balls and lines for a net. The layer of the
-// open mode is full, the others faint; the selected marker is white, and a selected node's links amber.
+// ---- the views: a cone for each start point (a line for the way it faces), a ball for a power-up (a cube for the cloak), balls and lines for a
+// net. The layer of the open mode is full, the others faint. Every marker keeps its own color; the selected one is bigger and ringed, a
+// selected node's links are amber and the others dimmer, and a one-way link has an arrow. A marker grows with its distance from the camera
+// (marker_math.js markerScale), so that it stays readable over the whole stage; the click picks by the same size (pickMarker).
 function disposeView(g) {
   if (!g) return;
   scene.remove(g);
@@ -3880,16 +3885,35 @@ function syncLayerVisibility() {
     c.closest('.switch').classList.toggle('none', on);
   }
 }
+const extentOf = (kind) => (kind === 'SPT' ? EXTENT.SPT : kind === 'PUP' ? EXTENT.PUP : EXTENT.NODE);
+// how much bigger than the rest marker i is drawn: the selected one, and a net node next to it (the layer of the open mode only)
+function markerFactor(kind, L, i) {
+  if (layerOf() !== kind || L.sel < 0) return 1;
+  if (i === L.sel) return SEL_GROW;
+  return L.net && L.points[L.sel] && (L.points[L.sel].links.some((l) => l.to === i) || L.points[i].links.some((l) => l.to === L.sel)) ? 1.2 : 1;
+}
+const MARKER_EDGE = 0x222831;      // the outline of the cloak's cube, dark so that the gray reads over the buildings
 function pointGroup(kind, L) {
   const g = new THREE.Group(), on = layerOf() === kind, opacity = on ? 0.9 : 0.4;
+  g.userData.f = [];
   L.points.forEach((p, k) => {
-    const col = on && k === L.sel ? 0xFFFFFF : markerColor(kind, p);
+    const col = markerColor(kind, p), shape = markerShape(kind, p), f = markerFactor(kind, L, k);
     const mat = new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true, opacity });
     const base = toThree(p.pos);
-    const mesh = new THREE.Mesh(kind === 'SPT' ? new THREE.ConeGeometry(14, 50, 14) : new THREE.SphereGeometry(10, 12, 8), mat);
+    const geo = shape === 'cone' ? new THREE.ConeGeometry(14, 50, 14) : shape === 'cube' ? new THREE.BoxGeometry(16, 16, 16) : new THREE.SphereGeometry(10, 12, 8);
+    const mesh = new THREE.Mesh(geo, mat);
     mesh.position.copy(base).add(new THREE.Vector3(0, MARKER_LIFT[kind], 0));
     mesh.renderOrder = 998;
     mesh.raycast = () => {};
+    mesh.userData.mk = { i: k, f };
+    mesh.userData.shape = shape;
+    g.userData.f[k] = f;
+    if (shape === 'cube') {
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: MARKER_EDGE, depthTest: false, transparent: true, opacity }));
+      edges.renderOrder = 999;
+      edges.raycast = () => {};
+      mesh.add(edges);
+    }
     g.add(mesh);
     if (kind === 'SPT') {
       const h = (p.heading * Math.PI) / 180, fwd = toThree([p.pos[0] + Math.sin(h) * 60, p.pos[1] + Math.cos(h) * 60, p.pos[2] + 25]);
@@ -3900,49 +3924,168 @@ function pointGroup(kind, L) {
       g.add(line);
     }
   });
+  if (kind === 'SPT') g.userData.names = L.points.map((p, i) => sptViewLabel(L.points, i, L.caps));
   return g;
 }
+const AMBER = 0xFFC233;
 function netGroup(kind, L) {
   const g = new THREE.Group(), on = layerOf() === kind, opacity = on ? 1 : 0.4, up = new THREE.Vector3(0, MARKER_LIFT[kind], 0), byColor = new Map();
-  const sel = on ? L.sel : -1;
+  const sel = on ? L.sel : -1, arrows = [];
+  g.userData.f = [];
   L.points.forEach((p, i) => p.links.forEach((l) => {
-    if (netTwoWay(L.points, i, l.to) && l.to < i) return;
-    const c = i === sel || l.to === sel ? 0xFFC233 : markerColor(kind, p);
-    if (!byColor.has(c)) byColor.set(c, []);
-    byColor.get(c).push(toThree(p.pos).add(up), toThree(L.points[l.to].pos).add(up));
+    const two = netTwoWay(L.points, i, l.to), touches = i === sel || l.to === sel;
+    const a = toThree(p.pos).add(up), b = toThree(L.points[l.to].pos).add(up), c = touches ? AMBER : markerColor(kind, p);
+    if (!two) arrows.push({ a, b, c });
+    if (two && l.to < i) return;
+    const key = c + (sel >= 0 && !touches ? ':dim' : '');
+    if (!byColor.has(key)) byColor.set(key, { color: c, dim: sel >= 0 && !touches, pts: [] });
+    byColor.get(key).pts.push(a, b);
   }));
-  for (const [color, pts] of byColor) {
-    const o = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true, opacity }));
+  for (const { color, dim, pts } of byColor.values()) {
+    const o = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true, opacity: dim ? opacity * 0.4 : opacity }));
     o.renderOrder = 997;
     o.raycast = () => {};
     g.add(o);
   }
+  if (arrows.length) {
+    const m = new THREE.InstancedMesh(new THREE.ConeGeometry(3, 10, 8), new THREE.MeshBasicMaterial({ depthTest: false, transparent: true, opacity }), arrows.length);
+    arrows.forEach((r, k) => m.setColorAt(k, new THREE.Color(r.c)));
+    m.renderOrder = 998;
+    m.raycast = () => {};
+    m.frustumCulled = false;
+    g.userData.arrows = { mesh: m, links: arrows, at: null };
+    g.add(m);
+  }
   L.points.forEach((p, i) => {
-    const m = new THREE.Mesh(new THREE.SphereGeometry(i === sel ? 11 : 7, 10, 8),
-                             new THREE.MeshBasicMaterial({ color: i === sel ? 0xFFFFFF : markerColor(kind, p), depthTest: false, transparent: true, opacity }));
+    const f = markerFactor(kind, L, i);
+    const m = new THREE.Mesh(new THREE.SphereGeometry(7, 10, 8), new THREE.MeshBasicMaterial({ color: markerColor(kind, p), depthTest: false, transparent: true, opacity }));
     m.position.copy(toThree(p.pos)).add(up);
     m.renderOrder = 998;
     m.raycast = () => {};
+    m.userData.mk = { i, f };
+    g.userData.f[i] = f;
     g.add(m);
   });
   return g;
 }
-// the ring over the marker the pointer is on (a marker mode): it faces the camera and keeps about the same size on the screen
-const mkRing = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 32 }, (_, a) => new THREE.Vector3(Math.cos(a / 32 * Math.PI * 2), Math.sin(a / 32 * Math.PI * 2), 0))),
-                                  new THREE.LineBasicMaterial({ color: 0xFFFFFF, depthTest: false, transparent: true, opacity: 0.9 }));
-mkRing.renderOrder = 999;
-mkRing.visible = false;
-mkRing.raycast = () => {};
-scene.add(mkRing);
-function showMarkerRing(i) {
-  const k = layerOf(), p = k && i >= 0 ? lay(k).points[i] : null;
-  mkRing.visible = !!p;
-  if (!p) return;
-  mkRing.position.copy(toThree(p.pos));
-  mkRing.position.y += MARKER_LIFT[k];
-  mkRing.quaternion.copy(camera.quaternion);
-  mkRing.scale.setScalar(Math.max(8, camera.position.distanceTo(mkRing.position) * 0.03));
+// the arrows of the one-way links: a cone a bit past the middle of the link, pointing the way it goes, one size on the screen like the balls
+const _q = new THREE.Quaternion(), _m4 = new THREE.Matrix4(), _va = new THREE.Vector3(), _vb = new THREE.Vector3(), _vs = new THREE.Vector3(), _Y = new THREE.Vector3(0, 1, 0);
+function placeArrows(g) {
+  const A = g.userData.arrows;
+  if (!A || (A.at && A.at.equals(camera.position))) return;
+  A.at = (A.at || new THREE.Vector3()).copy(camera.position);
+  A.links.forEach((r, k) => {
+    _va.copy(r.b).sub(r.a);
+    const len = _va.length();
+    _va.multiplyScalar(1 / (len || 1));
+    _vb.copy(r.a).addScaledVector(_va, len * 0.62);
+    _q.setFromUnitVectors(_Y, _va);
+    _m4.compose(_vb, _q, _vs.setScalar(markerScale(camera.position.distanceTo(_vb))));
+    A.mesh.setMatrixAt(k, _m4);
+  });
+  A.mesh.instanceMatrix.needsUpdate = true;
 }
+// the world size of a marker as drawn now, and its place and radius on the screen
+function markerRadius(kind, L, i, c) {
+  return extentOf(kind).r * markerScale(camera.position.distanceTo(c)) * (L.view?.userData.f?.[i] ?? 1);
+}
+function markerCenter(kind, p) {
+  const c = toThree(p.pos);
+  c.y += MARKER_LIFT[kind] || 0;
+  return c;
+}
+// the rings: the pointer (or the list row) is on a marker; and the selected marker. They face the camera.
+function makeRing(opacity, n = 1) {
+  const g = new THREE.Group();
+  for (let k = 0; k < n; k++) {
+    const l = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(Array.from({ length: 40 }, (_, a) => new THREE.Vector3(Math.cos(a / 40 * Math.PI * 2), Math.sin(a / 40 * Math.PI * 2), 0))),
+                                 new THREE.LineBasicMaterial({ color: 0xFFFFFF, depthTest: false, transparent: true, opacity }));
+    l.scale.setScalar(1 + k * 0.1);
+    l.renderOrder = 999;
+    l.raycast = () => {};
+    g.add(l);
+  }
+  g.visible = false;
+  g.raycast = () => {};
+  scene.add(g);
+  return g;
+}
+const mkRing = makeRing(0.75), mkSelRing = makeRing(1, 2);
+let ringIdx = -1;
+function ringAt(ring, i, mult) {
+  const k = layerOf(), L = k && lay(k), p = L && i >= 0 ? L.points[i] : null;
+  ring.visible = !!p;
+  if (!p) return;
+  const c = markerCenter(k, p);
+  ring.position.copy(c);
+  ring.quaternion.copy(camera.quaternion);
+  ring.scale.setScalar(markerRadius(k, L, i, c) * mult);
+}
+function showMarkerRing(i) {
+  ringIdx = i;
+  ringAt(mkRing, i, 1.3);
+}
+function ringsStep() {
+  const k = layerOf();
+  ringAt(mkRing, ringIdx, 1.3);
+  ringAt(mkSelRing, k ? lay(k).sel : -1, 1.3);
+}
+
+// ---- the text over the markers: which start point it is, a node's number, the name of the one the pointer is on
+const markerLabels = createMarkerLabels(canvas.parentElement);
+const _lv = new THREE.Vector3();
+// A start point is labeled with its place in its list, in the file's order (sptLabel); a net node with the number its row shows; a
+// power-up only while it is hovered or selected. In the Objects and Pedestrians modes' faint overlay only a short list of start points is labeled.
+const OVERLAY_LABELS_MAX = 12;
+function markerLabelItems(w, h) {
+  const items = [], mode = layerOf();
+  for (const kind of KINDS) {
+    const L = lay(kind), g = L.view;
+    if (!g || !g.visible) continue;
+    const own = mode === kind;
+    if (!own && !(mode === null && kind === 'SPT' && L.points.length <= OVERLAY_LABELS_MAX)) continue;
+    const ext = extentOf(kind), hot = own ? hover.shown : -1;
+    for (let i = 0; i < L.points.length; i++) {
+      const p = L.points[i], isSel = own && i === L.sel, isHot = i === hot, f = g.userData.f?.[i] ?? 1;
+      let text, prio = 3, cls = own ? '' : 'dim', wide = 0;
+      if (isHot) prio = 0; else if (isSel) prio = 1; else if (f > 1) prio = 2;
+      if (kind === 'SPT') text = g.userData.names[i];
+      else if (kind === 'PUP') { if (!isHot && !isSel) continue; text = markerName(kind, L.points, i, L.lists); }
+      else if (isHot || isSel) text = `${i + 1} · ${kind === 'FOP' ? L.lists[p.type] || `Type ${p.type}` : `Type ${p.type}`}`;
+      else { text = String(i + 1); cls += ' num'; wide = text.length * 6.4 + 12; }
+      if (isSel) cls += ' sel';
+      if (isHot) cls += ' hot';
+      if (kind === 'SPT' && text.endsWith('past room')) cls += ' warn';
+      const c = markerCenter(kind, p), d = camera.position.distanceTo(c);
+      _lv.copy(c);
+      _lv.y += ext.top * markerScale(d) * f;
+      _lv.project(camera);
+      if (_lv.z > 1) continue;
+      items.push({ key: kind + i, text, x: (_lv.x + 1) / 2 * w, y: (1 - _lv.y) / 2 * h - 4, prio: prio + (prio >= 3 ? Math.min(d / 1e5, 0.99) : 0), color: hexColor(markerColor(kind, p)), cls, w: wide || 0, stack: kind === 'SPT' });
+    }
+  }
+  return items;
+}
+// once a frame: the markers grow with the distance, the arrows turn, the rings and the labels follow
+function markerFrame() {
+  for (const kind of KINDS) {
+    const g = lay(kind).view;
+    if (!g || !g.visible) continue;
+    const at = g.userData.at;
+    if (!at || !at.equals(camera.position)) {
+      g.userData.at = (at || new THREE.Vector3()).copy(camera.position);
+      for (const m of g.children) {
+        const mk = m.userData.mk;
+        if (mk) m.scale.setScalar(markerScale(camera.position.distanceTo(m.position)) * mk.f);
+      }
+    }
+    placeArrows(g);
+  }
+  ringsStep();
+  const host = canvas.parentElement;
+  markerLabels.set(markerLabelItems(host.clientWidth, host.clientHeight), host.clientWidth, host.clientHeight);
+}
+frameHooks.push(markerFrame);
 
 // ---- picking, the gizmo
 const markerSel = () => { const k = layerOf(); if (!k) return null; const L = lay(k); return L.points[L.sel] || null; };
@@ -3963,18 +4106,28 @@ function markerScreen(kind, p) {
   const r = canvas.getBoundingClientRect();
   return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height];
 }
-// the marker of the open layer under the pointer: the nearest one within 18 px, or -1
+// The marker of the open layer under the pointer, or -1. Each marker takes clicks within its own size on the screen plus a margin (12 to 64
+// px, marker_math.js pickRadius); of the markers that reach the pointer, the one whose surface it is nearest to wins.
+// where marker i of the open layer is on the screen, in client pixels, and how big: {x, y, rPx}, or null behind the camera
+function markerPx(i, r = canvas.getBoundingClientRect()) {
+  const kind = layerOf(), L = kind && lay(kind), p = L && L.points[i];
+  if (!p) return null;
+  const c = markerCenter(kind, p), a = c.clone().project(camera);
+  if (a.z > 1) return null;
+  const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+  const b = c.clone().addScaledVector(up, markerRadius(kind, L, i, c)).project(camera);
+  return { x: r.left + (a.x + 1) / 2 * r.width, y: r.top + (1 - a.y) / 2 * r.height, rPx: Math.hypot((b.x - a.x) * r.width / 2, (b.y - a.y) * r.height / 2) };
+}
 function pickMarker(e) {
   const kind = layerOf();
   if (!kind) return -1;
-  let best = -1, bd = 18;
+  camera.updateMatrixWorld();
+  const r = canvas.getBoundingClientRect(), cands = [];
   lay(kind).points.forEach((p, i) => {
-    const s = markerScreen(kind, p);
-    if (!s) return;
-    const d = Math.hypot(s[0] - e.clientX, s[1] - e.clientY);
-    if (d < bd) { bd = d; best = i; }
+    const m = markerPx(i, r);
+    if (m) cands.push({ i, d: Math.hypot(m.x - e.clientX, m.y - e.clientY), rPx: m.rPx });
   });
-  return best;
+  return pickBest(cands);
 }
 function selectMarker(i) {
   const kind = layerOf();
@@ -4252,6 +4405,13 @@ const NONE_TEXT = {
   AIP: 'This stage has no AI net. Add puts a node where the view looks; with a node selected, the new one links to it.',
   FOP: 'This stage has no vehicle net. Add puts a node where the view looks; with a node selected, the new one links to it.',
 };
+// the marker as the view draws it, small: its shape and its color (the rows and the legend)
+function shapeSwatch(kind, p) {
+  const s = document.createElement('i');
+  s.className = 'shape ' + markerShape(kind, p);
+  s.style.setProperty('--c', hexColor(markerColor(kind, p)));
+  return s;
+}
 function mkRow(kind, L, i) {
   const p = L.points[i], li = document.createElement('li');
   li.className = 'it' + (i === L.sel ? ' sel' : '');
@@ -4259,9 +4419,9 @@ function mkRow(kind, L, i) {
   li.tabIndex = -1;                    // reached with the arrows from a section header
   li.setAttribute('role', 'option');
   li.setAttribute('aria-selected', String(i === L.sel));
-  const k = icon(LAYERS[kind].icon), h = document.createElement('span'), bd = document.createElement('span'), hd = document.createElement('span');
-  k.classList.add('k');
-  k.style.color = hexColor(markerColor(kind, p));
+  const k = document.createElement('span'), h = document.createElement('span'), bd = document.createElement('span'), hd = document.createElement('span');
+  k.className = 'k';
+  k.append(shapeSwatch(kind, p));
   h.className = 'h'; bd.className = 'bd'; hd.className = 'hd num';
   h.textContent = markerName(kind, L.points, i, L.lists);
   if (kind === 'SPT') {
@@ -4282,11 +4442,14 @@ function mkRow(kind, L, i) {
   li.title = `${h.textContent} · x ${Math.round(p.pos[0])}, y ${Math.round(p.pos[1])}, z ${Math.round(p.pos[2])}`;
   li.append(k, h, bd, hd);
   li.onclick = () => { selectMarker(i); focusSelection(); };
+  li.onmouseenter = () => { hover.row = i; hover.dirty = true; };
+  li.onmouseleave = () => { if (hover.row === i) hover.row = -1; hover.dirty = true; };
   return li;
 }
 function refreshMk() {
   const kind = layerOf();
   if (!kind) return;
+  hover.row = -1;
   const L = lay(kind), ul = $('mkList'), frag = document.createDocumentFragment();
   mkMeters(kind, L);
   mkFoot(kind);
@@ -4351,25 +4514,23 @@ $('mkList').addEventListener('keydown', (e) => {
 
 // ---- the right panel: nothing selected (what the colors are), and the selected marker
 const MK_HELP = {
-  SPT: 'Click a start point, in the view or in the list. A monster appears at the nearest start point of its list: Player for the first life of the players, CPU for the computer monsters, Respawn after a fall.',
-  PUP: 'Click a power-up, in the view or in the list. The game keeps 100 at a time; the file holds 255.',
-  AIP: 'Click a node, in the view or in the list. A computer monster walks the links between nodes; a two-way link is one path of the 450 the game keeps.',
-  FOP: 'Click a node, in the view or in the list. Cars, helicopters, flying saucers and tanks drive the links between nodes of their type.',
+  SPT: 'Click a start point, in the view or in the list. The label over a cone is its place in its list, in the order of the file: Player for the first life of the players, CPU for the computer monsters, Respawn after a fall.',
+  PUP: 'Click a power-up, in the view or in the list. Health is green, stamina blue, the special weapon red, the cloak a gray cube. The game keeps 100 at a time; the file holds 255.',
+  AIP: 'Click a node, in the view or in the list. A computer monster walks the links between nodes; a two-way link is one path of the 450 the game keeps. The numbers are the ones in the list; an arrow marks a one-way link; the links of the selected node are amber.',
+  FOP: 'Click a node, in the view or in the list. Cars, helicopters, flying saucers and tanks drive the links between nodes of their type. The numbers are the ones in the list; an arrow marks a one-way link; the links of the selected node are amber.',
 };
 function showMarkerLegend(kind) {
   const L = lay(kind), ul = $('mkLegend');
   setIc($('mkNoSelIc'), LAYERS[kind].icon);
   $('mkNoSelTx').textContent = MK_HELP[kind];
   $('mkNoSelHelp').textContent = 'Add, on the bar at the top of the left panel, puts a new one where the view looks. Drag the arrows to move it. Ctrl+Z undoes while this mode is open; Save to mod writes the file.';
-  const rows = kind === 'SPT' ? SPT_SHORT.map((t, l) => [markerColor('SPT', { list: l }), `${t}${L.lists[l] ? ` · ${L.lists[l]}` : ''}`])
-    : kind === 'PUP' ? PUP_GROUPS.map((g) => [markerColor('PUP', { type: g.types[0] }), g.title])
-    : kind === 'AIP' ? [[markerColor('AIP', { type: 0 }), 'Type 0, the main net'], [markerColor('AIP', { type: 1 }), 'Any other type']]
-    : (L.lists.length ? L.lists : ['Car street', 'Helicopter', 'Flying saucer', 'Tank and truck']).map((t, i) => [markerColor('FOP', { type: i }), t]);
-  ul.replaceChildren(...rows.map(([c, t]) => {
-    const li = document.createElement('li'), sw = document.createElement('i');
-    sw.className = 'sw dot';
-    sw.style.background = hexColor(c);
-    li.append(sw, t);
+  const rows = kind === 'SPT' ? SPT_SHORT.map((t, l) => [{ list: l }, `${t}${L.lists[l] ? ` · ${L.lists[l]}` : ''}`])
+    : kind === 'PUP' ? PUP_GROUPS.map((g) => [{ type: g.types[0] }, g.title])
+    : kind === 'AIP' ? [[{ type: 0 }, 'Type 0, the main net'], [{ type: 1 }, 'Any other type']]
+    : (L.lists.length ? L.lists : ['Car street', 'Helicopter', 'Flying saucer', 'Tank and truck']).map((t, i) => [{ type: i }, t]);
+  ul.replaceChildren(...rows.map(([p, t]) => {
+    const li = document.createElement('li');
+    li.append(shapeSwatch(kind, p), t);
     return li;
   }));
 }
@@ -4613,15 +4774,16 @@ setMini(store.get('mini', '0') === '1');
 // Screenshot: the view as a PNG download; the gizmo is left out of it
 $('shotBtn').onclick = () => {
   if (!stageRoot) return;
-  const gv = gizmo.visible, hv = hoverBox.visible, rv = mkRing.visible;
+  const gv = gizmo.visible, hv = hoverBox.visible, rv = mkRing.visible, sv = mkSelRing.visible;
   gizmo.visible = false;
   hoverBox.visible = false;
   mkRing.visible = false;
+  mkSelRing.visible = false;
   let url = '';
   try {
     renderer.render(scene, camera);          // the canvas keeps no frame between renders: read it right after one
     url = renderer.domElement.toDataURL('image/png');
-  } finally { gizmo.visible = gv; hoverBox.visible = hv; mkRing.visible = rv; }
+  } finally { gizmo.visible = gv; hoverBox.visible = hv; mkRing.visible = rv; mkSelRing.visible = sv; }
   const d = new Date(), z = (n) => String(n).padStart(2, '0');
   const name = `${stageName}_${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}.png`;
   const a = Object.assign(document.createElement('a'), { href: url, download: name });
@@ -5624,7 +5786,7 @@ if (new URLSearchParams(location.search).has('debug')) {
                        boxCenter: (o) => new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()), setGrid, setTool, setSnap, showKeys, showHint,
                        focusSelection, HINTS, get hintKey() { return hint.key; }, get hoverCount() { return hover.n; },
                        get gridMinor() { return gridMinor; }, get gridMajor() { return gridMajor; },
-                       get ui() { return ui; }, get pt() { return pt; }, get ptViews() { return ptViews; }, markerScreen, pickMarker, get marker() { return marker; }, markerCtx, get ptSaved() { return ptSaved; }, get outTab() { return outTab; },
+                       get ui() { return ui; }, get pt() { return pt; }, get ptViews() { return ptViews; }, markerScreen, pickMarker, markerPx, markerFrame, markerLabels: () => markerLabels.shown(), mkRing, mkSelRing, get marker() { return marker; }, markerCtx, get ptSaved() { return ptSaved; }, get outTab() { return outTab; },
                        get history() { return history; }, get future() { return future; }, get dirty() { return dirty; },
                        get modNow() { return modNow; }, get keep() { return keep; }, get game() { return game; },
                        get gizmoObject() { return gizmo.object || null; }, get gizmoMode() { return gizmo.getMode(); },

@@ -802,6 +802,171 @@ await check('markers in the view: the same for the nodes of the AI net', async (
   must(await until(`${D}.nets.AIP.points[${idx}].pos[1] === ${y0}`, 40), 'Revert did not put the node back');
   await goMode('objects');
 });
+// the labels the view should show for a layer's points, worked out here from the rules (a start point: its place in its list)
+const SPT_NAMES = ['Story', 'Player', 'CPU', 'Respawn'];
+const expectSptNames = (pts, caps) => pts.map((p, i) => {
+  const n = pts.slice(0, i + 1).filter((q) => q.list === p.list).length;
+  return (p.list === 0 ? 'Story' : SPT_NAMES[p.list] + ' ' + n) + (n > caps[p.list] ? ' · past room' : '');
+});
+const labelsNow = async () => JSON.parse(await ev('JSON.stringify(window.wotmDebug.markerLabels())'));
+await check('start points in the view: a label over each cone names it, and goes with the camera', async () => {
+  await goMode('spt');
+  await ev(`${D}.setView(false)`);
+  await ev(`${D}.frameAll()`);
+  await ev(`${D}.selectMarker(-1)`);
+  const pts = JSON.parse(await ev(`JSON.stringify(${D}.pt.SPT.points)`)), caps = JSON.parse(await ev(`JSON.stringify(${D}.pt.SPT.caps)`));
+  must(pts.length > 0, 'the stage has no start points');
+  const names = expectSptNames(pts, caps);
+  const have = await ev(`JSON.stringify(${D}.ptViews.SPT.userData.names)`);
+  must(have === JSON.stringify(names), `the names of the cones are not the places in their lists: ${have} vs ${JSON.stringify(names)}`);
+  must(await until(`${D}.markerLabels().length > 0`, 20), 'no label is drawn over the cones');
+  const shown = await labelsNow();
+  must(shown.every((l) => names.includes(l.text)), 'a label is not a start point name: ' + JSON.stringify(shown.map((l) => l.text)));
+  must(new Set(shown.map((l) => l.text)).size === shown.length, 'the same name is drawn twice');
+  must(await ev(`[...document.querySelectorAll('.mk-label')].every((e) => getComputedStyle(e).pointerEvents === 'none')`), 'a label takes the pointer');
+  // a label sits over its marker: over the cone's tip (which leans to a side when the view is oblique), its bottom above the cone's centre
+  const over = await ev(`(() => { const D = window.wotmDebug, bad = []; for (const e of document.querySelectorAll('.mk-label:not([hidden])')) { const b = e.getBoundingClientRect();
+    const i = D.ptViews.SPT.userData.names.indexOf(e.textContent); const m = D.markerPx(i); if (!m || Math.abs((b.left + b.right) / 2 - m.x) > m.rPx || b.bottom > m.y) bad.push([e.textContent, m && Math.round((b.left + b.right) / 2 - m.x), m && Math.round(b.bottom - m.y)]); } return JSON.stringify(bad); })()`);
+  must(over === '[]', 'a label is not over its cone: ' + over);
+  await shot('markers_spt_labels');
+  // the selected one is labeled, ringed, bigger and keeps its color
+  const idx = pts.length - 1;
+  await ev(`${D}.selectMarker(${idx})`);
+  must(await until(`${D}.markerLabels().some((l) => l.cls.includes('sel'))`, 20), 'the selected start point has no label');
+  must(await ev(`${D}.mkSelRing.visible`), 'the selected start point has no ring');
+  must(await ev(`${D}.ptViews.SPT.children.filter((m) => m.userData.mk).every((m) => m.material.color.getHex() !== 0xFFFFFF)`), 'a cone turned white');
+  must(await ev(`${D}.ptViews.SPT.children.find((m) => m.userData.mk && m.userData.mk.i === ${idx}).userData.mk.f > 1`), 'the selected cone is not bigger');
+  await ev(`${D}.selectMarker(-1)`);
+  // behind the camera: no label
+  await ev(`${D}.setView(true)`);
+  await ev(`${D}.fly.yaw += Math.PI`);
+  must(await until(`${D}.markerLabels().length === 0`, 40), 'labels are drawn for markers behind the camera: ' + JSON.stringify(await labelsNow()));
+  await ev(`${D}.fly.yaw -= Math.PI`);
+  // the other modes: the cones are faint scenery with their labels, when the list is short
+  await goMode('objects');
+  const few = pts.length <= 12;
+  must(await until(`(${D}.markerLabels().length > 0) === ${few}`, 40), `the labels over the faint cones are not as expected for ${pts.length} start points`);
+  must(await ev(`[...document.querySelectorAll('.mk-label:not([hidden])')].every((e) => e.classList.contains('dim'))`), 'a label of the faint cones is not dimmed');
+  await ev(`${D}.setView(false)`);
+});
+await check('markers in the view: a click inside the visible cone picks it when the camera is close', async () => {
+  await goMode('spt');
+  await ev(`${D}.setView(true)`);
+  const i = await ev(`${D}.pt.SPT.points.length - 1`);
+  await ev(`${D}.selectMarker(${i})`);
+  await ev(`${D}.focusSelection()`);
+  await sleep(900);
+  await ev(`${D}.selectMarker(-1)`);
+  await sleep(300);
+  const m = JSON.parse(await ev(`JSON.stringify(${D}.markerPx(${i}))`));
+  must(m && m.rPx > 30, 'the camera did not come close to the cone: ' + JSON.stringify(m));
+  // 80% of the way to the tip: inside the cone, further from its centre than the old 18 px
+  const y = m.y - m.rPx * 0.8;
+  must(y > 130, 'the test point is under the bars');
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: m.x, y });
+  must(await until(`${D}.hover.marker === ${i}`, 20), 'the pointer inside the cone is not on it: ' + await ev(`${D}.hover.marker`));
+  await clickAt(m.x, y);
+  must(await until(`${D}.markerCtx().sel === ${i}`, 20), `a click inside the cone, ${Math.round(m.rPx * 0.8)} px from its centre, did not pick it`);
+  must(await ev(`${D}.sel === null`), 'a building was picked');
+  // far out, the click still finds a marker of a few pixels
+  await ev(`${D}.selectMarker(-1)`);
+  await ev(`${D}.frameAll()`);
+  await sleep(500);
+  const far = JSON.parse(await ev(`JSON.stringify(${D}.markerPx(${i}))`));
+  if (far && far.x > 330 && far.x < 1200 && far.y > 130) {
+    await clickAt(far.x + 7, far.y + 5);
+    must(await until(`${D}.markerCtx().sel === ${i}`, 20), 'a click 9 px off a far marker did not pick it');
+  }
+  await ev(`${D}.selectMarker(-1)`);
+  await goMode('objects');
+  await ev(`${D}.setView(false)`);
+});
+await check('power-ups in the view: health green, stamina blue, special weapon red, the cloak a gray cube; the rows and the legend agree', async () => {
+  await goMode('pup');
+  await ev(`${D}.setView(false)`);
+  const L = `${D}.lay('PUP')`;
+  const at = JSON.parse(await ev(`JSON.stringify(${L}.points[0] ? ${L}.points[0].pos : [0, 0, 0])`));
+  // one of each kind of power-up, beside the stage's own
+  const types = [0, 1, 2, 6, 3, 4, 5, 7, 8, 9, 10];
+  const n0 = await ev(`${L}.points.length`);
+  await ev(`(() => { const D = window.wotmDebug, L = D.lay('PUP'); ${JSON.stringify(types)}.forEach((t, k) => L.points.push({ type: t, pos: [${at[0]} + k * 120, ${at[1]}, ${at[2]}], flags: 7, w: 0, sel: 0 })); D.selectMarker(-1); })()`);
+  const want = { 0: 0x4AE08A, 1: 0x4AE08A, 2: 0x4AE08A, 6: 0x4AE08A, 3: 0x36C5F0, 4: 0x36C5F0, 5: 0x36C5F0, 7: 0x36C5F0, 8: 0xF0605A, 9: 0xA8B0BC, 10: 0xFFC233 };
+  const got = JSON.parse(await ev(`JSON.stringify(${D}.lay('PUP').points.map((p, i) => { const m = ${D}.ptViews.PUP.children.find((c) => c.userData.mk && c.userData.mk.i === i); return [p.type, m.material.color.getHex(), m.geometry.type]; }))`));
+  for (const [type, hex, geo] of got) {
+    if (want[type] !== undefined) must(hex === want[type], `power-up type ${type} is ${hex.toString(16)}, not ${want[type].toString(16)}`);
+    must((type === 9) === (geo === 'BoxGeometry'), `power-up type ${type} is a ${geo}`);
+  }
+  must([8, 9, 10].every((t) => got.some(([ty]) => ty === t)), 'the test power-ups are missing');
+  // the rows carry the same color and shape
+  await ev(`${D}.setMode('spt')`);
+  await goMode('pup');
+  const rows = JSON.parse(await ev(`JSON.stringify([...document.querySelectorAll('#mkList li.it')].map((li) => [li.querySelector('.shape').className, li.querySelector('.shape').style.getPropertyValue('--c')]))`));
+  must(rows.length >= types.length, 'the list has fewer rows than power-ups');
+  must(rows.some(([cls, c]) => cls.includes('cube') && c === '#a8b0bc'), 'the cloak row is not a gray cube');
+  must(rows.some(([cls, c]) => cls.includes('ball') && c === '#f0605a'), 'no red ball in the rows');
+  must(rows.some(([cls, c]) => cls.includes('ball') && c === '#4ae08a'), 'no green ball in the rows');
+  must(rows.some(([cls, c]) => cls.includes('ball') && c === '#36c5f0'), 'no blue ball in the rows');
+  // the legend, with nothing selected
+  const leg = JSON.parse(await ev(`JSON.stringify([...document.querySelectorAll('#mkLegend li')].map((li) => [li.textContent.trim(), li.querySelector('.shape').className.replace('shape ', ''), li.querySelector('.shape').style.getPropertyValue('--c')]))`));
+  must(JSON.stringify(leg) === JSON.stringify([['Health', 'ball', '#4ae08a'], ['Stamina', 'ball', '#36c5f0'], ['Special weapon', 'ball', '#f0605a'], ['Cloak', 'cube', '#a8b0bc'], ['Story items', 'ball', '#ffc233']]), 'the legend is ' + JSON.stringify(leg));
+  // the selected one keeps its color and is named
+  const pick = n0 + types.indexOf(8);
+  await ev(`${D}.selectMarker(${pick})`);
+  must(await ev(`${D}.ptViews.PUP.children.find((c) => c.userData.mk && c.userData.mk.i === ${pick}).material.color.getHex() === 0xF0605A`), 'the selected power-up lost its color');
+  must(await until(`${D}.markerLabels().some((l) => l.cls.includes('sel'))`, 20), 'the selected power-up has no label');
+  await ev(`${D}.selectMarker(-1)`);
+  await ev(`${D}.frameAll()`);
+  await sleep(600);
+  await shot('markers_pup_colors');
+  await ev(`document.getElementById('mkRevert').click()`);
+  await goMode('objects');
+});
+await check('net nodes in the view: every node has its number, the selected one its name, its links are amber and a one-way link has an arrow; a row lights its node', async () => {
+  await goMode('aip');
+  await ev(`${D}.setView(false)`);
+  await ev(`${D}.frameAll()`);
+  await ev(`${D}.selectMarker(-1)`);
+  const n = await ev(`${D}.lay('AIP').points.length`);
+  must(n > 1, 'the stage has no AI net');
+  must(await until(`${D}.markerLabels().length > 0`, 40), 'no node is numbered');
+  const shown = await labelsNow();
+  must(shown.every((l) => /^[1-9][0-9]*( |$)/.test(l.text) && +l.text.split(' ')[0] <= n), 'a label is not a node number: ' + JSON.stringify(shown.slice(0, 5)));
+  // a row under the pointer lights its node: the ring and the name
+  const idx = Math.min(2, n - 1);
+  const rowEvent = (type) => ev(`(() => { const li = [...document.querySelectorAll('#mkList li.it')].find((l) => l._mk === ${idx}); li.dispatchEvent(new MouseEvent('${type}')); })()`);
+  await rowEvent('mouseenter');
+  must(await until(`${D}.hover.shown === ${idx} && ${D}.mkRing.visible`, 40), 'a row under the pointer did not light its node');
+  must(await until(`${D}.markerLabels().some((l) => l.cls.includes('hot') && l.text.startsWith('${idx + 1} '))`, 40), 'the node of the row has no name: ' + JSON.stringify(await labelsNow()));
+  await rowEvent('mouseleave');
+  must(await until(`${D}.hover.shown === -1`, 40), 'the light stayed on after the pointer left the row');
+  // select a node with links: its links are amber, the others dimmer, its neighbours bigger
+  const k = await ev(`window.wotmDebug.lay('AIP').points.findIndex((p) => p.links.length > 0)`);
+  must(k >= 0, 'no node has a link');
+  await ev(`${D}.selectMarker(${k})`);
+  must(await until(`${D}.markerLabels().some((l) => l.cls.includes('sel') && l.text.startsWith('${k + 1} '))`, 40), 'the selected node has no name');
+  const st = JSON.parse(await ev(`(() => { const D = window.wotmDebug, g = D.nets.AIP.view, P = D.lay('AIP').points;
+    const amber = g.children.filter((c) => c.isLineSegments && c.material.color.getHex() === 0xFFC233);
+    const nb = P[${k}].links.map((l) => l.to), big = g.children.filter((c) => c.userData.mk && c.userData.mk.f > 1).map((c) => c.userData.mk.i);
+    return JSON.stringify({ amber: amber.length, nb, big, selF: g.userData.f[${k}] }); })()`));
+  must(st.amber > 0, "the selected node's links are not amber");
+  must(st.selF > 1 && st.nb.every((j) => st.big.includes(j)), 'the selected node and its neighbours are not bigger: ' + JSON.stringify(st));
+  must(await ev(`${D}.mkSelRing.visible`), 'the selected node has no ring');
+  // an arrow for each one-way link
+  const count = () => ev(`(() => { const D = window.wotmDebug, P = D.lay('AIP').points; let one = 0; P.forEach((p, i) => p.links.forEach((l) => { if (!P[l.to].links.some((m) => m.to === i)) one++; }));
+    const A = D.nets.AIP.view.userData.arrows; return JSON.stringify([one, A ? A.links.length : 0]); })()`);
+  const a1 = JSON.parse(await count());
+  must(a1[0] === a1[1], 'the arrows are not one for each one-way link: ' + a1);
+  // make one: a link from the last node to the first that does not return
+  await ev(`(() => { const D = window.wotmDebug, P = D.lay('AIP').points, a = P.length - 1, b = 0; if (!P[a].links.some((l) => l.to === b)) P[a].links.push({ to: b, width: 20 });
+    P[b].links = P[b].links.filter((l) => l.to !== a); D.selectMarker(${k}); })()`);
+  const a2 = JSON.parse(await count());
+  must(a2[0] >= 1 && a2[0] === a2[1], 'a one-way link has no arrow: ' + a2);
+  must(await until(`(() => { const A = window.wotmDebug.nets.AIP.view.userData.arrows; return !!A && A.mesh.count === A.links.length; })()`, 20), 'the arrows are not instanced');
+  await shot('markers_net_numbers');
+  await ev(`${D}.selectMarker(-1)`);
+  await ev(`document.getElementById('mkRevert').click()`);
+  await goMode('objects');
+});
 await check('top bar: File menu holds the stage and mod commands; Test has a chevron for Test from here and Test options', async () => {
   must(await ev(`!document.getElementById('bar').querySelector('#newStage, #editStage, #packMod, #check, #testHere, #testOpts')`), 'a command is still loose on the bar');
   await ev(`document.getElementById('fileBtn').click()`);

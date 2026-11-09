@@ -751,7 +751,6 @@ button.small-btn { height: 22px; padding: 0 8px; font-size: 12px; flex: none; }
 /* the right panel: a node's links */
 #mkProps select, #mkProps #mkTypeNum { width: 100%; }
 #mkNoSel { font-size: 12px; line-height: 18px; color: var(--fg-2); }
-.legend .sw.dot { width: 10px; height: 10px; border-radius: 50%; margin: 0 3px; }
 .mk-links { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .mk-links li { display: grid; grid-template-columns: minmax(0, 1fr) 56px auto auto; gap: 6px; align-items: center; }
 .mk-links li.in { grid-template-columns: minmax(0, 1fr); color: var(--fg-2); font-size: 12px; }
@@ -874,6 +873,23 @@ button.small-btn { height: 22px; padding: 0 8px; font-size: 12px; flex: none; }
 .ruler-label { position: absolute; transform: translate(-50%, -140%); pointer-events: none; z-index: 3; white-space: nowrap;
                font-size: 12px; line-height: 16px; padding: 3px 9px; border-radius: 12px; color: var(--fg); border: 1px solid var(--line);
                background: color-mix(in srgb, var(--surface-1) 90%, transparent); backdrop-filter: blur(8px); box-shadow: var(--shadow-1); }
+/* the text over the markers of the view (markerlabels.js): --c is the marker's color */
+.mk-label { position: absolute; left: 0; top: 0; z-index: 1; pointer-events: none; white-space: nowrap; will-change: transform;
+            font-size: 11px; line-height: 14px; padding: 1px 6px 1px 5px; border-radius: 8px; color: var(--fg); border: 1px solid var(--line);
+            border-left: 3px solid var(--c, var(--line)); background: color-mix(in srgb, var(--surface-1) 88%, transparent); box-shadow: var(--shadow-1); }
+.mk-label[hidden] { display: none; }
+.mk-label.num { padding: 0 4px; font: 10px/13px var(--font-mono); font-variant-numeric: tabular-nums; }
+.mk-label.dim { opacity: .65; }
+.mk-label.warn { border-color: var(--warn); color: var(--warn); }
+.mk-label.sel { border-color: var(--c, var(--accent)); border-left-width: 3px; font-weight: 600; }
+.mk-label.hot { color: var(--accent-text); border-color: var(--accent-text); border-left-color: var(--c, var(--accent-text)); z-index: 2; }
+/* a marker as the view draws it: the rows of the lists and the legend (app.js shapeSwatch); --c is its color */
+.shape { display: inline-block; width: 10px; height: 10px; flex: none; background: var(--c); }
+.shape.ball { border-radius: 50%; }
+.shape.cube { border-radius: 2px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 45%, transparent); }
+.shape.cone { width: 11px; height: 12px; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+:is(#list, #pedList, #mkList) li.it > .k:has(.shape) { display: inline-flex; align-items: center; justify-content: center; }
+.legend .shape { margin: 0 3px; }
 /* the minimap (minimap.js): lower right of the view; the canvas is 220 x 220 whatever its size on the screen */
 #minimap { position: absolute; right: 8px; bottom: 8px; width: 160px; height: 160px; z-index: 2; cursor: crosshair; touch-action: none;
            background: color-mix(in srgb, var(--surface-1) 78%, transparent); backdrop-filter: blur(8px); border: 1px solid var(--line);
