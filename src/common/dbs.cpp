@@ -199,6 +199,10 @@ void dbsTraverse(_hierhead **roots, void (*cb)(_hierhead *, _fvector *, float (*
         case 3: {
             int cnt;
 
+            /* TRANSLATE: adds `trans` (+0x10) to the accumulated translation before the callback */
+            st.x += WF(n, 0x10);
+            st.y += WF(n, 0x14);
+            st.z += WF(n, 0x18);
             if (WU(n, 0) & 0xFFFC0000)
                 cb(node, sp, mat);
             cnt = WI(n, 8);

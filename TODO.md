@@ -3,7 +3,6 @@
 O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado sai deste arquivo: a história vai para a mensagem do commit e o que passou a existir vai para o doc de referência (no presente). Regras dos docs: `CLAUDE.md`, "Documentação".
 
 ## Decomp
-- **`dbsTraverse` (`src/common/dbs.cpp`, rascunho `NON_MATCHING`):** o caso TRANSLATE não soma o `trans` na posição acumulada; o retail soma (`docs/investigacoes/2026-11-06/objetos_fase.md`, seção 2).
 - **Fora do caminho crítico:** oracle para funções com chamadas; cobertura com gameplay para realimentar o `boot_coverage_asm.csv` (`57d4afd:docs/investigacoes/2026-10-19/pendencias_oracle_cobertura.md`, seções 2 e 3).
 
 ## Editor de fase
