@@ -244,6 +244,104 @@ await check('Light and fog: unsaved numbers count, Esc asks, Keep editing keeps,
   must(await until(`!document.getElementById('lightDlg').open`, 20), 'Discard did not close the panel');
   must(await ev('window.wotmDebug.unsavedCount()') === 0, 'the discarded numbers still count');
 });
+await check("Light and fog: every number has a reset to the disc's value, shown only when it differs; Reset all; works on a mod's file", async () => {
+  const dock = `document.getElementById('lightDlg')`;
+  const open = async () => {
+    await ev(`document.getElementById('lightBtn').click()`);
+    must(await until(`${dock} && ${dock}.open`, 80), 'lightDlg did not open');
+    must(await ev(`!!document.querySelector('#lightDlg #ltMin').offsetParent && document.querySelectorAll('#lightDlg .lt-light').length === 3`), 'the stage has no fog or lights to try this on');
+  };
+  const vis = () => ev(`[...document.querySelectorAll('#lightDlg .lt-rs')].filter((b) => !b.hidden).length`);
+  const setv = (sel, v) => ev(`(() => { const f = document.querySelector(${JSON.stringify(sel)}); f.value = ${JSON.stringify(String(v))}; f.dispatchEvent(new Event('input')); })()`);
+  const val = (sel) => ev(`document.querySelector(${JSON.stringify(sel)}).value`);
+  const btnOf = (sel) => `(document.querySelector(${JSON.stringify(sel)}).closest('.lt-row, .lt-f, .lt-lh') || document).querySelector('.lt-rs')`;
+  const unsaved = () => ev('window.wotmDebug.unsavedCount()');
+  const allOff = async (why) => {
+    must(await vis() === 0, why + ': a reset button is still shown');
+    must(await ev(`document.querySelector('#lightDlg .lt-resetall').disabled`), why + ': Reset all is still enabled');
+    must(await unsaved() === 0, why + ': still counts as changed (' + await unsaved() + ')');
+  };
+  await open();
+  await allOff('a fresh panel');
+  // a fog number: the button shows, names the original, and puts it back (the focus stays in the panel)
+  const min0 = await val('#ltMin');
+  await setv('#ltMin', +min0 + 7);
+  must(await ev(`!${btnOf('#ltMin')}.hidden`), 'no reset button after editing "Starts at"');
+  const t = await ev(`${btnOf('#ltMin')}.title`);
+  must(t.startsWith('Back to the original') && t.includes(min0), 'the tooltip does not name the original: ' + t);
+  must(await ev(`${btnOf('#ltMin')}.getBoundingClientRect().width >= 24 && !!${btnOf('#ltMin')}.getAttribute('aria-label')`), 'the button is smaller than 24px or has no label');
+  must(await unsaved() === 1 && !await ev(`document.querySelector('#lightDlg .lt-resetall').disabled`), 'the edit is not counted or Reset all stayed off');
+  await ev(`${btnOf('#ltMin')}.click()`);
+  must(await val('#ltMin') === min0, 'the number did not come back');
+  must(await ev(`document.activeElement.id`) === 'ltMin', 'the focus left the number: ' + await ev('document.activeElement.id || document.activeElement.className'));
+  await allOff('after the number');
+  // the double-click on the label is the same reset
+  await setv('#ltMax', +await val('#ltMax') + 100);
+  await ev(`document.querySelector('label[for=ltMax]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+  await allOff('after the double click');
+  // the fog color also takes the background back with it
+  const fc0 = await val('#ltFogC');
+  await setv('#ltFogC', fc0 === '#c86432' ? '#3264c8' : '#c86432');
+  must(await unsaved() === 1 && await ev(`!${btnOf('#ltFogC')}.hidden`), 'the fog color edit shows no reset');
+  await ev(`${btnOf('#ltFogC')}.click()`);
+  must(await val('#ltFogC') === fc0, 'the fog color did not come back');
+  await allOff('after the fog color');
+  // a light: strength then color go back one at a time and the panel ends as the disc's (the exact numbers, not a rounded look-alike)
+  const pc0 = +await val('#lt0pct'), c0 = await val('#lightDlg .lt-c');
+  await setv('#lt0pct', pc0 + 10);
+  await setv('#lightDlg .lt-c', c0 === '#00ff00' ? '#ff0000' : '#00ff00');
+  must(await unsaved() === 1, 'the light edits are not counted');
+  await ev(`${btnOf('#lt0pct')}.click()`);
+  must(+await val('#lt0pct') === pc0 && await unsaved() === 1, 'strength did not come back or the color went with it');
+  await ev(`[...document.querySelectorAll('#lightDlg .lt-light')][0].querySelectorAll('.lt-lh .lt-rs')[1].click()`);
+  must(await val('#lightDlg .lt-c') === c0, 'the color did not come back');
+  await allOff('after strength and color');
+  // the heading, the whole light, and Reset all
+  await setv('#lt0h', +await val('#lt0h') + 15);
+  await setv('#lt1p', Math.min(90, +await val('#lt1p') + 10));
+  await setv('#lt1pct', +await val('#lt1pct') + 5);
+  must(await unsaved() === 1, 'the light edits are not counted');
+  await ev(`document.querySelectorAll('#lightDlg .lt-light')[1].querySelectorAll('.lt-lh .lt-rs')[0].click()`);   // the whole of light 2
+  must(await ev(`document.querySelectorAll('#lightDlg .lt-light')[1].querySelector('.lt-lh .lt-rs').hidden`) === true, 'light 2 still shows a reset');
+  await setv('#ltMin', +min0 + 7);
+  await setv('#ltFogC', fc0 === '#c86432' ? '#3264c8' : '#c86432');
+  await sleep(500);
+  await shot('light_resets');
+  await ev(`document.querySelector('#lightDlg .lt-resetall').click()`);
+  await allOff('after Reset all');
+  must(await val('#ltMin') === min0, 'Reset all left a number');
+  // Esc still reaches the panel after a reset: nothing unsaved, so it closes
+  await setv('#ltMin', +min0 + 7);
+  await ev(`${btnOf('#ltMin')}.click()`);
+  await esc();
+  must(await until(`!${dock}.open`, 20), 'Esc after a reset did not close the panel');
+  must(await ev('document.getElementById("askDlg").open') === false, 'a question was asked about nothing');
+
+  // with a mod's file: the button goes back to the disc's number, not the file's; Save writes the disc's; Remove from mod deletes the file
+  const mrsFile = path.join(mods, 'smoke', 'RST', stage + '.MRS');
+  await open();
+  await setv('#ltMin', +min0 + 7);
+  await ev(`document.querySelector('#lightDlg .lt-save').click()`);
+  must(await until(`window.wotmDebug.unsavedCount() === 0 && ${dock}.querySelector('.lt-src span').textContent.startsWith("Your mod's file")`, 40), 'Save did not finish');
+  must(fs.existsSync(mrsFile), 'no ' + mrsFile);
+  must(await ev(`document.querySelector('#lightDlg .lt-src span').textContent`).then((x) => x.startsWith("Your mod's file")), 'the panel does not say it uses the mod file');
+  must(await vis() === 1 && await val('#ltMin') === String(+min0 + 7), 'the saved number should offer exactly one reset (' + await vis() + ')');
+  must((await ev(`${btnOf('#ltMin')}.title`)).includes(min0), 'the tooltip does not name the disc number');
+  await ev(`${btnOf('#ltMin')}.click()`);
+  must(await unsaved() === 1, 'going back to the disc number from a saved file should be a change');
+  await ev(`document.querySelector('#lightDlg .lt-save').click()`);
+  must(await until(`window.wotmDebug.unsavedCount() === 0`, 40), 'the second Save did not finish');
+  const r = await ev(`fetch('/api/mrs?name=${stage}&mod=smoke').then((x) => x.json())`);
+  must(r.fog.minR === r.original.fog.minR && String(r.fog.minR) === min0, 'the saved file does not have the disc numbers: ' + JSON.stringify(r.fog));
+  await allOff('after saving the disc numbers');
+  must(await ev(`!document.querySelector('#lightDlg .lt-reset').hidden`), 'no "Remove from mod" for a mod that has the file');
+  await ev(`document.querySelector('#lightDlg .lt-reset').click()`);
+  await answer('go');
+  must(await until(`document.querySelector('#lightDlg .lt-reset').hidden`, 40), 'Remove from mod left the button');
+  must(!fs.existsSync(mrsFile), 'the file stayed after Remove from mod');
+  await esc();
+  must(await until(`!${dock}.open`, 20), 'Esc did not close the panel at the end');
+});
 await check('Start points: an unsaved point asks on Esc and Close; Discard drops it', async () => {
   await ev(`document.getElementById('sptBtn').click()`);
   must(await until(`document.getElementById('sptDlg').open`, 80), 'sptDlg did not open');

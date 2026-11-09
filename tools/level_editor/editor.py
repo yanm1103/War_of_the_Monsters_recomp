@@ -358,13 +358,27 @@ def mrs_source(cfg, mod, name):
     return os.path.join(stage_root(cfg["disc"], base), "RST", base + ".MRS"), "disc"
 
 
-def stage_mrs(cfg, mod, name):
-    """The Light dialog's numbers ({"source", "file", "fog", "bg", "lights"}, lvl.mrs_values)."""
-    path, source = mrs_source(cfg, mod, name)
+def original_mrs(cfg, name):
+    """The numbers of the disc's .MRS for the stage (a custom stage's base stage), whatever a mod does to it: what the Light dialog's
+    reset buttons go back to. None when the disc has no such file."""
+    name = (name or "").upper()
+    c = custom_stages(cfg).get(name)
+    base = c["base"] if c else name
+    path = os.path.join(stage_root(cfg["disc"], base), "RST", base + ".MRS")
     if not os.path.isfile(path):
-        return {"source": source, "file": "", "fog": None, "bg": None, "lights": None}
+        return None
     with open(path, "rb") as f:
-        return dict(lvl.mrs_values(f.read()), source=source, file=path if source == "mod" else "")
+        return lvl.mrs_values(f.read())
+
+
+def stage_mrs(cfg, mod, name):
+    """The Light dialog's numbers ({"source", "file", "fog", "bg", "lights", "original"}, lvl.mrs_values; "original" is original_mrs)."""
+    path, source = mrs_source(cfg, mod, name)
+    original = original_mrs(cfg, name)
+    if not os.path.isfile(path):
+        return {"source": source, "file": "", "fog": None, "bg": None, "lights": None, "original": original}
+    with open(path, "rb") as f:
+        return dict(lvl.mrs_values(f.read()), source=source, file=path if source == "mod" else "", original=original)
 
 
 def save_mrs(cfg, b):

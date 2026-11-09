@@ -841,7 +841,12 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   the game lights as it draws them (cars, towers, statues; the editor does not draw the monsters, which the lights also light in the game).
   The rest of the stage has its light in its vertex colors, which the lights do not change. **Save to mod** writes `mods/<mod>/RST/<STAGE>.MRS` (a custom stage's folder keeps `<ID>.MRS`): a copy of the file the stage uses
   now with those numbers changed, the same size and every other byte as it was (the time of day, the ambient, the dust, trail and debris
-  colors). **Back to the disc's** deletes it. Closing the panel with numbers not saved puts the view back. The game reads the file when the
+  colors). **Remove from mod** deletes it (the stage then uses the disc's file). Closing the panel with numbers not saved puts the view back.
+  Every number has a small reset button (tooltip "Back to the original", also a double-click on its label) that shows only when the number
+  differs from the stage's disc file (for a custom stage, its base stage's file), whatever the mod's own file has; a light has one for its
+  color, strength, heading and pitch and one for the whole light, and **Reset all** in the footer puts every number back. A reset is an
+  edit like typing: the view follows it, it counts as unsaved until **Save to mod**, and the server's `/api/mrs` reply carries the disc's
+  numbers as `original`. The game reads the file when the
   stage loads (Reload in game). The fog ending before it starts is flagged: the game then draws no fog. `python tools/level_editor/test_mrs.py`
   is its server-side test.
 - **Textures** (Stage tab ▸ Pictures): every picture of the stage's `.TEX` and `.RTX` as a card with its texId, size and format

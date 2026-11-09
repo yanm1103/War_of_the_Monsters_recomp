@@ -67,6 +67,11 @@ def main():
         env = editor.stage_env(cfg, cfg["disc"], "CENTRAL", "T")
         assert env["bg"] == [200, 100, 50] and env["file"] == mine and "fa" not in env["fog"], env["fog"]
         assert editor.stage_env(cfg, cfg["disc"], "CENTRAL", "")["file"] == disc
+        # "original" is the disc's file whatever the mod has: the reply of the save carries it too, and the mod's own numbers differ
+        assert r["original"] == v and r["fog"]["rgb"] != r["original"]["fog"]["rgb"], r["original"]
+        assert editor.stage_mrs(cfg, "T", "CENTRAL")["original"] == v
+        assert editor.stage_mrs(cfg, "", "CENTRAL")["original"] == v and editor.stage_mrs(cfg, "", "CENTRAL")["source"] == "disc"
+        assert editor.original_mrs(cfg, "NOPE") is None and editor.stage_mrs(cfg, "T", "NOPE")["original"] is None
         r = editor.save_mrs(cfg, {"mod": "T", "name": "CENTRAL", "fog": dict(v["fog"], rgb=[9, 9, 9], maxR=9000.0)})
         assert not r["warnings"] and open(mine, "rb").read()[:12] == data[:12] and len(open(mine, "rb").read()) == len(data)
         r = editor.save_mrs(cfg, {"mod": "T", "name": "CENTRAL", "reset": True})
@@ -87,6 +92,7 @@ def main():
         assert os.path.isfile(os.path.join(sdir, "MYCITY.MRS")) and not os.path.exists(os.path.join(tmp, "T", "RST"))
         assert editor.stage_mrs(cfg, "T", "MYCITY")["fog"]["rgb"] == [5, 6, 7]
         assert editor.stage_mrs(cfg, "T", "CENTRAL")["source"] == "disc"
+        assert editor.stage_mrs(cfg, "T", "MYCITY")["original"] == v        # the base stage's disc file, not the folder's own
         assert editor.stage_env(cfg, cfg["disc"], "MYCITY", "T")["bg"] == [5, 6, 7]
         editor.save_mrs(cfg, {"mod": "T", "name": "MYCITY", "reset": True})
         assert not os.path.exists(os.path.join(sdir, "MYCITY.MRS")) and os.path.isdir(sdir)
