@@ -261,6 +261,8 @@ aside { background: var(--surface-1); padding: 12px; overflow: auto; min-height:
 :is(#list, #pedList) li.it { height: var(--h-row); display: grid; grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: center; gap: 8px;
               padding: 0 12px; cursor: pointer; white-space: nowrap; }
 :is(#list, #pedList) li.it:hover { background: var(--surface-2); }
+/* the keyboard's place in the list: the ring, and a transparent outline that forced-colors turns into a visible one */
+:is(#list, #pedList) :is(li.it, li.sec):focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 75%, transparent); outline: 2px solid transparent; outline-offset: -2px; }
 :is(#list, #pedList) li.it > .k { width: 16px; height: 16px; color: var(--muted); }
 :is(#list, #pedList) li.it .h { overflow: hidden; text-overflow: ellipsis; color: var(--fg); font-weight: 500; }
 :is(#list, #pedList) li.it.rule .h { color: var(--fg-2); font-weight: 400; }

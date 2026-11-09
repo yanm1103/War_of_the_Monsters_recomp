@@ -2179,6 +2179,9 @@ class Server(ThreadingHTTPServer):
     # on Windows SO_REUSEADDR lets a second server bind a port already in use: off there, so a taken port is noticed
     allow_reuse_address = os.name != "nt"
     daemon_threads = True
+    # the page opens dozens of connections at once (modules, icons, the stage): with the default queue of 5 the system refuses the
+    # extra ones ("connection refused" from a server that is up, a page that opens blank or without icons)
+    request_queue_size = 128
 
 
 def editor_at(port):

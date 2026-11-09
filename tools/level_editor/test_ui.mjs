@@ -133,7 +133,7 @@ if (!loaded) {
 console.log('stage:', await ev('document.getElementById("stage").value + ", " + window.wotmDebug.items().length + " items"'));
 
 await check('the summary counts the objects', async () => {
-  must(/\d+ objects/.test(await ev('document.getElementById("sumCounts").textContent')), 'sumCounts: ' + await ev('document.getElementById("sumCounts").textContent'));
+  must(await until('/\\d+ objects/.test(document.getElementById("sumCounts").textContent)', 40), 'sumCounts: ' + await ev('document.getElementById("sumCounts").textContent'));
 });
 await check('the controls other scripts click are all there', async () => {
   const lost = await ev(`${JSON.stringify(STABLE_IDS)}.filter((i) => !document.getElementById(i))`);
@@ -317,6 +317,22 @@ await check('the bars over the view never cover each other or the menus, from 16
       await shot(`bars_${w}x${h}`);
     }
   } finally { await size(1600, 900); await sleep(300); }
+});
+await check('the object list works from the keyboard: section header, arrows, Enter selects, the row keeps the focus', async () => {
+  await ev('window.wotmDebug.select(null)');
+  await ev(`document.querySelector('#list li.sec').focus()`);
+  await key('ArrowDown', 'ArrowDown', 40);
+  must(await ev(`document.activeElement.classList.contains('it')`), 'ArrowDown did not reach a row');
+  await key('ArrowDown', 'ArrowDown', 40);
+  const want = await ev(`document.activeElement._item.rec.info.handle`);
+  await key('Enter', 'Enter', 13);
+  must(await ev('window.wotmDebug.sel && window.wotmDebug.sel.rec.info.handle') === want, 'Enter did not select the row');
+  must(await ev(`document.activeElement.classList.contains('it') && document.activeElement._item.rec.info.handle === ${JSON.stringify(want)}`), 'the row lost the focus when the list was redrawn');
+  must(await ev(`document.activeElement.getAttribute('aria-selected')`) === 'true', 'the row is not aria-selected');
+  await key('ArrowUp', 'ArrowUp', 38);
+  await key('Home', 'Home', 36);
+  must(await ev(`document.activeElement.classList.contains('sec')`), 'Home did not go to the first header');
+  await ev('window.wotmDebug.select(null); document.activeElement.blur()');
 });
 await check('the Pedestrians mode and back', async () => {
   await ev('document.getElementById("modePeds").click()');

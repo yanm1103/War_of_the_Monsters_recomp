@@ -1193,6 +1193,24 @@ const SEC = Object.fromEntries(SECTIONS.map((s) => [s.id, s]));
 const secOf = (i) => (i.kind === 'newprop' ? 'newprops' : i.kind === 'destr' ? 'buildings' : i.kind === 'pickup' ? 'pickups' : i.rule === 'Terrain piece' ? 'terrain' : 'props');
 const secOpen = (id) => store.get('sec.' + id, id === 'terrain' ? '0' : '1') === '1';
 const setIc = (el, name) => el.style.setProperty('--ic', `url(vendor/mdi/${name}.svg)`);
+// The list with the keyboard: Up and Down walk the rows and the section headers, Home and End jump, Enter or Space selects (Shift or Ctrl
+// with it adds or takes away, as a click does)
+$('list').setAttribute('role', 'listbox');
+$('list').addEventListener('keydown', (e) => {
+  const li = e.target.closest && e.target.closest('li');
+  if (!li || e.altKey) return;
+  const rows = [...$('list').children], i = rows.indexOf(li);
+  const go = (j) => { const t = rows[Math.max(0, Math.min(rows.length - 1, j))]; if (t) { e.preventDefault(); t.focus(); } };
+  if (e.key === 'ArrowDown') go(i + 1);
+  else if (e.key === 'ArrowUp') go(i - 1);
+  else if (e.key === 'Home') go(0);
+  else if (e.key === 'End') go(rows.length - 1);
+  else if ((e.key === 'Enter' || e.key === ' ') && li._item) {
+    e.preventDefault();
+    if (e.shiftKey || e.ctrlKey) select(li._item, 'toggle');
+    else { select(li._item); if (li._item.node.visible) focus(li._item); }
+  }
+});
 // what changed in an original: moved, turned (copies and deleted are said apart)
 function moveState(rec) {
   if (rec.prop) return { moved: false, turned: false };   // a new prop has no disc place: it is said "New"
@@ -1215,6 +1233,10 @@ function kindCounts(list) {
 function rowEl(it) {
   const i = it.rec.info, li = document.createElement('li');
   li.className = 'it';
+  li._item = it;                       // the arrow keys and Enter (the list's own keydown) act on it
+  li.tabIndex = -1;                    // reached with the arrows from a section header; Tab does not walk hundreds of rows
+  li.setAttribute('role', 'option');
+  li.setAttribute('aria-selected', String(it === sel || group.includes(it)));
   if (it.copy) li.classList.add('copy');
   else if (!it.iname && i.nameSrc === 'rule') li.classList.add('rule');
   if (it === sel) li.classList.add('sel');
@@ -1279,7 +1301,13 @@ function refreshList() {
     frag.appendChild(h);
     if (open) for (const it of list) frag.appendChild(rowEl(it));
   }
+  // the list is redrawn on every edit: the row that had the keyboard keeps it
+  const had = ul.contains(document.activeElement) ? (document.activeElement._item || document.activeElement.dataset.sec) : null;
   ul.replaceChildren(frag);
+  if (had) {
+    const again = [...ul.children].find((e) => (e._item || e.dataset.sec) === had);
+    if (again) again.focus({ preventScroll: true });
+  }
   $('listEmpty').hidden = !!shown.length || !all.length;
   // the chips' counts: every object of the kind in the stage (copies too), and the changed originals
   const byKind = { destr: 0, pickup: 0, prop: 0 };
