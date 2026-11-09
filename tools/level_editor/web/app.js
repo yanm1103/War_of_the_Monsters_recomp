@@ -831,6 +831,7 @@ function showUndo() {
   $('redo').title = r ? `Redo: ${r.label} (Ctrl+Y)` : 'Nothing to redo (Ctrl+Y)';
   $('save').classList.toggle('dirty', dirty);
   showStatus();
+  queueBudget();
 }
 
 // ------------------------------------------------------------------ the status bar: last message, save, check, game, counts
@@ -853,9 +854,49 @@ function showStatus(changedN) {
                      : c.state === 'stale' ? 'Not checked since the last change' : 'Not checked',
                      { ok: 'ok', bad: 'err' }[c.state] || 'idle');
   ck.querySelector('.ic').style.setProperty('--ic', `url(vendor/mdi/${c.state === 'bad' ? 'alert-circle-outline' : c.state === 'ok' ? 'check-circle-outline' : 'shield-check-outline'}.svg)`);
+  showBudget();
   const n = group.length || (pedSel ? 1 : 0);
   stField('count', `${ui.changed} changed` + (n ? ` · ${n} selected` : ''));
   showGame();
+}
+
+// The stage's fixed room the patch uses: the 8 MB arena (copies, props, a bigger grid) and the 1024 Interactives slots (every building,
+// pickup and breakable prop). Asked of the server (/api/budget, the patch applied without the collision check) a moment after each edit.
+let budgetTimer = 0, budgetKey = '', budgetSeq = 0;
+const kb = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+function queueBudget() {
+  clearTimeout(budgetTimer);
+  if (!stageName) return;
+  budgetTimer = setTimeout(refreshBudget, 500);
+}
+async function refreshBudget() {
+  const body = { name: stageName, mod: modNow, patch: buildPatch() };
+  const key = JSON.stringify(body);
+  if (key === budgetKey && ui.budget) return;
+  const seq = ++budgetSeq;
+  try {
+    const res = await api('/api/budget', body);
+    if (seq !== budgetSeq || body.name !== stageName) return;   // a newer edit or another stage came meanwhile
+    ui.budget = res;
+    budgetKey = key;
+  } catch (e) {
+    if (seq !== budgetSeq) return;
+    ui.budget = null;
+  }
+  showStatus();
+}
+function showBudget() {
+  const b = document.querySelector('#status .budget'), r = ui.budget;
+  b.hidden = !r;
+  if (!r) return;
+  const sl = r.interactives, ar = r.arena;
+  const ps = sl.used / sl.total, pa = ar.used / ar.total;
+  const level = r.full || ps >= 1 || pa >= 1 ? 'err' : ps >= 0.8 || pa >= 0.8 ? 'warn' : 'idle';
+  stField('budget', `${sl.used}/${sl.total} slots · arena ${ar.used ? kb(ar.used) : '0'}` + (level === 'idle' ? '' : ' · nearly full'), level,
+          `Room this stage's patch uses.\nBreakable slots: ${sl.used} of ${sl.total} (${sl.disc} on the disc), as the patch counts them: ` +
+          `a copy of a building, a pickup or a breakable prop takes some, a delete does not give them back.\n` +
+          `Arena: ${ar.used.toLocaleString('en-US')} of ${ar.total.toLocaleString('en-US')} bytes (copies, props, a bigger grid).` +
+          (r.full ? `\nIt ran out: ${r.full}` : ''));
 }
 
 // ------------------------------------------------------------------ loading
@@ -869,6 +910,7 @@ async function loadStage(name) {
     for (const r of [stageRoot, skyRoot]) if (r) { scene.remove(r); r.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); }
     stageRoot = skyRoot = null;
     stageName = name;
+    ui.budget = null; budgetKey = '';
     $('keepNote').hidden = true;
     $('winNote').hidden = true;
     winHidden = false;

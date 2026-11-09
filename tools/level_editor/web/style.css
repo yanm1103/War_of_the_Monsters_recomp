@@ -550,6 +550,8 @@ dialog.pal { width: min(96vw, 2400px); max-width: none; }
 #status .st + .st:not(.msg) { border-left: 1px solid var(--line); border-radius: 0; }
 #status .st.ok .ic { color: var(--ok); }
 #status .st.err { color: var(--danger); }
+#status .st.budget { font-variant-numeric: tabular-nums; }
+#status .st.budget.warn { color: var(--warn); }
 #status .st.warn .ic { color: var(--warn); }
 #status .st.idle { color: var(--muted); }
 #status .st.save .dot { background: var(--muted); }

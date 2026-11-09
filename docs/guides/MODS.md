@@ -824,7 +824,11 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   the mode. **Fight HUD** (the screen icon) opens the HUD dialog (below).
 - **Status bar and Output:** the bar at the bottom shows the last message, whether the stage has unsaved changes (or when it was
   saved), the last check (passed, how many problems, or not checked since the last change), the game (closed, starting, running,
-  patch applied or ignored) and how many objects the mod changes. A click on a field opens the **Output** drawer on its tab:
+  patch applied or ignored), the **room meter** and how many objects the mod changes. The room meter reads "348/1024 slots · arena 3 KB":
+  the breakable slots the stage uses (the game's table holds 1024; a copy of a building, a pickup or a breakable prop takes some, and a
+  delete does not give them back, as `lvl.py patch` counts them) and the bytes of the 8 MB arena (copies, props, a bigger grid). It updates
+  half a second after each edit (`POST /api/budget`: the patch applied without the collision check, about 0.4 s), turns amber from 80 % of
+  either and red at the limit or when a step ran out of arena; its tooltip has the exact numbers. A click on a field opens the **Output** drawer on its tab:
   **Messages** (everything the editor says), **Check** (the last check's summary and problems, where a click selects the object,
   and the full `lvl.py patch` output under Details) and **Game** (the game's `[fase]` lines in words: patch applied, file
   rejected, another mod's file used, reload skipped or dropped; the load's details as the game writes them). The drawer opens by

@@ -470,6 +470,34 @@ def check_patch(disc, name, patch, mod_dir=None, pts_root=None):
             "lines": buf.getvalue().splitlines()}
 
 
+def budget_patch(disc, name, patch, mod_dir=None, pts_root=None):
+    """What the patch takes of the stage's fixed room, for the status bar: the 8 MB arena (new nodes, props, the bigger grid) and the
+    1024 Interactives slots (as lvl.py counts them, which is what refuses a copy). The same apply order as check_patch, without the
+    collision check, so it answers in about a second. `full` is set when a step ran out of arena."""
+    root = stage_root(disc, name)
+    full = ""
+    with contextlib.redirect_stdout(io.StringIO()):
+        st = lvl.Stage(name, root)
+        lp = lvl.LevelPatch(st)
+        lp.apply(patch)
+        if mod_dir and patch.get("props"):
+            try:
+                lp.apply_props(patch, mod_dir)
+            except lvl.PatchError as err:
+                full = str(err)
+        if patch.get("peds"):
+            pts = lvl.stage_points(pts_root or root, name)
+            try:
+                lp.apply_peds(patch, {"fodder": lvl.net_from_points(pts.get("FOP", [])),
+                                      "ped": lvl.net_from_points(pts.get("PED", []))})
+            except lvl.PatchError as err:
+                full = full or str(err)
+    return {"arena": {"used": int(lp.stats.get("arena bytes", 0)), "total": lvl.ARENA_SIZE},
+            "interactives": {"used": int(lp.interactives_used), "total": lvl.INTERACTIVES,
+                             "disc": int(sum(lp.interactives_before))},
+            "skipped": int(lp.stats.get("skipped", 0)), "full": full}
+
+
 def bad_mod(mod):
     """A mod name the editor refuses: empty, a path, or one the game skips (leading _ or .)."""
     return not mod or any(c in mod for c in "\\/:*?\"<>|") or mod.startswith(("_", "."))
@@ -1445,6 +1473,9 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/api/check":
                 return self.send(200, check_patch(cfg["disc"], base_of(cfg, b["name"]), b["patch"], mod_folder(cfg, b.get("mod")),
                                                   points_root(cfg, b["name"])))
+            if self.path == "/api/budget":      # the status bar's arena and slots meters (nothing is saved)
+                return self.send(200, budget_patch(cfg["disc"], base_of(cfg, b["name"]), b["patch"], mod_folder(cfg, b.get("mod")),
+                                                   points_root(cfg, b["name"])))
             if self.path == "/api/paths":       # Settings' badges for what is typed (nothing is saved)
                 return self.send(200, path_states(b))
             if self.path == "/api/props/import":   # Import .glb: a new prop in the mod, built for the open stage
