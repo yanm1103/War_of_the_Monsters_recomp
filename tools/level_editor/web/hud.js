@@ -179,6 +179,10 @@ async function replace(r, every, file = null) {
 }
 
 async function remove(r, every) {
+  const go = await new Promise((res) => ctx.ask("Back to the disc's picture?",
+    `This deletes your PNG for ${r.label} from mod "${ctx.mod}"` + (every && r.every > 1 ? ` on ${r.every} stages` : '') + ". It can't be undone.",
+    [['cancel', 'Cancel'], ['go', 'Delete the PNG', true]], (v) => res(v === 'go'), { icon: 'delete-outline' }));
+  if (!go) return;
   try {
     const res = await ctx.api('/api/hud/remove', { stage: ctx.stage, mod: ctx.mod, role: r.role, png: r.png, every });
     ctx.msg(res.lines, { level: 'muted' });

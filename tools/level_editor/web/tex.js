@@ -170,6 +170,10 @@ async function replace(r, file = null) {
 }
 
 async function remove(r) {
+  const go = await new Promise((res) => ctx.ask("Back to the disc's picture?",
+    `This deletes your PNG for ${idText(r)} from mod "${ctx.mod}". It can't be undone.`,
+    [['cancel', 'Cancel'], ['go', 'Delete the PNG', true]], (v) => res(v === 'go'), { icon: 'delete-outline' }));
+  if (!go) return;
   try {
     const res = await ctx.api('/api/tex/remove', { stage: ctx.stage, mod: ctx.mod, png: r.png });
     ctx.msg(res.lines, { level: 'muted' });

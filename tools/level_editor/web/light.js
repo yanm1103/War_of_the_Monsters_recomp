@@ -196,6 +196,10 @@ async function save() {
 }
 
 async function reset() {
+  const go = await new Promise((res) => ctx.ask("Back to the disc's light?",
+    `This deletes the light and fog file ${ctx.title} has in mod "${ctx.mod}". It can't be undone.`,
+    [['cancel', 'Cancel'], ['go', 'Delete the file', true]], (v) => res(v === 'go'), { icon: 'delete-outline' }));
+  if (!go) return;
   try {
     await ctx.api('/api/mrs', { mod: ctx.mod, name: ctx.stage, reset: true });
     ctx.msg(`Light and fog: back to the disc's file`, { level: 'ok', toast: true, open: false });

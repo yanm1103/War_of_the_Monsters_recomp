@@ -83,7 +83,8 @@ ws.onmessage = (m) => {
 };
 const send = (method, params = {}) => new Promise((r) => { const i = ++nextId; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
 async function ev(expr) {
-  const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true });
+  // userGesture: a click the test makes counts as the user's (without one the browser closes two dialogs opened by scripts with a single Esc)
+  const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true, userGesture: true });
   if (r.result.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails).slice(0, 400));
   return r.result.result.value;
 }
@@ -112,10 +113,17 @@ const must = (cond, why) => { if (!cond) throw new Error(why); };
 await send('Page.enable');
 await send('Runtime.enable');
 await send('Log.enable');
-await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/?debug` });
-const loaded = await until('!!(window.wotmDebug && window.wotmDebug.stageRoot && window.wotmDebug.items().length > 20)', 60, 500);
+// The first navigation sometimes meets "connection refused" from a server that is up (seen on Windows, not understood): the page
+// is asked for again, up to three times, a minute each.
+let loaded = false;
+for (let attempt = 1; attempt <= 3 && !loaded; attempt++) {
+  if (attempt > 1) console.log(`the page did not come up (${pageErrors.length} errors): trying again (${attempt}/3)`);
+  pageErrors.length = 0;
+  await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/?debug` });
+  loaded = await until('!!(window.wotmDebug && window.wotmDebug.stageRoot && window.wotmDebug.items().length > 20)', 120, 500);
+}
 if (!loaded) {
-  console.log('FAIL  the stage did not load in 3 minutes (disc configured?)');
+  console.log('FAIL  the stage did not load in three tries (disc configured?)');
   console.log(await ev(`JSON.stringify({ ready: document.readyState, url: location.href, debug: !!window.wotmDebug, busy: (document.getElementById('busyText') || {}).textContent,
     status: (document.querySelector('#status .msg .tx') || {}).textContent, stage: (document.getElementById('stage') || {}).value })`).catch((e) => String(e)));
   console.log('page errors:', pageErrors.slice(0, 5).join(' | ') || '(none)');
@@ -173,6 +181,29 @@ await check('a click on the gizmo that moves nothing is not an edit', async () =
   await ev(`(() => { const g = window.wotmDebug.gizmo; g.dispatchEvent({ type: 'dragging-changed', value: true }); g.dispatchEvent({ type: 'dragging-changed', value: false }); })()`);
   must(await ev('window.wotmDebug.history.length') === h0, 'a history step was left');
   must(await ev('window.wotmDebug.unsavedCount()') === 0 && await ev('window.wotmDebug.dirty') === false, 'the stage is marked as changed');
+});
+
+await check('Remove all nodes asks first; Esc keeps them; Ctrl+P waits for the answer; closing without Save puts them back', async () => {
+  await ev(`document.getElementById('aipBtn').click()`);
+  must(await until(`document.getElementById('netDlg').open`, 80), 'netDlg did not open');
+  const n0 = await ev('window.wotmDebug.nets.AIP.points.length');
+  must(n0 > 0, 'the stage has no AI net to try this on');
+  await ev(`document.getElementById('netClear').click()`);
+  must(await until(`document.getElementById('askDlg').open`, 20), 'no question was asked');
+  await key('p', 'KeyP', 80, 2);                      // Ctrl+P: the palette must not open over the question
+  await sleep(300);
+  must(await ev(`!(document.getElementById('palDlg') && document.getElementById('palDlg').open)`), 'the palette opened over the question');
+  await esc();
+  must(await until(`!document.getElementById('askDlg').open`, 20), 'Esc did not close the question');
+  must(await ev('window.wotmDebug.nets.AIP.points.length') === n0, 'Esc removed the nodes');
+  must(await ev(`document.getElementById('netDlg').open`), 'Esc on the question closed the dialog under it too');
+  await ev(`document.getElementById('netClear').click()`);
+  must(await until(`document.getElementById('askDlg').open`, 20), 'no question the second time');
+  await ev(`document.querySelector('#askBtns .primary, #askBtns button:last-child').click()`);
+  must(await until(`window.wotmDebug.nets.AIP.points.length === 0`, 20), 'the nodes stayed after the answer');
+  await esc();                                         // the dialog closes without Save: the file's net comes back
+  must(await until(`!document.getElementById('netDlg').open`, 20), 'netDlg did not close');
+  must(await until(`window.wotmDebug.nets.AIP.points.length === ${n0}`, 40), 'the net did not come back: ' + await ev('window.wotmDebug.nets.AIP.points.length') + ' nodes');
 });
 
 await ev('window.wotmDebug.select(null)').catch(() => {});

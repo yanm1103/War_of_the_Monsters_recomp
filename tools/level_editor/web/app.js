@@ -3622,9 +3622,15 @@ $('sptSave').onclick = async () => {
   msg(`Saved ${r.points.length} ${PT_WORDS[kind][1]} in the mod` + (r.warnings.length ? '. ' + r.warnings.join(' ') : '. Restart the stage to see them'),
       { level: r.warnings.length ? 'warn' : 'ok', toast: true });
 };
-$('sptReset').onclick = async () => {
-  const kind = ptKind, r = await ptPost({ reset: true });
-  if (r) msg(`The stage's own ${PT_WORDS[kind][1]} are back (the mod's file is gone)`, { level: 'ok', toast: true });
+$('sptReset').onclick = () => {
+  const kind = ptKind;
+  ask(`Take the mod's ${PT_WORDS[kind][1]} out?`,
+      `This deletes the ${PT_WORDS[kind][1]} file ${title(stageName)} has in mod "${modNow}" and puts the stage's own back. It can't be undone.`,
+      [['cancel', 'Cancel'], ['go', 'Delete the file', true]], async (v) => {
+        if (v !== 'go') return;
+        const r = await ptPost({ reset: true });
+        if (r) msg(`The stage's own ${PT_WORDS[kind][1]} are back (the mod's file is gone)`, { level: 'ok', toast: true });
+      }, { icon: 'delete-outline' });
 };
 $('sptDlg').addEventListener('close', () => { if (ptKeep(ptKind) !== ptSaved[ptKind]) loadPoints(ptKind); });   // closed without saving: back to the file's points
 
@@ -3911,12 +3917,17 @@ $('netUnlink').onclick = () => {
 };
 $('netClear').onclick = () => {
   const n = nets[netKind];
-  n.points = [];
-  n.sel = -1;
-  netErr('');
-  netRows();
-  updateNetView(netKind);
-  netInfo();
+  const clear = () => {
+    n.points = [];
+    n.sel = -1;
+    netErr('');
+    netRows();
+    updateNetView(netKind);
+    netInfo();
+  };
+  if (!n.points.length) { clear(); return; }
+  ask(`Remove all ${n.points.length} nodes?`, `The ${NET_WORDS[netKind].noun} in this window is emptied. The mod's file stays as it is until you save.`,
+      [['cancel', 'Cancel'], ['go', 'Remove them', true]], (v) => { if (v === 'go') clear(); }, { icon: 'delete-outline' });
 };
 async function netPost(body) {
   const kind = netKind, n = nets[kind];
@@ -3937,9 +3948,15 @@ $('netSave').onclick = async () => {
   msg(`Saved a ${NET_WORDS[netKind].noun} of ${r.points.length} nodes in the mod` + (r.warnings.length ? '. ' + r.warnings.join(' ') : '. Restart the stage to see it'),
       { level: r.warnings.length ? 'warn' : 'ok', toast: true });
 };
-$('netReset').onclick = async () => {
-  const r = await netPost({ reset: true });
-  if (r) msg(`The stage's own ${NET_WORDS[netKind].noun} is back (the mod's file is gone)`, { level: 'ok', toast: true });
+$('netReset').onclick = () => {
+  const kind = netKind;
+  ask(`Take the mod's ${NET_WORDS[kind].noun} out?`,
+      `This deletes the ${NET_WORDS[kind].noun} file ${title(stageName)} has in mod "${modNow}" and puts the stage's own back. It can't be undone.`,
+      [['cancel', 'Cancel'], ['go', 'Delete the file', true]], async (v) => {
+        if (v !== 'go') return;
+        const r = await netPost({ reset: true });
+        if (r) msg(`The stage's own ${NET_WORDS[kind].noun} is back (the mod's file is gone)`, { level: 'ok', toast: true });
+      }, { icon: 'delete-outline' });
 };
 $('netDlg').addEventListener('close', () => {      // closed without saving: back to the file's net
   const n = nets[netKind];
@@ -4540,7 +4557,7 @@ async function restoreEnv(name, mod) {   // the panel closed with numbers nobody
 $('lightBtn').onclick = () => {
   if (!stageName) return;
   const name = stageName;
-  openLight({ stage: name, title: title(name), mod: modNow, api, msg, mods: () => modList, newMod: NEW_MOD, chooseMod,
+  openLight({ stage: name, title: title(name), mod: modNow, api, msg, ask, mods: () => modList, newMod: NEW_MOD, chooseMod,
               preview: previewEnv, restore: () => restoreEnv(name, modNow), look: () => gameLook, setLook,
               game: () => ({ running: game.state === 'running', dirty }), reload: reloadGame });
 };
@@ -4717,7 +4734,7 @@ const FLY_CODES = { KeyW: 'w', KeyA: 'a', KeyS: 's', KeyD: 'd', KeyQ: 'q', KeyE:
 window.addEventListener('keyup', (e) => { if (FLY_CODES[e.code]) fly.keys.delete(FLY_CODES[e.code]); });
 window.addEventListener('keydown', (e) => {
   const k = (e.key || '').toLowerCase(), ctrl = e.ctrlKey || e.metaKey, field = typing(e.target);
-  if (ctrl && !e.altKey && k === 'p') { e.preventDefault(); openPalette(); return; }   // the browser's print dialog never opens
+  if (ctrl && !e.altKey && k === 'p') { e.preventDefault(); if (!$('askDlg').open) openPalette(); return; }   // the browser's print dialog never opens; a question is answered first
   if (document.querySelector('dialog[open]')) {   // a dialog has the keys (Esc closes it, the selection stays)
     if (ctrl && k === 's') e.preventDefault();
     return;
