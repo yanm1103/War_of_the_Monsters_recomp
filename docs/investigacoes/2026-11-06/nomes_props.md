@@ -1,7 +1,7 @@
 # Nomes legíveis para os objetos da fase no editor
 
 Tema: o disco guarda algum nome para os prédios, pickups e props? O que dá para nomear sozinho, por objeto, e como guardar os
-nomes que o usuário der. Hoje o editor mostra a alça e o tipo (`lvl.py objects`: `destr`/`pickup`/`prop`). Base: `objetos_fase.md`
+nomes que o usuário der. Hoje o editor mostra a alça e o tipo (`lvl.py objects`: `destr`/`pickup`/`prop`). Base: `726b99b:docs/investigacoes/2026-11-06/objetos_fase.md`
 e `editor_pc.md` (mesma pasta).
 
 Marcação: **[certo]** = lido no código (C++ decompilado ou asm conferido); **[medido]** = contado nas 19 fases de `disc/` pelos

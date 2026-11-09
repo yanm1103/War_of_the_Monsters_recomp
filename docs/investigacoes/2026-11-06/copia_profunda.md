@@ -1,6 +1,6 @@
 # Cópia profunda nos patches de fase (2026-11-06)
 
-Item 3 do editor de fase: copiar prédio com destrutíveis dentro, e a cópia ter a própria fumaça. Contexto anterior: `objetos_fase.md`, seções 4 e 6.
+Item 3 do editor de fase: copiar prédio com destrutíveis dentro, e a cópia ter a própria fumaça. Contexto anterior: `726b99b:docs/investigacoes/2026-11-06/objetos_fase.md`, seções 4 e 6.
 
 ## O que mudou
 - `tools/lvl.py` (`LevelPatch.spine`, `deep_clone`, `copy`) e `native/runtime/wotm_levelpatch.inc` (as mesmas funções, mesma ordem, mesmo log).

@@ -68,14 +68,14 @@ Medidas [certo]:
 - Os 331 objetos do CENTRAL ganham nó. 4 deles não têm malha no estado 0 (destrutíveis `0xA4B7C0`, `0xA50250`, `0xA54E00`,
   `0xA98930`, 0 OBJECTs: gatilhos invisíveis). O editor precisa desenhar esses como marcador.
 - VEGAS: 3 destrutíveis (`0xC14370`, `0xCC7850`, `0xCE2730`) ficam sem nó porque o percurso não chega neles (um GROUP acima não tem
-  o bit visual, o mesmo corte do `Scene::walk`) [certo]. Provavelmente são os GROUPs por modo de jogo (`objetos_fase.md`:
+  o bit visual, o mesmo corte do `Scene::walk`) [certo]. Provavelmente são os GROUPs por modo de jogo (`726b99b:docs/investigacoes/2026-11-06/objetos_fase.md`:
   "GROUP→NULL por modo") [hipótese]. O editor deve abrir o nó dessas alças pela posição do `lvl.py` mesmo sem passar pelo GROUP.
 - Tempo: ~3 s no CENTRAL, ~5 s no METRO. Vale guardar o `.glb` num cache (`<dados>/cache/editor/<FASE>_<sha1 do .NGP>.glb`) e
   refazer só quando o disco ou o mod mudar.
 
 ### O que falta para o desenho ficar fiel
 - **LOD** [certo]: a prova pega o mais detalhado (`--lod 99`). O LOD 0 vem em coordenadas do mundo, desfeito por um TRANSLATE
-  inverso abaixo do LOD (`objetos_fase.md`); com o dono na alça isso continua certo, porque o TRANSLATE inverso é filho. Um
+  inverso abaixo do LOD (`726b99b:docs/investigacoes/2026-11-06/objetos_fase.md`); com o dono na alça isso continua certo, porque o TRANSLATE inverso é filho. Um
   seletor de LOD no editor é só exportar de novo.
 - **SWITCH** [certo]: sai o `whichChild` do disco. Os pickups sobem com `whichChild = 0` (o `Pickup::init` escreve isso), e no disco
   já é 0 no CENTRAL (a contagem bate). SWITCH de estado em tempo de execução não importa para o editor.
@@ -170,7 +170,7 @@ abrir o jogo.
 
 [certo] O patch entra num único ponto: a entrada do `dbInitDb` chamado por `Shell::LoadLevelFiles`, com a imagem já inflada e nada
 registrado. A carga copia posição e matriz para Destructibles, Pickups e seus `_cs`, emissores e grupos de pedestres, e as redes
-de carros e pedestres são cortadas antes de qualquer veículo nascer (`objetos_fase.md`, `MODS.md`). O RESTART da pausa
+de carros e pedestres são cortadas antes de qualquer veículo nascer (`726b99b:docs/investigacoes/2026-11-06/objetos_fase.md`, `MODS.md`). O RESTART da pausa
 (`TheGame::ResetLevel` + `rtMain(0)`) **não** recarrega a fase, então não reaplica o patch.
 
 Opções:

@@ -182,7 +182,7 @@ uns MB no cache. A cópia é testada (o release a usa) e não toca em nada compa
 - A camada nativa já espera várias cargas por execução: `loadLevelFilesTapped` conta `g_loadGen`, usado para recomeçar o que é guardado
   por arquivo carregado (`wotm_overrides.cpp` ~1361); `wotmLoadFreeze` congela a tela durante a carga.
 
-### Reaplicar sem recarregar: não [certo pelo código, ver `objetos_fase.md` e `colisao_fase.md`]
+### Reaplicar sem recarregar: não [certo pelo código, ver `726b99b:docs/investigacoes/2026-11-06/objetos_fase.md` e `colisao_fase.md`]
 O que teria que ser refeito à mão: (1) desfazer o patch anterior, o que exige a imagem de antes do `dbInitDb` (os nós antigos foram
 reescritos, e as cópias e os `ROTATE` novos estão na arena); (2) refazer o registro da travessia (`Destructibles`, `Interactives` e a
 tabela de ids do `dbProcInteractive`, `LevelPickups` e os `_cs` deles, emissores, `PedGroup`, veículos já nascidos com ponteiro para a

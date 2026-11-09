@@ -2,7 +2,7 @@
 
 Tema: como o jogo lista, escolhe e carrega uma fase; o que é amarrado ao índice e o que é amarrado ao nome do arquivo; e uma
 proposta de "fase custom por mod" (`stage.json`, no estilo do `monster.json`) que clona uma fase existente com um patch. No fim, uma
-avaliação de fase do zero. Os relatórios irmãos desta pasta (`objetos_fase.md`, `colisao_fase.md`, `pts_fase.md`) cobrem o que o patch
+avaliação de fase do zero. Os relatórios irmãos desta pasta (`726b99b:docs/investigacoes/2026-11-06/objetos_fase.md`, `colisao_fase.md`, `pts_fase.md`) cobrem o que o patch
 mexe dentro da fase; aqui é só a "casca" (menu, índice, nomes, código por fase).
 
 Marcação: **[certo]** = lido no código (C++ decompilado, asm conferido ou código de `native/`); **[hipótese]** = dedução não

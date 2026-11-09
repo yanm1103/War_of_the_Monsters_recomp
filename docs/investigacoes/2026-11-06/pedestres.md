@@ -1,7 +1,7 @@
 # Pedestres da fase: como o jogo guarda e usa, e o que o editor precisa para controlá-los
 
 Pedido: controle de pedestres no editor de fase (ver as rotas, mover/acrescentar/apagar pontos e ligações, desligar, mudar a
-quantidade). Lido antes: `pts_fase.md` (formato do `.PED`, `PathTool::exportPoints`), `objetos_fase.md` (nó 0xBB8 no `.NGP`),
+quantidade). Lido antes: `pts_fase.md` (formato do `.PED`, `PathTool::exportPoints`), `726b99b:docs/investigacoes/2026-11-06/objetos_fase.md` (nó 0xBB8 no `.NGP`),
 `editor_pc.md`, `MODS.md` ("Level patches", "Level editor") e `native/runtime/wotm_levelpatch.inc` (`cutNets`).
 
 Fontes novas: `asm/game/PedGroup.s` (TU inteira, nada decompilado), `asm/data/game/PedGroup.sdata.s` (constantes),
