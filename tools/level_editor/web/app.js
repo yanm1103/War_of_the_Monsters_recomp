@@ -2423,7 +2423,22 @@ function showWinner() {
 }
 const FAILED = { check: 'Check failed', save: "Couldn't save", test: "Couldn't start the game", reload: "Couldn't reload the game" };
 // Check, Save, Test in game or Reload in game; true when the server did it. Saving with no mod chosen asks which one first.
+// One Save, Check, Test or Reload at a time: a second Ctrl+S or click while one is under way would write the same file twice at once
+let posting = '';
+const POSTING_LABEL = { save: 'Saving…', check: 'Checking…', test: 'Starting…', reload: 'Reloading…' };
 async function post(kind, save = true, extra = {}) {
+  if (posting) return false;
+  posting = kind;
+  const btn = { save: $('save'), check: $('check') }[kind];
+  const lbl = btn && btn.querySelector('.lbl'), was = lbl && lbl.textContent;
+  if (btn) { btn.setAttribute('aria-busy', 'true'); lbl.textContent = POSTING_LABEL[kind]; }
+  try { return await postNow(kind, save, extra); }
+  finally {
+    posting = '';
+    if (btn) { btn.removeAttribute('aria-busy'); lbl.textContent = was; }
+  }
+}
+async function postNow(kind, save, extra) {
   if (openFailed || !stageRoot) {       // a patch built from nothing would be saved over this stage's file
     msg(openFailed ? `${FAILED[kind] || kind}: ${title(openFailed)} didn't open, so there is nothing to ${kind}. Use Retry on the note over the view.`
                    : `${FAILED[kind] || kind}: no stage is open yet.`, { level: 'err', toast: true });

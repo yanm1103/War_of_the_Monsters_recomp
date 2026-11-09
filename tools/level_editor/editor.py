@@ -16,6 +16,7 @@ comes from tools/lvl.py (objects, patch, path cuts, collision check) and tools/l
 """
 import base64
 import contextlib
+import errno
 import io
 import glob
 import io
@@ -2130,6 +2131,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(404, {"error": "not found"})
         except SettingsError as e:
             return self.send(400, {"error": str(e), "code": "settings"})
+        except OSError as e:
+            if not (isinstance(e, PermissionError) or e.errno in (errno.ENOSPC, errno.EROFS, errno.EACCES, errno.EBUSY)):
+                traceback.print_exc()
+                return self.send(500, {"error": "%s: %s" % (type(e).__name__, e)})
+            # a write that the system refused: say what to look at (the generic text was "PermissionError: [Errno 13] ...")
+            traceback.print_exc()
+            what = os.path.basename(e.filename) if e.filename else "a file"
+            return self.send(500, {"error": "The system would not write %s (%s). The mod's folder may be read-only, the disk full, or a program "
+                                            "(the game, an antivirus) may have the file open." % (what, e.strerror or type(e).__name__),
+                                   "code": "disk"})
         except Exception as e:      # noqa: BLE001
             traceback.print_exc()
             return self.send(500, {"error": "%s: %s" % (type(e).__name__, e)})

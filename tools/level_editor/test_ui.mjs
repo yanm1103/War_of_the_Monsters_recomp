@@ -167,6 +167,16 @@ await check('Save writes the patch into the mod and saving the undone state remo
   must(!fs.existsSync(levelFile), 'the file stayed after saving the original state; the patch is ' + await ev('JSON.stringify(window.wotmDebug.buildPatch())'));
 });
 
+await check('two Saves at once write once, and the button says it is saving', async () => {
+  await ev('window.wotmDebug.select(window.wotmDebug.items().find((x) => x.rec.info.handle === ' + JSON.stringify(first) + ' && !x.copy)); window.wotmDebug.nudge(0, 0, 1, false)');
+  const r = await ev(`(async () => { const D = window.wotmDebug; const a = D.post('save'), b = D.post('save');
+    const busy = document.getElementById('save').getAttribute('aria-busy') + ' ' + document.querySelector('#save .lbl').textContent;
+    return JSON.stringify([busy, await a, await b, document.getElementById('save').hasAttribute('aria-busy'), document.querySelector('#save .lbl').textContent]); })()`);
+  must(r === JSON.stringify(['true Saving…', true, false, false, 'Save']), 'got ' + r);
+  await ev('window.wotmDebug.undo()');
+  await ev(`window.wotmDebug.post('save')`);
+  must(!fs.existsSync(levelFile), 'the file stayed after saving the original state');
+});
 await check('an emptied X field puts the number back instead of moving the object to 0', async () => {
   await ev('window.wotmDebug.select(window.wotmDebug.items().find((x) => x.rec.info.handle === ' + JSON.stringify(first) + ' && !x.copy))');
   const before = await ev('document.getElementById("px").value');
