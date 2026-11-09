@@ -23,4 +23,6 @@ tools/run_live.sh
 
 `tools/build_appimage.sh` builds it in the pinned Ubuntu 22.04 x86-64 environment (GLIBC 2.35 ceiling, static C++ runtime with hidden symbols, LGPL-only FFmpeg); `tools/check_appimage.py` validates the payload (`tools/test_check_appimage.py` tests the checker). The package carries no ISO, retail ELF, disc files or mods; licenses and notices are in `tools/release/linux/`.
 
-An AppImage is not published until its corresponding-source and game-derived-code distribution questions are resolved. A successful build and local launch are not, by themselves, approval to distribute it.
+The AppImage is published with each release as a Linux preview. Next to it go the FFmpeg 7.1 source archive, its signature and the checksums that `build_appimage.sh` writes (the LGPL obligation for the bundled FFmpeg).
+
+Build prerequisites on the Ubuntu 22.04 image: `nasm` (FFmpeg's x86 assembly) on top of the tools the script checks. GCC 11 does not compile the PS2Recomp tools (`ps2_recomp` fails with an incomplete `ps2recomp::Symbol` inside `std::unordered_map`), so `tools/setup_runtime.sh` is run in a newer image (Ubuntu 24.04). Its `runtime/PS2Recomp`, `recomp/retail` and `disc/SCUS_971.97` are copied into the 22.04 tree, and `tools/build_appimage.sh` runs there without `setup_runtime.sh`. The translated code does not depend on the compiler that built the tools.

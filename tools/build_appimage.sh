@@ -13,7 +13,7 @@ fail() { printf 'AppImage build: %s\n' "$*" >&2; exit 1; }
 [[ -f "$repo/recomp/retail/register_functions.cpp" ]] || fail "generated runtime inputs are missing; build locally from your own ISO first"
 [[ -z "${WOTM_FFMPEG_PREFIX:-}" && -z "${WOTM_FFMPEG_SYSROOT:-}" && -z "${WOTM_EXE_LINKER_FLAGS:-}" ]] || fail "unset package override variables; the build pins FFmpeg and linker flags"
 
-for tool in cmake ninja pkg-config cc gcc make python3 curl gpg sha256sum readelf patchelf file desktop-file-validate mksquashfs unsquashfs; do
+for tool in cmake ninja pkg-config cc gcc make python3 curl gpg sha256sum readelf patchelf file desktop-file-validate mksquashfs unsquashfs nasm; do
     command -v "$tool" >/dev/null || fail "missing prerequisite: $tool"
 done
 
