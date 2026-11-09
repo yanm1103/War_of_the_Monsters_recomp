@@ -222,6 +222,21 @@ main { display: grid; grid-template-columns: 44px 272px minmax(0, 1fr) 304px; mi
 aside { background: var(--surface-1); padding: 12px; overflow: auto; min-height: 0; }
 #left { border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
 #right { border-left: 1px solid var(--line); overflow-x: hidden; }
+/* the right panel's two tabs (Selection, Stage) and the Stage tab's rows: a labeled button per tool, with how it saves */
+.rtabs { display: flex; gap: 2px; margin: -4px -4px 12px; border-bottom: 1px solid var(--line); position: sticky; top: -12px; background: var(--surface-1); z-index: 1; padding-top: 4px; }
+.rtab { flex: 1; height: 32px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--fg-2); font-weight: 600; }
+.rtab:hover { color: var(--fg); background: var(--surface-2); }
+.rtab.on { color: var(--accent-text); border-bottom-color: var(--accent); }
+.rtab:focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 75%, transparent); }
+#stageTab .sec-title { margin-top: 14px; }
+#stageTab .sum + .sec-title { margin-top: 0; }
+.srow { display: flex; align-items: center; gap: 10px; width: 100%; height: auto; min-height: 44px; padding: 6px 10px; margin: 0 0 4px; text-align: left; justify-content: flex-start; }
+.srow > .ic { width: 20px; height: 20px; flex: none; color: var(--muted); }
+.srow .st { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.srow .st b { font-weight: 600; color: var(--fg); }
+.srow .st small { color: var(--muted); font-size: 11px; line-height: 14px; overflow-wrap: anywhere; }
+.srow .how { flex: none; font-size: 10px; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; padding: 0 6px; }
+.how-key { margin-top: 12px; }
 .sec-title { display: flex; align-items: center; gap: 4px; font: 600 11px/16px var(--font-ui); letter-spacing: .06em;
              text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
 

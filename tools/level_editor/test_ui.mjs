@@ -297,6 +297,25 @@ await check('the Add prop and Layers menus open and close', async () => {
     must(await until(`document.getElementById(${JSON.stringify(m)}).hidden`, 12), 'Esc did not close ' + m);
   }
 });
+await check('the right panel has Selection and Stage tabs; the stage tools are rows of the Stage tab; selecting switches back', async () => {
+  must(await ev(`!document.getElementById('stageTab').hidden === false`), 'the Stage tab is open at the start');
+  await ev(`document.getElementById('tabStage').click()`);
+  must(await ev(`!document.getElementById('stageTab').hidden && document.getElementById('selTab').hidden`), 'the Stage tab did not open');
+  const rows = await ev(`['gridBtn','lightBtn','texBtn','hud','picBtn','sptBtn','pupBtn','aipBtn','fopBtn'].filter((i) => { const b = document.getElementById(i); return !b || !document.getElementById('stageTab').contains(b) || !b.offsetParent; })`);
+  must(rows.length === 0, 'not visible in the Stage tab: ' + rows.join(', '));
+  must(await ev(`!document.getElementById('overlay').querySelector('#gridBtn, #sptBtn, #picBtn')`), 'a stage tool is still on the view bar');
+  must(await ev(`!document.getElementById('rail').querySelector('#texBtn, #lightBtn, #hud')`), 'a stage tool is still on the rail');
+  must(await ev(`document.getElementById('tabStage').classList.contains('on') && !document.getElementById('tabSel').classList.contains('on')
+    && document.getElementById('tabStage').getAttribute('aria-selected') === 'true'`), 'the tab buttons do not say which tab is open');
+  await sleep(600);          // the buttons' color transition (a headless page draws few frames)
+  await shot('stage_tab');
+  await ev(`document.getElementById('texBtn').click()`);
+  must(await until(`document.getElementById('texDlg').open`, 80), 'Textures did not open from the Stage tab');
+  await esc();
+  await ev(`window.wotmDebug.select(window.wotmDebug.items().find((x) => !x.copy))`);
+  must(await ev(`document.getElementById('stageTab').hidden && !document.getElementById('selTab').hidden`), 'selecting did not bring the Selection tab back');
+  await ev('window.wotmDebug.select(null)');
+});
 await check('menus: one open at a time, a click outside closes, arrows walk, Esc gives the focus back to the button', async () => {
   await ev(`document.getElementById('addProp').click()`);
   must(await ev(`!document.getElementById('propMenu').hidden`), 'Add prop did not open');

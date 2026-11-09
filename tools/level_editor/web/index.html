@@ -45,10 +45,6 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
   <nav id="rail" aria-label="Modes">
     <button id="modeObjects" class="mode on" title="Objects: move, turn, copy and delete the stage's buildings, pickups and props (1)" aria-label="Objects"><i class="ic" style="--ic:url(vendor/mdi/cube-outline.svg)"></i></button>
     <button id="modePeds" class="mode" title="Pedestrians: the groups of people and the sidewalks they walk (2)" aria-label="Pedestrians"><i class="ic" style="--ic:url(vendor/mdi/walk.svg)"></i></button>
-    <span class="rsep"></span>
-    <button id="texBtn" title="Textures: replace any picture of this stage (buildings, ground, props, particles) with a PNG in your mod" aria-label="Textures"><i class="ic" style="--ic:url(vendor/mdi/image-edit-outline.svg)"></i></button>
-    <button id="lightBtn" title="Light and fog: the stage's fog, background color and three lights (RST/&lt;STAGE&gt;.MRS), written into your mod" aria-label="Light and fog"><i class="ic" style="--ic:url(vendor/mdi/white-balance-sunny.svg)"></i></button>
-    <button id="hud" title="Fight HUD and sky: replace the pictures of this stage's fight HUD and sky with PNGs in your mod" aria-label="Fight HUD and sky"><i class="ic" style="--ic:url(vendor/mdi/monitor-dashboard.svg)"></i></button>
   </nav>
   <aside id="left">
     <!-- the Objects mode's search, chips and list (class obj); the Pedestrians mode's panel (#pedPanel) -->
@@ -127,12 +123,6 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <span class="fsep"></span>
       <button id="focusSel" class="icon ghost" title="Focus the selection (F)" aria-label="Focus the selection" disabled><i class="ic" style="--ic:url(vendor/mdi/crosshairs-gps.svg)"></i></button>
       <button id="frame" class="icon ghost" title="Frame the whole stage (Home)" aria-label="Frame all"><i class="ic" style="--ic:url(vendor/mdi/fit-to-screen-outline.svg)"></i></button>
-      <button id="gridBtn" class="icon ghost" title="Stage size: the collision grid's rectangle (what the game collides, shoots and sees across); a bigger one lets objects go farther out" aria-label="Stage size"><i class="ic" style="--ic:url(vendor/mdi/arrow-expand-all.svg)"></i></button>
-      <button id="sptBtn" class="icon ghost" title="Start points: where the monsters appear (a file of the mod)" aria-label="Start points"><i class="ic" style="--ic:url(vendor/mdi/flag-outline.svg)"></i></button>
-      <button id="pupBtn" class="icon ghost" title="Power-ups: the health, stamina and other pickups lying in the stage (a file of the mod)" aria-label="Power-ups"><i class="ic" style="--ic:url(vendor/mdi/heart-plus-outline.svg)"></i></button>
-      <button id="aipBtn" class="icon ghost" title="AI net: the paths the computer monsters walk (a file of the mod)" aria-label="AI net"><i class="ic" style="--ic:url(vendor/mdi/graph-outline.svg)"></i></button>
-      <button id="fopBtn" class="icon ghost" title="Vehicle net: the roads and flight paths of the cars, helicopters, flying saucers and tanks (a file of the mod)" aria-label="Vehicle net"><i class="ic" style="--ic:url(vendor/mdi/road-variant.svg)"></i></button>
-      <button id="picBtn" class="icon ghost" title="Use this view as the stage's picture on the stage select (a custom stage, Training, Lake Powell or Tokyo DM)" aria-label="Stage picture"><i class="ic" style="--ic:url(vendor/mdi/image-frame.svg)"></i></button>
       <button id="rulerBtn" class="icon ghost" title="Ruler: click two points of the stage to read the distance, the flat distance, the height and the heading between them (M)" aria-label="Ruler" aria-pressed="false"><i class="ic" style="--ic:url(vendor/mdi/ruler.svg)"></i></button>
       <button id="shotBtn" class="icon ghost" title="Screenshot: download the view as a PNG (the gizmo stays out of it)" aria-label="Screenshot"><i class="ic" style="--ic:url(vendor/mdi/camera-outline.svg)"></i></button>
     </div>
@@ -174,6 +164,35 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <div><div id="busyText">Loading…</div><div class="busy-sub">The first time a stage opens takes a few seconds.</div></div></div></div>
   </section>
   <aside id="right">
+    <!-- two tabs: what is selected, and what belongs to the whole stage (its name and file, size, light, pictures, start points and nets) -->
+    <div id="rtabs" class="rtabs" role="tablist" aria-label="Right panel">
+      <button id="tabSel" class="rtab on" role="tab" aria-selected="true" aria-controls="selTab" type="button">Selection</button>
+      <button id="tabStage" class="rtab" role="tab" aria-selected="false" aria-controls="stageTab" type="button">Stage</button>
+    </div>
+    <div id="stageTab" role="tabpanel" aria-labelledby="tabStage" hidden>
+      <div class="sum">
+        <div id="sumStage" class="sum-title"></div>
+        <div id="sumCounts" class="muted num"></div>
+        <div id="sumMod" class="sum-mod"></div>
+        <div class="sec-title">Saves to</div>
+        <div id="sumPath" class="path"></div>
+      </div>
+      <div class="sec-title">Size</div>
+      <button id="gridBtn" class="srow" type="button" title="Stage size: the collision grid's rectangle (what the game collides, shoots and sees across); a bigger one lets objects go farther out"><i class="ic" style="--ic:url(vendor/mdi/arrow-expand-all.svg)"></i><span class="st"><b>Stage size</b><small>The area the game collides across</small></span><small class="how">Patch</small></button>
+      <div class="sec-title">Environment</div>
+      <button id="lightBtn" class="srow" type="button" title="Light and fog: the stage's fog, background color and three lights (RST/&lt;STAGE&gt;.MRS), written into your mod"><i class="ic" style="--ic:url(vendor/mdi/white-balance-sunny.svg)"></i><span class="st"><b>Light and fog</b><small>Fog, background and three lights</small></span><small class="how">File</small></button>
+      <div class="sec-title">Pictures</div>
+      <button id="texBtn" class="srow" type="button" title="Textures: replace any picture of this stage (buildings, ground, props, particles) with a PNG in your mod"><i class="ic" style="--ic:url(vendor/mdi/image-edit-outline.svg)"></i><span class="st"><b>Textures</b><small>Any picture of the stage, as a PNG</small></span><small class="how">Now</small></button>
+      <button id="hud" class="srow" type="button" title="Fight HUD and sky: replace the pictures of this stage's fight HUD and sky with PNGs in your mod"><i class="ic" style="--ic:url(vendor/mdi/monitor-dashboard.svg)"></i><span class="st"><b>Fight HUD and sky</b><small>The fight's bars, icons and sky</small></span><small class="how">Now</small></button>
+      <button id="picBtn" class="srow" type="button" title="Use this view as the stage's picture on the stage select (a custom stage, Training, Lake Powell or Tokyo DM)"><i class="ic" style="--ic:url(vendor/mdi/image-frame.svg)"></i><span class="st"><b>Stage picture</b><small>This view, on the stage select</small></span><small class="how">Now</small></button>
+      <div class="sec-title">Gameplay</div>
+      <button id="sptBtn" class="srow" type="button" title="Start points: where the monsters appear (a file of the mod)"><i class="ic" style="--ic:url(vendor/mdi/flag-outline.svg)"></i><span class="st"><b>Start points</b><small>Where the monsters appear</small></span><small class="how">File</small></button>
+      <button id="pupBtn" class="srow" type="button" title="Power-ups: the health, stamina and other pickups lying in the stage (a file of the mod)"><i class="ic" style="--ic:url(vendor/mdi/heart-plus-outline.svg)"></i><span class="st"><b>Power-ups</b><small>Health, stamina and other pickups</small></span><small class="how">File</small></button>
+      <button id="aipBtn" class="srow" type="button" title="AI net: the paths the computer monsters walk (a file of the mod)"><i class="ic" style="--ic:url(vendor/mdi/graph-outline.svg)"></i><span class="st"><b>AI net</b><small>Where the computer monsters walk</small></span><small class="how">File</small></button>
+      <button id="fopBtn" class="srow" type="button" title="Vehicle net: the roads and flight paths of the cars, helicopters, flying saucers and tanks (a file of the mod)"><i class="ic" style="--ic:url(vendor/mdi/road-variant.svg)"></i><span class="st"><b>Vehicle net</b><small>Roads and flight paths of the vehicles</small></span><small class="how">File</small></button>
+      <p class="help how-key"><b>Patch</b>: goes in Save, with Undo. <b>File</b>: its own file in the mod, with its own Save. <b>Now</b>: written as soon as you confirm.</p>
+    </div>
+    <div id="selTab" role="tabpanel" aria-labelledby="tabSel">
     <div id="noSel">
       <div class="empty-head"><i class="ic big" style="--ic:url(vendor/mdi/cursor-default-click-outline.svg)"></i><div class="t">Nothing selected</div></div>
       <dl class="keys">
@@ -183,13 +202,6 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
         <dt><kbd>Ctrl</kbd>+<kbd>A</kbd></dt><dd>Select everything listed</dd>
         <dt><kbd>Esc</kbd></dt><dd>Deselect</dd>
       </dl>
-      <div class="sum">
-        <div id="sumStage" class="sum-title"></div>
-        <div id="sumCounts" class="muted num"></div>
-        <div id="sumMod" class="sum-mod"></div>
-        <div class="sec-title">Saves to</div>
-        <div id="sumPath" class="path"></div>
-      </div>
       <div class="sec-title">Getting started</div>
       <ol class="steps">
         <li>Click a building, in the view or in the list.</li>
@@ -335,6 +347,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
           <button id="pdDel" class="danger" title="Delete (Del)"><i class="ic" style="--ic:url(vendor/mdi/delete-outline.svg)"></i><span class="lbl">Delete</span><kbd>Del</kbd></button>
         </div>
       </section>
+    </div>
     </div>
   </aside>
 </main>

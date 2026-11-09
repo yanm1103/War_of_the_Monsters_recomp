@@ -1367,7 +1367,29 @@ function selectMany(list, add = false) {
   sel = group[group.length - 1] || null;
   showSel();
 }
+// The right panel's tabs: Selection (what is selected) and Stage (what belongs to the whole stage). Selecting something shows its tab.
+function showRightTab(name) {
+  const stage = name === 'stage';
+  $('selTab').hidden = stage;
+  $('stageTab').hidden = !stage;
+  for (const [id, on] of [['tabSel', !stage], ['tabStage', stage]]) {
+    $(id).classList.toggle('on', on);
+    $(id).setAttribute('aria-selected', String(on));
+    $(id).tabIndex = on ? 0 : -1;
+  }
+  store.set('rtab', name);
+}
+$('tabSel').onclick = () => showRightTab('selection');
+$('tabStage').onclick = () => showRightTab('stage');
+$('rtabs').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  e.preventDefault();
+  const to = e.target.id === 'tabSel' ? 'stage' : 'selection';
+  showRightTab(to);
+  $(to === 'stage' ? 'tabStage' : 'tabSel').focus();
+});
 function showSel() {
+  if (sel || pedSel) showRightTab('selection');
   gizmo.detach();
   if (sel) pedSel = null;
   peds.highlight(pedSel);
@@ -4899,6 +4921,7 @@ if (new URLSearchParams(location.search).has('debug')) {
                        get pedSel() { return pedSel; }, get group() { return group; }, get sel() { return sel; },
                        get env() { return env; }, get skyRoot() { return skyRoot; }, get skyViews() { return skyViews; }, get stageRoot() { return stageRoot; } };
 }
+showRightTab(store.get('rtab', 'selection') === 'stage' ? 'stage' : 'selection');
 // --vt: the height of the bars over the view (they wrap onto a second row when it is narrow); the menus and the notes sit under them
 new ResizeObserver(() => $('view').style.setProperty('--vt', $('viewTop').offsetHeight + 'px')).observe($('viewTop'));
 loop();
