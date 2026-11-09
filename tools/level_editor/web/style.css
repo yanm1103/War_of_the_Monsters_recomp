@@ -754,14 +754,26 @@ button.small-btn { height: 22px; padding: 0 8px; font-size: 12px; flex: none; }
 .mk-links { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .mk-links li { display: grid; grid-template-columns: minmax(0, 1fr) 56px auto auto; gap: 6px; align-items: center; }
 .mk-links li.in { grid-template-columns: minmax(0, 1fr); color: var(--fg-2); font-size: 12px; }
+.mk-links li.inlink { grid-template-columns: minmax(0, 1fr) auto; }
 .mk-links li.fop { grid-template-columns: minmax(0, 1fr) 52px 52px auto auto; }
 .mk-links .to { justify-content: flex-start; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px; }
 .mk-links input[type=number] { min-width: 0; width: 100%; padding: 0 4px; }
 .mk-links .two { display: inline-flex; gap: 4px; align-items: center; font-size: 11px; color: var(--fg-2); cursor: pointer; }
 .mk-links .none { color: var(--muted); font-size: 12px; display: block; }
 .mk-linkadd { display: flex; gap: 6px; }
-.mk-linkadd .field { flex: 1; }
-.mk-linkadd .field > input { padding-left: 28px; }
+.mk-linkadd > button { flex: 1; justify-content: flex-start; }
+.mk-linkadd > button kbd, .mk-linkrow > button kbd { margin-left: auto; font-size: 10px; padding: 1px 4px; }
+/* the Link tool on the left panel: its button and the option to go on from the node just linked */
+.mk-linkrow { display: flex; align-items: center; gap: 10px; flex: none; }
+.mk-linkrow > button { flex: none; }
+.mk-linkrow > .switch { flex: 1; min-width: 0; }
+#mkLinkHow { flex: none; }
+/* the chip at the pointer in the Link tool: what the click will do */
+.link-chip { position: absolute; left: 0; top: 0; z-index: 3; pointer-events: none; white-space: nowrap; font-size: 12px; line-height: 16px;
+             padding: 2px 8px; border-radius: 10px; color: var(--fg); border: 1px solid var(--accent); will-change: transform;
+             background: color-mix(in srgb, var(--surface-1) 92%, transparent); box-shadow: var(--shadow-1); }
+.link-chip[hidden] { display: none; }
+.link-chip.bad { border-color: var(--danger); color: var(--danger); }
 /* People and Width: a slider and its number */
 .slide-row { display: flex; align-items: center; gap: 8px; }
 .slide-row > input[type=range] { flex: 1; min-width: 0; margin: 0; }

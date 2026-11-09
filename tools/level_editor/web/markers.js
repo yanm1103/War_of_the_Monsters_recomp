@@ -108,19 +108,55 @@ export function removeNode(points, k) {
   for (const m of points) m.links = m.links.filter((l) => l.to !== k).map((l) => Object.assign({}, l, { to: l.to > k ? l.to - 1 : l.to }));
   return points;
 }
-// link a and b both ways with the given attributes ({width} or {width, drop}); an existing link takes the new attributes.
+// link a and b both ways with the given attributes ({width} or {width, drop}); a link that exists keeps its own.
 // false when a node would pass `max` links (nothing is left half done)
 export function linkBoth(points, a, b, attrs, max) {
   const need = (x, y) => !points[x].links.some((l) => l.to === y) && points[x].links.length >= max;
   if (need(a, b) || need(b, a)) return false;
   const add = (x, y) => {
-    const ex = points[x].links.find((l) => l.to === y);
-    if (ex) Object.assign(ex, attrs);
-    else points[x].links.push(Object.assign({ to: y }, attrs));
+    if (!points[x].links.some((l) => l.to === y)) points[x].links.push(Object.assign({ to: y }, attrs));
   };
   add(a, b);
   add(b, a);
   return true;
+}
+// The Link tool: what a click on node b does for the selected node a.
+//   plain click  a link between them (either direction) is cut, and otherwise one is made both ways       -> 'cut' | 'link'
+//   oneWay       the link from a to b only: cut when it exists, made when it does not                    -> 'cut-one' | 'one-way'
+// 'full': a node would pass `max` links, `full` is its index; 'none': a is b. Nothing is changed by the plan.
+export function linkPlan(points, a, b, oneWay, max) {
+  if (a === b || !points[a] || !points[b]) return { action: 'none' };
+  const ab = points[a].links.some((l) => l.to === b), ba = points[b].links.some((l) => l.to === a);
+  if (oneWay) {
+    if (ab) return { action: 'cut-one' };
+    return points[a].links.length >= max ? { action: 'full', full: a } : { action: 'one-way' };
+  }
+  if (ab || ba) return { action: 'cut' };
+  if (points[a].links.length >= max) return { action: 'full', full: a };
+  if (points[b].links.length >= max) return { action: 'full', full: b };
+  return { action: 'link' };
+}
+// make the plan's change (new links take attrs); returns the plan
+export function applyLink(points, a, b, attrs, oneWay, max) {
+  const plan = linkPlan(points, a, b, oneWay, max);
+  const add = (x, y) => points[x].links.push(Object.assign({ to: y }, attrs));
+  if (plan.action === 'link') { add(a, b); add(b, a); }
+  else if (plan.action === 'one-way') add(a, b);
+  else if (plan.action === 'cut') unlink(points, a, b);
+  else if (plan.action === 'cut-one') points[a].links = points[a].links.filter((l) => l.to !== b);
+  return plan;
+}
+// the words for a plan, with 1-based node numbers: the chip at the pointer and the message of a refusal
+export function linkWords(plan, a, b, max) {
+  switch (plan.action) {
+    case 'link': return `Link ${a + 1} and ${b + 1}`;
+    case 'one-way': return `Link ${a + 1} to ${b + 1}, one way`;
+    case 'cut': return `Cut ${a + 1} and ${b + 1}`;
+    case 'cut-one': return `Cut ${a + 1} to ${b + 1}`;
+    case 'new': return 'New node';
+    case 'full': return `Node ${plan.full + 1} already has ${max} links`;
+    default: return '';
+  }
 }
 // take every link between a and b away
 export function unlink(points, a, b) {

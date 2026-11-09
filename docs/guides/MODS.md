@@ -900,8 +900,8 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   - **AI net** (`.AIP`): the paths the computer monsters walk. Each node has a position and a type (0 for nearly all; the AI only follows
     paths of the type it stands on, so a type splits the net into sub-nets), each link a width (the lane is width x 10 to each side; the
     disc's are 12 to 24). The right panel lists the selected node's links, each with its width, a **Two-way** switch (adds or takes away the
-    link back) and a cut (both directions); the one-way links that end at the node are listed with a button to link back, and "To" plus
-    **Link** joins the node and the number typed both ways with the width under **New links** in the left panel. The view draws the links
+    link back) and a cut (both directions); the one-way links that end at the node are listed with a button to link back and a cut. To join
+    two nodes use the **Link tool** (below). The view draws the links
     and numbers every node as the list does (the nodes in reach of the screen, clear of each other; the selected node and the hovered
     one show their type too). The selected node is bigger and ringed, its links are amber and the other links dimmer, its neighbours are
     bigger, and a one-way link has an arrow pointing the way it goes. A row under the pointer in the list outlines its node in the view. Limits: 255 nodes, 6 links per node and 450 paths (a two-way link is one path; the game ignores the
@@ -914,6 +914,16 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
     two-way when both ends link to each other. Limits: 255 nodes and 6 links per node. The view colors the roads by who drives them (yellow
     cars, green helicopters, pink saucers, orange tanks) and draws them faint in the other modes only with **Display ▸ Vehicle net** on. Nodes are numbered, and one-way links have arrows, as in the AI net.
     A net of one node gives the vehicles nowhere to drive, and none at all brings back the game's 2 default nodes.
+  - **Link tool** (**K**, the **Link** button on the left panel or on the selected node's Links; both nets). With a node selected, a click on
+    another node, in the view or in the list, joins the two both ways; a click on a node the selected one is already linked to (in either
+    direction) cuts the link. **Shift**+click makes the link one way, out of the selected node, or cuts only that direction. A click on the
+    ground adds a node there, of the selected node's type, linked to it. A new link takes the Width (and Drop) under **New links**; a link
+    that exists keeps its own. With **Go on from the new node** on (the default) the node just linked becomes the selected one, so 1, 2, 3, 4
+    is three clicks; off, the selection stays. While the tool is on, a rubber band runs from the selected node to the node or the ground under
+    the pointer and a chip beside it says what the click does ("Link 2 and 3", "Cut 2 and 3", "New node"); the gizmo is hidden. **Ctrl** held
+    is the tool without turning it on, and **Esc** leaves it before it lets go of the selection. A node never passes 6 links: the click that
+    would is refused with a message naming the node, and nothing changes. **Add** makes a node linked to the selected one, of its type, and
+    selects the new node, so repeated Add draws a path; **Ctrl+Z** takes any of these back. Past 450 paths the AI net's meter fills and a message says the game ignores the rest.
 - **Stage picture:** Stage tab ▸ Pictures ▸ Stage picture saves the middle 2:1 band of the view, 512x256, as
   `mods/<mod>/levelpics/<name>.png` for a custom stage (`<id>`) and for Training, Lake Powell and Tokyo DM; the other game stages have
   their picture in `SHELL.TEX` (make a custom stage on one). The stage select picks it up the next time the game starts.

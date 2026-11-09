@@ -124,6 +124,11 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
         <label class="field suf" title="The width of a new link: the lane is this times 10 to each side"><i class="pre">Width</i><input id="mkWidth" type="number" min="0" max="255" value="20" aria-label="Width of a new link"></label>
         <label class="field suf" id="mkDropLbl" title="How far below the path a helicopter may fly when it chases a target, times 10"><i class="pre">Drop</i><input id="mkDropN" type="number" min="0" max="255" value="0" aria-label="Drop of a new link"></label>
       </div>
+      <div id="mkLinkRow" class="mk-linkrow" hidden>
+        <button type="button" id="mkLinkTool" aria-pressed="false" title="Link tool (K): with a node selected, click another node, in the view or in the list, to link them; click a linked node to cut the link. Shift+click: one way. Click the ground: a new node, linked. Esc stops. Holding Ctrl does the same without the tool."><i class="ic" style="--ic:url(vendor/mdi/link-variant.svg)"></i><span class="lbl">Link</span><kbd>K</kbd></button>
+        <label class="switch" title="After a link, the node you linked to is the selected one, so that 1, 2, 3, 4 takes three clicks"><input type="checkbox" id="mkChain" checked><span class="track"></span><span class="tx">Go on from the new node</span></label>
+      </div>
+      <div id="mkLinkHow" class="help" hidden>Select a node, press <b>Link</b>, then click another node to join them. Click a linked node to cut it.<br>Shift+click joins one way only. Click the ground to add a node. Esc stops.</div>
       <ul id="mkList" role="listbox" aria-label="Markers"></ul>
       <div id="mkNone" class="list-empty" hidden>
         <i class="ic" id="mkNoneIc" style="--ic:url(vendor/mdi/flag-outline.svg)"></i>
@@ -213,6 +218,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <div id="keepNote" class="callout warn" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span id="keepText"></span>
         <button id="keepClose" class="icon ghost" title="Hide this note" aria-label="Hide"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
     </div>
+    <div id="linkChip" class="link-chip" hidden></div>
     <div id="hint" class="muted" aria-live="polite"></div>
     <div id="busy" hidden><div class="busy-card" role="status"><span class="spin"></span>
       <div><div id="busyText">Loading…</div><div class="busy-sub">The first time a stage opens takes a few seconds.</div></div></div></div>
@@ -440,10 +446,9 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
         <div class="sec-title">Links<span class="lead" id="mkLinkCount"></span></div>
         <ul class="mk-links" id="mkLinkList"></ul>
         <div class="mk-linkadd">
-          <label class="field" title="The number of the node to link this one to, both ways, with the width (and drop) of New links"><i class="pre">To</i><input id="mkLinkTo" type="number" min="1" step="1" aria-label="Node number to link to"></label>
-          <button type="button" id="mkLink" title="Link this node and that one, both ways"><i class="ic" style="--ic:url(vendor/mdi/link-variant.svg)"></i><span class="lbl">Link</span></button>
+          <button type="button" id="mkLink" aria-pressed="false" title="Link tool (K): click another node, in the view or in the list, to link it to this one; click a linked node to cut the link. Shift+click: one way."><i class="ic" style="--ic:url(vendor/mdi/link-variant.svg)"></i><span class="lbl">Link to another node</span><kbd>K</kbd></button>
         </div>
-        <div class="help">A link is one way until the other node links back; <b>Two-way</b> adds the link back. Cutting a link takes both directions away.</div>
+        <div class="help">A link is one way until the other node links back; <b>Two-way</b> adds the link back. The x cuts both directions. A new link takes the Width (and Drop) of New links.</div>
       </section>
       <section class="psec">
         <div class="sec-title">Actions</div>
@@ -599,6 +604,14 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
         <dl class="kl">
           <dt>Click</dt><dd>Select a marker (in its own mode); the pointer on one outlines it and names it</dd>
           <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo in this layer; Save writes its file</dd>
+        </dl>
+        <h3>AI net, Vehicle net: linking</h3>
+        <dl class="kl">
+          <dt><kbd>K</kbd></dt><dd>Link tool: click a node, then another, to join them; click a linked node to cut it</dd>
+          <dt><kbd>Shift</kbd>+Click</dt><dd>In the Link tool: a link that goes one way, from the selected node</dd>
+          <dt><kbd>Ctrl</kbd>+Click</dt><dd>The Link tool, while the key is held</dd>
+          <dt>Click the ground</dt><dd>In the Link tool: a new node there, linked to the selected one</dd>
+          <dt><kbd>Esc</kbd></dt><dd>Leave the Link tool, then deselect</dd>
         </dl>
       </div>
       <div>

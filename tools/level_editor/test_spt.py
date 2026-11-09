@@ -157,6 +157,13 @@ def main():
         out = editor.save_spt(cfg, {"mod": "M", "name": "CENTRAL", "points": net}, "AIP")
         assert os.path.isfile(os.path.join(tmp, "M", "PTS", "CENTRAL.AIP")) and out["source"] == "mod" and not out["warnings"], out
         assert lvl.aip_paths(out["points"]) == 1
+        # the Link tool's result: 1 and 2 joined both ways, then 2 to 3 both ways with its own width, 3 to 1 one way
+        net = [{"pos": [0.0, 0.0, 0.0], "type": 0, "links": [{"to": 1, "width": 20}]},
+               {"pos": [100.0, 0.0, 0.0], "type": 0, "links": [{"to": 0, "width": 20}, {"to": 2, "width": 33}]},
+               {"pos": [200.0, 0.0, 0.0], "type": 0, "links": [{"to": 1, "width": 33}, {"to": 0, "width": 9}]}]
+        out = editor.save_spt(cfg, {"mod": "M", "name": "CENTRAL", "points": net}, "AIP")
+        assert [n["links"] for n in out["points"]] == [n["links"] for n in net], out["points"]
+        assert lvl.aip_paths(out["points"]) == 3, lvl.aip_paths(out["points"])         # two two-way links and one one-way
         for bad in ([{"pos": [0, 0, 0], "links": [{"to": 5, "width": 1}]}], [{"pos": [0, 0, 0], "links": [{"to": 0, "width": 1}]}],
                     [{"pos": [0, 0, 0], "links": [{"to": 0, "width": 1}] * 7}], [{"pos": [0, 0, 0], "type": 256}]):
             try:

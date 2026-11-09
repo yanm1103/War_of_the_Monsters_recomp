@@ -486,6 +486,7 @@ await check('a stage switch with a draft: Discard opens the other stage with its
   await goMode('objects');
 });
 await check("Undo and Redo of the patch leave a layer's draft alone; in a marker mode Ctrl+Z is the layer's", async () => {
+  await ev(`${D}.layersReady()`);                 // (the stage the test before reopened is still reading its layers' files)
   await goMode('spt');
   const n0 = await layerN('SPT');
   await ev(`document.getElementById('mkAdd').click()`);
@@ -512,6 +513,7 @@ await check("Undo and Redo of the patch leave a layer's draft alone; in a marker
   must(await ev(`${D}.unsavedCount()`) === 0, 'something is still unsaved');
 });
 await check('Move my changes to another mod keeps a draft that is in no mod yet', async () => {
+  await ev(`${D}.layersReady()`);
   fs.mkdirSync(path.join(mods, 'smoke2'), { recursive: true });
   await goMode('spt');
   const n0 = await layerN('SPT');
@@ -540,7 +542,8 @@ await check('the Net links: a node shows its links, Link joins two nodes both wa
   await ev(`${D}.selectMarker(${a})`);
   const l0 = await ev(`${D}.lay('AIP').points[${a}].links.length`);
   must(await ev(`document.querySelectorAll('#mkLinkList li.fop, #mkLinkList li:not(.in)').length`) >= l0, 'the right panel does not list the links');
-  await ev(`(() => { document.getElementById('mkLinkTo').value = ${b + 1}; document.getElementById('mkLink').click(); })()`);
+  must(await ev(`!document.getElementById('mkLinkTo')`), 'the number field and its Link button are still there');
+  await ev(`(() => { ${D}.linkTool.chain = false; ${D}.linkNodes(${a}, ${b}, false); ${D}.linkTool.chain = true; })()`);
   must(await ev(`${D}.lay('AIP').points[${a}].links.some((l) => l.to === ${b}) && ${D}.lay('AIP').points[${b}].links.some((l) => l.to === ${a})`), 'Link did not join both ways');
   must(await ev(`[...document.querySelectorAll('#mkLinkList li')].some((li) => li.querySelector('.to') && li.querySelector('.to').textContent === '→ Node ${b + 1}' && li.querySelector('input[type=checkbox]').checked)`), 'the link is not listed as two-way');
   await ev(`(() => { const li = [...document.querySelectorAll('#mkLinkList li')].find((x) => x.querySelector('.to') && x.querySelector('.to').textContent === '→ Node ${b + 1}'); const c = li.querySelector('input[type=checkbox]'); c.checked = false; c.dispatchEvent(new Event('change')); })()`);
@@ -800,6 +803,162 @@ await check('markers in the view: the same for the nodes of the AI net', async (
   must(await until(`${D}.markerCtx().sel === -1`, 20), 'Esc did not let go of the node');
   await ev(`document.getElementById('mkRevert').click()`);
   must(await until(`${D}.nets.AIP.points[${idx}].pos[1] === ${y0}`, 40), 'Revert did not put the node back');
+  await goMode('objects');
+});
+// the Link tool of the nets, by the mouse and the keys
+const clickMod = async (x, y, modifiers = 0) => {
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, modifiers });
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1, modifiers });
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1, modifiers });
+  await sleep(200);
+};
+const moveTo = async (x, y, modifiers = 0) => { await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, modifiers }); await sleep(120); };
+const onScreen = async (kind) => JSON.parse(await ev(`(() => { const D = window.wotmDebug; return JSON.stringify(D.lay('${kind}').points.map((p, i) => [i, D.markerScreen('${kind}', p)]).filter((x) => x[1]
+  && x[1][0] > 330 && x[1][0] < innerWidth - 480 && x[1][1] > 130 && x[1][1] < innerHeight - 120)); })()`));
+const linkedAny = (P, a, b) => P[a].links.some((l) => l.to === b) || P[b].links.some((l) => l.to === a);
+const pts = async (kind) => JSON.parse(await ev(`JSON.stringify(${D}.lay('${kind}').points)`));
+await check('the Link tool: with node 2 selected, a click on node 3 joins them; again cuts; Shift is one way; the ground adds a node; Esc leaves the tool first', async () => {
+  await goMode('aip');
+  await ev(`${D}.setView(false)`);
+  await ev(`${D}.frameAll()`);
+  await sleep(600);
+  const on = await onScreen('AIP');
+  let P = await pts('AIP');
+  // a, b, c on screen, far apart from each other, with no link between them
+  let trio = null;
+  const far = (u, v) => Math.hypot(u[1][0] - v[1][0], u[1][1] - v[1][1]) > 70;
+  for (const A of on) for (const B of on) for (const C of on) {
+    if (trio || A[0] === B[0] || B[0] === C[0] || A[0] === C[0]) continue;
+    if (P[A[0]].links.length < 5 && P[B[0]].links.length < 5 && P[C[0]].links.length < 5 && far(A, B) && far(B, C) && far(A, C) && !linkedAny(P, A[0], B[0]) && !linkedAny(P, B[0], C[0]) && !linkedAny(P, A[0], C[0])) trio = [A, B, C];
+  }
+  must(trio, 'no three unlinked AI net nodes on screen');
+  const [[a, pa], [b, pb], [c, pc]] = trio;
+  await ev(`${D}.selectMarker(${b})`);
+  must(await ev(`document.getElementById('mkLinkRow').hidden === false && document.getElementById('mkLinkHow').hidden === false`), 'the Link controls are not on the left panel');
+  must(await ev(`!!document.querySelector('#mkLinks #mkLink')`), 'the Link button is not on the right panel');
+  await key('k', 'KeyK', 75);
+  must(await until(`${D}.linkTool.on`, 20), 'K did not turn the Link tool on');
+  must(await ev(`document.getElementById('mkLinkTool').getAttribute('aria-pressed') === 'true' && document.getElementById('mkLink').getAttribute('aria-pressed') === 'true'`), 'the buttons do not say the tool is on');
+  must(await ev(`!${D}.marker.on`), 'the gizmo stays on the node while linking');
+  must(await until(`${D}.hintKey === 'link'`, 20), 'the hint is ' + await ev(`${D}.hintKey`));
+  // the pointer on node c: the rubber band runs from node b to c and the chip says what a click does
+  await moveTo(pc[0], pc[1]);
+  must(await until(`${D}.hover.marker === ${c}`, 20), 'the pointer is not on node ' + c);
+  must(await until(`${D}.chipText === 'Link ${b + 1} and ${c + 1}'`, 20), 'the chip says: ' + await ev(`${D}.chipText`));
+  must(await ev(`${D}.netRubber.visible && !document.getElementById('linkChip').hidden`), 'no rubber band or chip');
+  await ev(`document.querySelectorAll('#toasts .toast').forEach((t) => t.remove())`);
+  await shot('link_tool_hover');
+  await moveTo(pc[0], pc[1], 8);
+  must(await until(`${D}.chipText === 'Link ${b + 1} to ${c + 1}, one way'`, 20), 'with Shift the chip says: ' + await ev(`${D}.chipText`));
+  await moveTo(pb[0], pb[1]);
+  must(await until(`${D}.hover.marker === ${b} && ${D}.chipText === '' && !${D}.netRubber.visible`, 20), 'the selected node itself shows a band: ' + await ev(`${D}.chipText`));
+  // the width of New links goes on the new link; both ways; the selection goes on to the node linked (Go on is on)
+  await ev(`(() => { const w = document.getElementById('mkWidth'); w.value = 33; w.dispatchEvent(new Event('input')); })()`);
+  await clickMod(pc[0], pc[1]);
+  P = await pts('AIP');
+  must(P[b].links.some((l) => l.to === c && l.width === 33) && P[c].links.some((l) => l.to === b && l.width === 33), 'the click did not join node ' + b + ' and ' + c + ' both ways with the width 33');
+  must(await ev(`${D}.markerCtx().sel === ${c}`), 'the selection did not go on to node ' + c);
+  must(await ev(`[...document.querySelectorAll('#mkLinkList li')].some((li) => li.querySelector('.to') && li.querySelector('.to').textContent === '→ Node ${b + 1}')`), 'the right panel does not list the link of the new selection');
+  // Ctrl+Z takes the link back (the tool stays on)
+  await key('z', 'KeyZ', 90, 2);
+  must(await until(`!${D}.lay('AIP').points[${b}].links.some((l) => l.to === ${c})`, 20), 'Ctrl+Z did not take the link back');
+  must(await ev(`${D}.linkTool.on && ${D}.markerCtx().sel === ${b}`), 'the undo changed the tool or the selection');
+  // again, then a click on the node it is joined to cuts it, both ways
+  await clickMod(pc[0], pc[1]);
+  await clickMod(pb[0], pb[1]);
+  P = await pts('AIP');
+  must(!linkedAny(P, b, c), 'a click on a linked node did not cut the link');
+  must(await ev(`${D}.markerCtx().sel === ${c}`), 'a cut moved the selection');
+  // Shift: one way, out of the selected node (c) to b; the arrow is drawn; Shift on it again cuts that direction only
+  await clickMod(pb[0], pb[1], 8);
+  P = await pts('AIP');
+  must(P[c].links.some((l) => l.to === b) && !P[b].links.some((l) => l.to === c), 'Shift+click did not make a link out of node ' + c + ' alone');
+  must(await ev(`${D}.nets.AIP.view.userData.arrows && ${D}.nets.AIP.view.userData.arrows.links.length >= 1`), 'no arrow for the one-way link');
+  await ev(`${D}.selectMarker(${c})`);
+  await clickMod(pb[0], pb[1], 8);
+  P = await pts('AIP');
+  must(!linkedAny(P, b, c), 'Shift+click on a one-way link did not cut it');
+  // Go on off: the selection stays
+  await ev(`document.getElementById('mkChain').click()`);
+  must(await ev(`${D}.linkTool.chain === false`), 'the Go on option did not turn off');
+  await ev(`${D}.selectMarker(${a})`);
+  await clickMod(pb[0], pb[1]);
+  must(await ev(`${D}.markerCtx().sel === ${a} && ${D}.lay('AIP').points[${a}].links.some((l) => l.to === ${b})`), 'with Go on off the selection should stay on node ' + a);
+  await ev(`document.getElementById('mkChain').click()`);
+  // a row of the list links too
+  await ev(`${D}.selectMarker(${a})`);
+  await ev(`[...document.querySelectorAll('#mkList li')].find((li) => li._mk === ${c}).click()`);
+  must(await ev(`${D}.lay('AIP').points[${a}].links.some((l) => l.to === ${c}) && ${D}.lay('AIP').points[${c}].links.some((l) => l.to === ${a})`), 'a click on the row of node ' + c + ' did not link');
+  // a node that is full: refused, named, nothing changed
+  await ev(`document.getElementById('mkRevert').click()`);
+  must(await until(`${D}.unsavedCount() === 0`, 40), 'Revert did not clean up');
+  await ev(`(() => { const f = ${D}.lay('AIP').points[${c}]; let t = 0; while (f.links.length < 6) { if (t !== ${c} && t !== ${b} && !f.links.some((l) => l.to === t)) f.links.push({ to: t, width: 5 }); t++; } })()`);
+  await ev(`${D}.selectMarker(${b})`);
+  const before = await ev(`JSON.stringify(${D}.lay('AIP').points)`);
+  await ev(`${D}.linkNodes(${b}, ${c}, false)`);
+  must(before === await ev(`JSON.stringify(${D}.lay('AIP').points)`), 'a link to a full node changed the net');
+  must(await ev(`!document.getElementById('mkErr').hidden && document.getElementById('mkErr').textContent.includes('Node ${c + 1} already has 6 links')`), 'the refusal does not name the node: ' + await ev(`document.getElementById('mkErr').textContent`));
+  await ev(`document.getElementById('mkRevert').click()`);
+  must(await until(`${D}.unsavedCount() === 0`, 40), 'Revert did not clean up');
+  // the ground: a click on the stage puts a new node there, of this node's type, joined both ways, and selects it
+  await ev(`${D}.setLinkTool(true)`);
+  await ev(`${D}.selectMarker(${a})`);
+  const n0 = await layerN('AIP');
+  const [W, H] = JSON.parse(await ev(`JSON.stringify([innerWidth, innerHeight])`));
+  let spot = null;
+  for (let y = 200; y < H - 150 && !spot; y += 60) for (let x = 400; x < W - 520 && !spot; x += 70) {
+    if (on.some((m) => Math.hypot(m[1][0] - x, m[1][1] - y) < 50)) continue;
+    await moveTo(x, y);
+    if (await ev(`${D}.chipText === 'New node'`)) spot = [x, y];
+  }
+  must(spot, 'no ground to put a node on');
+  await shot('link_tool_new_node');
+  await clickMod(spot[0], spot[1]);
+  must(await layerN('AIP') === n0 + 1, 'the click on the ground did not add a node');
+  P = await pts('AIP');
+  const nn = P.length - 1;
+  must(P[nn].type === P[a].type && P[a].links.some((l) => l.to === nn) && P[nn].links.some((l) => l.to === a), 'the new node is not joined both ways to node ' + a + ' with its type');
+  must(await ev(`${D}.markerCtx().sel === ${nn}`), 'the new node is not the selected one');
+  await key('z', 'KeyZ', 90, 2);
+  must(await until(`${D}.lay('AIP').points.length === ${n0}`, 20), 'Ctrl+Z did not take the new node back');
+  // Esc: the tool first, then the selection
+  await key('Escape', 'Escape', 27);
+  must(await until(`!${D}.linkTool.on`, 20), 'Esc did not leave the Link tool');
+  must(await ev(`${D}.markerCtx().sel === ${a}`), 'the first Esc let go of the selection');
+  await key('Escape', 'Escape', 27);
+  must(await until(`${D}.markerCtx().sel === -1`, 20), 'the second Esc did not deselect');
+  // Ctrl held is the tool without turning it on
+  await ev(`${D}.selectMarker(${a})`);
+  await clickMod(pc[0], pc[1], 2);
+  must(await ev(`${D}.lay('AIP').points[${a}].links.some((l) => l.to === ${c})`), 'Ctrl+click did not link');
+  await ev(`document.getElementById('mkRevert').click()`);
+  must(await until(`${D}.unsavedCount() === 0`, 40), 'Revert did not clean up');
+  await goMode('objects');
+});
+await check('the Link tool in the vehicle net: a new link takes the Width and the Drop of New links; Add makes a node of the selected type', async () => {
+  await goMode('fop');
+  must(await until(`${D}.lay('FOP').points.length > 3`, 80), 'the stage has too few vehicle net nodes');
+  const P = await pts('FOP');
+  let pair = null;
+  for (let x = 0; x < P.length && !pair; x++) for (let y = 0; y < P.length && !pair; y++) if (x !== y && !linkedAny(P, x, y) && P[x].links.length < 5 && P[y].links.length < 5 && P[x].type === 1 && P[y].type === 1) pair = [x, y];
+  if (!pair) for (let x = 0; x < P.length && !pair; x++) for (let y = 0; y < P.length && !pair; y++) if (x !== y && !linkedAny(P, x, y) && P[x].links.length < 5 && P[y].links.length < 5) pair = [x, y];
+  must(pair, 'every pair of nodes is linked already');
+  const [a, b] = pair;
+  await ev(`(() => { for (const [id, v] of [['mkWidth', 12], ['mkDropN', 26]]) { const e = document.getElementById(id); e.value = v; e.dispatchEvent(new Event('input')); } })()`);
+  await ev(`${D}.selectMarker(${a})`);
+  await ev(`${D}.setLinkTool(true)`);
+  await ev(`${D}.linkNodes(${a}, ${b}, false)`);
+  const Q = await pts('FOP');
+  must(Q[a].links.some((l) => l.to === b && l.width === 12 && l.drop === 26) && Q[b].links.some((l) => l.to === a && l.width === 12 && l.drop === 26), 'the new link does not take 12 and 26: ' + JSON.stringify([a, b, Q[a].links, Q[b].links, await ev(`[document.getElementById('mkErr').textContent, ${D}.markerCtx().kind, ${D}.markerCtx().sel, ${D}.lay('FOP').caps, ${D}.linkTool.on]`)]));
+  await ev(`${D}.setLinkTool(false)`);
+  must(await ev(`document.getElementById('mkNewType').value === '${Q[b].type}'`), 'the type of the next new node does not follow the selected node: ' + await ev(`document.getElementById('mkNewType').value`));
+  const n0 = await layerN('FOP');
+  await ev(`document.getElementById('mkAdd').click()`);
+  const R = await pts('FOP');
+  must(R.length === n0 + 1 && R[n0].type === Q[b].type && R[n0].links.some((l) => l.to === b) && R[b].links.some((l) => l.to === n0), 'Add did not make a linked node of the selected type');
+  must(await ev(`${D}.markerCtx().sel === ${n0}`), 'the new node is not selected, so that Add again would not go on from it');
+  await ev(`document.getElementById('mkRevert').click()`);
+  must(await until(`${D}.unsavedCount() === 0`, 40), 'Revert did not clean up');
   await goMode('objects');
 });
 // the labels the view should show for a layer's points, worked out here from the rules (a start point: its place in its list)

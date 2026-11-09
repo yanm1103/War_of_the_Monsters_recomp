@@ -19,7 +19,8 @@ import { testBody, openTestOpts, loadTestOpts, testSummary } from './testopts.js
 import { createRuler } from './ruler.js';
 import { createMinimap } from './minimap.js';
 import { KINDS, isNet, LAYERS, KIND_OF_MODE, FILE_MAX, SPT_SHORT, sptOver, PUP_GROUPS, markerColor, hexColor, sections as mkSections,
-         markerName, netTwoWay, netPaths, removeNode, linkBoth, unlink, oneWayIn, markerShape, sptViewLabel } from './markers.js';
+         markerName, netTwoWay, netPaths, removeNode, linkBoth, unlink, oneWayIn, markerShape, sptViewLabel,
+         linkPlan, applyLink, linkWords } from './markers.js';
 import { markerScale, EXTENT, SEL_GROW, pickBest } from './marker_math.js';
 import { createMarkerLabels } from './markerlabels.js';
 
@@ -639,13 +640,20 @@ const HINTS = {
   pedGroup: 'Drag the arrows to move it · End to drop · Ctrl+D to copy · Del to delete',
   mk: 'Click a marker to select it · Add puts a new one where the view looks · The other layers are faint',
   mkSel: 'Drag the arrows to move it · End to drop · Ctrl+D to copy · Del to delete · Ctrl+Z to undo · Esc to deselect',
+  mkNet: 'Drag the arrows to move it · K to link it to other nodes · Ctrl+D to copy · Del to delete · Esc to deselect',
+  link: 'Click a node to link or cut · Shift+click: one way · Click the ground: new node · Esc stops',
+  linkPick: 'Link tool: click the node to start from · Esc stops',
 };
 const hint = { key: '', timer: 0 };
 function hintKey() {
   if (band && !$('band').hidden) return 'band';
   if (gizmo.dragging) return 'gizmo';
   if (editMode === 'peds') return pedSel ? (pedSel.kind === 'group' ? 'pedGroup' : 'pedSeg') : 'peds';
-  if (layerOf()) return lay(layerOf()).sel >= 0 ? 'mkSel' : 'mk';
+  if (layerOf()) {
+    const L = lay(layerOf());
+    if (L.net && linkTool.on) return L.sel >= 0 ? 'link' : 'linkPick';
+    return L.sel >= 0 ? (L.net ? 'mkNet' : 'mkSel') : 'mk';
+  }
   if (isDeleted(sel)) return 'deleted';
   if (group.length > 1) return 'many';
   if (sel) return gizmo.getMode() === 'rotate' ? 'turn' : 'one';
@@ -1853,8 +1861,16 @@ function deletedHit(ray, far = Infinity) {
 
 // Hover: what a click would pick, outlined in white, and the pointer as a hand over it. At most 30 raycasts a second, from the
 // render loop, and none while a button is down (drag, look, band, gizmo) or the gizmo has the pointer.
-const hover = { at: null, last: 0, item: null, n: 0, dirty: false, marker: -1, row: -1, shown: -1 };   // marker: under the pointer; row: its list row under it; shown: the one outlined
-canvas.addEventListener('pointermove', (e) => { hover.at = ndc(e); hover.client = [e.clientX, e.clientY]; hover.dirty = true; hover.buttons = e.buttons; });
+const hover = { at: null, last: 0, item: null, n: 0, dirty: false, marker: -1, row: -1, shown: -1, surf: null, shift: false, ctrl: false };   // marker: under the pointer; row: its list row under it; shown: the one outlined; surf: the stage's surface under it (Link tool)
+// the Link tool of the nets (K): on, and whether the node just linked becomes the selected one
+const linkTool = { on: false, chain: store.get('netChain', '1') === '1' };
+let newTypeOf = '';      // the node whose type the bar's type control last followed
+canvas.addEventListener('pointermove', (e) => {
+  hover.at = ndc(e); hover.client = [e.clientX, e.clientY]; hover.dirty = true; hover.buttons = e.buttons;
+  hover.shift = e.shiftKey; hover.ctrl = e.ctrlKey || e.metaKey;
+});
+for (const type of ['keydown', 'keyup']) window.addEventListener(type, (e) => { hover.shift = e.shiftKey; hover.ctrl = e.ctrlKey || e.metaKey; hover.dirty = true; });
+window.addEventListener('blur', () => { hover.shift = false; hover.ctrl = false; });
 canvas.addEventListener('pointerleave', () => { hover.at = null; hover.dirty = true; });
 // what is under the pointer at p (NDC): {item} an object, {ped} a pedestrian marker, {deleted} a dashed box, or null
 function pickAt(p, add = false) {
@@ -1890,12 +1906,13 @@ function hoverStep() {
   }
   hover.item = it;
   hover.marker = mk;
+  hover.surf = mk < 0 && !busy && hover.at && linkOn(hover.ctrl) && lay(layerOf()).sel >= 0 ? surfaceAt(hover.at) : null;   // where a click would put a new node
   hover.shown = mk >= 0 ? mk : hover.row ?? -1;      // the pointer on a marker, or on its row in the list
   showMarkerRing(hover.shown);
   const obj = it && !it.kind ? it : null;   // an object or a deleted original (pedestrian markers have a kind)
   hoverBox.visible = !!obj && obj.node.visible && !group.includes(obj);
   if (hoverBox.visible) hoverBox.setFromObject(obj.node);
-  canvas.style.cursor = gizmo.axis !== null && !busy ? 'move' : it || mk >= 0 ? 'pointer' : '';
+  canvas.style.cursor = gizmo.axis !== null && !busy ? 'move' : it || mk >= 0 ? 'pointer' : linkOn(hover.ctrl) ? 'crosshair' : '';
 }
 function showProps() {
   if (!sel || isDeleted(sel)) return;
@@ -1948,6 +1965,8 @@ function enterMode(m) {
   store.set('mode', m);
   group = []; sel = null; pedSel = null;
   for (const k of KINDS) lay(k).sel = -1;
+  linkTool.on = false;
+  syncLinkTool();
   if ((m === 'peds' || layerOf(m)) && gizmo.getMode() === 'rotate') setTool('translate');
   applyModeView();
   updateLayerViews();          // the active layer is drawn full, the others faint
@@ -2537,9 +2556,11 @@ canvas.addEventListener('pointerup', (e) => {
   // in a marker mode (start points, power-ups, a net): the marker near the pointer is selected; nothing near lets go of it. The objects
   // are scenery there, so the click never falls through to them.
   if (layerOf()) {
-    if (e.shiftKey || e.ctrlKey) return;
+    const L = lay(layerOf()), link = linkOn(e.ctrlKey || e.metaKey);
+    if (link && L.sel >= 0) { linkClick(e); return; }      // the Link tool: the click joins or cuts, or puts a new node on the ground
+    if (!link && (e.shiftKey || e.ctrlKey)) return;
     const m = pickMarker(e);
-    if (m >= 0) selectMarker(m); else if (lay(layerOf()).sel >= 0) deselectMarker();
+    if (m >= 0) selectMarker(m); else if (L.sel >= 0 && !linkTool.on) deselectMarker();
     return;
   }
   // the first visible thing under the pointer: an object, a pedestrian marker, a deleted one's dashed box; ground or a road: nothing
@@ -4133,6 +4154,7 @@ function selectMarker(i) {
   const kind = layerOf();
   if (!kind) return;
   lay(kind).sel = i;
+  hover.dirty = true;
   updateLayerView(kind);
   showSel();
 }
@@ -4140,7 +4162,7 @@ function deselectMarker() { selectMarker(-1); }
 // the gizmo follows the selected marker (its place, and a move of the marker by anything else puts it there)
 function syncMarkerGizmo() {
   const p = markerSel();
-  if (!p || sel || pedSel) {
+  if (!p || sel || pedSel || linkTool.on) {      // (the Link tool clicks the nodes: the gizmo's arrows would be in the way)
     if (marker.on) { gizmo.detach(); marker.on = false; }
     return;
   }
@@ -4372,6 +4394,8 @@ function mkFillBar() {
   add.title = L.net ? `Add a node where the view looks (with a node selected, the new one is linked to it, both ways)` : `Add a ${w.one} where the view looks`;
   const d = $('mkDefaults');
   d.hidden = !L.net;
+  $('mkLinkRow').hidden = !L.net;
+  $('mkLinkHow').hidden = !L.net;
   if (L.net) {
     $('mkDropLbl').hidden = kind !== 'FOP';
     $('mkWidth').value = netDefaults[kind].width;
@@ -4441,7 +4465,7 @@ function mkRow(kind, L, i) {
   }
   li.title = `${h.textContent} · x ${Math.round(p.pos[0])}, y ${Math.round(p.pos[1])}, z ${Math.round(p.pos[2])}`;
   li.append(k, h, bd, hd);
-  li.onclick = () => { selectMarker(i); focusSelection(); };
+  li.onclick = (e) => mkPick(i, e.shiftKey);
   li.onmouseenter = () => { hover.row = i; hover.dirty = true; };
   li.onmouseleave = () => { if (hover.row === i) hover.row = -1; hover.dirty = true; };
   return li;
@@ -4507,8 +4531,7 @@ $('mkList').addEventListener('keydown', (e) => {
   else if (e.key === 'End') go(rows.length - 1);
   else if ((e.key === 'Enter' || e.key === ' ') && li._mk !== undefined) {
     e.preventDefault(); e.stopPropagation();
-    selectMarker(li._mk);
-    focusSelection();
+    mkPick(li._mk, e.shiftKey);
   }
 });
 
@@ -4516,8 +4539,8 @@ $('mkList').addEventListener('keydown', (e) => {
 const MK_HELP = {
   SPT: 'Click a start point, in the view or in the list. The label over a cone is its place in its list, in the order of the file: Player for the first life of the players, CPU for the computer monsters, Respawn after a fall.',
   PUP: 'Click a power-up, in the view or in the list. Health is green, stamina blue, the special weapon red, the cloak a gray cube. The game keeps 100 at a time; the file holds 255.',
-  AIP: 'Click a node, in the view or in the list. A computer monster walks the links between nodes; a two-way link is one path of the 450 the game keeps. The numbers are the ones in the list; an arrow marks a one-way link; the links of the selected node are amber.',
-  FOP: 'Click a node, in the view or in the list. Cars, helicopters, flying saucers and tanks drive the links between nodes of their type. The numbers are the ones in the list; an arrow marks a one-way link; the links of the selected node are amber.',
+  AIP: 'Click a node, in the view or in the list. A computer monster walks the links between nodes; a two-way link is one path of the 450 the game keeps. The numbers are the ones in the list; an arrow marks a one-way link; the links of the selected node are amber. To join two nodes, select one, press Link (K) and click the other.',
+  FOP: 'Click a node, in the view or in the list. Cars, helicopters, flying saucers and tanks drive the links between nodes of their type. The numbers are the ones in the list; an arrow marks a one-way link; the links of the selected node are amber. To join two nodes, select one, press Link (K) and click the other.',
 };
 function showMarkerLegend(kind) {
   const L = lay(kind), ul = $('mkLegend');
@@ -4577,7 +4600,15 @@ function showMarker() {
     $('mkFlagRow').title = 'Shadow under the power-up (the game then keeps it on the floor)';
   }
   $('mkLinks').hidden = !L.net;
-  if (L.net) showLinks(kind, L, i);
+  if (L.net) {
+    showLinks(kind, L, i);
+    // Add makes a node of the selected node's type (the type of the new node, on the bar, follows the selection until it is changed)
+    if (newTypeOf !== kind + ':' + i) {
+      newTypeOf = kind + ':' + i;
+      if (kind === 'AIP') $('mkNewNum').value = p.type;
+      else if ([...$('mkNewType').options].some((o) => +o.value === p.type)) $('mkNewType').value = String(p.type);
+    }
+  } else newTypeOf = '';
 }
 function showLinks(kind, L, k) {
   const p = L.points[k], ul = $('mkLinkList'), fop = kind === 'FOP';
@@ -4620,10 +4651,10 @@ function showLinks(kind, L, k) {
     li.append(two, cut);
     rows.push(li);
   }
-  if (!p.links.length) { const li = document.createElement('li'); li.className = 'in'; li.innerHTML = '<span class="none">No links yet. Link it to another node below, or Add a node while this one is selected.</span>'; rows.push(li); }
+  if (!p.links.length) { const li = document.createElement('li'); li.className = 'in'; li.innerHTML = '<span class="none">No links yet. Press Link and click another node, or Add a node while this one is selected.</span>'; rows.push(li); }
   for (const { from } of oneWayIn(L.points, k)) {
     const li = document.createElement('li'), b = document.createElement('button');
-    li.className = 'in';
+    li.className = 'in inlink';
     b.type = 'button'; b.className = 'ghost small-btn';
     b.textContent = `Node ${from + 1} links here, one way. Link back`;
     b.title = 'Make the link two-way';
@@ -4631,7 +4662,13 @@ function showLinks(kind, L, k) {
       if (p.links.length >= L.caps[2]) { mkErrSet(`Node ${k + 1} already has ${L.caps[2]} links.`); return; }
       p.links.push(Object.assign({ to: from }, netAttrs(kind)));
     });
-    li.append(b);
+    const cutIn = document.createElement('button');
+    cutIn.type = 'button'; cutIn.className = 'icon ghost';
+    cutIn.title = `Cut the link from node ${from + 1}`;
+    cutIn.setAttribute('aria-label', cutIn.title);
+    cutIn.append(icon('close'));
+    cutIn.onclick = () => markerEdit(`cut a link of ${markerLabel()}`, () => { L.points[from].links = L.points[from].links.filter((m) => m.to !== k); });
+    li.append(b, cutIn);
     rows.push(li);
   }
   ul.replaceChildren(...rows);
@@ -4702,28 +4739,136 @@ for (const id of ['mkx', 'mky', 'mkz', 'mkh']) {
   for (const id of ['mkx', 'mky', 'mkz']) scrubField($(id), hooks(false));
   scrubField($('mkh'), hooks(true));
 }
-// Link: the selected node and the number typed, both ways, with the numbers of New links
-$('mkLink').onclick = () => {
-  const kind = layerOf(), L = kind && lay(kind), a = L && L.sel, b = parseInt($('mkLinkTo').value, 10) - 1;
+
+// ---- the Link tool (K) of the nets
+// With a node selected, a click on another node joins the two both ways, or cuts the link they have; Shift+click does it for the link
+// out of the selected node only (one way); a click on the ground puts a new node there, linked. A rubber band and a chip at the pointer
+// say what the click will do. Ctrl held is the tool for as long as the key is down. The pure rules are markers.js linkPlan / applyLink.
+const linkOn = (ctrl) => { const k = layerOf(); return !!k && lay(k).net && (linkTool.on || !!ctrl); };
+function syncLinkTool() {
+  for (const id of ['mkLinkTool', 'mkLink']) {
+    const b = $(id);
+    b.classList.toggle('on', linkTool.on);
+    b.setAttribute('aria-pressed', String(linkTool.on));
+  }
+  $('mkChain').checked = linkTool.chain;
+  syncMarkerGizmo();
+  hover.dirty = true;
+  showHint();
+}
+function setLinkTool(on) {
+  const k = layerOf();
+  linkTool.on = !!on && !!k && lay(k).net;
+  syncLinkTool();
+}
+function linkRefuse(text) {
+  mkErrSet(text);
+  toast(text, 'warn');
+}
+// the stage's surface under p (NDC), the first visible hit, or null
+function surfaceAt(p) {
+  if (!stageRoot) return null;
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(p, camera);
+  const hit = ray.intersectObject(stageRoot, true).find((h) => visibleChain(h.object));
+  return hit ? hit.point : null;
+}
+// node a (the selected one) and node b: joined or cut as linkPlan says; the node linked to becomes the selected one when "Go on" is on
+function linkNodes(a, b, oneWay) {
+  const kind = layerOf(), L = kind && lay(kind);
+  if (!L || !L.net || !L.points[a] || !L.points[b]) return;
+  const max = L.caps[2], plan = linkPlan(L.points, a, b, oneWay, max);
+  if (plan.action === 'none') return;
+  if (plan.action === 'full') { linkRefuse(linkWords(plan, a, b, max)); return; }
+  if (L.sel !== a) selectMarker(a);
+  markerEdit(`${plan.action.startsWith('cut') ? 'cut' : 'link'} node ${a + 1} and node ${b + 1}`, () => { applyLink(L.points, a, b, netAttrs(kind), oneWay, max); });
+  mkErrSet(kind === 'AIP' && netPaths(L.points) > L.caps[1] ? `The game keeps ${L.caps[1]} paths and ignores the rest.` : '');
+  if (linkTool.chain && (plan.action === 'link' || plan.action === 'one-way')) selectMarker(b);
+}
+// a new node on the ground at pos (game coordinates), of the selected node's type, linked to it (one way out of it with oneWay)
+function linkNewNode(pos, oneWay) {
+  const kind = layerOf(), L = kind && lay(kind), a = L ? L.sel : -1;
   if (!L || !L.net || a < 0) return;
-  if (!(b >= 0 && b < L.points.length) || b === a) { mkErrSet('Type the number of another node.'); return; }
-  let ok = true;
-  const did = markerEdit(`link ${markerLabel()} to node ${b + 1}`, () => { ok = linkBoth(L.points, a, b, netAttrs(kind), L.caps[2]); });
-  if (!ok) mkErrSet(`A node holds at most ${L.caps[2]} links.`);
-  else { mkErrSet(''); if (did) $('mkLinkTo').value = ''; }
-};
+  const max = L.caps[2], pa = L.points[a];
+  if (L.points.length >= FILE_MAX) { linkRefuse(`A stage holds at most ${FILE_MAX} ${LAYERS[kind].many}.`); return; }
+  if (pa.links.length >= max) { linkRefuse(linkWords({ action: 'full', full: a }, a, a, max)); return; }
+  const before = JSON.stringify(L.points), k = L.points.length, attrs = netAttrs(kind);
+  L.points.push({ pos: pos.map(r1), type: pa.type, links: oneWay ? [] : [Object.assign({ to: a }, attrs)], w: 0, sel: 0, tail: '' });
+  pa.links.push(Object.assign({ to: k }, attrs));
+  layerPush(kind, before, a, 'add a node');
+  L.sel = linkTool.chain ? k : a;
+  mkErrSet('');
+  layerChanged(kind);
+  showSel();
+}
+// a click in the view with the tool on and a node selected
+function linkClick(e) {
+  const L = lay(layerOf()), a = L.sel, b = pickMarker(e);
+  if (b === a) return;
+  if (b >= 0) { linkNodes(a, b, e.shiftKey); return; }
+  const hit = surfaceAt(ndc(e));
+  if (hit) linkNewNode(toGame(hit), e.shiftKey);
+}
+// a click or Enter on a row of the list: with the tool on and another node selected it links, otherwise it selects
+function mkPick(i, oneWay) {
+  const L = lay(layerOf());
+  if (L.net && linkTool.on && L.sel >= 0 && i !== L.sel) { linkNodes(L.sel, i, oneWay); return; }
+  selectMarker(i);
+  focusSelection();
+}
+// the rubber band from the selected node to where the click would land, and the chip that says what it would do
+const netRubber = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+                                 new THREE.LineBasicMaterial({ color: AMBER, depthTest: false, transparent: true, opacity: 0.95 }));
+netRubber.renderOrder = 999;
+netRubber.frustumCulled = false;
+netRubber.raycast = () => {};
+netRubber.visible = false;
+scene.add(netRubber);
+const linkChip = $('linkChip');
+let chipText = '';
+function linkPreview() {
+  const kind = layerOf(), L = kind && lay(kind);
+  let plan = null, a = -1, b = -1, end = null, max = 0;
+  if (L && L.net && L.points[L.sel] && linkOn(hover.ctrl) && hover.at && hover.client && !hover.buttons) {
+    a = L.sel; b = hover.marker; max = L.caps[2];
+    if (b >= 0 && b !== a && L.points[b]) { plan = linkPlan(L.points, a, b, hover.shift, max); end = markerCenter(kind, L.points[b]); }
+    else if (b < 0 && hover.surf) {
+      plan = L.points[a].links.length >= max ? { action: 'full', full: a } : { action: 'new' };
+      end = hover.surf.clone();
+      end.y += MARKER_LIFT[kind] || 0;
+    }
+  }
+  const show = !!plan && plan.action !== 'none';
+  netRubber.visible = show;
+  if (show) {
+    const pos = netRubber.geometry.attributes.position, s = markerCenter(kind, L.points[a]);
+    pos.setXYZ(0, s.x, s.y, s.z);
+    pos.setXYZ(1, end.x, end.y, end.z);
+    pos.needsUpdate = true;
+    netRubber.material.color.setHex(plan.action === 'full' || plan.action.startsWith('cut') ? 0xF0605A : AMBER);
+  }
+  const text = show ? (plan.action === 'new' && hover.shift ? 'New node, one way' : linkWords(plan, a, b, max)) : '';
+  if (text !== chipText) {
+    chipText = text;
+    linkChip.hidden = !text;
+    linkChip.textContent = text;
+    linkChip.classList.toggle('bad', show && plan.action === 'full');
+  }
+  if (text) {
+    const r = canvas.parentElement.getBoundingClientRect();
+    linkChip.style.transform = `translate(${Math.round(hover.client[0] - r.left + 16)}px, ${Math.round(hover.client[1] - r.top + 18)}px)`;
+  }
+}
+frameHooks.push(linkPreview);
+$('mkLinkTool').onclick = () => setLinkTool(!linkTool.on);
+$('mkLink').onclick = () => setLinkTool(!linkTool.on);
+$('mkChain').onchange = () => { linkTool.chain = $('mkChain').checked; store.set('netChain', linkTool.chain ? '1' : '0'); };
 
 // ------------------------------------------------------------------ ruler (M), minimap (N), screenshot and Pack mod
 // The ruler (web/ruler.js): two clicks on the stage's surface; the first visible hit under the pointer, as viewPoint takes it.
 const ruler = createRuler({
   THREE, scene, camera, host: canvas.parentElement, toGame,
-  surface: (p) => {
-    if (!stageRoot) return null;
-    const ray = new THREE.Raycaster();
-    ray.setFromCamera(p, camera);
-    const hit = ray.intersectObject(stageRoot, true).find((h) => visibleChain(h.object));
-    return hit ? hit.point : null;
-  },
+  surface: surfaceAt,
 });
 function setRuler(on) {
   ruler.setOn(on);
@@ -5715,6 +5860,7 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'p') { if (editMode !== 'peds') setPeds(!pedsOn); }
   else if (k === 'c') setColl(!collOn);
   else if (k === 'm') setRuler(!ruler.on);
+  else if (k === 'k') { if (layerOf() && lay(layerOf()).net) setLinkTool(!linkTool.on); }
   else if (k === 'n') setMini(!minimap.on);
   else if (k === '1') setMode('objects');
   else if (k === '2') setMode('peds');
@@ -5723,7 +5869,8 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();      // (a question opened by this very key would otherwise get the browser's own Esc and close at once)
     const lk = layerOf(), dock = document.querySelector('dialog.dock[open]');
     if (ruler.on) setRuler(false);
-    else if (lk && lay(lk).sel >= 0) deselectMarker();                              // a layer's marker first,
+    else if (linkTool.on) setLinkTool(false);                                       // the Link tool first,
+    else if (lk && lay(lk).sel >= 0) deselectMarker();                              // then a layer's marker,
     else if (dock && !sel && !pedSel) requestDockClose(dock);                      // then the tool panel (the focus was in the view)
     else select(null);
   }
@@ -5786,7 +5933,7 @@ if (new URLSearchParams(location.search).has('debug')) {
                        boxCenter: (o) => new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()), setGrid, setTool, setSnap, showKeys, showHint,
                        focusSelection, HINTS, get hintKey() { return hint.key; }, get hoverCount() { return hover.n; },
                        get gridMinor() { return gridMinor; }, get gridMajor() { return gridMajor; },
-                       get ui() { return ui; }, get pt() { return pt; }, get ptViews() { return ptViews; }, markerScreen, pickMarker, markerPx, markerFrame, markerLabels: () => markerLabels.shown(), mkRing, mkSelRing, get marker() { return marker; }, markerCtx, get ptSaved() { return ptSaved; }, get outTab() { return outTab; },
+                       get ui() { return ui; }, get pt() { return pt; }, get ptViews() { return ptViews; }, layersReady: () => Promise.all(Object.values(layLoading)), markerScreen, pickMarker, markerPx, linkTool, setLinkTool, linkNodes, linkPreview, netRubber, get chipText() { return chipText; }, markerFrame, markerLabels: () => markerLabels.shown(), mkRing, mkSelRing, get marker() { return marker; }, markerCtx, get ptSaved() { return ptSaved; }, get outTab() { return outTab; },
                        get history() { return history; }, get future() { return future; }, get dirty() { return dirty; },
                        get modNow() { return modNow; }, get keep() { return keep; }, get game() { return game; },
                        get gizmoObject() { return gizmo.object || null; }, get gizmoMode() { return gizmo.getMode(); },

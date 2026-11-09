@@ -106,9 +106,9 @@ t('linking both ways, with a limit, leaves nothing half done', () => {
   assert.ok(M.linkBoth(p, 0, 1, { width: 30 }, 6));
   assert.deepEqual(p[0].links, [{ to: 1, width: 30 }]);
   assert.deepEqual(p[1].links, [{ to: 0, width: 30 }]);
-  assert.ok(M.linkBoth(p, 0, 1, { width: 40 }, 6));           // again: the width is replaced, no second link
+  assert.ok(M.linkBoth(p, 0, 1, { width: 40 }, 6));           // again: the link keeps its width, no second link
   assert.equal(p[0].links.length, 1);
-  assert.equal(p[0].links[0].width, 40);
+  assert.equal(p[0].links[0].width, 30);
   const full = [node(0), node(0, [2]), node(0)];
   assert.equal(M.linkBoth(full, 0, 1, { width: 1 }, 1), false);   // node 1 is at its limit: node 0 got no link either
   assert.equal(full[0].links.length, 0);
@@ -122,6 +122,48 @@ t('unlinking takes both directions; the links that are not returned are found', 
   M.unlink(p, 0, 1);
   assert.equal(p[0].links.length, 1);
   assert.equal(p[1].links.length, 0);
+});
+
+const dirs = (p) => p.map((q, i) => q.links.map((l) => `${i}>${l.to}`)).flat().sort();
+
+t('the Link tool: 2 to 3 joins both ways, again cuts, Shift is one way', () => {
+  const p = [node(0), node(0, [0]), node(0)];            // nodes 0 and 1 are joined both ways, node 2 stands alone
+  p[0].links.push({ to: 1, width: 20 });
+  const attrs = { width: 12 };
+  assert.equal(M.applyLink(p, 1, 2, attrs, false, 6).action, 'link');
+  assert.deepEqual(dirs(p), ['0>1', '1>0', '1>2', '2>1']);
+  assert.deepEqual(p[2].links, [{ to: 1, width: 12 }]);   // new links take the attributes
+  assert.equal(p[1].links.find((l) => l.to === 0).width, 20);   // the old ones keep theirs
+  assert.equal(M.applyLink(p, 1, 2, attrs, false, 6).action, 'cut');
+  assert.deepEqual(dirs(p), ['0>1', '1>0']);
+  assert.equal(M.applyLink(p, 1, 2, attrs, true, 6).action, 'one-way');
+  assert.deepEqual(dirs(p), ['0>1', '1>0', '1>2']);
+  assert.equal(M.applyLink(p, 1, 2, attrs, true, 6).action, 'cut-one');
+  assert.deepEqual(dirs(p), ['0>1', '1>0']);
+  // one-way onto a link that comes the other way: both ways now; a plain click then cuts the pair
+  const q = [node(0, [1]), node(0)];
+  assert.equal(M.applyLink(q, 1, 0, attrs, true, 6).action, 'one-way');
+  assert.ok(M.netTwoWay(q, 0, 1));
+  assert.equal(M.applyLink(q, 0, 1, attrs, false, 6).action, 'cut');
+  assert.deepEqual(dirs(q), []);
+  // a plain click on a pair joined one way cuts it
+  const r = [node(0, [1]), node(0)];
+  assert.equal(M.applyLink(r, 1, 0, attrs, false, 6).action, 'cut');
+  assert.deepEqual(dirs(r), []);
+  assert.equal(M.applyLink(r, 1, 1, attrs, false, 6).action, 'none');
+});
+
+t('the Link tool refuses at the limit, names the node and changes nothing', () => {
+  const p = [node(0), node(0, [2], [2]), node(0)];       // node 1 is at 2 links (the limit here)
+  const before = JSON.stringify(p);
+  const a = M.applyLink(p, 0, 1, { width: 1 }, false, 2);
+  assert.deepEqual([a.action, a.full], ['full', 1]);
+  const b = M.applyLink(p, 1, 0, { width: 1 }, true, 2);
+  assert.deepEqual([b.action, b.full], ['full', 1]);
+  assert.equal(JSON.stringify(p), before);
+  assert.equal(M.linkWords(a, 0, 1, 2), 'Node 2 already has 2 links');
+  assert.equal(M.linkWords({ action: 'link' }, 1, 2, 6), 'Link 2 and 3');
+  assert.equal(M.linkWords({ action: 'cut-one' }, 1, 2, 6), 'Cut 2 to 3');
 });
 
 console.log(`test_markers: ${n} ok`);
