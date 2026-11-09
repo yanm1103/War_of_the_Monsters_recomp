@@ -618,8 +618,17 @@ function setWorld(node, posGame, heading, rec, tilt) {
     const t = tilt || (() => { const a = propAngles(node.getWorldQuaternion(new THREE.Quaternion())); return [a.p, a.r]; })();
     qWorld = propQuat(heading, t[0], Math.max(-89, Math.min(89, t[1])));
   } else qWorld = new THREE.Quaternion().setFromAxisAngle(Y, THREE.MathUtils.degToRad(heading - rec.h0)).multiply(rec.q0);
-  const m = new THREE.Matrix4().compose(toThree(posGame), qWorld, rec.s0);
+  // the patch's "scale" grows the object about its handle: the node's scale is the disc's times it (a new prop has none)
+  const it = rec.prop ? null : itemOf.get(node);
+  const m = new THREE.Matrix4().compose(toThree(posGame), qWorld, it ? rec.s0.clone().multiplyScalar(effScale(it)) : rec.s0);
   setWorldMatrix(node, m);
+}
+// The scale an item has: its own, else (a copy) its original's, else 1
+const effScale = (it) => it.scale ?? (it.copy ? it.rec.item.scale ?? 1 : 1);
+// Draws the item's scale again where it stands (after its scale, or its original's, changed)
+function refreshScale(rec) {
+  if (rec.prop) return;
+  for (const it of [rec.item, ...rec.copies]) setWorld(it.node, posOf(it), headingOf(it), rec);
 }
 function setWorldMatrix(node, m) {
   node.parent.updateWorldMatrix(true, false);
@@ -638,11 +647,15 @@ function headingOf(item) {
 // copy with null takes what its original says (lvl.py, "hp" and "traffic")
 const HP_MAX = 32767;
 const okHp = (v) => Number.isInteger(v) && v >= 1 && v <= HP_MAX;
+// "scale": the object grows about its handle (a number from 0.1 to 8; the runtime does the same, lvl.py SCALE_MIN/SCALE_MAX)
+const SCALE_MIN = 0.1, SCALE_MAX = 8;
+const okScale = (v) => typeof v === 'number' && v >= SCALE_MIN && v <= SCALE_MAX;
 function makeCopy(rec, pos, heading, iname = '', own = {}) {
   const node = rec.node.clone(true);
   rec.node.parent.add(node);
   node.visible = true;
-  const item = { rec, node, copy: true, attached: [], iname, hp: okHp(own.hp) ? own.hp : null, traffic: typeof own.traffic === 'boolean' ? own.traffic : null };
+  const item = { rec, node, copy: true, attached: [], iname, hp: okHp(own.hp) ? own.hp : null, traffic: typeof own.traffic === 'boolean' ? own.traffic : null,
+    scale: okScale(own.scale) ? own.scale : null };
   itemOf.set(node, item);
   rec.copies.push(item);
   setWorld(node, pos, heading, rec);
@@ -740,11 +753,12 @@ function buildPatch() {
     }
     if (rec.copies.length) {
       e.copies = rec.copies.map((c) => Object.assign({ pos: posOf(c).map(r1), heading: r1(headingOf(c)) }, c.iname ? { name: c.iname } : {},
-        c.hp != null ? { hp: c.hp } : {}, c.traffic != null ? { traffic: c.traffic } : {}));
+        c.hp != null ? { hp: c.hp } : {}, c.traffic != null ? { traffic: c.traffic } : {}, c.scale != null ? { scale: c.scale } : {}));
     }
     if (!rec.deleted) {
       if (rec.item.hp != null) e.hp = rec.item.hp;
       if (rec.item.traffic != null) e.traffic = rec.item.traffic;
+      if (rec.item.scale != null) e.scale = rec.item.scale;
     }
     if (rec.extra) Object.assign(e, rec.extra);
     if (Object.keys(e).length > 2) objects.push(e);
@@ -777,7 +791,7 @@ function resetAll() {
   for (const rec of recs) {
     for (const c of [...rec.copies]) removeCopy(c);
     rec.item.iname = '';
-    rec.item.hp = rec.item.traffic = null;
+    rec.item.hp = rec.item.traffic = rec.item.scale = null;
     rec.deleted = false;
     rec.node.visible = true;
     setWorldMatrix(rec.node, rec.m0);
@@ -796,18 +810,20 @@ function applyPatch(patch) {
     if (e && typeof e === 'object' && e.sky === 'clouds' && typeof e.model === 'string' && e.model) { cloudsModel = propKey(e.model); continue; }
     if (!makeProp(e)) keep.props.push(e);
   }
-  for (const rec of recs) { rec.extra = null; rec.item.hp = rec.item.traffic = null; }
+  for (const rec of recs) { rec.extra = null; rec.item.hp = rec.item.traffic = rec.item.scale = null; }
   for (const e of Array.isArray(patch.objects) ? patch.objects : []) {
     const rec = e && typeof e === 'object' ? byHandle.get(normHandle(e.handle)) : null;
     if (!rec) { keep.objects.push(e); continue; }
     const extra = Object.fromEntries(Object.entries(e).filter(([k]) => !ENTRY_KEYS.has(k)));
-    // "hp" and "traffic" the editor can show are the item's own; anything else under those keys stays as the file has it
+    // "hp", "traffic" and "scale" the editor can show are the item's own; anything else under those keys stays as the file has it
     if (okHp(extra.hp)) { rec.item.hp = extra.hp; delete extra.hp; }
     if (typeof extra.traffic === 'boolean') { rec.item.traffic = extra.traffic; delete extra.traffic; }
+    if (okScale(extra.scale)) { rec.item.scale = extra.scale; delete extra.scale; }
     rec.extra = Object.keys(extra).length ? extra : null;
     for (const c of e.copies || []) makeCopy(rec, c.pos, c.heading ?? rec.h0, c.name || '', c);
     if (e.delete) { rec.deleted = true; rec.node.visible = false; }
     else if (e.pos || e.heading !== undefined) setWorld(rec.node, e.pos || rec.pw, e.heading ?? rec.h0, rec);
+    if (rec.item.scale != null && !e.delete && !(e.pos || e.heading !== undefined)) refreshScale(rec);
   }
   for (const [h, n] of Object.entries(patch.names || {})) {
     const rec = byHandle.get(normHandle(h));
@@ -1050,7 +1066,7 @@ async function loadStage(name) {
         const q0 = new THREE.Quaternion(), s0 = new THREE.Vector3(), p = new THREE.Vector3();
         o.matrixWorld.decompose(p, q0, s0);
         const rec = { info: i, node: o, p0: i.pos, pw: toGame(p), m0: o.matrixWorld.clone(), h0: i.heading, q0, s0, copies: [], deleted: false };
-        rec.item = { rec, node: o, copy: false, attached: [], iname: '', hp: null, traffic: null };
+        rec.item = { rec, node: o, copy: false, attached: [], iname: '', hp: null, traffic: null, scale: null };
         recs.push(rec);
         byHandle.set(normHandle(i.handle), rec);
         itemOf.set(o, rec.item);
@@ -1120,7 +1136,7 @@ function items() {
   return out;
 }
 function changed(rec) {
-  if (rec.prop || rec.deleted || rec.copies.length || rec.item.hp != null || rec.item.traffic != null) return true;
+  if (rec.prop || rec.deleted || rec.copies.length || rec.item.hp != null || rec.item.traffic != null || rec.item.scale != null) return true;
   const p = posOf(rec.item);
   return Math.hypot(p[0] - rec.pw[0], p[1] - rec.pw[1], p[2] - rec.pw[2]) > 0.05 || Math.abs(wrapDeg(headingOf(rec.item) - rec.h0)) > 0.05;
 }
@@ -1444,11 +1460,22 @@ function showPropsPanel() {
 // Behavior: a building's hit points and a car pickup's type (the patch's "hp" and "traffic"). A blank field is what the disc has; a copy
 // with a blank field takes what its original says
 function showBehavior() {
-  const i = sel.rec.info, hasHp = i.hp != null, hasCar = i.traffic != null;
-  $('secBehavior').hidden = group.length > 1 || !!sel.rec.prop || !(hasHp || hasCar);
+  const i = sel.rec.info, hasHp = i.hp != null, hasCar = i.traffic != null, hasScale = i.kind !== 'pickup';
+  $('secBehavior').hidden = group.length > 1 || !!sel.rec.prop || !(hasHp || hasCar || hasScale);
   $('hpRow').hidden = !hasHp;
   $('trafRow').hidden = !hasCar;
+  $('scaleRow').hidden = !hasScale;
   const note = [];
+  if (hasScale) {
+    // "scale" grows the object about its handle (its origin, often a corner): the drawing and the collision both follow it
+    const no = i.scaleNo || '';
+    $('pScale').disabled = !!no;
+    $('pScale').value = sel.scale ?? '';
+    $('pScale').placeholder = String(sel.copy ? sel.rec.item.scale ?? 1 : 1);
+    $('pScale').title = no ? `Can't be scaled: ${no}` : 'How many times bigger (or smaller) it is, about its handle: 0.1 to 8. Blank: its own size';
+    note.push(no ? `It can't be scaled: ${no}.` : 'It grows about its handle (its origin, often a corner of it); what rests on it does not follow.' +
+      (sel.copy ? ' A copy takes its original’s unless you set its own.' : ''));
+  }
   if (hasHp) {
     $('pHp').value = sel.hp ?? '';
     $('pHp').placeholder = String(sel.copy ? sel.rec.item.hp ?? i.hp : i.hp);
@@ -2113,7 +2140,7 @@ function resetSel() {
   for (const r of rs) {
     if (r.prop) continue;   // a new prop has no disc place to go back to
     for (const c of [...r.copies]) removeCopy(c);
-    r.item.hp = r.item.traffic = null;
+    r.item.hp = r.item.traffic = r.item.scale = null;
     r.deleted = false;
     r.node.visible = true;
     setWorldMatrix(r.node, r.m0);
@@ -2528,7 +2555,7 @@ async function stopGame() {
 // {text, cls, stage, end, more, last}; end: the line settles what the editor waits for (applied, ignored or dropped), more: the
 // load's own lines follow it (up to "depois:", last). null: a line shown as it is.
 const STAT_WORDS = { moved: 'moved', copies: 'copies', deleted: 'deleted', skipped: 'not applied', 'hit points set': 'buildings with their own hit points',
-                     'traffic set': 'cars with their own type', 'ped segments': 'sidewalks',
+                     'traffic set': 'cars with their own type', scaled: 'objects scaled', 'ped segments': 'sidewalks',
                      'ped groups changed': 'pedestrian groups changed', 'ped groups added': 'pedestrian groups added',
                      'ped groups deleted': 'pedestrian groups deleted', 'ped groups off': 'pedestrian groups off' };
 function statsText(s) {
@@ -4497,6 +4524,18 @@ $('pHp').onchange = () => {
   if (v === (sel.copy ? sel.rec.item.hp ?? sel.rec.info.hp : sel.rec.info.hp)) v = null;     // what it would have anyway: nothing to say
   snapshot('hit points ' + whatSel());
   sel.hp = v;
+  showSel();
+};
+$('pScale').onchange = () => {
+  if (!sel || sel.rec.prop) return;
+  const raw = $('pScale').value.trim();
+  let v = raw === '' ? null : Number(raw);
+  if (v !== null && !okScale(v)) { msg(`Scale is a number from ${SCALE_MIN} to ${SCALE_MAX}`, { level: 'warn' }); showSel(); return; }
+  if (v !== null) v = Math.round(v * 1000) / 1000;
+  if (v === (sel.copy ? sel.rec.item.scale ?? 1 : 1)) v = null;       // what it would have anyway: nothing to say
+  snapshot('scale ' + whatSel());
+  sel.scale = v;
+  refreshScale(sel.rec);
   showSel();
 };
 $('pTraffic').onchange = () => {

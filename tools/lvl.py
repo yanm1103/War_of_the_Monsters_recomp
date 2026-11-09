@@ -417,6 +417,7 @@ class Stage:
              "handle_shared": bool(handle and handle != node and len(children(img, handle)) > 1),
              "nested": any(self.op(a) == 39 for a in self.chain(node)[:-1]),
              "parents": len(self.parents.get(node, [])), "chain": self.chain_str(self.chain(node))}
+        o["scale_no"] = scale_reason(img, handle, through.get(handle, [])) if handle else "it has no handle"     # "" when "scale" works on it
         o["states"] = img.u16((img.u32(node + 0xC) & MASK) + 0xA) if kind == "destr" else 0
         o["hp"] = self.hit_points(img.u32(node + 0xC) & MASK) if kind == "destr" else None
         # a pickup that can be a car in the traffic: {"traffic": whether id2 bit 0 is set}
@@ -733,6 +734,29 @@ HP_MAX = 32767                  # Destructible::takeHit computes (int)health * 6
 HP_MIN_DAMAGE = 5               # the minimum damage of hit point classes 2 to 6: a hit under it does nothing
 INTERACTIVES = 1024            # Interactives::s_dbInteractive, unchecked
 INTERACTIVE_SPARE = 32          # monsters, helicopters, bugs: what the budget keeps free besides slot 0
+SCALE_MIN, SCALE_MAX = 0.1, 8.0     # the entry's "scale" range
+# nodes a collision path may not cross below a scaled handle: hdTraversePath rebuilds its matrix from TRANSLATE/ROTATE/ANIM_XFORM and
+# knows no SCALE, so the part's offset would stay unscaled in the collision while the drawing scales it
+SCALE_BLOCKERS = (3, 4, 30, 17, 25, 35, 38)
+
+
+def scale_reason(img, h, paths):
+    """Why the object under handle h cannot take a "scale" (the empty string when it can). The drawing scales with a SCALE under the
+    handle, but the collision knows no SCALE (hdTraversePath), so each path takes a leaf with the numbers already multiplied: right
+    only when nothing between the handle and the leaf moves the part (TRANSLATE, ROTATE, an animation), when the leaf holds triangles
+    or planes, and when the object is not a pickup (a monster picks it up and carries it). `paths` are the Path objects through h."""
+    for c in children(img, h):
+        if img.u32(c) & 63 == 1 and PICKUP_IDS[0] <= img.u32(c) >> 18 < PICKUP_IDS[1]:
+            return "it is a pickup (a monster picks it up and carries it)"
+    for p in paths:
+        below = p.nodes[p.nodes.index(h) + 1:] if h in p.nodes else []
+        bad = next((n for n in below[:-1] if img.u32(n) & 63 in SCALE_BLOCKERS), None)
+        if bad is not None:
+            return "a collision path of it goes through a %s (%07x) below the handle, a part that moves on its own" % (
+                OPN.get(img.u32(bad) & 63, img.u32(bad) & 63), bad)
+        if img.u32(p.leaf) & 63 not in (10, 42):
+            return "its collision has a %s (a camera trigger)" % OPN.get(img.u32(p.leaf) & 63, img.u32(p.leaf) & 63)
+    return ""
 
 
 def node_size(img, n):
@@ -857,6 +881,9 @@ class LevelPatch:
         self.log = []
         self.redone = {}            # path -> (box, cells, how)
         self.footprints = []        # (convex XY polygon, zmin, zmax) of every solid box in its new place
+        self.fp_index = {}          # path -> its place in footprints (a path redone again, by a scale after a move, replaces its box)
+        self.leaf_cache = {}        # (leaf, scale) -> the scaled clone, for the entry being applied
+        self.leaf_of = {}           # scaled clone -> the leaf it was cloned from (the one the tree still holds)
         self.stats = collections.Counter()
         self.shallow = shallow      # WOTM_LEVELPATCH_SHALLOW: copies share all but the handle and the top state pair
         self.wraps = []             # GROUPs the copies made: child 0 is the original, the others its copies
@@ -960,7 +987,12 @@ class LevelPatch:
             wc, how = [ngp.xform(carry, c) for c in corners], "carried"
         bb = aabb(wc)
         if not p.trigger:
-            self.footprints.append((hull2d(wc), bb[0][2], bb[1][2]))
+            fp = (hull2d(wc), bb[0][2], bb[1][2])
+            if pa in self.fp_index:
+                self.footprints[self.fp_index[pa]] = fp
+            else:
+                self.fp_index[pa] = len(self.footprints)
+                self.footprints.append(fp)
         for i in range(3):
             self.wf32(pa + 4 * i, bb[0][i])
             self.wf32(pa + 0xC + 4 * i, bb[1][i])
@@ -989,19 +1021,20 @@ class LevelPatch:
             c, r = _union(c, r, c2, r2)
         return c, r
 
-    def grow_spheres(self, h, old_pos):
-        """The drawing skips a GROUP whose sphere is out of view: grow the ones above h to keep covering what hangs under it."""
+    def grow_spheres(self, h, old_pos, scale=1.0):
+        """The drawing skips a GROUP whose sphere is out of view: grow the ones above h to keep covering what hangs under it.
+        `scale` is the SCALE the patch is about to put under h (what hangs under it gets that much bigger)."""
         img, st = self.img, self.st
         W = self.world(h)
         groups = [g for g in st.chain(h)[:-1] if self.op(g) == 1]
         s = self.obj_sphere(h)
         if s:
-            co, ro = list(ngp.xform(W, s[0])), s[1] * _maxscale(W)
+            co, ro = list(ngp.xform(W, [x * scale for x in s[0]])), s[1] * scale * _maxscale(W)
         else:   # nothing to measure: the nearest GROUP's sphere, carried from the old place
             g = groups[-1]
             M = chain_matrix(img, st.chain(g)[:-1])
             cw = ngp.xform(M, [img.f32(g + 0x10 + 4 * i) for i in range(3)])
-            co, ro = list(W[3][:3]), img.f32(g + 0x1C) * _maxscale(M) + math.dist(cw, old_pos)
+            co, ro = list(W[3][:3]), (img.f32(g + 0x1C) * _maxscale(M) + math.dist(cw, old_pos)) * max(scale, 1.0)
         for g in groups:
             M = chain_matrix(img, st.chain(g)[:-1])
             k = _maxscale(M)
@@ -1090,6 +1123,7 @@ class LevelPatch:
             self.redo(pa, carry)
         self.grow_spheres(h, old_pos)
         self.stats["moved"] += 1
+        return h
 
     def delete(self, h):
         for pa in self.paths_through(h):
@@ -1160,6 +1194,137 @@ class LevelPatch:
                 raise PatchError("%s: handle %07x is not a car pickup (types 2, 3, 15, 26): \"traffic\" is for those" % (where, h))
             out["traffic"] = tr
         return out
+
+    # --- scale (the entry's and the copy's "scale")
+    def scale_plan(self, h, where="entry"):
+        """The collision paths through handle h, after checking that its object can be scaled; PatchError before anything is written.
+        The drawing takes a SCALE under the handle; the collision knows no SCALE, so each path gets a leaf with the numbers already
+        multiplied (scale_reason says when that is not right)."""
+        paths = self.paths_through(h)
+        why = scale_reason(self.img, h, [Path(self.img, pa) for pa in paths])
+        if why:
+            raise PatchError("%s: handle %07x: %s, so \"scale\" cannot scale it" % (where, h, why))
+        return paths
+
+    def scale_of(self, e, h, where="entry"):
+        """The entry's (or copy's) "scale" as a float, or None when it names none; checked against what is under h."""
+        k = e.get("scale")
+        if k is None:
+            return None
+        if not (_number(k) and not isinstance(k, bool) and SCALE_MIN <= k <= SCALE_MAX):
+            raise PatchError("%s: \"scale\" is a number from %g to %g" % (where, SCALE_MIN, SCALE_MAX))
+        self.scale_plan(h, where)
+        return float(k)
+
+    def pool_count(self, ob):
+        """Vertices of POLY_COLL object ob that its triangles read (the highest index + 1)."""
+        img = self.img
+        polys = ob + 0x18 + 14 * img.u16(ob + 6)
+        return 1 + max((img.u8(polys + 8 * i + j) for i in range(img.u16(ob + 4)) for j in range(3)), default=-1)
+
+    def leaf_clone_cost(self, leaf):
+        img = self.img
+        if self.op(leaf) == 10:
+            return 0x20 + 16 * max(img.s16(leaf + 4), 0) + 15
+        n = min(img.u32(leaf + 4), 256)
+        cost = 8 + 4 * n + 15
+        for k in range(n):
+            ob = img.u32(leaf + 8 + 4 * k) & MASK
+            cost += 0x18 + 14 * img.u16(ob + 6) + 8 * img.u16(ob + 4) + 15 + 12 * self.pool_count(ob) + 15
+        return cost
+
+    def scale_cost(self, h, k):
+        """The most arena bytes scaling the object under h takes: the SCALE node, one clone of each leaf, new list nodes for the cells
+        the bigger boxes cover."""
+        img, g = self.img, self.st.grid
+        paths = [Path(img, pa) for pa in self.paths_through(h)]
+        cost = 0x2C + 4 * len(child_slots(img, h)) + 15
+        cost += sum(self.leaf_clone_cost(lf) for lf in {p.leaf for p in paths})
+        for p in paths:
+            n = int(math.floor((math.hypot(p.max[0] - p.min[0], p.max[1] - p.min[1]) * max(k, 1.0) + 2.0) / g.cell)) + 2
+            cost += 8 * min(n, g.cols) * min(n, g.rows)
+        return cost
+
+    def scaled_leaf(self, leaf, k):
+        """A clone of a collision leaf whose numbers are multiplied by k about the leaf's origin. A hull (COLL_VOL) keeps its plane
+        normals and takes d, the local sphere's centre and its radius times k. A triangle leaf (POLY_COLL) takes copies of its objects
+        and vertex pools: vertices times k, bboxOrigin times k and bboxScale over k (hdSphereVsPolyCollis quantises a point as
+        (p - bboxOrigin) * bboxScale, so the box tree's shorts stay the same)."""
+        img, base = self.img, self.img.base
+        key = (leaf, k)
+        if key in self.leaf_cache:
+            return self.leaf_cache[key]
+        if self.op(leaf) == 10:
+            n = max(img.s16(leaf + 4), 0)
+            a = self.alloc(0x20 + 16 * n, 16)
+            img.d[a - base:a - base + 0x20 + 16 * n] = img.d[leaf - base:leaf - base + 0x20 + 16 * n]
+            for off in (0x10, 0x14, 0x18, 0x1C):
+                self.wf32(a + off, img.f32(leaf + off) * k)
+            for j in range(n):
+                self.wf32(a + 0x2C + 16 * j, img.f32(leaf + 0x2C + 16 * j) * k)
+        else:
+            n = min(img.u32(leaf + 4), 256)
+            a = self.alloc(8 + 4 * n, 16)
+            img.d[a - base:a - base + 8 + 4 * n] = img.d[leaf - base:leaf - base + 8 + 4 * n]
+            for j in range(n):
+                ob = img.u32(leaf + 8 + 4 * j) & MASK
+                size = 0x18 + 14 * img.u16(ob + 6) + 8 * img.u16(ob + 4)
+                nb = self.alloc(size, 16)
+                img.d[nb - base:nb - base + size] = img.d[ob - base:ob - base + size]
+                pc, vp = self.pool_count(ob), img.u32(ob) & MASK
+                pool = self.alloc(12 * pc, 16)
+                for v in range(pc * 3):
+                    self.wf32(pool + 4 * v, img.f32(vp + 4 * v) * k)
+                self.set_ptr(nb, pool)
+                for c in range(3):
+                    self.wf32(nb + 8 + 4 * c, img.f32(ob + 8 + 4 * c) * k)
+                self.wf32(nb + 0x14, img.f32(ob + 0x14) / k)
+                self.set_ptr(a + 8 + 4 * j, nb)
+        self.leaf_cache[key] = a
+        self.leaf_of[a] = leaf
+        self.stats["leaves scaled"] += 1
+        return a
+
+    def insert_scale(self, h, k):
+        """A uniform SCALE as the only child of handle h, holding h's children: the drawing (and dbsTraverse, which hands the destructibles
+        the scaled matrix) scales about the handle's origin, in the object's own axes."""
+        img, st = self.img, self.st
+        slots = child_slots(img, h)
+        if not slots:
+            return
+        kids = children(img, h)
+        s = self.alloc(0x2C + 4 * len(slots), 16)
+        self.w32(s, 30)
+        self.w32(s + 8, len(slots))
+        self.w32(s + 0xC, 1)            # uniform: hierScaleNode keeps the light table
+        for i in range(3):
+            self.wf32(s + 0x20 + 4 * i, k)
+        for j, sl in enumerate(slots):
+            self.w32(s + 0x2C + 4 * j, img.u32(sl))
+        self.w32(h + 8, 1)
+        self.set_ptr(slots[0], s)
+        for c in kids:
+            st.parents[c] = [s if x == h else x for x in st.parents[c]]
+        st.parents[s] = [h]
+        if h in st.root_of:
+            st.root_of[s] = st.root_of[h]
+        self.through.add(s)
+
+    def set_scale(self, h, k):
+        """Scale the object under handle h (the handle itself, the one `h` returned from move, not the TRANSLATE a ROTATE replaced) by k
+        about its origin: the collision paths take scaled leaves and their boxes and cells are redone, the GROUPs above grow, and a
+        SCALE goes under the handle for the drawing."""
+        if abs(k - 1.0) < 1e-6:
+            return
+        img = self.img
+        paths = self.scale_plan(h)
+        for pa in paths:
+            p = Path(img, pa)
+            self.set_ptr(pa + 0x24 + 4 * (p.length - 1), self.scaled_leaf(p.leaf, k))
+            self.redo(pa, ngp.ident())
+        self.grow_spheres(h, self.world(h)[3][:3], k)
+        self.insert_scale(h, k)
+        self.stats["scaled"] += 1
 
     def reached(self):
         """The nodes dbsTraverse reaches from the roots it walks (dbProcInteractive registers only these)."""
@@ -1629,6 +1794,8 @@ class LevelPatch:
                     self.unlinked_before.add(np_)
                 self.stats["paths added"] += 1
             self.grow_spheres(hc, old_pos)
+            if pl.get("scale") is not None:
+                self.set_scale(hc, pl["scale"])
             self.w16(wrap + 8, 2 + i)
             self.stats["copies"] += 1
         self.register_instances()
@@ -1685,7 +1852,11 @@ class LevelPatch:
         return False
 
     def path_linked(self, pa):
-        nodes = Path(self.img, pa).nodes
+        nodes = []
+        for n in Path(self.img, pa).nodes:
+            while n in self.leaf_of:        # a scaled leaf stands for the disc's one it was cloned from (a handle scaled twice: a chain)
+                n = self.leaf_of[n]
+            nodes.append(n)
         return all(self._next_to(a, b) for a, b in zip(nodes, nodes[1:]))
 
     def check_copies(self):
@@ -1903,6 +2074,10 @@ class LevelPatch:
                 moving = not e.get("delete") and ("pos" in e or "heading" in e)
                 extra = self.move_cost(h, e.get("heading") is not None) if moving else 0
                 mine = {} if e.get("delete") else self.extras_of(e, h)      # "hp" and "traffic": checked before anything is written
+                self.leaf_cache = {}
+                sc = None if e.get("delete") else self.scale_of(e, h)       # "scale": the same
+                if sc is not None and abs(sc - 1.0) > 1e-6:
+                    extra += self.scale_cost(h, sc)
                 cp = e.get("copies")
                 if isinstance(cp, list) and cp:
                     places = []         # all checked before copy(), as the hook does: a bad one leaves nothing behind
@@ -1911,9 +2086,12 @@ class LevelPatch:
                         if not (isinstance(p3, list) and len(p3) == 3 and all(_number(x) for x in p3)):
                             raise PatchError("a copy without \"pos\" [x, y, z]")
                         hd = c.get("heading")
-                        # a copy takes the entry's hit points and pickup type unless it names its own
+                        own = self.scale_of(c, h, "a copy")
+                        # a copy takes the entry's hit points, pickup type and scale unless it names its own
                         places.append({"pos": [float(x) for x in p3], "heading": float(hd) if _number(hd) else None,
-                                       **{**mine, **self.extras_of(c, h, "a copy")}})
+                                       **{**mine, **self.extras_of(c, h, "a copy")}, "scale": sc if own is None else own})
+                        if places[-1]["scale"] is not None and abs(places[-1]["scale"] - 1.0) > 1e-6:
+                            extra += self.scale_cost(h, places[-1]["scale"])
                     self.copy(h, places, extra)
                 elif extra > self.arena_free():
                     raise PatchError("handle %07x: the move takes up to %d bytes, the arena has %d left" % (h, extra, self.arena_free()))
@@ -1922,7 +2100,9 @@ class LevelPatch:
                 else:
                     self.set_extras(h, mine)
                     if moving:
-                        self.move(h, e.get("pos") or pos, e.get("heading"))
+                        h = self.move(h, e.get("pos") or pos, e.get("heading"))
+                    if sc is not None:
+                        self.set_scale(h, sc)
             except (PatchError, KeyError, TypeError, ValueError) as err:
                 self.log.append("entry %d skipped: %s" % (k, err))
                 self.stats["skipped"] += 1

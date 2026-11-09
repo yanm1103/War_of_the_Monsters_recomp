@@ -308,7 +308,9 @@ def describe(stage, objs, on, facts, names):
                     "name": name, "nameSrc": src, "rule": lvlnames.rule_name(stage, o["kind"], f, names),
                     "sig": f["sig"] or "", "dims": f["dims"], "ptype": f.get("ptype"),
                     # a building's hit points and whether a car pickup drives in the traffic, as the disc has them (None: not that kind)
-                    "hp": o.get("hp"), "traffic": o.get("traffic")})
+                    "hp": o.get("hp"), "traffic": o.get("traffic"),
+                    # why "scale" does not work on it ("" when it does): lvl.scale_reason
+                    "scaleNo": o.get("scale_no", "")})
     return out
 
 

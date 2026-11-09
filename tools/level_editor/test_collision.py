@@ -67,6 +67,13 @@ def main():
     worst, n = off_box(moved)
     assert worst < 2.0, worst
 
+    # a scaled object: its shapes are the scaled leaves and still fill the boxes the patch put the paths in
+    scaled = editor.collision_patch(disc, "CENTRAL", {"objects": [{"handle": "0x%X" % h, "from": list(objs[0]["pos"]), "scale": 2.0}]})
+    assert boxes(scaled) != boxes(plain), "scaling an object left the collision as it was"
+    worst, n = off_box(scaled)
+    assert worst < 2.0, worst
+    assert scaled["count"]["mesh"] == plain["count"]["mesh"] and len(scaled["leaves"]) > len(plain["leaves"]) - 1, (scaled["count"], plain["count"])
+
     # a hull_ prop (a pyramid) and a coll_ prop (a cube) placed with a turn
     with tempfile.TemporaryDirectory() as tmp:
         mod = os.path.join(tmp, "mod")

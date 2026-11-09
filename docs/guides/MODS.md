@@ -598,6 +598,17 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   game clears it for class 1, the stages' smallest objects), which is what lets a thrown monster hurt it, so a class 1 object given
   an `hp` takes damage from one. Over 32767 the game's health fraction (`(int)health * 65535`) overflows, so the number is refused.
   `WOTM_LEVELPATCH_HP=1` logs the health the game keeps for each one.
+- `scale` (a number from 0.1 to 8; on an entry and on each copy): the object grows (or shrinks) by that factor, the same on every
+  axis, about its handle (the handle's own position and axes: a building whose handle sits at a corner grows away from that corner).
+  The drawing and the collision both follow: a monster stands on the scaled roof and bumps into the scaled walls. The patch puts a
+  `SCALE` node under the handle for the drawing and gives each collision path of the object a clone of its leaf with the numbers
+  already multiplied (the game's collision knows no `SCALE`; `FORMATS.md`, "Stage collision"), so a scaled object takes arena bytes
+  (the log's `leaves scaled`) and the boxes and cells of its paths are redone in the bigger (or smaller) place. It goes after the
+  move and the turn of the same entry. A copy takes its entry's `scale` unless it names its own (`1` is its original size). A scaled
+  object breaks as before, its broken states drawn at the new size. It is refused (the entry is skipped, with the reason in the log; the copies too) for a pickup, for an object with a part that moves
+  on its own below the handle (a crane or a turning sign: a `TRANSLATE`, `ROTATE` or animation between the handle and a collision
+  leaf), and for one with a camera trigger. Scaling the same handle twice multiplies. What rests on the object (a roof tank) is a
+  pickup of its own and keeps its size and place.
 - `traffic` (`true` or `false`; on an entry and on each copy): for a car pickup (types 2, 3, 15 and 26, the parked and the driving cars
   of the disc; the editor lists them under Pickups), `true` makes it a car that drives the stage's `.FOP` streets and `false` leaves
   it parked until a monster picks it up. It is bit 0 of the `id2` of the pickup's id group, which `LevelPickups::createPickup` reads
@@ -944,11 +955,13 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   along X, Y or Z; bottoms, middles or tops for Z) and **Spread evenly** (the two outermost stay, the others go between them with
   equal gaps or equal distances between their middles). Align needs two objects and Spread three. The copies are the new
   selection.
-- **Behavior** (below Arrange, open at first; one object at a time; a building and a car pickup have it, nothing else): **Hit
-  points** for a building and **Car** for a car pickup (As the disc has it, Parked or Drives in the traffic). A blank field is the
-  disc's value, which the note under it gives; typing the disc's own value blanks it again. A copy with a blank field takes its
-  original's (the placeholder shows it), and a copy of a copy keeps what the copy was given. They are the patch's `hp` and `traffic`
-  ("Level patches"); a changed one counts as a change in the list's Changed filter and Restore original clears it.
+- **Behavior** (below Arrange, open at first; one object at a time; a building and a car pickup have it, nothing else): **Scale**
+  for a building or a disc prop (grayed, with the reason in the note, when it has a part that moves on its own), **Hit points** for a
+  building and **Car** for a car pickup (As the disc has it, Parked or Drives in the traffic). A blank field is the disc's value (size
+  1), which the note under it gives; typing the disc's own value blanks it again. A copy with a blank field takes its original's
+  (the placeholder shows it), and a copy of a copy keeps what the copy was given. The object grows in the editor's view about its
+  handle, as the game draws it; what rests on it does not follow. They are the patch's `scale`, `hp` and `traffic` ("Level
+  patches"); a changed one counts as a change in the list's Changed filter and Restore original clears it.
 - **Several objects:** Shift+click (or Ctrl+click, also in the list) adds or takes out one, Shift+left drag selects the ones whose
   middle falls in the box (only the kinds on in the list), **Ctrl+A** selects everything the list shows. The gizmo and the fields
   act on the last one picked (amber outline and row); the others (orange) follow it by the same move or turn, and Drop, Duplicate,

@@ -234,6 +234,8 @@ struct Stage
     std::map<std::string, int> stats;
     std::vector<std::string> log, pathLines;
     std::vector<Footprint> footprints;   // cada caixa solida no lugar novo, para cortar as redes de carros e pedestres
+    std::map<uint32_t, size_t> fpIndex;  // caminho -> lugar em footprints (refeito de novo, pela escala depois de um movimento, troca a caixa)
+    std::map<std::pair<uint32_t, double>, uint32_t> leafCache;   // (folha, escala) -> o clone escalado, na entrada que se aplica
     bool shallow = false;
     std::vector<uint32_t> wraps;           // GROUPs das copias: filho 0 e o original, os outros as copias
     std::array<int64_t, 3> interBefore{};  // Interactives antes do patch (carga + 1, destrocos com pickup, folga)
@@ -587,7 +589,14 @@ struct Stage
             how = "carried";
         }
         aabb(w, bb);
-        if (!(u32(pa + 0x20) & 1)) footprints.push_back({hull2d(w), bb.mn.v[2], bb.mx.v[2]});
+        if (!(u32(pa + 0x20) & 1))
+        {
+            const Footprint fp{hull2d(w), bb.mn.v[2], bb.mx.v[2]};
+            if (const auto it = fpIndex.find(pa); it != fpIndex.end())
+                footprints[it->second] = fp;
+            else
+                fpIndex[pa] = footprints.size(), footprints.push_back(fp);
+        }
         for (int i = 0; i < 3; ++i) wf32(pa + 4 * i, bb.mn.v[i]), wf32(pa + 0xC + 4 * i, bb.mx.v[i]);
         const std::set<int> cs = cellsFor(bb);
         setCells(pa, cs);
@@ -620,8 +629,9 @@ struct Stage
         }
         return any;
     }
-    // O desenho pula o GROUP cuja esfera sai da vista (Scene::outOfView): as dos GROUPs acima de h crescem para cobrir o que pende dela
-    void growSpheres(uint32_t h, const V3 &oldPos)
+    // O desenho pula o GROUP cuja esfera sai da vista (Scene::outOfView): as dos GROUPs acima de h crescem para cobrir o que pende dela.
+    // `scale` e o SCALE que o patch vai pôr abaixo de h (o que pende dela fica tantas vezes maior)
+    void growSpheres(uint32_t h, const V3 &oldPos, double scale = 1.0)
     {
         const M4 w = world(h);
         const std::vector<uint32_t> ch = chain(h);
@@ -632,14 +642,14 @@ struct Stage
         V3 co, lc;
         double ro, lr;
         if (objSphere(h, lc, lr))
-            co = xform(w, lc), ro = lr * maxScale(w);
+            co = xform(w, {{lc.v[0] * scale, lc.v[1] * scale, lc.v[2] * scale}}), ro = lr * scale * maxScale(w);
         else
         {   // nada para medir: a esfera do GROUP mais perto, levada do lugar antigo
             const uint32_t g = groups.back();
             const M4 m = above(g);
             const V3 cw = xform(m, {{f32(g + 0x10), f32(g + 0x14), f32(g + 0x18)}});
             co = {{w.m[3][0], w.m[3][1], w.m[3][2]}};
-            ro = f32(g + 0x1C) * maxScale(m) + dist(cw, oldPos);
+            ro = (f32(g + 0x1C) * maxScale(m) + dist(cw, oldPos)) * std::max(scale, 1.0);
         }
         for (uint32_t g : groups)
         {
@@ -737,7 +747,7 @@ struct Stage
     }
 
     // ------------------------------------------------------------------ edicoes
-    void move(uint32_t h, const V3 &pos, double heading)
+    uint32_t move(uint32_t h, const V3 &pos, double heading)   // devolve a alca: um ROTATE novo quando um TRANSLATE gira
     {
         const M4 before = world(h, false);
         const V3 oldPos = pos3(world(h));
@@ -746,6 +756,7 @@ struct Stage
         for (uint32_t pa : pathsThrough(h)) redo(pa, carry);
         growSpheres(h, oldPos);
         ++stats["moved"];
+        return h;
     }
     void erase(uint32_t h)
     {
@@ -787,7 +798,7 @@ struct Stage
     }
     // "hp" e "traffic" da entrada ou da copia (lvl.py LevelPatch.extras_of/set_extras, mesma regra); -1: a entrada nao diz
     struct Extras { int hp = -1, traffic = -1; };
-    struct Place { V3 pos; double heading; Extras ex; };
+    struct Place { V3 pos; double heading; Extras ex; double scale = std::nan(""); };
     // Os DESTRUCTIBLEs do proprio objeto da alca h: a descida para em cada um, entao um destrutivel dentro de um estado de outro (uma
     // placa no telhado que quebra sozinha) fica com os pontos de vida que tem
     std::vector<uint32_t> hpTargets(uint32_t h) const
@@ -860,6 +871,152 @@ struct Stage
             stats["traffic set"] += int(gs.size());
         }
     }
+    // ------------------------------------------------------------------ escala (lvl.py LevelPatch.scale_plan e seguintes, mesma regra e mesma ordem)
+    // "scale" da entrada ou da copia: o objeto cresce em torno da alca. O desenho ganha um SCALE uniforme embaixo da alca; a colisao nao
+    // conhece SCALE, entao cada caminho passa a apontar para uma folha com os numeros ja multiplicados (COLL_VOL: d, centro e raio da
+    // esfera; POLY_COLL: vertices e bboxOrigin vezes k, bboxScale sobre k, porque o hdSphereVsPolyCollis quantiza (p - origem) * escala).
+    // So vale sem nada entre a alca e a folha que mova a peca (TRANSLATE, ROTATE, animacao), em folha de triangulos ou planos e fora
+    // de pickup (o monstro o pega e o carrega)
+    static constexpr double kScaleMin = 0.1, kScaleMax = 8.0;
+    static bool scaleBlocker(uint32_t o)
+    {
+        return o == TRANSLATE || o == ROTATE || o == SCALE || o == ANIM_XFORM || o == CHAR_INSTANCE || o == SKEL_BONE || o == ANIM_SCALE;
+    }
+    std::vector<uint32_t> scalePlan(uint32_t h, const char *where) const
+    {
+        for (uint32_t c : children(h))
+            if (op(c) == GROUP && ident(c) >= kPickupLo && ident(c) < kPickupHi)
+                throw PatchError(fmt("%s: a alca %07x e um pickup: \"scale\" e para predios e props", where, h));
+        std::vector<uint32_t> paths = pathsThrough(h);
+        for (uint32_t pa : paths)
+        {
+            const Path p = path(pa);
+            const auto it = std::find(p.nodes.begin(), p.nodes.end(), h);
+            for (auto q = it + 1; q + 1 < p.nodes.end(); ++q)
+                if (scaleBlocker(op(*q)))
+                    throw PatchError(fmt("%s: um caminho de colisao da alca %07x passa por um %s (%07x) abaixo dela, uma peca que anda sozinha: "
+                                         "\"scale\" e para objetos sem uma", where, h, opName(op(*q)), *q));
+            if (op(p.nodes.back()) != COLL_VOL && op(p.nodes.back()) != POLY_COLL)
+                throw PatchError(fmt("%s: a alca %07x tem um %s na colisao (gatilho de camera): \"scale\" nao o escala", where, h, opName(op(p.nodes.back()))));
+        }
+        return paths;
+    }
+    // NaN quando o item nao diz "scale"
+    double scaleOf(const json::Value &e, uint32_t h, const char *where) const
+    {
+        const json::Value *v = e.get("scale");
+        if (!v || v->type == json::Value::Null) return std::nan("");
+        if (v->type != json::Value::Int || !(v->d >= kScaleMin && v->d <= kScaleMax))
+            throw PatchError(fmt("%s: \"scale\" e um numero de %g a %g", where, kScaleMin, kScaleMax));
+        scalePlan(h, where);
+        return v->d;
+    }
+    // Vertices do pool do objeto ob que os triangulos leem (o maior indice + 1)
+    uint32_t poolCount(uint32_t ob) const
+    {
+        const uint32_t polys = ob + 0x18 + 14 * u16(ob + 6), n = u16(ob + 4);
+        uint32_t m = 0;
+        for (uint32_t i = 0; i < n; ++i)
+            for (uint32_t j = 0; j < 3; ++j) m = std::max<uint32_t>(m, u8(polys + 8 * i + j) + 1u);
+        return m;
+    }
+    int64_t leafCloneCost(uint32_t leaf) const
+    {
+        if (op(leaf) == COLL_VOL) return 0x20 + 16 * int64_t(std::max<int>(s16(leaf + 4), 0)) + 15;
+        const uint32_t n = std::min<uint32_t>(u32(leaf + 4), 256);
+        int64_t c = 8 + 4 * int64_t(n) + 15;
+        for (uint32_t k = 0; k < n; ++k)
+        {
+            const uint32_t ob = u32(leaf + 8 + 4 * k) & kMask;
+            c += 0x18 + 14 * int64_t(u16(ob + 6)) + 8 * int64_t(u16(ob + 4)) + 15 + 12 * int64_t(poolCount(ob)) + 15;
+        }
+        return c;
+    }
+    // O mais que a escala de h toma da arena: o SCALE, um clone de cada folha e nos de lista para as celulas das caixas maiores
+    int64_t scaleCost(uint32_t h, double k) const
+    {
+        int64_t cost = 0x2C + 4 * int64_t(childSlots(h).size()) + 15;
+        std::set<uint32_t> leaves;
+        for (uint32_t pa : pathsThrough(h))
+        {
+            const Path p = path(pa);
+            leaves.insert(p.nodes.back());
+            const int n = int(std::floor((std::hypot(p.box.mx.v[0] - p.box.mn.v[0], p.box.mx.v[1] - p.box.mn.v[1]) * std::max(k, 1.0) + 2.0) / cell)) + 2;
+            cost += 8 * int64_t(std::min(n, cols)) * std::min(n, rows);
+        }
+        for (uint32_t lf : leaves) cost += leafCloneCost(lf);
+        return cost;
+    }
+    uint32_t scaledLeaf(uint32_t leaf, double k)
+    {
+        const auto key = std::make_pair(leaf, k);
+        if (const auto it = leafCache.find(key); it != leafCache.end()) return it->second;
+        uint32_t a;
+        if (op(leaf) == COLL_VOL)
+        {
+            const uint32_t n = uint32_t(std::max<int>(s16(leaf + 4), 0)), size = 0x20 + 16 * n;
+            a = alloc(size, 16);
+            copyBytes(a, leaf, size);
+            for (uint32_t off : {0x10u, 0x14u, 0x18u, 0x1Cu}) wf32(a + off, f32(leaf + off) * k);
+            for (uint32_t j = 0; j < n; ++j) wf32(a + 0x2C + 16 * j, f32(leaf + 0x2C + 16 * j) * k);
+        }
+        else
+        {
+            const uint32_t n = std::min<uint32_t>(u32(leaf + 4), 256);
+            a = alloc(8 + 4 * n, 16);
+            copyBytes(a, leaf, 8 + 4 * n);
+            for (uint32_t j = 0; j < n; ++j)
+            {
+                const uint32_t ob = u32(leaf + 8 + 4 * j) & kMask, size = 0x18 + 14 * uint32_t(u16(ob + 6)) + 8 * uint32_t(u16(ob + 4));
+                const uint32_t nb = alloc(size, 16), pc = poolCount(ob), vp = u32(ob) & kMask, pool = alloc(12 * pc, 16);
+                copyBytes(nb, ob, size);
+                for (uint32_t v = 0; v < pc * 3; ++v) wf32(pool + 4 * v, f32(vp + 4 * v) * k);
+                setPtr(nb, pool);
+                for (uint32_t c = 0; c < 3; ++c) wf32(nb + 8 + 4 * c, f32(ob + 8 + 4 * c) * k);
+                wf32(nb + 0x14, f32(ob + 0x14) / k);
+                setPtr(a + 8 + 4 * j, nb);
+            }
+        }
+        leafCache[key] = a;
+        ++stats["leaves scaled"];
+        return a;
+    }
+    // Um SCALE uniforme como unico filho da alca h, com os filhos dela: o desenho (e o dbsTraverse, que da aos destrutiveis a matriz
+    // escalada) cresce em torno da origem da alca, nos eixos do objeto
+    void insertScale(uint32_t h, double k)
+    {
+        const std::vector<uint32_t> slots = childSlots(h), kids = children(h);
+        if (slots.empty()) return;
+        const uint32_t s = alloc(0x2C + 4 * uint32_t(slots.size()), 16);
+        w32(s, SCALE);
+        w32(s + 8, uint32_t(slots.size()));
+        w32(s + 0xC, 1);   // uniforme: o hierScaleNode mantem a tabela de luz
+        for (int i = 0; i < 3; ++i) wf32(s + 0x20 + 4 * i, k);
+        for (size_t j = 0; j < slots.size(); ++j) w32(s + 0x2C + 4 * uint32_t(j), u32(slots[j]));
+        w32(h + 8, 1);
+        setPtr(slots[0], s);
+        for (uint32_t c : kids)
+            for (uint32_t &x : parents[c])
+                if (x == h) x = s;
+        parents[s] = {h};
+        inTree.insert(s);
+    }
+    // Escala o objeto da alca h (a que o move devolveu) por k em torno da origem dela: caminhos com folhas escaladas e caixa e celulas
+    // refeitas, GROUPs acima crescem e o SCALE entra embaixo da alca
+    void setScale(uint32_t h, double k)
+    {
+        if (std::fabs(k - 1.0) < 1e-6) return;
+        for (uint32_t pa : scalePlan(h, "escala"))
+        {
+            const Path p = path(pa);
+            setPtr(pa + 0x24 + 4 * uint32_t(p.len - 1), scaledLeaf(p.nodes.back(), k));
+            redo(pa, identM());
+        }
+        growSpheres(h, pos3(world(h)), k);
+        insertScale(h, k);
+        ++stats["scaled"];
+    }
+
     // Copia de n e dos GROUP/SWITCH/TRANSLATE/ROTATE abaixo dele que nao tem outro pai; o que e compartilhado fica compartilhado
     uint32_t clonePrivate(uint32_t n, bool top)
     {
@@ -1436,6 +1593,7 @@ struct Stage
                 ++stats["paths added"];
             }
             growSpheres(hc, oldPos);
+            if (!std::isnan(places[i].scale)) setScale(hc, places[i].scale);
             w16(wrap + 8, uint16_t(2 + i));
             ++stats["copies"];
         }
@@ -1646,8 +1804,12 @@ struct Stage
                 const json::Value *del = e.get("delete");
                 const bool deleting = del && del->asBool();
                 const bool moving = !deleting && (e.get("pos") || e.get("heading"));
-                const int64_t extra = moving ? moveCost(h, !std::isnan(headingOf(e))) : 0;
+                int64_t extra = moving ? moveCost(h, !std::isnan(headingOf(e))) : 0;
                 const Extras mine = deleting ? Extras{} : extrasOf(e, h, "entrada");   // "hp" e "traffic": conferidos antes de escrever
+                leafCache.clear();
+                const double sc = deleting ? std::nan("") : scaleOf(e, h, "entrada");   // "scale": o mesmo
+                const auto scaled = [](double k) { return !std::isnan(k) && std::fabs(k - 1.0) > 1e-6; };
+                if (scaled(sc)) extra += scaleCost(h, sc);
                 if (const json::Value *cp = e.get("copies"); cp && cp->type == json::Value::Arr && !cp->arr.empty())
                 {
                     std::vector<Place> places;
@@ -1658,6 +1820,9 @@ struct Stage
                         pl.heading = headingOf(c);
                         const Extras own = extrasOf(c, h, "uma copia");   // a copia toma o que a entrada diz, salvo o que ela mesma diz
                         pl.ex = {own.hp >= 0 ? own.hp : mine.hp, own.traffic >= 0 ? own.traffic : mine.traffic};
+                        const double ownScale = scaleOf(c, h, "uma copia");
+                        pl.scale = std::isnan(ownScale) ? sc : ownScale;
+                        if (scaled(pl.scale)) extra += scaleCost(h, pl.scale);
                         places.push_back(pl);
                     }
                     copy(h, places, extra);
@@ -1673,8 +1838,9 @@ struct Stage
                     {
                         V3 to = pos;
                         if (e.get("pos") && !num3(e.get("pos"), to)) throw PatchError("\"pos\" nao e [x, y, z]");
-                        move(h, to, headingOf(e));
+                        h = move(h, to, headingOf(e));
                     }
+                    if (!std::isnan(sc)) setScale(h, sc);
                 }
             }
             catch (const PatchError &err)
