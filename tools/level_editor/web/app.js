@@ -4960,6 +4960,14 @@ for (const id of ['sptDlg', 'netDlg', 'gridDlg']) {
     requestDockClose($(id));
   });
 }
+// Enter in a field of a form dialog takes its main button (the buttons are type="button", so that Enter never closes the dialog by itself)
+for (const [dlg, btn] of [['stageDlg', 'nsOk'], ['propDlg', 'ipOk'], ['pfDlg', 'pfOk']]) {
+  $(dlg).addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.defaultPrevented || !e.target.matches('input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file])')) return;
+    e.preventDefault();
+    $(btn).click();
+  });
+}
 // Open a tool: if another one is open, that one is closed first (asking about an unsaved draft)
 function openTool(fn) {
   const cur = document.querySelector('dialog.dock[open]');

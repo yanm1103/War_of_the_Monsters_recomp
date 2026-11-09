@@ -38,7 +38,8 @@
     it loads CENTRAL, checks the ids other scripts click, an edit through undo and Save, every dialog opening and closing with Esc,
     and the server refusing a request the page would not send (`test_local_guard.py` covers that without a disc). It runs the
     editor program with its own settings file and a temporary mods folder (`WOTM_LEVEL_EDITOR_CONFIG`, `WOTM_LEVEL_EDITOR_NAMES`),
-    so nothing of the user's changes; `--shots <dir>` saves a PNG per dialog.
+    so nothing of the user's changes; `--shots <dir>` saves a PNG per dialog. `node tools/level_editor/test_contrast.mjs` checks the contrast of the
+    colors in `web/style.css` (text 4.5:1, a field's border 3:1, both themes) and needs no browser.
   - `lvlhud.py <STAGE>|--all`: the fight HUD a stage carries (level editor, HUD panel). The HUD nodes (ids 0x1C20..0x2133) and the
     fight font (id 18) are found by id, and each texture gets a role (bar atlas, special icon, BOSS label, player number, font,
     pickup ring, hint box, cinema bars, buttons), its file (`.TEX` or `.RTX`), its texId and the mod PNG name. `--all` prints the

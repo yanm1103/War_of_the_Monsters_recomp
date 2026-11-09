@@ -395,6 +395,16 @@ await check('tool panels dock over the right panel, not modal: the width follows
   await ev(`document.getElementById('rightGrip').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
   must(await until(`Math.round(document.getElementById('right').getBoundingClientRect().width) === ${w0}`, 20), 'a double click did not put it back: ' + await W());
 });
+await check('Enter in a field of New stage takes its main button (a bad id answers with its error, the dialog stays)', async () => {
+  await ev(`document.getElementById('newStage').click()`);
+  must(await until(`document.getElementById('stageDlg').open`, 40), 'New stage did not open');
+  await ev(`(() => { const f = document.getElementById('nsId'); f.value = '1x'; f.focus(); })()`);
+  await key('Enter', 'Enter', 13);
+  must(await until(`!document.getElementById('nsErr').hidden`, 20), 'Enter did nothing: no error on the id');
+  must(await ev(`document.getElementById('stageDlg').open`), 'the dialog closed on a bad id');
+  await esc();
+  must(await until(`!document.getElementById('stageDlg').open`, 20), 'Esc did not close New stage');
+});
 await check('top bar: File menu holds the stage and mod commands; Test has a chevron for Test from here and Test options', async () => {
   must(await ev(`!document.getElementById('bar').querySelector('#newStage, #editStage, #packMod, #check, #testHere, #testOpts')`), 'a command is still loose on the bar');
   await ev(`document.getElementById('fileBtn').click()`);

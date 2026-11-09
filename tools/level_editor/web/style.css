@@ -2,8 +2,8 @@
    preference take the light set. --panel / --panel2 / --accent-fg stay as aliases for hud.js and peds.js. */
 :root, :root[data-theme="dark"], :root[data-theme="system"] {
   --bg: #15171B; --surface-1: #1C1F24; --surface-2: #24282E; --surface-3: #2D323A; --input-bg: #16191D;
-  --line: #2E333B; --line-strong: #3D434D;
-  --fg: #E6E9EE; --fg-2: #AEB6C2; --muted: #7F8895; --disabled: #565D68;
+  --line: #2E333B; --line-strong: #3D434D; --control: #6B7380;
+  --fg: #E6E9EE; --fg-2: #AEB6C2; --muted: #8B94A1; --disabled: #565D68;
   --accent: #2563EB; --accent-hover: #3B74F0; --accent-press: #1E4FC4; --accent-text: #7AB0FF;
   --sel: #FFC233; --sel-2: #FF8A3D;
   --sel-bg: color-mix(in srgb, #FFC233 16%, transparent); --sel-bg-2: color-mix(in srgb, #FF8A3D 12%, transparent);
@@ -17,12 +17,12 @@
 }
 :root[data-theme="light"] {
   --bg: #E9ECF0; --surface-1: #FFFFFF; --surface-2: #F4F6F8; --surface-3: #EBEEF2; --input-bg: #FFFFFF;
-  --line: #DDE1E7; --line-strong: #C5CBD3;
-  --fg: #1B1F24; --fg-2: #4A525E; --muted: #6B7380; --disabled: #A3AAB4;
+  --line: #DDE1E7; --line-strong: #C5CBD3; --control: #868E9A;
+  --fg: #1B1F24; --fg-2: #4A525E; --muted: #5F6772; --disabled: #A3AAB4;
   --accent: #2563EB; --accent-hover: #1D55D6; --accent-press: #1846B5; --accent-text: #1D5BD8;
   --sel: #E0A100; --sel-2: #F07A2A;
   --sel-bg: color-mix(in srgb, #F5B400 22%, transparent); --sel-bg-2: color-mix(in srgb, #F07A2A 14%, transparent);
-  --ok: #1F9D63; --changed: #1F9D63; --added: #1D5BD8; --danger: #D13B35; --warn: #B7791F;
+  --ok: #167A4B; --changed: #167A4B; --added: #1D5BD8; --danger: #D13B35; --warn: #8A5A0E;
   --ax-x: #D9443D; --ax-y: #2F74D0; --ax-z: #1F9D63;
   --view: #CAD2DC; --checker-a: #C8CCD2; --checker-b: #E2E5E9;
   --seg-on: var(--surface-1);
@@ -33,12 +33,12 @@
 @media (prefers-color-scheme: light) {
   :root[data-theme="system"] {
     --bg: #E9ECF0; --surface-1: #FFFFFF; --surface-2: #F4F6F8; --surface-3: #EBEEF2; --input-bg: #FFFFFF;
-    --line: #DDE1E7; --line-strong: #C5CBD3;
-    --fg: #1B1F24; --fg-2: #4A525E; --muted: #6B7380; --disabled: #A3AAB4;
+    --line: #DDE1E7; --line-strong: #C5CBD3; --control: #868E9A;
+    --fg: #1B1F24; --fg-2: #4A525E; --muted: #5F6772; --disabled: #A3AAB4;
     --accent: #2563EB; --accent-hover: #1D55D6; --accent-press: #1846B5; --accent-text: #1D5BD8;
     --sel: #E0A100; --sel-2: #F07A2A;
     --sel-bg: color-mix(in srgb, #F5B400 22%, transparent); --sel-bg-2: color-mix(in srgb, #F07A2A 14%, transparent);
-    --ok: #1F9D63; --changed: #1F9D63; --added: #1D5BD8; --danger: #D13B35; --warn: #B7791F;
+    --ok: #167A4B; --changed: #167A4B; --added: #1D5BD8; --danger: #D13B35; --warn: #8A5A0E;
     --ax-x: #D9443D; --ax-y: #2F74D0; --ax-z: #1F9D63;
     --view: #CAD2DC; --checker-a: #C8CCD2; --checker-b: #E2E5E9;
     --seg-on: var(--surface-1);
@@ -102,7 +102,7 @@ button:disabled, button.primary:disabled, button.on:disabled, button.ghost:disab
 /* ------------------------------------------------------------------ fields and pickers */
 /* :where keeps this base at one element's weight, so that a wrapper (.field, .fl) can set the padding and width */
 input:where(:not([type=checkbox]):not([type=radio]):not([type=range])), select {
-  font: inherit; color: var(--fg); background: var(--input-bg); border: 1px solid var(--line-strong);
+  font: inherit; color: var(--fg); background: var(--input-bg); border: 1px solid var(--control);
   border-radius: var(--r-md); height: var(--h-ctl); padding: 0 8px; min-width: 0;
   transition: border-color .12s, box-shadow .12s; }
 input:not([type=checkbox]):not([type=radio]):not([type=range]):focus, select:focus {
@@ -878,3 +878,14 @@ dialog.dock .spt-row:not(.pup):not(.net) > :nth-child(8), dialog.dock .spt-row.p
 dialog.dock .spt-row.net > :nth-child(6) { grid-column: 2 / 7; grid-row: 3; font-size: 12px; color: var(--fg-2); overflow-wrap: anywhere; }
 dialog.dock .spt-row.net > :nth-child(7) { grid-column: 5 / 7; grid-row: 1; }
 dialog.dock .spt-row.net > :nth-child(2) { grid-column: 2 / 5; }
+
+/* people who ask the system for less motion get none (the pulse of the game indicator, the fades) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
+}
+/* forced colors (Windows high contrast): focus and the "on" state are drawn with outlines, which the system keeps */
+@media (forced-colors: active) {
+  :focus-visible { outline: 2px solid Highlight !important; outline-offset: 1px; }
+  .tgl:has(> input:checked), .chip:has(input:checked), .rtab.on, #rail > button.on, button.toggle.on, .seg > button.on { outline: 2px solid Highlight; outline-offset: -2px; }
+  .switch input:checked + .track { outline: 2px solid Highlight; }
+}

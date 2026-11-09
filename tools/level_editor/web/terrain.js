@@ -66,6 +66,9 @@ function build() {
   q('.tr-id').addEventListener('input', () => err(''));
   q('.tr-from').addEventListener('change', () => loadFrom(q('.tr-from').value));
   q('.tr-ok').addEventListener('click', () => create(false));
+  dlg.addEventListener('keydown', (e) => {      // Enter in a number field takes Create
+    if (e.key === 'Enter' && !e.defaultPrevented && e.target.matches('input[type=number], input[type=text]')) { e.preventDefault(); q('.tr-ok').click(); }
+  });
   q('.tr-id').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); create(false); } });
 }
 
