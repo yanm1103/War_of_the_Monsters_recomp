@@ -129,6 +129,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <button id="gridBtn" class="icon ghost" title="Stage size: the collision grid's rectangle (what the game collides, shoots and sees across); a bigger one lets objects go farther out" aria-label="Stage size"><i class="ic" style="--ic:url(vendor/mdi/arrow-expand-all.svg)"></i></button>
       <button id="sptBtn" class="icon ghost" title="Start points: where the monsters appear (a file of the mod)" aria-label="Start points"><i class="ic" style="--ic:url(vendor/mdi/account-group-outline.svg)"></i></button>
       <button id="pupBtn" class="icon ghost" title="Power-ups: the health, stamina and other pickups lying in the stage (a file of the mod)" aria-label="Power-ups"><i class="ic" style="--ic:url(vendor/mdi/package-variant-closed.svg)"></i></button>
+      <button id="aipBtn" class="icon ghost" title="AI net: the paths the computer monsters walk (a file of the mod)" aria-label="AI net"><i class="ic" style="--ic:url(vendor/mdi/vector-polyline-plus.svg)"></i></button>
       <button id="picBtn" class="icon ghost" title="Use this view as the stage's picture on the stage select (a custom stage, Training, Lake Powell or Tokyo DM)" aria-label="Stage picture"><i class="ic" style="--ic:url(vendor/mdi/image-edit-outline.svg)"></i></button>
       <button id="keysBtn" class="icon ghost" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><i class="ic" style="--ic:url(vendor/mdi/keyboard-outline.svg)"></i></button>
     </div>
@@ -464,6 +465,30 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <div class="callout err" id="sptErr" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-circle-outline.svg)"></i><span></span></div>
     </div>
     <div class="dlg-foot"><button type="button" id="sptReset" title="Takes the mod's file away: the stage's own points (or power-ups) come back">Back to the disc's</button><button type="button" data-close>Close</button><button id="sptSave" type="button" class="primary">Save</button></div>
+  </form>
+</dialog>
+<dialog id="aipDlg" class="dlg spt" aria-labelledby="aipTitle">
+  <form method="dialog">
+    <div class="dlg-head"><h2 id="aipTitle">AI net</h2>
+      <button type="button" data-close class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+    <div class="dlg-body">
+      <p class="muted" id="aipText"></p>
+      <div id="aipList"></div>
+      <div class="gd-btns">
+        <button type="button" id="aipAdd" title="Adds a node where the middle of the view meets the stage; with a node selected, linked to it both ways">Add node at the view's aim</button>
+        <label class="fl" style="flex-direction:row;align-items:center;gap:6px">Width <input id="aipWidth" type="number" min="0" max="255" value="20" style="width:5em"></label>
+        <label class="fl" style="flex-direction:row;align-items:center;gap:6px">Type <input id="aipType" type="number" min="0" max="255" value="0" style="width:4em"></label>
+      </div>
+      <div class="gd-btns">
+        <label class="fl" style="flex-direction:row;align-items:center;gap:6px">Selected node and node # <input id="aipTo" type="number" min="1" style="width:5em"></label>
+        <button type="button" id="aipLink" title="Link the selected node and that one, both ways, with the width above">Link</button>
+        <button type="button" id="aipUnlink" title="Take out every link between the two">Unlink</button>
+        <button type="button" id="aipClear" title="Take every node away (a net of your own from scratch)">Clear the net</button>
+      </div>
+      <div class="help" id="aipInfo"></div>
+      <div class="callout err" id="aipErr" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-circle-outline.svg)"></i><span></span></div>
+    </div>
+    <div class="dlg-foot"><button type="button" id="aipReset" title="Takes the mod's file away: the stage's own net comes back">Back to the disc's</button><button type="button" data-close>Close</button><button id="aipSave" type="button" class="primary">Save</button></div>
   </form>
 </dialog>
 <dialog id="gridDlg" class="dlg" aria-labelledby="gdTitle">

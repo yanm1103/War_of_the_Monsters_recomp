@@ -2454,6 +2454,70 @@ def build_pup(points):
     return b"".join(out)
 
 
+AIP_NODES = 255                 # a points file holds 255 records (the in-game net has room for 300)
+AIP_MAX_PATHS = 450             # AiPathNet::MAX_PATHS: "Exceeded ... ignoring path"
+AIP_LINKS = 6                   # links per node (the width bytes sit at 0x2C..0x31)
+
+
+def read_aip(path):
+    """An .AIP as the editor's AI net: [{"pos": [x, y, z], "type", "links": [{"to", "width"}], "w", "sel", "tail"}]. `type` (0x32) splits
+    the net into sub-nets (the AI only follows paths of the type it stands on); `links` are directed (a two-way link is one on each
+    node); `tail` keeps the unread bytes 0x33..0x3B as hex. Links to a missing node are dropped."""
+    pts = read_points(path)
+    out = []
+    for p in pts:
+        r = p["raw"]
+        links = [{"to": p["links"][j], "width": r[0x2C + j]} for j in range(max(0, min(p["nlinks"], AIP_LINKS)))
+                 if 0 <= p["links"][j] < len(pts)]
+        out.append({"pos": [float(v) for v in p["pos"][:3]], "type": r[0x32], "links": links, "w": p["pos"][3], "sel": r[0x3C],
+                    "tail": r[0x33:0x3C].hex()})
+    return out
+
+
+def aip_paths(nodes):
+    """How many paths AiPathNet makes of this net: a two-way link is one path, a one-way link its own."""
+    seen, n = set(), 0
+    for i, nd in enumerate(nodes):
+        for l in nd["links"]:
+            key = (min(i, l["to"]), max(i, l["to"])) if any(m["to"] == i for m in nodes[l["to"]]["links"]) else (i, l["to"], 1)
+            if key not in seen:
+                seen.add(key)
+                n += 1
+    return n
+
+
+def build_aip(nodes):
+    """The bytes of an .AIP for those nodes (links: at most 6 per node, to an existing other node, width 0..255; type 0..255)."""
+    if len(nodes) > AIP_NODES:
+        raise ValueError("an .AIP holds at most %d nodes (it has %d)" % (AIP_NODES, len(nodes)))
+    out = [struct.pack("<II", POINTS_MAGIC, len(nodes))]
+    for k, nd in enumerate(nodes):
+        pos, links, t = nd.get("pos"), nd.get("links") or [], nd.get("type", 0)
+        if not (isinstance(pos, (list, tuple)) and len(pos) == 3 and all(isinstance(v, (int, float)) and math.isfinite(v) for v in pos)):
+            raise ValueError("node %d: the position is three numbers" % (k + 1))
+        if not isinstance(t, int) or isinstance(t, bool) or not 0 <= t <= 255:
+            raise ValueError("node %d: the type is 0 to 255" % (k + 1))
+        if len(links) > AIP_LINKS:
+            raise ValueError("node %d has %d links; at most %d" % (k + 1, len(links), AIP_LINKS))
+        rec = bytearray(64)
+        struct.pack_into("<4f", rec, 0, pos[0], pos[1], pos[2], float(nd.get("w") or 0.0))
+        struct.pack_into("<i", rec, 0x10, len(links))
+        for j, l in enumerate(links):
+            to, w = l.get("to"), l.get("width", 10)
+            if not isinstance(to, int) or isinstance(to, bool) or not 0 <= to < len(nodes) or to == k:
+                raise ValueError("node %d: link %d goes to a node that does not exist (or to itself)" % (k + 1, j + 1))
+            if not isinstance(w, int) or isinstance(w, bool) or not 0 <= w <= 255:
+                raise ValueError("node %d: link %d width is 0 to 255" % (k + 1, j + 1))
+            struct.pack_into("<i", rec, 0x14 + 4 * j, to)
+            rec[0x2C + j] = w
+        rec[0x32] = t
+        tail = bytes.fromhex(nd.get("tail") or "")
+        rec[0x33:0x33 + len(tail[:9])] = tail[:9]
+        rec[0x3C] = int(nd.get("sel") or 0) & 0xFF
+        out.append(bytes(rec))
+    return b"".join(out)
+
+
 def describe_point(ext, p):
     r, n = p["raw"], min(p["nlinks"], 6)
     if ext == "SPT":

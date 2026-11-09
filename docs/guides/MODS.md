@@ -805,6 +805,14 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   health 10, stamina 10, special weapon, cloak, story items 10 to 19, which only appear in story mode), a position (z is the height the
   power-up rests at; the rotation is random in the game) and a Shadow box. The game keeps 100 at a time (the dialog warns past that).
   Same file rules: `mods/<mod>/PTS/<STAGE>.PUP`, or `<ID>.PUP` in a custom stage's folder.
+  The polyline button opens the **AI net** (`.AIP`): the paths the computer monsters walk. Each node has a position and a type (0 for nearly
+  all; the AI only follows paths of the type it stands on, so a type splits the net into sub-nets), each link a width (the lane is
+  width x 10 to each side; the disc's are 12 to 24). The dialog lists the nodes with their links (a number alone is a two-way link, an arrow
+  a one-way link), adds a node at the view's aim linked both ways to the selected one (so a path is a few clicks), links and unlinks two
+  nodes by number, moves a node to the aim and clears the net. The view draws the links (amber around the selected node). Limits shown in
+  the dialog: 255 nodes, 6 links per node and 450 paths (a two-way link is one path; the game ignores the rest). A stage without its own
+  net gives the CPUs nowhere to go: CAPITOL and TRAINING have 2 nodes, METRO none (a METRO-based custom stage leaves the CPU lists unless
+  it brings its own).
 - **Stage picture:** the picture button (lower right of the view) saves the middle 2:1 band of the view, 512x256, as
   `mods/<mod>/levelpics/<name>.png` for a custom stage (`<id>`) and for Training, Lake Powell and Tokyo DM; the other game stages have
   their picture in `SHELL.TEX` (make a custom stage on one). The stage select picks it up the next time the game starts.
