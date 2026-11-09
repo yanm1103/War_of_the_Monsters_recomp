@@ -426,6 +426,61 @@ await check('the side panels hide and come back: the view takes their place, a s
   must(await until(`Math.round(document.getElementById('left').getBoundingClientRect().width) === ${left0}`, 20), 'the left panel did not come back');
   must(await until(`Math.round(document.getElementById('view').getBoundingClientRect().width) === ${view0}`, 20), 'the view is not as wide as before: ' + await W('view') + ' vs ' + view0);
 });
+const clickAt = async (x, y) => {
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+  await sleep(150);
+};
+// the first marker of a kind that is on screen, clear of the bars and the panels: [index, [x, y]] as JSON, or null
+const markerOnScreen = (kind, list) => ev(`(() => { const D = window.wotmDebug; const r = ${list}.map((p, i) => [i, D.markerScreen('${kind}', p)]).filter((x) => x[1]
+  && x[1][0] > 330 && x[1][0] < innerWidth - 480 && x[1][1] > 130 && x[1][1] < innerHeight - 120);
+  return r.length ? JSON.stringify(r[0]) : null; })()`);
+await check('markers in the view: a click near a start point selects it, the gizmo moves it, a click on nothing lets go, Esc closes the panel', async () => {
+  await ev(`document.getElementById('sptBtn').click()`);
+  must(await until(`document.getElementById('sptDlg').open`, 40), 'Start points did not open');
+  await ev(`window.wotmDebug.frameAll()`);
+  await sleep(500);
+  const want = await markerOnScreen('SPT', 'D.pt.SPT.points');
+  must(want, 'no start point on screen to click');
+  const [idx, [sx, sy]] = JSON.parse(want);
+  await clickAt(sx, sy);
+  must(await until(`window.wotmDebug.markerCtx() && window.wotmDebug.markerCtx().sel === ${idx}`, 20), 'the click did not select start point ' + idx);
+  must(await ev('window.wotmDebug.marker.on && !!window.wotmDebug.gizmoObject'), 'the gizmo is not on the marker');
+  must(await ev(`!!document.querySelector('#sptList .spt-row.sel')`), 'its row is not selected');
+  // the gizmo moves it: the point's numbers follow (the gizmo's own drag cannot be driven here; its change event can)
+  const x0 = await ev(`window.wotmDebug.pt.SPT.points[${idx}].pos[0]`);
+  await ev(`(() => { const D = window.wotmDebug; D.gizmoObject.position.x += 50; D.gizmo.dispatchEvent({ type: 'objectChange' }); })()`);
+  const x1 = await ev(`window.wotmDebug.pt.SPT.points[${idx}].pos[0]`);
+  must(Math.abs(x1 - x0 - 50) < 0.2, `the point did not follow the gizmo: ${x0} -> ${x1}`);
+  // a click on nothing (the corner of the view) lets go
+  await clickAt(340, 140);
+  must(await until(`window.wotmDebug.markerCtx().sel === -1 && !window.wotmDebug.marker.on`, 20), 'a click on nothing did not let go of the marker');
+  await key('Escape', 'Escape', 27);       // the focus is in the view: Esc closes the panel, asking about the moved point first
+  await answer('discard');
+  must(await until(`!document.getElementById('sptDlg').open`, 20), 'Esc with the focus in the view did not close the panel');
+});
+await check('markers in the view: the same for the nodes of the AI net', async () => {
+  await ev(`document.getElementById('aipBtn').click()`);
+  must(await until(`document.getElementById('netDlg').open`, 40), 'AI net did not open');
+  await ev(`window.wotmDebug.frameAll()`);
+  await sleep(500);
+  const want = await markerOnScreen('AIP', 'D.nets.AIP.points');
+  must(want, 'no AI net node on screen to click');
+  const [idx, [sx, sy]] = JSON.parse(want);
+  await clickAt(sx, sy);
+  must(await until(`window.wotmDebug.markerCtx() && window.wotmDebug.markerCtx().sel === ${idx} && window.wotmDebug.marker.on`, 20), 'the click did not select node ' + idx);
+  await shot('marker_selected_net');
+  const y0 = await ev(`window.wotmDebug.nets.AIP.points[${idx}].pos[1]`);
+  await ev(`(() => { const D = window.wotmDebug; D.gizmoObject.position.z -= 40; D.gizmo.dispatchEvent({ type: 'objectChange' }); })()`);     // game y is three -z
+  const y1 = await ev(`window.wotmDebug.nets.AIP.points[${idx}].pos[1]`);
+  must(Math.abs(y1 - y0 - 40) < 0.2, `the node did not follow the gizmo: ${y0} -> ${y1}`);
+  await key('Escape', 'Escape', 27);       // the marker first (the focus is in the view), then the panel
+  must(await until(`window.wotmDebug.markerCtx().sel === -1`, 20), 'Esc did not let go of the node');
+  await key('Escape', 'Escape', 27);
+  await answer('discard');
+  must(await until(`!document.getElementById('netDlg').open && window.wotmDebug.nets.AIP.points[${idx}].pos[1] === ${y0}`, 40), 'Discard did not put the node back');
+});
 await check('top bar: File menu holds the stage and mod commands; Test has a chevron for Test from here and Test options', async () => {
   must(await ev(`!document.getElementById('bar').querySelector('#newStage, #editStage, #packMod, #check, #testHere, #testOpts')`), 'a command is still loose on the bar');
   await ev(`document.getElementById('fileBtn').click()`);

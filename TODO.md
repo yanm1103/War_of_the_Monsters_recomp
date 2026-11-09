@@ -7,7 +7,6 @@ O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado s
 
 ## Editor de fase
 - **Escala: destroços e câmera de um prédio escalado:** o `dbsTraverse` entrega aos destrutíveis a matriz já escalada (`AddDestruct`), e os destroços (`ActDebris`) e a câmera da quebra usam a posição e a matriz guardadas ali; conferir o tamanho e o lugar dos pedaços que voam com um prédio que solta destroços (o de CENTRAL que se quebrou nas provas vai direto para o estado final, sem pedaço voando). Escala de props novos do Blender não existe (o tamanho vem do modelo: `--height`).
-- **UX do editor, marcadores na vista (decidido pelo dono: sim):** pontos de largada, power-ups e nós das redes selecionáveis e arrastáveis na vista, com o gizmo e o Desfazer (hoje só se editam pelas linhas do painel acoplado; as cenas já existem em `ptViews`/`nets[].view`, sem raycast). Rascunho e `isDirty` já cobrem esses arquivos; o Desfazer não (cada um tem o seu rascunho). Plano em `99e13ca:docs/investigacoes/2026-11-09/ux_consolidado.md`, seção 5.
 - **UX do editor, acabamento (etapa 19 do consolidado):** alvos de 24 px, `aria-selected` nas abas do `#output`, `th`/`aria-label` nas tabelas (pontos e redes são grades de `div`). "Pickups" na lista x "Power-ups" no botão: o termo do jogo para vida e stamina não foi decidido.
 
 ## Fora da ordem (até o dono escolher)

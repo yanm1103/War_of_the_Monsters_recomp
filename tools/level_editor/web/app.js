@@ -635,6 +635,7 @@ function showHint() {
 let stageBases = {};     // a custom stage's name -> the game stage it is built on (its files, its handles, its props)
 let stageMeta = {};      // a custom stage's name -> its listing entry (id, title, base, mod, narrator, random)
 const baseOf = (n) => stageBases[n] || n;
+let marker = { on: false };     // the gizmo is on a start point, a power-up or a net node (markerProxy), not on an object
 let fileStamp = 0;     // when the mod's file for this stage last changed, as the server told (Save sends it back: a file that changed meanwhile is asked about)
 let cfg = {}, stageName = '', recs = [], byHandle = new Map(), itemOf = new Map(), sel = null, group = [], dirty = false;
 // undo and redo: {p: the patch as JSON before the change, label}; savedJson: the patch the mod's file holds
@@ -1448,6 +1449,7 @@ $('rtabs').addEventListener('keydown', (e) => {
   $(to === 'stage' ? 'tabStage' : 'tabSel').focus();
 });
 function showSel() {
+  marker.on = false;     // (showSel detaches the gizmo below; an object or a pedestrian marker takes it)
   if (sel || pedSel) { showRightTab('selection'); if (rightOff) setRightOff(false); }     // what is selected is shown
   gizmo.detach();
   if (sel) pedSel = null;
@@ -2104,6 +2106,7 @@ gizmo.addEventListener('dragging-changed', (e) => {
   }
 });
 gizmo.addEventListener('objectChange', () => {
+  if (marker.on) { moveMarker(); return; }
   if (pedSel) { peds.moved(pedSel); showPed(); return; }
   if (!sel) return;
   if (gizmo.getMode() === 'rotate') setWorld(sel.node, posOf(sel), headingOf(sel), sel.rec);   // only about the game's Z
@@ -2408,6 +2411,12 @@ canvas.addEventListener('pointerup', (e) => {
   }
   if (!down || moved > 4 || gizmo.dragging || dragged || e.button !== 0) return;
   if (ruler.on) { if (!ruler.click(ndc(e))) toast('Nothing there to measure: click the stage.', 'info'); return; }   // the ruler takes the clicks
+  // with a panel of markers open (start points, power-ups, a net): the marker near the pointer is selected; nothing near lets go of it
+  if (markerCtx() && !e.shiftKey && !e.ctrlKey) {
+    const m = pickMarker(e), cur = markerCtx();
+    if (m >= 0) { selectMarker(m); return; }
+    if (cur.sel >= 0) { cur.sel = -1; refreshMarkers(cur); }
+  }
   // the first visible thing under the pointer: an object, a pedestrian marker, a deleted one's dashed box; ground or a road: nothing
   const add = e.shiftKey || e.ctrlKey, h = pickAt(ndc(e), add);
   if (h && h.ped) selectPed(h.ped);
@@ -3635,7 +3644,7 @@ async function loadPointsNow(kind) {
 }
 const loadSpt = () => { loadPoints('SPT'); loadPoints('PUP'); loadNet('AIP'); loadNet('FOP'); };
 // A cone for each point (colored; white when selected); a start point has a line for the way the monster faces, a power-up is a ball on its rest height
-function updatePtView(kind) {
+function updatePtViewNow(kind) {
   const old = ptViews[kind];
   if (old) { scene.remove(old); old.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); }); ptViews[kind] = null; }
   if (!pt[kind].points.length) return;
@@ -3826,7 +3835,7 @@ function netPaths(n) {   // as the game counts them: a two-way link is one path
   n.points.forEach((p, i) => p.links.forEach((l) => seen.add(netTwoWay(n, i, l.to) ? `${Math.min(i, l.to)}-${Math.max(i, l.to)}` : `${i}>${l.to}`)));
   return seen.size;
 }
-function updateNetView(kind) {
+function updateNetViewNow(kind) {
   const n = nets[kind];
   if (n.view) { scene.remove(n.view); n.view.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); }); n.view = null; }
   if (!n.points.length) return;
@@ -3854,6 +3863,77 @@ function updateNetView(kind) {
   });
   scene.add(n.view);
 }
+
+// ------------------------------------------------------------------ markers in the view: start points, power-ups and net nodes
+// With the tool's panel open, a click near a marker selects it (its row too) and the gizmo moves it, as for an object; a click on nothing
+// lets go. They are drafts of the file the panel keeps (its Save), outside Undo, like the rows' numbers.
+const markerProxy = new THREE.Object3D();
+scene.add(markerProxy);
+const MARKER_LIFT = { SPT: 25, PUP: 14, AIP: 6, FOP: 6 };       // where the cone, the ball and the road end are drawn above the point
+function markerCtx() {
+  if ($('sptDlg').open) return { kind: ptKind, pts: pt[ptKind].points, get sel() { return ptSel; }, set sel(v) { ptSel = v; } };
+  if ($('netDlg').open) { const n = nets[netKind]; return { kind: netKind, pts: n.points, get sel() { return n.sel; }, set sel(v) { n.sel = v; } }; }
+  return null;
+}
+// the screen place of a marker, in client pixels (null behind the camera)
+function markerScreen(kind, p) {
+  const v = toThree(p.pos);
+  v.y += MARKER_LIFT[kind] || 0;
+  v.project(camera);
+  if (v.z > 1) return null;
+  const r = canvas.getBoundingClientRect();
+  return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height];
+}
+// the marker under the pointer: the nearest one within 18 px, or -1
+function pickMarker(e) {
+  const cur = markerCtx();
+  if (!cur) return -1;
+  let best = -1, bd = 18;
+  cur.pts.forEach((p, i) => {
+    const s = markerScreen(cur.kind, p);
+    if (!s) return;
+    const d = Math.hypot(s[0] - e.clientX, s[1] - e.clientY);
+    if (d < bd) { bd = d; best = i; }
+  });
+  return best;
+}
+function refreshMarkers(cur) {
+  if (cur.kind === 'SPT' || cur.kind === 'PUP') { updatePtViewNow(cur.kind); ptRows(); ptInfo(); }
+  else { updateNetViewNow(cur.kind); netRows(); netInfo(); }
+  syncMarkerGizmo();
+}
+function selectMarker(i) {
+  const cur = markerCtx();
+  if (!cur) return;
+  if (sel || pedSel) select(null);
+  cur.sel = i;
+  refreshMarkers(cur);
+  document.querySelector('#sptList .spt-row.sel, #netList .spt-row.sel')?.scrollIntoView({ block: 'nearest' });
+}
+// the gizmo follows the selected marker while a panel with markers is open (and nothing else is selected)
+function syncMarkerGizmo() {
+  const cur = markerCtx();
+  if (!cur || cur.sel < 0 || !cur.pts[cur.sel] || sel || pedSel) {
+    if (marker.on) { gizmo.detach(); marker.on = false; }
+    return;
+  }
+  if (gizmo.dragging) return;
+  markerProxy.position.copy(toThree(cur.pts[cur.sel].pos));
+  markerProxy.updateMatrixWorld(true);
+  if (!marker.on || gizmo.object !== markerProxy) {
+    if (gizmo.getMode() !== 'translate') setTool('translate');
+    gizmo.attach(markerProxy);
+    marker.on = true;
+  }
+}
+function moveMarker() {
+  const cur = markerCtx();
+  if (!cur || cur.sel < 0 || !cur.pts[cur.sel]) return;
+  cur.pts[cur.sel].pos = toGame(markerProxy.position).map((x) => Math.round(x * 10) / 10);
+  refreshMarkers(cur);
+}
+function updatePtView(kind) { updatePtViewNow(kind); syncMarkerGizmo(); }
+function updateNetView(kind) { updateNetViewNow(kind); syncMarkerGizmo(); }
 const netErr = (t) => { $('netErr').hidden = !t; if (t) $('netErr').querySelector('span').textContent = t; };
 function netInfo() {
   const n = nets[netKind], cap = n.caps;
@@ -5055,7 +5135,14 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'n') setMini(!minimap.on);
   else if (k === '1') setMode('objects');
   else if (k === '2') setMode('peds');
-  else if (k === 'escape') { if (ruler.on) setRuler(false); else select(null); }
+  else if (k === 'escape') {
+    e.preventDefault();      // (a question opened by this very key would otherwise get the browser's own Esc and close at once)
+    const cur = markerCtx(), dock = document.querySelector('dialog.dock[open]');
+    if (ruler.on) setRuler(false);
+    else if (cur && cur.sel >= 0) { cur.sel = -1; refreshMarkers(cur); }          // a tool's marker first,
+    else if (dock && !sel && !pedSel) requestDockClose(dock);                      // then the tool panel (the focus was in the view)
+    else select(null);
+  }
 });
 window.addEventListener('beforeunload', (e) => { if (dirty) writeDraft(); if (isDirty()) { e.preventDefault(); e.returnValue = ''; } });
 
@@ -5112,7 +5199,7 @@ if (new URLSearchParams(location.search).has('debug')) {
                        boxCenter: (o) => new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()), setGrid, setTool, setSnap, showKeys, showHint,
                        focusSelection, HINTS, get hintKey() { return hint.key; }, get hoverCount() { return hover.n; },
                        get gridMinor() { return gridMinor; }, get gridMajor() { return gridMajor; },
-                       get ui() { return ui; }, get pt() { return pt; }, get ptViews() { return ptViews; }, get ptSaved() { return ptSaved; }, get outTab() { return outTab; },
+                       get ui() { return ui; }, get pt() { return pt; }, get ptViews() { return ptViews; }, markerScreen, pickMarker, get marker() { return marker; }, markerCtx, get ptSaved() { return ptSaved; }, get outTab() { return outTab; },
                        get history() { return history; }, get future() { return future; }, get dirty() { return dirty; },
                        get modNow() { return modNow; }, get keep() { return keep; }, get game() { return game; },
                        get gizmoObject() { return gizmo.object || null; }, get gizmoMode() { return gizmo.getMode(); },
