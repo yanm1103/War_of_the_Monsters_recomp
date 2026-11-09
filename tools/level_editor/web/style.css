@@ -419,8 +419,10 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 .float .fsep { width: 1px; height: 20px; background: var(--line); margin: 0 3px; flex: none; }
 .float .seg { border-color: transparent; }
 .float .seg > button { height: 24px; }
-#toolBar { top: 8px; left: 8px; }
-#overlay { top: 8px; right: 8px; }
+/* the two bars share one row and wrap onto a second when the view is narrow, so they never cover each other (--vt: that block's height) */
+#viewTop { position: absolute; top: 8px; left: 8px; right: 8px; z-index: 2; display: flex; flex-wrap: wrap; align-items: flex-start;
+           justify-content: space-between; gap: 8px; pointer-events: none; }
+#viewTop > .float { position: static; pointer-events: auto; max-width: 100%; flex-wrap: wrap; }
 #toolBar .field.small-num { width: 56px; margin-left: 2px; }
 #toolBar .field.small-num > input { height: 24px; }
 #toolBar:not(:has(#snap:checked)) .small-num { display: none; }
@@ -439,7 +441,7 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 .float button.ghost:hover { color: var(--fg); }
 .float button:disabled { border-color: transparent; color: var(--disabled); }
 /* the layers menu, under the view bar */
-#layersMenu { top: 48px; right: 8px; z-index: 4; flex-direction: column; align-items: stretch; gap: 4px; padding: 8px 10px; min-width: 210px; }
+#layersMenu { top: calc(var(--vt, 36px) + 12px); right: 8px; z-index: 4; flex-direction: column; align-items: stretch; gap: 4px; padding: 8px 10px; min-width: 210px; }
 #layersMenu .sec-title { margin: 0 0 2px; }
 #layersMenu .switch { height: 28px; }
 #layersMenu .switch .ic { color: var(--muted); }
@@ -455,7 +457,7 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 #pedBar { display: contents; }
 /* Add prop: the mod's models for this stage, under the tool bar's button */
 #propBar { display: contents; }
-#propMenu { top: 48px; left: 8px; z-index: 4; flex-direction: column; align-items: stretch; gap: 2px; padding: 8px; width: 280px; max-height: calc(100vh - 64px); overflow-y: auto; }
+#propMenu { top: calc(var(--vt, 36px) + 12px); left: 8px; z-index: 4; flex-direction: column; align-items: stretch; gap: 2px; padding: 8px; width: 280px; max-height: calc(100vh - 64px); overflow-y: auto; }
 #propMenu .sec-title { margin: 0 2px 4px; }
 .gd-pair { display: flex; gap: 8px; }
 .gd-pair input { flex: 1; min-width: 0; }
@@ -523,7 +525,7 @@ dialog.pal { width: min(96vw, 2400px); max-width: none; }
 .ip-file { display: flex; align-items: center; gap: 10px; margin: 4px 0 10px; }
 .ip-file #ipFile { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* notes over the view's upper left (under the tool bar): the mod that wins in the game, what the file keeps */
-#notes { position: absolute; top: 52px; left: 8px; max-width: min(520px, 55%); display: flex; flex-direction: column; gap: 8px; z-index: 2;
+#notes { position: absolute; top: calc(var(--vt, 36px) + 16px); left: 8px; max-width: min(520px, 55%); display: flex; flex-direction: column; gap: 8px; z-index: 2;
          pointer-events: none; }
 #notes > .callout { margin: 0; box-shadow: var(--shadow-pop); pointer-events: auto; }
 /* loading: a veil over the view and a card with a spinner */

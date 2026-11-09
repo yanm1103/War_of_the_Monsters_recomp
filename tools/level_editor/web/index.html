@@ -35,7 +35,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
   <button id="test" class="primary" title="Open the game on this stage (training mode, as Togera, unless the Test options say otherwise)" aria-label="Test in game"><i class="ic" style="--ic:url(vendor/mdi/play.svg)"></i><span class="lbl">Test in game</span></button>
   <button id="testHere" class="icon" title="Test from here: the game starts you where the view aims, facing where it looks" aria-label="Test from here"><i class="ic" style="--ic:url(vendor/mdi/map-marker.svg)"></i></button>
   <button id="testOpts" class="icon" title="Test options: your monster, the CPUs, training mode" aria-label="Test options"><i class="ic" style="--ic:url(vendor/mdi/tune.svg)"></i></button>
-  <button id="reload" disabled aria-label="Reload in game"><i class="ic" style="--ic:url(vendor/mdi/refresh.svg)"></i><span class="lbl">Reload in game</span></button>
+  <button id="reload" disabled hidden aria-label="Reload in game"><i class="ic" style="--ic:url(vendor/mdi/refresh.svg)"></i><span class="lbl">Reload in game</span></button>
   <button id="stop" class="icon" title="Close the game the editor opened" aria-label="Stop game" hidden><i class="ic" style="--ic:url(vendor/mdi/stop.svg)"></i></button>
   <span class="sep"></span>
   <button id="help" class="icon ghost" title="Keyboard shortcuts (? or F1)" aria-label="Keyboard shortcuts"><i class="ic" style="--ic:url(vendor/mdi/help-circle-outline.svg)"></i></button>
@@ -94,6 +94,8 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
     <canvas id="canvas"></canvas>
     <div id="band" hidden></div>
     <canvas id="minimap" width="220" height="220" hidden aria-label="Minimap"></canvas>
+    <!-- the two bars over the view's top edge: they sit side by side and wrap onto a second row when the view is narrow, never over each other -->
+    <div id="viewTop">
     <!-- the tool: Move or Turn, and the snap (it holds for the gizmo and the arrow keys) -->
     <div id="toolBar" class="float" role="toolbar" aria-label="Tool">
       <div class="seg" role="group" aria-label="Gizmo">
@@ -112,23 +114,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <span id="propBar"><span class="fsep"></span>
         <button id="addProp" class="ghost" aria-haspopup="true" aria-expanded="false" title="Add a new prop where the view looks: a model of your mod, or a .glb from Blender"><i class="ic" style="--ic:url(vendor/mdi/shape-plus-outline.svg)"></i><span class="lbl">Add prop</span></button></span>
     </div>
-    <div id="propMenu" class="float menu" hidden role="menu" aria-label="Add prop">
-      <div class="sec-title">Props of <span id="pmMod"></span></div>
-      <div id="pmList"></div>
-      <div id="pmNone" class="pm-none"></div>
-      <div class="sec-title pf-title" title="A saved selection, put down again where the view looks (mods/&lt;mod&gt;/prefabs/)">Prefabs</div>
-      <div id="pfList"></div>
-      <div id="pfNone" class="pm-none"></div>
-      <div class="pf-tools">
-        <label class="field suf" title="Turn the prefab by this much about its middle when it is put down (counterclockwise seen from above)"><i class="pre">Turn</i><input id="pfTurn" type="number" step="15" min="-360" max="360" value="0" aria-label="Turn when pasting"><i class="post">°</i></label>
-        <button id="pfSave" type="button" class="ghost" title="Save the selected objects as a prefab: their places relative to their middle"><i class="ic" style="--ic:url(vendor/mdi/package-variant-closed.svg)"></i><span class="lbl">Save selection…</span></button>
-      </div>
-      <label class="pm-sky" for="pmSky" title="Replaces the sky dome with one of this mod's models in the game, and in the view with Game look (faces turned inward, with a texture)"><span>Sky dome</span><select id="pmSky"></select></label>
-      <label class="pm-sky pm-sky2" for="pmClouds" title="Replaces the layer of clouds with one of this mod's models, in the game and in the view with Game look (faces turned inward, with a texture, around the origin)"><span>Cloud layer</span><select id="pmClouds"></select></label>
-      <button id="pmImport" type="button" class="ghost wide"><i class="ic" style="--ic:url(vendor/mdi/tray-arrow-up.svg)"></i><span class="lbl">Import .glb…</span></button>
-      <button id="pmTerrain" type="button" class="ghost wide" title="Hills and ramps from a picture of heights (a PNG)"><i class="ic" style="--ic:url(vendor/mdi/terrain.svg)"></i><span class="lbl">Terrain from a heightmap…</span></button>
-    </div>
-    <!-- the view: game look, grid, layers; fly or orbit; focus, frame all; the shortcuts -->
+    <!-- the view: game look, grid, layers; fly or orbit; focus, frame all; the shortcuts are on the top bar (?) -->
     <div id="overlay" class="float" role="toolbar" aria-label="View">
       <label class="tgl icon" title="Game look: the stage's fog, background and sky, as in the game (L)"><input type="checkbox" id="look" aria-label="Game look"><i class="ic" style="--ic:url(vendor/mdi/weather-fog.svg)"></i></label>
       <label class="tgl icon" title="Grid: 100-unit lines (the snap step when it is smaller) and 1000-unit lines, at the base of the selection"><input type="checkbox" id="grid" aria-label="Grid"><i class="ic" style="--ic:url(vendor/mdi/grid.svg)"></i></label>
@@ -142,14 +128,30 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <button id="focusSel" class="icon ghost" title="Focus the selection (F)" aria-label="Focus the selection" disabled><i class="ic" style="--ic:url(vendor/mdi/crosshairs-gps.svg)"></i></button>
       <button id="frame" class="icon ghost" title="Frame the whole stage (Home)" aria-label="Frame all"><i class="ic" style="--ic:url(vendor/mdi/fit-to-screen-outline.svg)"></i></button>
       <button id="gridBtn" class="icon ghost" title="Stage size: the collision grid's rectangle (what the game collides, shoots and sees across); a bigger one lets objects go farther out" aria-label="Stage size"><i class="ic" style="--ic:url(vendor/mdi/arrow-expand-all.svg)"></i></button>
-      <button id="sptBtn" class="icon ghost" title="Start points: where the monsters appear (a file of the mod)" aria-label="Start points"><i class="ic" style="--ic:url(vendor/mdi/account-group-outline.svg)"></i></button>
-      <button id="pupBtn" class="icon ghost" title="Power-ups: the health, stamina and other pickups lying in the stage (a file of the mod)" aria-label="Power-ups"><i class="ic" style="--ic:url(vendor/mdi/package-variant-closed.svg)"></i></button>
-      <button id="aipBtn" class="icon ghost" title="AI net: the paths the computer monsters walk (a file of the mod)" aria-label="AI net"><i class="ic" style="--ic:url(vendor/mdi/vector-polyline-plus.svg)"></i></button>
+      <button id="sptBtn" class="icon ghost" title="Start points: where the monsters appear (a file of the mod)" aria-label="Start points"><i class="ic" style="--ic:url(vendor/mdi/flag-outline.svg)"></i></button>
+      <button id="pupBtn" class="icon ghost" title="Power-ups: the health, stamina and other pickups lying in the stage (a file of the mod)" aria-label="Power-ups"><i class="ic" style="--ic:url(vendor/mdi/heart-plus-outline.svg)"></i></button>
+      <button id="aipBtn" class="icon ghost" title="AI net: the paths the computer monsters walk (a file of the mod)" aria-label="AI net"><i class="ic" style="--ic:url(vendor/mdi/graph-outline.svg)"></i></button>
       <button id="fopBtn" class="icon ghost" title="Vehicle net: the roads and flight paths of the cars, helicopters, flying saucers and tanks (a file of the mod)" aria-label="Vehicle net"><i class="ic" style="--ic:url(vendor/mdi/road-variant.svg)"></i></button>
-      <button id="picBtn" class="icon ghost" title="Use this view as the stage's picture on the stage select (a custom stage, Training, Lake Powell or Tokyo DM)" aria-label="Stage picture"><i class="ic" style="--ic:url(vendor/mdi/image-edit-outline.svg)"></i></button>
+      <button id="picBtn" class="icon ghost" title="Use this view as the stage's picture on the stage select (a custom stage, Training, Lake Powell or Tokyo DM)" aria-label="Stage picture"><i class="ic" style="--ic:url(vendor/mdi/image-frame.svg)"></i></button>
       <button id="rulerBtn" class="icon ghost" title="Ruler: click two points of the stage to read the distance, the flat distance, the height and the heading between them (M)" aria-label="Ruler" aria-pressed="false"><i class="ic" style="--ic:url(vendor/mdi/ruler.svg)"></i></button>
       <button id="shotBtn" class="icon ghost" title="Screenshot: download the view as a PNG (the gizmo stays out of it)" aria-label="Screenshot"><i class="ic" style="--ic:url(vendor/mdi/camera-outline.svg)"></i></button>
-      <button id="keysBtn" class="icon ghost" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><i class="ic" style="--ic:url(vendor/mdi/keyboard-outline.svg)"></i></button>
+    </div>
+    </div>
+    <div id="propMenu" class="float menu" hidden role="menu" aria-label="Add prop">
+      <div class="sec-title">Props of <span id="pmMod"></span></div>
+      <div id="pmList"></div>
+      <div id="pmNone" class="pm-none"></div>
+      <div class="sec-title pf-title" title="A saved selection, put down again where the view looks (mods/&lt;mod&gt;/prefabs/)">Prefabs</div>
+      <div id="pfList"></div>
+      <div id="pfNone" class="pm-none"></div>
+      <div class="pf-tools">
+        <label class="field suf" title="Turn the prefab by this much about its middle when it is put down (counterclockwise seen from above)"><i class="pre">Turn</i><input id="pfTurn" type="number" step="15" min="-360" max="360" value="0" aria-label="Turn when pasting"><i class="post">°</i></label>
+        <button id="pfSave" type="button" class="ghost" title="Save the selected objects as a prefab: their places relative to their middle"><i class="ic" style="--ic:url(vendor/mdi/package-up.svg)"></i><span class="lbl">Save selection…</span></button>
+      </div>
+      <label class="pm-sky" for="pmSky" title="Replaces the sky dome with one of this mod's models in the game, and in the view with Game look (faces turned inward, with a texture)"><span>Sky dome</span><select id="pmSky"></select></label>
+      <label class="pm-sky pm-sky2" for="pmClouds" title="Replaces the layer of clouds with one of this mod's models, in the game and in the view with Game look (faces turned inward, with a texture, around the origin)"><span>Cloud layer</span><select id="pmClouds"></select></label>
+      <button id="pmImport" type="button" class="ghost wide"><i class="ic" style="--ic:url(vendor/mdi/tray-arrow-up.svg)"></i><span class="lbl">Import .glb…</span></button>
+      <button id="pmTerrain" type="button" class="ghost wide" title="Hills and ramps from a picture of heights (a PNG)"><i class="ic" style="--ic:url(vendor/mdi/terrain.svg)"></i><span class="lbl">Terrain from a heightmap…</span></button>
     </div>
     <div id="layersMenu" class="float menu" hidden role="menu" aria-label="Layers">
       <div class="sec-title">Layers</div>

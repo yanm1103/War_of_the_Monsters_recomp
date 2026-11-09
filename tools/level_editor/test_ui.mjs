@@ -31,11 +31,11 @@ const STABLE_IDS = ['stage', 'newStage', 'editStage', 'mod', 'packMod', 'undo', 
   'stop', 'help', 'settings', 'modeObjects', 'modePeds', 'texBtn', 'lightBtn', 'hud', 'filter', 'list', 'canvas', 'toolBar', 'tMove', 'tTurn',
   'snap', 'snapMove', 'snapTurn', 'addProp', 'propMenu', 'pmImport', 'pmTerrain', 'pmSky', 'pmClouds', 'overlay', 'look', 'grid', 'layersBtn',
   'layersMenu', 'vFly', 'vOrbit', 'focusSel', 'frame', 'gridBtn', 'sptBtn', 'pupBtn', 'aipBtn', 'fopBtn', 'picBtn', 'rulerBtn', 'shotBtn',
-  'keysBtn', 'noSel', 'sumCounts', 'sumStage', 'sumMod', 'sumPath', 'props', 'px', 'py', 'pz', 'ph', 'drop', 'dup', 'reset', 'del', 'carry',
+  'viewTop', 'noSel', 'sumCounts', 'sumStage', 'sumMod', 'sumPath', 'props', 'px', 'py', 'pz', 'ph', 'drop', 'dup', 'reset', 'del', 'carry',
   'output', 'status', 'dlg', 'gridDlg', 'sptDlg', 'netDlg', 'keysDlg', 'palDlg', 'stageDlg', 'propDlg', 'pfDlg', 'askDlg', 'modDlg'];
 // [button, dialog it opens]: each must open, and Esc must close it
 const DIALOGS = [['gridBtn', 'gridDlg'], ['sptBtn', 'sptDlg'], ['pupBtn', 'sptDlg'], ['aipBtn', 'netDlg'], ['fopBtn', 'netDlg'],
-  ['texBtn', 'texDlg'], ['lightBtn', 'lightDlg'], ['hud', 'hudDlg'], ['keysBtn', 'keysDlg'], ['settings', 'dlg'], ['testOpts', 'testDlg'],
+  ['texBtn', 'texDlg'], ['lightBtn', 'lightDlg'], ['hud', 'hudDlg'], ['help', 'keysDlg'], ['settings', 'dlg'], ['testOpts', 'testDlg'],
   ['newStage', 'stageDlg']];
 // known to fail today (a step of the UX plan fixes each): reported, not failing
 const KNOWN = new Set(args.includes('--strict') ? [] : []);
@@ -260,7 +260,7 @@ await check('Start points: an unsaved point asks on Esc and Close; Discard drops
   must(await until(`document.getElementById('sptDlg').open`, 80), 'sptDlg did not open again');
   const onServer = await ev(`fetch('/api/spt?name=${stage}&mod=smoke&kind=SPT').then((r) => r.json()).then((j) => j.points.length)`);
   must(await until(`document.querySelectorAll('#sptList > *').length === ${n0}`, 40),
-    `the discarded point came back (${await rows()} rows, ${n0} before; the server has ${onServer} points; the draft says ${await ev("window.wotmDebug.ui && 'n/a'")})`);
+    `the discarded point came back (${await rows()} rows [${await ev(`[...document.querySelectorAll('#sptList > *')].map((e) => e.className + ':' + (e.textContent || '').slice(0, 6)).join(' | ')`)}], ${n0} before; the server has ${onServer} points; the draft has ${await ev('window.wotmDebug.pt.SPT.points.length')}, saved copy ${await ev('JSON.parse(window.wotmDebug.ptSaved.SPT).length')})`);
   await esc();
   must(await until(`!document.getElementById('sptDlg').open`, 20), 'a clean dialog did not close on Esc');
 });
@@ -296,6 +296,27 @@ await check('the Add prop and Layers menus open and close', async () => {
     await esc();
     must(await until(`document.getElementById(${JSON.stringify(m)}).hidden`, 12), 'Esc did not close ' + m);
   }
+});
+await check('the bars over the view never cover each other or the menus, from 1600 wide down to 900', async () => {
+  const size = (w, h) => send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
+  try {
+    for (const [w, h] of [[1600, 900], [1100, 650], [900, 600]]) {
+      await size(w, h);
+      await sleep(500);
+      const r = JSON.parse(await ev(`(() => { const R = (id) => document.getElementById(id).getBoundingClientRect();
+        const a = R('toolBar'), b = R('overlay'), top = R('viewTop'), v = R('view');
+        const hit = (p, q) => p.left < q.right && q.left < p.right && p.top < q.bottom && q.top < p.bottom;
+        document.getElementById('addProp').click(); const pm = R('propMenu'); document.getElementById('addProp').click();
+        document.getElementById('layersBtn').click(); const lm = R('layersMenu'); document.getElementById('layersBtn').click();
+        return JSON.stringify({ bars: hit(a, b), propMenuUnder: pm.top >= a.bottom, layersUnder: lm.top >= b.bottom, inside: b.right <= v.right + 1 && a.left >= v.left - 1, vt: getComputedStyle(document.getElementById('view')).getPropertyValue('--vt') }); })()`));
+      must(!r.bars, `${w}x${h}: the tool bar and the view bar overlap`);
+      must(r.propMenuUnder, `${w}x${h}: the Add prop menu opens over the tool bar`);
+      must(r.layersUnder, `${w}x${h}: the Layers menu opens over the view bar`);
+      must(r.inside, `${w}x${h}: a bar runs out of the view`);
+      must(r.vt.trim() !== '', `${w}x${h}: --vt is not set`);
+      await shot(`bars_${w}x${h}`);
+    }
+  } finally { await size(1600, 900); await sleep(300); }
 });
 await check('the Pedestrians mode and back', async () => {
   await ev('document.getElementById("modePeds").click()');

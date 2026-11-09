@@ -2733,6 +2733,7 @@ function showGame() {
   test.disabled = $('testHere').disabled = s === 'starting';
   test.classList.toggle('primary', s === 'closed');
   rl.disabled = s !== 'running';
+  rl.hidden = s === 'closed';        // there is nothing to reload until a game is open (Test in game opens one)
   rl.classList.toggle('primary', s === 'running' || s === 'reloading');
   const label = isDirty() ? 'Save & reload' : 'Reload in game';
   rl.querySelector('.lbl').textContent = label;
@@ -3148,7 +3149,6 @@ function showKeys() {
   showLayers(false);
   $('keysDlg').showModal();
 }
-$('keysBtn').onclick = showKeys;
 $('help').onclick = showKeys;
 $('pedAddGroup').onclick = () => addPed('group');
 $('pedAddSeg').onclick = () => addPed('seg');
@@ -3493,12 +3493,16 @@ let ptKind = 'SPT', ptSel = -1;
 const ptKeep = (kind) => JSON.stringify(pt[kind].points);
 // the color of a point: SPT by list, PUP by what it gives (health red, stamina green, the rest blue)
 const ptColor = (kind, p) => PT_COLORS[kind][kind === 'SPT' ? p.list : p.type < 3 || p.type === 6 ? 0 : p.type < 6 || p.type === 7 ? 1 : 2] ?? 0xAAAAAA;
-async function loadPoints(kind) {
+// A load that a newer one overtakes waits for the newer one (its caller draws the list when it returns: with the old numbers it would
+// draw a list the newer load never redraws)
+const ptLoading = {};
+function loadPoints(kind) { return (ptLoading[kind] = loadPointsNow(kind)); }
+async function loadPointsNow(kind) {
   if (!stageName) return;
   const id = ++ptLoadId[kind];
   try {
     const r = await api(`/api/spt?name=${encodeURIComponent(stageName)}&mod=${encodeURIComponent(modNow || '')}&kind=${kind}`);
-    if (id !== ptLoadId[kind]) return;
+    if (id !== ptLoadId[kind]) return ptLoading[kind];
     pt[kind] = r;
     ptSaved[kind] = ptKeep(kind);
     if (kind === ptKind) ptSel = -1;
@@ -3668,12 +3672,14 @@ const nets = { AIP: newNet([255, 450, 6]), FOP: newNet([255, 0, 6]) };
 let netKind = 'AIP', fopOn = store.get('fop', '0') === '1';
 const netKeep = (n) => JSON.stringify(n.points);
 const netTake = (n, r) => Object.assign(n, { points: r.points, caps: r.caps, source: r.source, lists: r.lists || [], saved: JSON.stringify(r.points), sel: -1 });
-async function loadNet(kind) {
+const netLoading = {};     // as loadPoints: an overtaken load waits for the newer one
+function loadNet(kind) { return (netLoading[kind] = loadNetNow(kind)); }
+async function loadNetNow(kind) {
   if (!stageName) return;
   const n = nets[kind], id = ++n.loadId;
   try {
     const r = await api(`/api/spt?name=${encodeURIComponent(stageName)}&mod=${encodeURIComponent(modNow || '')}&kind=${kind}`);
-    if (id !== n.loadId) return;
+    if (id !== n.loadId) return netLoading[kind];
     netTake(n, r);
   } catch (e) { if (id === n.loadId) netTake(n, { points: [], caps: n.caps, source: 'disc', lists: n.lists }); }
   updateNetView(kind);
@@ -4873,13 +4879,15 @@ if (new URLSearchParams(location.search).has('debug')) {
                        boxCenter: (o) => new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3()), setGrid, setTool, setSnap, showKeys, showHint,
                        focusSelection, HINTS, get hintKey() { return hint.key; }, get hoverCount() { return hover.n; },
                        get gridMinor() { return gridMinor; }, get gridMajor() { return gridMajor; },
-                       get ui() { return ui; }, get outTab() { return outTab; },
+                       get ui() { return ui; }, get pt() { return pt; }, get ptSaved() { return ptSaved; }, get outTab() { return outTab; },
                        get history() { return history; }, get future() { return future; }, get dirty() { return dirty; },
                        get modNow() { return modNow; }, get keep() { return keep; }, get game() { return game; },
                        get gizmoObject() { return gizmo.object || null; }, get gizmoMode() { return gizmo.getMode(); },
                        get pedSel() { return pedSel; }, get group() { return group; }, get sel() { return sel; },
                        get env() { return env; }, get skyRoot() { return skyRoot; }, get skyViews() { return skyViews; }, get stageRoot() { return stageRoot; } };
 }
+// --vt: the height of the bars over the view (they wrap onto a second row when it is narrow); the menus and the notes sit under them
+new ResizeObserver(() => $('view').style.setProperty('--vt', $('viewTop').offsetHeight + 'px')).observe($('viewTop'));
 loop();
 if (new URLSearchParams(location.search).has('bake')) bakeOriginals();
 api('/api/init').then(init).catch((e) => msg(`Couldn't reach the editor program: ${cleanError(e).text}`, { level: 'err' }));
