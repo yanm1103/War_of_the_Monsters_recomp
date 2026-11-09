@@ -745,7 +745,10 @@ after its page closes (a reload of the page keeps it). The release zip carries i
 (`tools/build_level_editor.ps1`), whose mods folder is the one the game reads. The page is in English, with a dark, a light and a
 System theme (the one the OS uses), in the settings (the cog at the top right).
 - **Top bar:** the stage (switching with unsaved changes asks: Cancel, Discard, or Save and switch), the mod (a list of the mods
-  folder's mods and **New mod…**, which asks for a name; its `levels/<STAGE>.json`
+  folder's mods and **New mod…**, which asks for a name; the box button next to it, **Pack mod**, downloads the mod's whole folder
+  as `<mod>.zip` (one top folder named like the mod, so it unpacks into `mods/`; hidden files and `__pycache__` stay out, and so do
+  the sources kept in `mods/_<mod>_src/`; a mod over 400 MB is refused: zip its folder by hand; what you have not saved is not in
+  it, and a note says so); its `levels/<STAGE>.json`
   loads with the stage, and the editor remembers it; switching with unsaved changes offers **Discard and load X** or **Move my
   changes to X**, and says when X already has a file for this stage; Save with no mod chosen asks **Save into which mod?**),
   **Undo** (Ctrl+Z) and **Redo** (Ctrl+Y or Ctrl+Shift+Z; their tooltips name the change), **Check** (`lvl.py patch` on the disc's
@@ -894,7 +897,14 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
 - **View bars:** on the top left, the tool: **Move** (**G**) and **Turn** (**R**, about the vertical only) for the gizmo, and
   **Snap** with its steps (10 units and 15 degrees by default; they also set the arrow keys' step). On the top right: **Game
   look** (**L**), **Grid** (a line every 100 units, or every snap step when it is smaller, and a stronger one every 1000, at the
-  base of the selection), **Layers** (Pedestrians, Collision and Vehicle net), the cameras, Focus, Frame all and the shortcuts. The gizmo's arrows
+  base of the selection), **Layers** (Pedestrians, Collision, Vehicle net and Minimap), the cameras, Focus, Frame all, the dialogs
+  of the stage's points and nets, the **Ruler**, the **Screenshot** and the shortcuts. The ruler (**M**) takes two clicks on the
+  stage's surface and writes the distance, the flat distance, the height and the heading (0 faces +Y, 90 faces +X) over the line; a
+  third click starts again, **Esc** or **M** stops it, and while it is on the clicks select nothing. The screenshot downloads the
+  view as a PNG named after the stage and the time, with the gizmo left out. The minimap (**N**, or **Layers > Minimap**) is the
+  stage seen from above in the lower right corner of the view, over the collision grid's rectangle: a dot for each object (buildings
+  gray, pickups yellow, props blue, new props green), the selection in amber and the camera as an arrow; a click or a drag on it
+  takes the camera there, at the height it has. The gizmo's arrows
   have the colors of the X, Y and Z fields; the selected object's amber outline shows through what stands in front of it, the
   others of a selection (orange) only where they are in view. A deleted object shows as a red dashed box where it was while it is
   selected; with **Changed** on, every deleted one does (a click on the box selects it), and a green box marks each changed object.
@@ -986,7 +996,9 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   because the stages' own light is). An optional colors PNG laid over the same rectangle replaces the ramp. The mesh comes twice,
   as the drawn model (0.6 units under the floor line so flat places do not fight with the stage's floor) and as a `coll_terrain`
   mesh with the same triangles, which the monsters walk on. The PNGs and the numbers stay in the prop's folder (`heightmap.png`,
-  `colors.png`, `terrain.json`), and a name the mod already has asks before replacing. The new prop is placed at the middle of the
+  `colors.png`, `terrain.json`), and a name the mod already has asks before replacing; **Start from** at the top of the dialog (shown
+  when the mod has a terrain of this stage) opens one of them again with its pictures and numbers, and Create then rebuilds it in
+  place, without the question. The new prop is placed at the middle of the
   grid's rectangle, else where the view looks. `python tools/lvlterrain.py <heights.png> <out.glb> --size X Y --height H [--cells N]
   [--colors colors.png] [--brightness P]` writes the `.glb` alone. The same menu ends with **Sky dome** and **Cloud layer**: the stage's own, or one of the mod's
   models for this stage (the `sky` entries of `props`, above; undoable, counted by Check as a replaced dome or cloud layer, and

@@ -23,6 +23,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
   <button id="newStage" class="icon ghost" title="New stage: a copy of a game stage with its own level patch, as another entry on the stage select" aria-label="New stage"><i class="ic" style="--ic:url(vendor/mdi/plus.svg)"></i></button>
   <button id="editStage" class="icon ghost" title="Edit stage: the name, base, narrator and RANDOM of this custom stage" aria-label="Edit stage" disabled><i class="ic" style="--ic:url(vendor/mdi/pencil-outline.svg)"></i></button>
   <label class="field mod" title="The mod your changes are saved into (mods/&lt;mod&gt;/levels/)"><i class="pre ic" style="--ic:url(vendor/mdi/puzzle-outline.svg)"></i><select id="mod" aria-label="Mod"></select></label>
+  <button id="packMod" class="icon ghost" title="Pack mod: download the mod's folder as a .zip to share (it unpacks into mods/)" aria-label="Pack mod"><i class="ic" style="--ic:url(vendor/mdi/package-up.svg)"></i></button>
   <span class="sep"></span>
   <button id="undo" class="icon ghost" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><i class="ic" style="--ic:url(vendor/mdi/undo.svg)"></i></button>
   <button id="redo" class="icon ghost" title="Redo (Ctrl+Y)" aria-label="Redo" disabled><i class="ic" style="--ic:url(vendor/mdi/redo.svg)"></i></button>
@@ -92,6 +93,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
   <section id="view">
     <canvas id="canvas"></canvas>
     <div id="band" hidden></div>
+    <canvas id="minimap" width="220" height="220" hidden aria-label="Minimap"></canvas>
     <!-- the tool: Move or Turn, and the snap (it holds for the gizmo and the arrow keys) -->
     <div id="toolBar" class="float" role="toolbar" aria-label="Tool">
       <div class="seg" role="group" aria-label="Gizmo">
@@ -145,6 +147,8 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <button id="aipBtn" class="icon ghost" title="AI net: the paths the computer monsters walk (a file of the mod)" aria-label="AI net"><i class="ic" style="--ic:url(vendor/mdi/vector-polyline-plus.svg)"></i></button>
       <button id="fopBtn" class="icon ghost" title="Vehicle net: the roads and flight paths of the cars, helicopters, flying saucers and tanks (a file of the mod)" aria-label="Vehicle net"><i class="ic" style="--ic:url(vendor/mdi/road-variant.svg)"></i></button>
       <button id="picBtn" class="icon ghost" title="Use this view as the stage's picture on the stage select (a custom stage, Training, Lake Powell or Tokyo DM)" aria-label="Stage picture"><i class="ic" style="--ic:url(vendor/mdi/image-edit-outline.svg)"></i></button>
+      <button id="rulerBtn" class="icon ghost" title="Ruler: click two points of the stage to read the distance, the flat distance, the height and the heading between them (M)" aria-label="Ruler" aria-pressed="false"><i class="ic" style="--ic:url(vendor/mdi/ruler.svg)"></i></button>
+      <button id="shotBtn" class="icon ghost" title="Screenshot: download the view as a PNG (the gizmo stays out of it)" aria-label="Screenshot"><i class="ic" style="--ic:url(vendor/mdi/camera-outline.svg)"></i></button>
       <button id="keysBtn" class="icon ghost" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><i class="ic" style="--ic:url(vendor/mdi/keyboard-outline.svg)"></i></button>
     </div>
     <div id="layersMenu" class="float menu" hidden role="menu" aria-label="Layers">
@@ -152,6 +156,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <label class="switch" title="Pedestrian groups (violet cones) and their sidewalks (cyan lanes), faint, while you edit objects (P). The Pedestrians mode edits them."><input type="checkbox" id="pedsOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/walk.svg)"></i><span class="tx">Pedestrians</span><kbd>P</kbd></label>
       <label class="switch" title="What the game collides with, with your changes applied: triangles green (buildings, a prop's coll_ meshes), convex hulls cyan (hull_ meshes), trigger volumes and animated parts as orange boxes; dimmer is a broken state of a building. What touches the selection stays bright."><input type="checkbox" id="collOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/cube-scan.svg)"></i><span class="tx">Collision</span><kbd>C</kbd></label>
       <div class="help" id="collInfo" hidden></div>
+      <label class="switch" title="The stage seen from above in the corner of the view: a dot for each object, the selection in amber, the camera as an arrow. Click or drag on it to take the camera there."><input type="checkbox" id="miniOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/map-outline.svg)"></i><span class="tx">Minimap</span><kbd>N</kbd></label>
       <label class="switch" title="The vehicle net drawn in the view, its roads colored by who drives them: yellow cars, green helicopters, pink flying saucers, orange tanks. The Vehicle net dialog shows it too."><input type="checkbox" id="fopOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/road-variant.svg)"></i><span class="tx">Vehicle net</span></label>
     </div>
     <div id="notes">
@@ -467,6 +472,8 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
           <dt><kbd>L</kbd></dt><dd>Game look</dd>
           <dt><kbd>P</kbd></dt><dd>Pedestrians layer</dd>
           <dt><kbd>C</kbd></dt><dd>Collision layer</dd>
+          <dt><kbd>M</kbd></dt><dd>Ruler: click two points of the stage</dd>
+          <dt><kbd>N</kbd></dt><dd>Minimap</dd>
           <dt><kbd>1</kbd> / <kbd>2</kbd></dt><dd>Objects / Pedestrians</dd>
         </dl>
         <h3>File</h3>

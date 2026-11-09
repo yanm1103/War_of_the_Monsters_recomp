@@ -15,6 +15,8 @@ import { initColl } from './coll.js';
 import { propRows, propAngles as propAngles_ } from './tilt_math.js';
 import { toPrefabEntries, placeEntry } from './prefab_math.js';
 import { testBody, openTestOpts, loadTestOpts, testSummary } from './testopts.js';
+import { createRuler } from './ruler.js';
+import { createMinimap } from './minimap.js';
 
 // The GS modulates and blends the bytes as they are: no color management (texture, vertex and interface colors stay raw).
 THREE.ColorManagement.enabled = false;
@@ -522,9 +524,11 @@ canvas.addEventListener('wheel', (e) => {
 window.addEventListener('blur', () => fly.keys.clear());
 window.addEventListener('keyup', (e) => fly.keys.delete(e.key.toLowerCase()));
 
+const frameHooks = [];    // what the features further down do once a frame (the ruler, the minimap)
 function loop() {
   requestAnimationFrame(loop);
   flyStep();
+  for (const h of frameHooks) h();
   if (orbit.enabled) orbit.update();
   for (const s of [skyRoot, ...Object.values(skyViews).map((v) => v && v.view)]) if (s) s.position.copy(camera.position);   // the sky moves with the camera (it turns with the view, not the stage)
   hoverStep();
@@ -998,6 +1002,7 @@ async function loadStage(name) {
     for (const r of [stageRoot, skyRoot]) if (r) { scene.remove(r); r.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); }
     stageRoot = skyRoot = null;
     lightClose();
+    if (ruler.on) setRuler(false);       // its points were on the old stage
     stageName = name;
     $('editStage').disabled = !stageMeta[name];
     ui.budget = null; budgetKey = '';
@@ -2197,6 +2202,7 @@ canvas.addEventListener('pointerup', (e) => {
     toast('In Fly view, hold the right button to look around (or press V for Orbit).', 'info');
   }
   if (!down || moved > 4 || gizmo.dragging || dragged || e.button !== 0) return;
+  if (ruler.on) { if (!ruler.click(ndc(e))) toast('Nothing there to measure: click the stage.', 'info'); return; }   // the ruler takes the clicks
   // the first visible thing under the pointer: an object, a pedestrian marker, a deleted one's dashed box; ground or a road: nothing
   const add = e.shiftKey || e.ctrlKey, h = pickAt(ndc(e), add);
   if (h && h.ped) selectPed(h.ped);
@@ -3634,6 +3640,99 @@ $('aipBtn').onclick = () => openNet('AIP');
 $('fopBtn').onclick = () => openNet('FOP');
 $('fopOn').checked = fopOn;
 $('fopOn').onchange = (e) => { fopOn = e.target.checked; store.set('fop', fopOn ? '1' : '0'); updateNetView('FOP'); };
+
+// ------------------------------------------------------------------ ruler (M), minimap (N), screenshot and Pack mod
+// The ruler (web/ruler.js): two clicks on the stage's surface; the first visible hit under the pointer, as viewPoint takes it.
+const ruler = createRuler({
+  THREE, scene, camera, host: canvas.parentElement, toGame,
+  surface: (p) => {
+    if (!stageRoot) return null;
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(p, camera);
+    const hit = ray.intersectObject(stageRoot, true).find((h) => visibleChain(h.object));
+    return hit ? hit.point : null;
+  },
+});
+function setRuler(on) {
+  ruler.setOn(on);
+  $('rulerBtn').classList.toggle('on', ruler.on);
+  $('rulerBtn').setAttribute('aria-pressed', String(ruler.on));
+  if (ruler.on) msg('Ruler: click two points of the stage (Esc or M to stop)', { level: 'info', toast: true });
+}
+$('rulerBtn').onclick = () => setRuler(!ruler.on);
+// The minimap (web/minimap.js)
+const MINI_DOT = { destr: ['#8a8f98', 2], pickup: ['#ffd24a', 2], prop: ['#6fb8ff', 1.5], newprop: ['#4ae08a', 2] };
+const miniItems = () => items().filter((it) => it.node.visible && !isDeleted(it));
+const minimap = createMinimap({
+  canvas: $('minimap'),
+  bounds: () => {
+    const g = gridNow() || stageGrid;
+    if (g) return { min: [g.min[0], g.min[1]], max: [g.max[0], g.max[1]] };
+    const ps = miniItems().map(posOf);
+    return ps.length ? { min: [Math.min(...ps.map((p) => p[0])) - 200, Math.min(...ps.map((p) => p[1])) - 200],
+                         max: [Math.max(...ps.map((p) => p[0])) + 200, Math.max(...ps.map((p) => p[1])) + 200] } : null;
+  },
+  dots: () => miniItems().map((it) => {
+    const p = posOf(it), [c, r] = MINI_DOT[it.rec.info.kind] || ['#8a8f98', 2];
+    return { x: p[0], y: p[1], c, r, sel: group.includes(it) || it === sel };
+  }),
+  cam: () => {
+    const d = camera.getWorldDirection(new THREE.Vector3()), p = toGame(camera.position);
+    return { x: p[0], y: p[1], heading: ((Math.atan2(d.x, -d.z) * 180) / Math.PI + 360) % 360 };
+  },
+  go: (x, y) => {      // the camera (and what it orbits) to that spot, at the height it has
+    const at = fly.on ? camera.position : orbit.target, d = toThree([x, y, 0]).sub(new THREE.Vector3(at.x, 0, at.z)).setY(0);
+    camera.position.add(d);
+    if (!fly.on) orbit.target.add(d);
+  },
+});
+function setMini(on) {
+  minimap.setOn(on);
+  $('miniOn').checked = minimap.on;
+  store.set('mini', minimap.on ? '1' : '0');
+}
+$('miniOn').onchange = (e) => setMini(e.target.checked);
+let miniLast = 0;
+frameHooks.push(() => {
+  ruler.update();
+  const now = performance.now();
+  if (minimap.on && now - miniLast > 100) { miniLast = now; minimap.draw(); }
+});
+setMini(store.get('mini', '0') === '1');
+// Screenshot: the view as a PNG download; the gizmo is left out of it
+$('shotBtn').onclick = () => {
+  if (!stageRoot) return;
+  const gv = gizmo.visible, hv = hoverBox.visible;
+  gizmo.visible = false;
+  hoverBox.visible = false;
+  let url = '';
+  try {
+    renderer.render(scene, camera);          // the canvas keeps no frame between renders: read it right after one
+    url = renderer.domElement.toDataURL('image/png');
+  } finally { gizmo.visible = gv; hoverBox.visible = hv; }
+  const d = new Date(), z = (n) => String(n).padStart(2, '0');
+  const name = `${stageName}_${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}.png`;
+  const a = Object.assign(document.createElement('a'), { href: url, download: name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  msg(`Screenshot ${name} saved to your downloads`, { level: 'ok', toast: true });
+};
+// Pack mod: mods/<mod>/ as a .zip (editor.py pack_mod)
+$('packMod').onclick = async () => {
+  if (!modNow) { msg('Choose a mod first: Pack mod zips its folder', { level: 'warn', toast: true }); return; }
+  try {
+    const r = await fetch(`/api/pack?mod=${encodeURIComponent(modNow)}`);
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `The server answered ${r.status}`);
+    const url = URL.createObjectURL(await r.blob());
+    const a = Object.assign(document.createElement('a'), { href: url, download: `${modNow}.zip` });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    msg(`Packed ${modNow}.zip` + (dirty ? '. The changes you have not saved are not in it' : ''), { level: dirty ? 'warn' : 'ok', toast: true });
+  } catch (e) { msg(e.message || String(e), { level: 'err', toast: true }); }
+};
 $('netAdd').onclick = () => {
   const n = nets[netKind];
   if (n.points.length >= n.caps[0]) { netErr(`A net holds at most ${n.caps[0]} nodes.`); return; }
@@ -4249,6 +4348,7 @@ async function openTerrainDlg() {
   }
   const g = gridNow();
   openTerrain({ stage: stageName, title: title(stageName), mod: modNow, api, ask, msg,
+                existing: () => [...propModels.values()].filter((p) => p.info.terrain && !p.info.error && p.info.stage === baseOf(stageName)).map((p) => p.info.model),
                 size: () => (g ? [g.max[0] - g.min[0] - 100, g.max[1] - g.min[1] - 100] : [2000, 2000]),
                 done: async (res, replaced) => {
                   const p = JSON.stringify(buildPatch());
@@ -4490,9 +4590,11 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'l') setLook(!gameLook);
   else if (k === 'p') { if (editMode === 'objects') setPeds(!pedsOn); }
   else if (k === 'c') setColl(!collOn);
+  else if (k === 'm') setRuler(!ruler.on);
+  else if (k === 'n') setMini(!minimap.on);
   else if (k === '1') setMode('objects');
   else if (k === '2') setMode('peds');
-  else if (k === 'escape') select(null);
+  else if (k === 'escape') { if (ruler.on) setRuler(false); else select(null); }
 });
 window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 

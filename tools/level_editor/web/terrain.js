@@ -1,7 +1,8 @@
 // The New terrain dialog: a PNG of heights becomes a prop of the mod (hills and ramps: a drawn mesh with its light baked in, and the same
 // triangles as collision, tools/lvlterrain.py). Server: POST /api/props/terrain. openTerrain(ctx) opens it (it builds itself the first
 // time). ctx, from app.js: stage, title, mod, api(url, body), msg(text, opts), ask(head, text, buttons, then), size() -> [x, y] (the
-// rectangle the dialog starts with), done(res, replaced) (the prop is built: app.js loads it and places it).
+// rectangle the dialog starts with), existing() -> the mod's terrains of this stage (names; "Start from" opens one again from the
+// heightmap.png, colors.png and terrain.json its folder kept), done(res, replaced) (the prop is built: app.js loads it and places it).
 // The CSS is in style.css (#terrainDlg).
 import { el } from './hud.js';
 
@@ -25,6 +26,7 @@ function build() {
       <button type="button" data-close class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
     <div class="dlg-body">
       <p class="muted tr-text"></p>
+      <label class="fl tr-from-row" hidden>Start from<select class="tr-from" title="Open a terrain of this mod again, with its picture and numbers"></select></label>
       <div class="tr-file"><button type="button" class="tr-pick-h"><i class="ic" style="--ic:url(vendor/mdi/terrain.svg)"></i>Choose heightmap…</button>
         <span class="muted tr-name-h">No file chosen</span><img class="tr-thumb tr-thumb-h" alt="" hidden></div>
       <div class="tr-file"><button type="button" class="tr-pick-c" title="A picture laid over the same rectangle; without it the terrain is green low, brown and gray high">Choose colors…</button>
@@ -62,6 +64,7 @@ function build() {
   dlg.addEventListener('drop', (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) readPng(f, heights ? setColors : setHeights); });
   for (const c of ['.tr-sx', '.tr-sy', '.tr-cells']) q(c).addEventListener('input', info);
   q('.tr-id').addEventListener('input', () => err(''));
+  q('.tr-from').addEventListener('change', () => loadFrom(q('.tr-from').value));
   q('.tr-ok').addEventListener('click', () => create(false));
   q('.tr-id').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); create(false); } });
 }
@@ -99,6 +102,36 @@ function setColors(c) {
   if (c) t.src = c.url;
 }
 
+// A PNG kept in the prop's folder (base64) as the dialog's picture
+function kept(b64, name) {
+  return new Promise((res, rej) => {
+    const url = 'data:image/png;base64,' + b64, im = new Image();
+    im.onload = () => res({ data: b64, url, name, w: im.naturalWidth, h: im.naturalHeight, kb: Math.max(1, Math.round(b64.length * 0.75 / 1024)) });
+    im.onerror = () => rej(new Error(`${name} does not open as a picture`));
+    im.src = url;
+  });
+}
+// "Start from": the numbers and pictures a terrain of the mod kept (heightmap.png, colors.png, terrain.json)
+async function loadFrom(name) {
+  err('');
+  if (!name) return;
+  try {
+    const r = await ctx.api(`/api/props/terrain?mod=${encodeURIComponent(ctx.mod)}&name=${encodeURIComponent(name)}`);
+    const t = r.terrain || {}, size = t.size || [2000, 2000];
+    q('.tr-id').value = name;
+    heights = null;
+    setHeights(await kept(r.heights, 'heightmap.png'));
+    setColors(r.colors ? await kept(r.colors, 'colors.png') : null);
+    q('.tr-id').value = name;
+    q('.tr-sx').value = String(size[0]);
+    q('.tr-sy').value = String(size[1]);
+    q('.tr-h').value = String(t.height ?? 300);
+    q('.tr-cells').value = String(Array.isArray(t.cells) ? Math.max(...t.cells) : 64);
+    q('.tr-bright').value = String(t.brightness ?? 80);
+    info();
+  } catch (e) { err(e.message || String(e)); }
+}
+
 const nums = () => ({ sx: +q('.tr-sx').value, sy: +q('.tr-sy').value, h: +q('.tr-h').value, cells: +q('.tr-cells').value,
                        bright: +q('.tr-bright').value });
 function info() {
@@ -112,6 +145,7 @@ function info() {
 
 async function create(replace) {
   const n = nums(), name = q('.tr-id').value.trim().toUpperCase();
+  if (name && q('.tr-from').value === name) replace = true;      // opened again from this terrain: Create rebuilds it in place
   if (!heights) { err('Choose a heightmap (a PNG) first.'); return; }
   if (!/^[A-Z0-9_]{1,8}$/.test(name)) { err('The name is 1 to 8 letters, digits or _.'); q('.tr-id').focus(); return; }
   if (!(n.sx >= 10 && n.sy >= 10)) { err('The width and the depth are at least 10 units.'); return; }
@@ -150,6 +184,10 @@ export function openTerrain(c) {
   q('.tr-h').value = '300';
   q('.tr-cells').value = '64';
   q('.tr-bright').value = '80';
+  const have = ctx.existing ? ctx.existing() : [], from = q('.tr-from');
+  from.textContent = '';
+  from.append(new Option('A new terrain', ''), ...have.map((n) => new Option(n, n)));
+  q('.tr-from-row').hidden = !have.length;
   q('.tr-text').textContent = `Hills and ramps for ${ctx.title}, from a picture of heights, saved as a prop of mod "${ctx.mod}".`;
   err('');
   info();

@@ -803,3 +803,12 @@ button.small-btn { height: 22px; padding: 0 8px; font-size: 12px; flex: none; }
 #lightDlg .lt-look > button, #lightDlg .lt-nomod > select { flex: none; }
 #lightDlg .dlg-foot { align-items: center; }
 #lightDlg .lt-game { margin-right: auto; font-size: 12px; }
+/* the ruler's label over the middle of its line (ruler.js) */
+.ruler-label { position: absolute; transform: translate(-50%, -140%); pointer-events: none; z-index: 3; white-space: nowrap;
+               font-size: 12px; line-height: 16px; padding: 3px 9px; border-radius: 12px; color: var(--fg); border: 1px solid var(--line);
+               background: color-mix(in srgb, var(--surface-1) 90%, transparent); backdrop-filter: blur(8px); box-shadow: var(--shadow-1); }
+/* the minimap (minimap.js): lower right of the view; the canvas is 220 x 220 whatever its size on the screen */
+#minimap { position: absolute; right: 8px; bottom: 8px; width: 160px; height: 160px; z-index: 2; cursor: crosshair; touch-action: none;
+           background: color-mix(in srgb, var(--surface-1) 78%, transparent); backdrop-filter: blur(8px); border: 1px solid var(--line);
+           border-radius: var(--r-lg); box-shadow: var(--shadow-pop); }
+#minimap[hidden] { display: none; }

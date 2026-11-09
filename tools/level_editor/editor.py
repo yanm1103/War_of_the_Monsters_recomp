@@ -18,6 +18,7 @@ import base64
 import contextlib
 import io
 import glob
+import io
 import json
 import math
 import os
@@ -31,6 +32,7 @@ import time
 import traceback
 import urllib.parse
 import urllib.request
+import zipfile
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -935,10 +937,65 @@ def props_list(cfg, mod):
                      scale=m.get("scale"), preview=os.path.isfile(pv), origin=m.get("origin"),
                      destructible=({"class": (m["destructible"] or {}).get("class"), "states": len((m["destructible"] or {}).get("states") or [])}
                                     if m.get("destructible") else None))
+            e["terrain"] = os.path.isfile(os.path.join(d, n, "terrain.json")) and os.path.isfile(os.path.join(d, n, "heightmap.png"))
         except (OSError, ValueError, AttributeError) as err:
             e["error"] = "prop.json does not read: %s" % err
         out.append(e)
     return out
+
+
+PACK_MAX = 400 * 1024 * 1024        # the zip is built in memory: a mod over this (uncompressed) is packed by hand
+
+
+def pack_mod(cfg, mod):
+    """The mod's folder as a .zip to share: one top folder named like the mod, so it unpacks into mods/. Every file under it (levels,
+    props, prefabs, PTS, textures, models, sounds...) but hidden ones and __pycache__; the sources kept in mods/_<mod>_src/ are
+    another folder and stay out. Returns (bytes, file name, file count). ValueError for no mod, a missing one or one over PACK_MAX."""
+    d = mod_folder(cfg, mod)
+    if not d:
+        raise ValueError(bad_mod_reason((mod or "").strip()))
+    if not os.path.isdir(d):
+        raise ValueError('Mod "%s" has no folder yet: save something into it first' % mod.strip())
+    files, total = [], 0
+    for root, dirs, names in os.walk(d):
+        dirs[:] = sorted(x for x in dirs if not x.startswith(".") and x != "__pycache__")
+        for n in sorted(names):
+            if n.startswith("."):
+                continue
+            p = os.path.join(root, n)
+            files.append(p)
+            total += os.path.getsize(p)
+    if not files:
+        raise ValueError('Mod "%s" is empty: there is nothing to pack' % mod.strip())
+    if total > PACK_MAX:
+        raise ValueError("Mod %s is %d MB: too big to pack here (the limit is %d MB). Zip its folder by hand." % (mod.strip(), total >> 20, PACK_MAX >> 20))
+    buf = io.BytesIO()
+    top = os.path.basename(os.path.normpath(d))
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+        for p in files:
+            z.write(p, top + "/" + os.path.relpath(p, d).replace(os.sep, "/"))
+    return buf.getvalue(), top + ".zip", len(files)
+
+
+def terrain_get(cfg, mod, name):
+    """What New terrain kept in the prop's folder, to open the dialog on it again: {"terrain": terrain.json, "heights": base64 of
+    heightmap.png, "colors": base64 of colors.png or ""}. ValueError when the prop has none."""
+    name = str(name or "").strip().upper()
+    d = props_dir(cfg, mod)
+    folder = lvl._child_nocase(d, name) if d and re.fullmatch(r"[A-Z0-9_]{1,8}", name) else None
+    try:
+        with open(os.path.join(folder, "terrain.json"), encoding="utf-8") as f:
+            t = json.load(f)
+        with open(os.path.join(folder, "heightmap.png"), "rb") as f:
+            hm = f.read()
+    except (OSError, TypeError, ValueError):
+        raise ValueError("%s has no terrain numbers or heightmap to open again (it was not made by New terrain)" % (name or "That prop"))
+    cm = b""
+    p = os.path.join(folder, "colors.png")
+    if os.path.isfile(p):
+        with open(p, "rb") as f:
+            cm = f.read()
+    return {"terrain": t, "heights": base64.b64encode(hm).decode(), "colors": base64.b64encode(cm).decode() if cm else ""}
 
 
 # ------------------------------------------------------------------ prefabs (a saved selection, mods/<mod>/prefabs/<name>.json)
@@ -1767,13 +1824,15 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
-    def send(self, code, body, ctype="application/json"):
+    def send(self, code, body, ctype="application/json", filename=None):
         if isinstance(body, (dict, list)):
             body = json.dumps(body).encode()
         elif isinstance(body, str):
             body = body.encode()
         self.send_response(code)
         self.send_header("Content-Type", ctype)
+        if filename:
+            self.send_header("Content-Disposition", 'attachment; filename="%s"' % filename)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -1828,6 +1887,17 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(400, {"error": str(e)})
             if u.path == "/api/props":          # the mod's props (props/*/prop.json)
                 return self.send(200, {"props": props_list(cfg, q.get("mod", ""))})
+            if u.path == "/api/props/terrain":  # the numbers and PNGs a New terrain left in the prop's folder
+                try:
+                    return self.send(200, terrain_get(cfg, q.get("mod", ""), q.get("name", "")))
+                except ValueError as e:
+                    return self.send(400, {"error": str(e)})
+            if u.path == "/api/pack":           # the mod's folder as a .zip download
+                try:
+                    data, fname, n = pack_mod(cfg, q.get("mod", ""))
+                except (ValueError, OSError) as e:
+                    return self.send(400, {"error": str(e)})
+                return self.send(200, data, "application/zip", fname)
             if u.path == "/api/prefabs":        # the mod's prefabs (prefabs/*.json)
                 return self.send(200, {"prefabs": prefabs_list(cfg, q.get("mod", ""))})
             if u.path == "/api/propglb":        # a prop's preview (what the game draws)
