@@ -306,13 +306,75 @@ def describe(stage, objs, on, facts, names):
     return out
 
 
+def mrs_file(cfg, mod, name):
+    """Where the mod keeps a stage's .MRS: (path, custom). A custom stage's is the first .MRS of its folder (else <ID>.MRS there), the
+    game stage's mods/<mod>/RST/<NAME>.MRS. Raises ValueError for a bad mod name (a custom stage keeps its own mod's)."""
+    name = (name or "").upper()
+    c = custom_stages(cfg).get(name)
+    if not c and bad_mod(mod):
+        raise ValueError(bad_mod_reason(mod))
+    if c:
+        folder = os.path.join(cfg["mods"], c["mod"], "stages", c["folder"])
+        have = sorted(f for f in os.listdir(folder) if f.upper().endswith(".MRS"))
+        return os.path.join(folder, have[0] if have else c["id"].upper() + ".MRS"), c
+    return os.path.join(cfg["mods"], mod, "RST", name + ".MRS"), None
+
+
+def mrs_source(cfg, mod, name):
+    """The .MRS the game reads for the stage with this mod: (path, "mod" | "disc"). A custom stage takes its folder's file, else the
+    base's from the disc; a game stage the mod's, else the disc's."""
+    name = (name or "").upper()
+    c = custom_stages(cfg).get(name)
+    if c or not bad_mod(mod):
+        path, c = mrs_file(cfg, mod, name)
+        if os.path.isfile(path):
+            return path, "mod"
+    base = c["base"] if c else name
+    return os.path.join(stage_root(cfg["disc"], base), "RST", base + ".MRS"), "disc"
+
+
+def stage_mrs(cfg, mod, name):
+    """The Light dialog's numbers ({"source", "file", "fog", "bg", "lights"}, lvl.mrs_values)."""
+    path, source = mrs_source(cfg, mod, name)
+    if not os.path.isfile(path):
+        return {"source": source, "file": "", "fog": None, "bg": None, "lights": None}
+    with open(path, "rb") as f:
+        return dict(lvl.mrs_values(f.read()), source=source, file=path if source == "mod" else "")
+
+
+def save_mrs(cfg, b):
+    """Writes the stage's .MRS into the mod ({"mod", "name", "fog", "bg", "lights"}: the source file with those parts changed, every
+    other byte as it is), or takes the mod's file away with "reset": true (the disc's comes back). Returns stage_mrs's reply plus
+    "warnings"."""
+    mod, name = (b.get("mod") or "").strip(), (b.get("name") or "").upper()
+    path, _c = mrs_file(cfg, mod, name)
+    if b.get("reset"):
+        if os.path.isfile(path):
+            os.remove(path)
+            try:
+                os.rmdir(os.path.dirname(path))     # the mod's RST folder, when that was all it held (never a custom stage's)
+            except OSError:
+                pass
+        return dict(stage_mrs(cfg, mod, name), warnings=[])
+    src, _how = mrs_source(cfg, mod, name)
+    with open(src, "rb") as f:
+        data = lvl.mrs_edit(f.read(), b.get("fog"), b.get("bg"), b.get("lights"))
+    warn = []
+    fog = b.get("fog")
+    if fog and not fog["maxR"] > fog["minR"]:
+        warn.append("The fog ends before it starts: the game then draws no fog at all.")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".tmp", "wb") as f:
+        f.write(data)
+    os.replace(path + ".tmp", path)
+    return dict(stage_mrs(cfg, mod, name), warnings=warn)
+
+
 def stage_env(cfg, disc, name, mod=""):
     """The stage's look from RST/<STAGE>.MRS (lvl.read_mrs; the mod's own file when it has one): fog (key 4, with FA and FB
     as fogCalcFogValues makes them), background (the fog's color: fogBackgroundColorIsSlaved; key 2 when there is no fog)
     and the three parallel lights (key 5; dir points at the light, game axes, Z up)."""
-    path = os.path.join(cfg["mods"], mod, "RST", name.upper() + ".MRS") if mod else ""
-    if not os.path.isfile(path):
-        path = os.path.join(stage_root(disc, name), "RST", name.upper() + ".MRS")
+    path, _source = mrs_source(cfg, mod, name)
     env = {"file": path, "fog": None, "bg": None, "lights": []}
     if not os.path.isfile(path):
         return env
@@ -1380,7 +1442,7 @@ class Handler(BaseHTTPRequestHandler):
                 winner = patch_winner(cfg, mod, q["name"]) if mod and not bad_mod(mod) else \
                     (sorted(have, key=str.lower)[-1] if have else "")
                 return self.send(200, {"objects": describe(q["name"], objs, on, facts, load_names()), "patch": patch,
-                                       "env": stage_env(cfg, cfg["disc"], base, mod),
+                                       "env": stage_env(cfg, cfg["disc"], q["name"], mod),
                                        "grid": {"min": [st.grid.min_x, st.grid.min_y], "max": [st.grid.max_x, st.grid.max_y],
                                                 "cell": st.grid.cell, "cols": st.grid.cols, "rows": st.grid.rows} if st.grid else None,
                                        "walls": STAGES.walls(cfg["disc"], base),
@@ -1389,6 +1451,11 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/spt":            # the stage's start points as the game reads them with this mod
                 try:
                     return self.send(200, stage_spt(cfg, q.get("mod", ""), q.get("name", ""), point_kind(q.get("kind"))))
+                except (ValueError, OSError) as e:
+                    return self.send(400, {"error": str(e)})
+            if u.path == "/api/mrs":            # the stage's fog, background and lights as the game reads them with this mod
+                try:
+                    return self.send(200, stage_mrs(cfg, q.get("mod", ""), q.get("name", "")))
                 except (ValueError, OSError) as e:
                     return self.send(400, {"error": str(e)})
             if u.path == "/api/props":          # the mod's props (props/*/prop.json)
@@ -1501,6 +1568,11 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     return self.send(200, save_spt(cfg, b, point_kind(b.get("kind"))))
                 except (ValueError, OSError) as e:
+                    return self.send(400, {"error": str(e)})
+            if self.path == "/api/mrs":            # write the fog, background and lights into the mod (or "reset": back to the disc's)
+                try:
+                    return self.send(200, save_mrs(cfg, b))
+                except (ValueError, KeyError, TypeError, AttributeError, OSError) as e:
                     return self.send(400, {"error": str(e)})
             if self.path == "/api/props/floor":    # a floor prop over the grid's rectangle
                 try:

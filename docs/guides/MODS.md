@@ -787,6 +787,17 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   pickups, vehicles and animated parts do not come along.
 - **Fight HUD and sky** (the monitor button): the pictures of the stage's fight HUD and of its sky (the OBJECTs under the nodes with id 2),
   each replaceable by a PNG in the mod (`<stage>_tNNNN.png`, "Textures as PNG"). A sky picture is the stage's own (never "apply to all").
+- **Light and fog** (the sun button on the rail): a panel docked at the right (not modal, so the view stays in sight) for the stage's
+  `RST/<STAGE>.MRS` (`FORMATS.md`, "`.MRS`"): the fog's color (the background takes it), where it starts and ends, how thick it gets
+  (0 to 255) and the draw distance, and the three parallel lights, each a color, a strength (100 % is 255 in the strongest channel; it can pass it)
+  and a heading and pitch (where the light comes from: heading 0 is +Y and turns toward +X, pitch 90 is straight overhead). The view follows
+  each field as it is typed: the fog and the background show with Game look on (the panel offers to turn it on), the lights on the objects
+  the game lights as it draws them (cars, towers, statues; the editor does not draw the monsters, which the lights also light in the game).
+  The rest of the stage has its light in its vertex colors, which the lights do not change. **Save to mod** writes `mods/<mod>/RST/<STAGE>.MRS` (a custom stage's folder keeps `<ID>.MRS`): a copy of the file the stage uses
+  now with those numbers changed, the same size and every other byte as it was (the time of day, the ambient, the dust, trail and debris
+  colors). **Back to the disc's** deletes it. Closing the panel with numbers not saved puts the view back. The game reads the file when the
+  stage loads (Reload in game). The fog ending before it starts is flagged: the game then draws no fog. `python tools/level_editor/test_mrs.py`
+  is its server-side test.
 - **Textures** (the picture button on the rail): every picture of the stage's `.TEX` and `.RTX` as a card with its texId, size and format
   (the buildings', ground's and props' pictures, the particles, the HUD and the sky), each replaceable by a PNG in the mod (`<stage>_tNNNN.png`
   or `<stage>_rtx_tNNNN.png`, "Textures as PNG"; the game draws it on every object that uses the old one, at any resolution). Tabs:
@@ -830,7 +841,7 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   since the game does not use the chosen mod's file; its X hides it until the next stage or mod.
 - **Mode rail** (the narrow column on the left): **Objects** (the cube, or **1**) and **Pedestrians** (the walking figure, or
   **2**) switch what the editor works on: the left list, the right panel and what a click in the view picks; the editor remembers
-  the mode. **Textures** (the picture icon) opens the Textures dialog and **Fight HUD** (the screen icon) the HUD dialog (below).
+  the mode. **Light and fog** (the sun icon), **Textures** (the picture icon) and **Fight HUD** (the screen icon) open their panels (below).
 - **Status bar and Output:** the bar at the bottom shows the last message, whether the stage has unsaved changes (or when it was
   saved), the last check (passed, how many problems, or not checked since the last change), the game (closed, starting, running,
   patch applied or ignored), the **room meter** and how many objects the mod changes. The room meter reads "348/1024 slots · arena 3 KB":

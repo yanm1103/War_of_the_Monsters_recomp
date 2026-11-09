@@ -8,6 +8,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { createPeds } from './peds.js';
 import { openHud, hudGameChanged } from './hud.js';
 import { openTex, texGameChanged } from './tex.js';
+import { openLight, lightGameChanged, lightLookChanged, lightClose } from './light.js';
 
 // The GS modulates and blends the bytes as they are: no color management (texture, vertex and interface colors stay raw).
 THREE.ColorManagement.enabled = false;
@@ -286,6 +287,7 @@ function applyLook() {
   renderer.setClearColor(gameLook && env && env.bg ? gsColor(env.bg)
     : getComputedStyle(document.documentElement).getPropertyValue('--view').trim());
   $('look').checked = gameLook;
+  lightLookChanged();
   // the grid: black lines on the light theme's background, white on the dark one and over the stage's own (Game look)
   const t = document.documentElement.dataset.theme;
   const light = t === 'light' || (t === 'system' && matchMedia('(prefers-color-scheme: light)').matches);
@@ -910,6 +912,7 @@ async function loadStage(name) {
     select(null);
     for (const r of [stageRoot, skyRoot]) if (r) { scene.remove(r); r.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); }
     stageRoot = skyRoot = null;
+    lightClose();
     stageName = name;
     ui.budget = null; budgetKey = '';
     $('keepNote').hidden = true;
@@ -2413,6 +2416,7 @@ function setGameState(s) {
   showGame();
   hudGameChanged();
   texGameChanged();
+  lightGameChanged();
 }
 function showGame() {
   const s = game.state, where = title(gameStage() || stageName);
@@ -3821,6 +3825,38 @@ function openHudDialog() {
             game: () => ({ running: game.state === 'running', dirty }), reload: reloadGame });
 }
 $('hud').onclick = openHudDialog;
+// The Light and fog panel (web/light.js): the file's numbers as the view's env, as editor.py stage_env makes it (fog's FA and FB as
+// fogCalcFogValues does, the background the fog's color, each light's direction toward the light in game axes)
+function envFromRaw(r) {
+  const fog = r.fog ? { ...r.fog } : null;
+  if (fog && fog.maxR > fog.minR) {
+    const fb = (fog.maxV - 1) * fog.minR * fog.maxR / (fog.maxR - fog.minR);
+    fog.fa = 1 - fb / fog.maxR;
+    fog.fb = fb;
+  }
+  const lights = (r.lights || []).map((l) => {
+    const h = l.h * Math.PI / 180, p = l.p * Math.PI / 180;
+    return { rgb: l.rgb, h: l.h, p: l.p, dir: [Math.cos(p) * Math.sin(h), Math.cos(p) * Math.cos(h), Math.sin(p)] };
+  });
+  return { file: env ? env.file : '', fog, bg: fog && fog.fa !== undefined ? fog.rgb : r.bg ? r.bg.slice(0, 3) : null, lights };
+}
+function previewEnv(r) { env = envFromRaw(r); setLights(env.lights); applyLook(); }
+async function restoreEnv(name, mod) {   // the panel closed with numbers nobody saved: the view goes back to the file's
+  try {
+    const info = await api(`/api/stage?name=${encodeURIComponent(name)}&mod=${encodeURIComponent(mod)}`);
+    if (name !== stageName) return;
+    env = info.env || null;
+    setLights(env && env.lights);
+    applyLook();
+  } catch (e) { /* the stage load shows its own errors */ }
+}
+$('lightBtn').onclick = () => {
+  if (!stageName) return;
+  const name = stageName;
+  openLight({ stage: name, title: title(name), mod: modNow, api, msg, mods: () => modList, newMod: NEW_MOD, chooseMod,
+              preview: previewEnv, restore: () => restoreEnv(name, modNow), look: () => gameLook, setLook,
+              game: () => ({ running: game.state === 'running', dirty }), reload: reloadGame });
+};
 // the Textures dialog (web/tex.js): every picture of the stage; it writes into the mod at once, like the HUD's
 $('texBtn').onclick = () => {
   if (!stageName) return;

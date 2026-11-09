@@ -2554,6 +2554,80 @@ def read_mrs(path):
     return out
 
 
+def mrs_entries(data):
+    """[(offset, key, size)] of a .MRS image's entries (the 12-byte header is skipped; key 1 or a bad size ends the list)."""
+    off, out = 12, []
+    while off + 8 <= len(data):
+        key, size = struct.unpack_from("<ii", data, off)
+        if key == 1 or size < 8 or off + size > len(data):
+            break
+        out.append((off, key, size))
+        off += size
+    return out
+
+
+def mrs_values(data):
+    """What the editor's Light dialog shows of a .MRS image: {"bg": [r, g, b, a] | None, "fog": {minR, maxR, maxV, farClip, rgb} | None,
+    "lights": [{rgb, h, p}] x 3 | None} (key 2, 4 and 5; the rest of the file is not looked at)."""
+    out = {"bg": None, "fog": None, "lights": None}
+    for off, key, size in mrs_entries(data):
+        body = data[off + 8: off + size]
+        if key == 2 and len(body) >= 16:
+            out["bg"] = list(struct.unpack_from("<4i", body))
+        elif key == 4 and len(body) >= 28:
+            mn, mx, maxv, far, r, g, b = struct.unpack_from("<4f3i", body)
+            out["fog"] = {"minR": mn, "maxR": mx, "maxV": maxv, "farClip": far, "rgb": [r, g, b]}
+        elif key == 5 and len(body) >= 60:
+            v = struct.unpack_from("<15f", body)
+            out["lights"] = [{"rgb": [v[i], v[3 + i], v[6 + i]], "h": v[9 + i], "p": v[12 + i]} for i in range(3)]
+    return out
+
+
+def _mrs_num(x, name, lo, hi):
+    if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) or not lo <= x <= hi:
+        raise ValueError("%s must be a number from %g to %g" % (name, lo, hi))
+    return float(x)
+
+
+def mrs_edit(data, fog=None, bg=None, lights=None):
+    """A copy of a .MRS image with the fog (key 4), the background (key 2) and the three lights (key 5) set; every entry keeps its size and
+    everything else, the header and the tail included, stays byte for byte. fog: {minR, maxR, maxV, farClip, rgb}; bg: [r, g, b] (its
+    alpha stays); lights: three {rgb, h, p}. A part the file has no entry for is refused."""
+    out = bytearray(data)
+    keys = {k: (off, size) for off, k, size in reversed(mrs_entries(data))}
+    for part, key in ((fog, 4), (bg, 2), (lights, 5)):
+        if part is not None and key not in keys:
+            raise ValueError("this file has no entry for %s" % {4: "fog", 2: "background", 5: "lights"}[key])
+
+    def rgb(c, name, hi=255):
+        if not isinstance(c, (list, tuple)) or len(c) != 3:
+            raise ValueError("%s needs 3 numbers" % name)
+        return [_mrs_num(x, name, 0, hi) for x in c]
+    if fog is not None:
+        off, size = keys[4]
+        c = [int(round(x)) for x in rgb(fog.get("rgb"), "the fog color")]
+        mn, mx = _mrs_num(fog.get("minR"), "the fog start", 0, 1e6), _mrs_num(fog.get("maxR"), "the fog end", 0, 1e6)
+        maxv = _mrs_num(fog.get("maxV"), "the fog density", 0, 255)
+        far = _mrs_num(fog.get("farClip"), "the far clip", 1, 1e6)
+        struct.pack_into("<4f3i", out, off + 8, mn, mx, maxv, far, *c)
+    if bg is not None:
+        off, size = keys[2]
+        c = [int(round(x)) for x in rgb(bg, "the background color")]
+        struct.pack_into("<3i", out, off + 8, *c)          # the alpha (the 4th int) stays
+    if lights is not None:
+        if not isinstance(lights, (list, tuple)) or len(lights) != 3:
+            raise ValueError("there are three lights")
+        off, size = keys[5]
+        v = [0.0] * 15
+        for i, lt in enumerate(lights):
+            c = rgb(lt.get("rgb"), "light %d's color" % (i + 1), 1000)
+            v[i], v[3 + i], v[6 + i] = c
+            v[9 + i] = _mrs_num(lt.get("h"), "light %d's heading" % (i + 1), -720, 720)
+            v[12 + i] = _mrs_num(lt.get("p"), "light %d's pitch" % (i + 1), -90, 90)
+        struct.pack_into("<15f", out, off + 8, *v)
+    return bytes(out)
+
+
 def describe_mrs(key, body):
     if key == 2:
         return "background rgba %s" % (struct.unpack_from("<4i", body),)
