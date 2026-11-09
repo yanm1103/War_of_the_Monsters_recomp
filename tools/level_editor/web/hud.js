@@ -194,5 +194,7 @@ export async function openHud(opts) {
   dlg.showModal();
   q('.dlg-foot .primary').focus();
 }
+// the helpers the Textures dialog (tex.js) shares: building elements, a picked image as PNG bytes, the file picker
+export { el, icon, asPng, pick, psmText };
 // app.js calls it when the game starts or stops while the dialog is open
 export function hudGameChanged() { if (dlg && dlg.open && ctx) showGame(); }

@@ -125,6 +125,23 @@ def stage_hud(root, stage):
             "users": {t: sorted(v) for t, v in users.items()}}
 
 
+def stage_textures(root, stage):
+    """Every picture of the stage's .TEX and .RTX (palettes left out): [{"tex", "file", "w", "h", "psm"}] by texId. A texId in both
+    files belongs to the .TEX (what png_name writes)."""
+    base = os.path.join(root, "LVL", stage.upper())
+    found = {}
+    for kind in ("tex", "rtx"):
+        path = base + "." + kind.upper()
+        if not os.path.isfile(path):
+            continue
+        data, _ = tex.read_file(path)
+        for p in tex.parse(data)["packets"]:
+            if not p.is_palette():
+                found.setdefault(p.texId, {"tex": p.texId, "file": kind, "w": p.w, "h": p.h,
+                                           "psm": tex.PSM_NAMES.get(p.psm, hex(p.psm))})
+    return [found[k] for k in sorted(found)]
+
+
 def png_name(stage, entry):
     """The PNG name the native drawing looks for (native/wotm_texmods.hpp), as tools/tex.py export writes it."""
     return "%s%s_t%04d.png" % (stage.lower(), "_rtx" if entry["file"] == "rtx" else "", entry["tex"])
@@ -171,6 +188,28 @@ def panel(info, mod_dir, exported):
                          "disc": os.path.join(exported, name) if os.path.isfile(os.path.join(exported, name)) else None,
                          "mod": have.get(name.lower())})
     return {"stage": stage, "version": info["version"], "rows": rows}
+
+
+def texture_rows(info, textures, mod_dir, exported):
+    """The editor's Textures dialog: one row per picture of the stage (stage_textures), with the HUD roles it serves (roles that name
+    the picture, not the sky), the disc's PNG (in `exported`) and the mod's if it has one."""
+    stage = info["stage"]
+    have = mod_pngs(mod_dir, stage) if mod_dir and os.path.isdir(mod_dir) else {}
+    roles = {}
+    for key, label, _ids, _same in ROLES:
+        for e in info["roles"][key]:
+            roles.setdefault((e["tex"], e["file"]), []).append(key)
+    rows = []
+    for e in textures:
+        name = png_name(stage, e)
+        disc = os.path.join(exported, name)
+        grey = not os.path.isfile(disc)     # no palette found for it: tex.py export writes it in greys, as <name>_sempaleta.png
+        if grey:
+            disc = os.path.join(exported, name[:-4] + "_sempaleta.png")
+        rows.append({"png": name, "tex": e["tex"], "file": e["file"], "w": e["w"], "h": e["h"], "psm": e["psm"],
+                     "roles": roles.get((e["tex"], e["file"]), []), "grey": grey and os.path.isfile(disc),
+                     "disc": disc if os.path.isfile(disc) else None, "mod": have.get(name.lower())})
+    return rows
 
 
 def targets(infos, stage, role, every):

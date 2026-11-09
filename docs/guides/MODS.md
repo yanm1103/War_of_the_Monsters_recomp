@@ -787,6 +787,15 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   pickups, vehicles and animated parts do not come along.
 - **Fight HUD and sky** (the monitor button): the pictures of the stage's fight HUD and of its sky (the OBJECTs under the nodes with id 2),
   each replaceable by a PNG in the mod (`<stage>_tNNNN.png`, "Textures as PNG"). A sky picture is the stage's own (never "apply to all").
+- **Textures** (the picture button on the rail): every picture of the stage's `.TEX` and `.RTX` as a card with its texId, size and format
+  (the buildings', ground's and props' pictures, the particles, the HUD and the sky), each replaceable by a PNG in the mod (`<stage>_tNNNN.png`
+  or `<stage>_rtx_tNNNN.png`, "Textures as PNG"; the game draws it on every object that uses the old one, at any resolution). Tabs:
+  **In the scene** (what the stage's objects in the view draw with), **HUD and sky**, **Other** (particles and effects), **Replaced** and
+  **All**, each with its count; the search takes a number (`12`) or a size (`64x64`). A card has **Replace** (or a PNG dropped on it; another
+  proportion than the game's asks first), **Save original as PNG** (to edit it) and, when the mod has one, **Remove**. A picture the editor
+  finds no palette for shows its original in grey (a "No palette" tag): the game still draws the replacement in its own colors. The dialog
+  writes into the mod at once, outside Undo, in the mod's `LVL/` (a custom stage's own folder for its pictures, as the Fight HUD dialog does);
+  with the game open, **Reload in game** sits at the bottom. `python tools/level_editor/test_textures.py` is its server-side test.
 - **Stage size** (the expand button): the rectangle of the collision grid (`grid` in the patch), four numbers and "Grow every side by 1000"; the view draws the disc's rectangle in grey and the patch's in blue;
   it can only grow. Check reports a rectangle the game would skip. For a stage with boundary walls (CENTRAL, VEGAS, CAPITOL) the dialog also has
   a checkbox that sets `"walls": "off"`. "Apply and add a floor over it" also builds a prop `FL_<stage>` in the mod (a visible plate 0.6 under
@@ -821,7 +830,7 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   since the game does not use the chosen mod's file; its X hides it until the next stage or mod.
 - **Mode rail** (the narrow column on the left): **Objects** (the cube, or **1**) and **Pedestrians** (the walking figure, or
   **2**) switch what the editor works on: the left list, the right panel and what a click in the view picks; the editor remembers
-  the mode. **Fight HUD** (the screen icon) opens the HUD dialog (below).
+  the mode. **Textures** (the picture icon) opens the Textures dialog and **Fight HUD** (the screen icon) the HUD dialog (below).
 - **Status bar and Output:** the bar at the bottom shows the last message, whether the stage has unsaved changes (or when it was
   saved), the last check (passed, how many problems, or not checked since the last change), the game (closed, starting, running,
   patch applied or ignored), the **room meter** and how many objects the mod changes. The room meter reads "348/1024 slots · arena 3 KB":

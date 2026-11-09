@@ -12,15 +12,14 @@ Rearranjar fases existentes (mover, girar, apagar, duplicar prédios e objetos, 
 
 Ideias para facilitar a vida de quem faz mod (o que o editor ainda não tem; cada uma só no editor, salvo onde disser), na ordem sugerida:
 5. **Luz, neblina e fundo (`RST/<FASE>.MRS`):** o editor lê o `.MRS` para o "Game look" e o jogo aceita um do mod; falta o diálogo que edita cor e distância da neblina, fundo e as 3 luzes paralelas, com a vista ao vivo. Conferir o layout (formato do `.AIC`, `FORMATS.md`, "`.MRS`").
-6. **Texturas da fase por PNG:** diálogo "Textures" com a miniatura de cada texId do `.TEX` e Replace, no molde do diálogo do HUD (`hudapi.py` já escreve `<fase>_tNNNN.png`).
-7. **Transformações em lote:** array linear e circular, espelhar, alinhar e distribuir, girar em X e Y (props), salvar a seleção como prefab para outra fase. Tudo vira entradas e cópias do patch que já existem.
-8. **Terreno por heightmap:** um PNG de altura vira um prop com malha visual e `coll_*` (até 16384 triângulos), para colinas e rampas; é o que falta para uma arena que não seja plana.
-9. **Rede de veículos (`.FOP`):** o mesmo diálogo do `.AIP`, com os tipos 0 a 3 (rua, helicóptero, disco voador, tanque) e o campo `drop`; é o único arquivo de pontos sem editor.
-10. **Teste no jogo configurável:** escolher monstro, modo e CPUs, e "Testar daqui" (ponto de partida na câmera).
-11. **Colisão na vista:** botão que desenha caixas, hulls e `coll_*` (dados de `lvl.py collision`).
-12. **Editar o `stage.json` depois de criado:** nome, narrador, RANDOM, base.
-13. **Precisam do runtime:** pontos de vida das construções originais, tipo do pickup (carro estacionado para carro no trânsito, `id2` bit 0), escala por objeto.
-14. **Menores:** régua entre dois pontos, captura de tela, "Empacotar mod" em zip, minimapa.
+6. **Transformações em lote:** array linear e circular, espelhar, alinhar e distribuir, girar em X e Y (props), salvar a seleção como prefab para outra fase. Tudo vira entradas e cópias do patch que já existem.
+7. **Terreno por heightmap:** um PNG de altura vira um prop com malha visual e `coll_*` (até 16384 triângulos), para colinas e rampas; é o que falta para uma arena que não seja plana.
+8. **Rede de veículos (`.FOP`):** o mesmo diálogo do `.AIP`, com os tipos 0 a 3 (rua, helicóptero, disco voador, tanque) e o campo `drop`; é o único arquivo de pontos sem editor.
+9. **Teste no jogo configurável:** escolher monstro, modo e CPUs, e "Testar daqui" (ponto de partida na câmera).
+10. **Colisão na vista:** botão que desenha caixas, hulls e `coll_*` (dados de `lvl.py collision`).
+11. **Editar o `stage.json` depois de criado:** nome, narrador, RANDOM, base.
+12. **Precisam do runtime:** pontos de vida das construções originais, tipo do pickup (carro estacionado para carro no trânsito, `id2` bit 0), escala por objeto.
+13. **Menores:** régua entre dois pontos, captura de tela, "Empacotar mod" em zip, minimapa.
 
 ## Fora da ordem (até o dono escolher)
 - **4 jogadores sempre a 60:** com 4 vistas, ~80% dos quadros saem a 60 e o resto a 30; quem segura é o EE (mediana ~14 ms, p90 ~17,5 ms). Candidatos, pelo perfil das amostras do EE (`PS2X_HOSTPROF=2` + `_RAW=1`, resolvido pelo `wotm.map` do mesmo build): o envoltório do VU0 traduzido (`executeVU0Microprogram` copia ~1 KB de estado em cada sentido, ~3%) e o `checkpointDue` fora de linha (~3%), ambos costura do PS2Recomp; a montagem do pacote do VU1 que o `wotm.exe` descarta (`pktAddVu1ObjAsm`, ~4%, arriscado: item G3 de `723b110:docs/investigacoes/2026-10-23/performance_vistas.md`). Na janela, as partículas ainda no modo imediato do rlgl (~0,6 ms por vista). Comparar alternando na mesma corrida (a luta IA x IA não se repete).

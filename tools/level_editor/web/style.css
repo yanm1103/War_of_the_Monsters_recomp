@@ -697,3 +697,32 @@ button.small-btn { height: 22px; padding: 0 8px; font-size: 12px; flex: none; }
 #hudDlg label.hud-every { display: flex; align-items: center; gap: 6px; margin: 8px 0 0; color: var(--fg-2); font-size: 12px; cursor: pointer; }
 #hudDlg .dlg-foot { align-items: center; }
 #hudDlg .hud-game { margin-right: auto; font-size: 12px; }
+
+/* the Textures dialog (web/tex.js) */
+#texDlg { width: 920px; max-width: calc(100vw - 32px); }
+#texDlg .tx-nomod { align-items: center; }
+#texDlg .tx-nomod > select { width: 160px; flex: none; }
+#texDlg .tx-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 12px; }
+#texDlg .tx-bar .field { width: 220px; }
+#texDlg .tx-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+#texDlg .tx-none { padding: 24px 0; text-align: center; }
+.tx-card { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: var(--r-md);
+           background: var(--surface-1); transition: background-color .12s; }
+.tx-card.on { border-color: var(--changed); }
+.tx-card.drop { background: color-mix(in srgb, var(--accent) 14%, transparent); box-shadow: inset 0 0 0 2px var(--accent); }
+.tx-pic { position: relative; aspect-ratio: 1; border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden;
+          background: repeating-conic-gradient(var(--checker-a) 0 25%, var(--checker-b) 0 50%) 0 0 / 12px 12px; }
+.tx-img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.tx-img.px { image-rendering: pixelated; }
+.tx-img.none { display: grid; place-items: center; color: var(--muted); font-size: 11px; background: var(--surface-2); }
+.tx-badges { position: absolute; left: 4px; top: 4px; display: flex; flex-wrap: wrap; gap: 3px; }
+.tx-badges .badge { background: color-mix(in srgb, var(--surface-1) 86%, transparent); }
+.tx-badges .badge.hud { color: var(--fg-2); }
+.tx-badges .badge.grey { color: var(--muted); }
+.tx-name { display: flex; flex-direction: column; min-width: 0; line-height: 16px; }
+.tx-name b { font-weight: 600; }
+.tx-meta { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tx-acts { display: flex; gap: 4px; }
+.tx-acts > button { width: 28px; height: 26px; }
+#texDlg .dlg-foot { align-items: center; }
+#texDlg .tx-game { margin-right: auto; font-size: 12px; }

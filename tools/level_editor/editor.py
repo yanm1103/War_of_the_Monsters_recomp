@@ -1416,6 +1416,10 @@ class Handler(BaseHTTPRequestHandler):
                 mod = q.get("mod", "").strip()
                 mods_dir, mod_arg, base, _sub, _c = hud_target(cfg, q["stage"], mod if mod and not bad_mod(mod) else "")
                 return self.send(200, HUD.panel(cfg["disc"], mods_dir, mod_arg, base))
+            if u.path == "/api/texs":           # the Textures dialog: every picture of the stage
+                mod = q.get("mod", "").strip()
+                mods_dir, mod_arg, base, _sub, _c = hud_target(cfg, q["stage"], mod if mod and not bad_mod(mod) else "")
+                return self.send(200, HUD.textures(cfg["disc"], mods_dir, mod_arg, base))
             if u.path == "/api/hudimg":
                 mod = q.get("mod", "").strip()
                 mods_dir, mod_arg, base, _sub, _c = hud_target(cfg, q["stage"], "" if bad_mod(mod) else mod)
@@ -1517,11 +1521,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {"ok": True})
             if self.path == "/api/stop":        # only the game this editor opened
                 return self.send(200, {"ok": True, "stopped": stop_game(), "running": False})
-            if self.path in ("/api/save", "/api/test", "/api/reload", "/api/hud/replace", "/api/hud/remove"):
+            if self.path in ("/api/save", "/api/test", "/api/reload", "/api/hud/replace", "/api/hud/remove",
+                             "/api/tex/replace", "/api/tex/remove"):
                 mod = (b.get("mod") or "").strip()
                 # Test without saving writes nothing: no mod needed
                 if bad_mod(mod) and not (self.path == "/api/test" and not b.get("save", True) and not mod):
                     return self.send(400, {"error": bad_mod_reason(mod), "code": "mod"})
+                if self.path in ("/api/tex/replace", "/api/tex/remove"):
+                    mods_dir, mod_arg, base, sub, _custom = hud_target(cfg, b["stage"], mod)
+                    if self.path == "/api/tex/replace":
+                        return self.send(200, {"lines": HUD.tex_replace(cfg["disc"], mods_dir, mod_arg, base, b["png"], b["data"], sub)})
+                    return self.send(200, {"lines": HUD.tex_remove(cfg["disc"], mods_dir, mod_arg, base, b["png"])})
                 if self.path in ("/api/hud/replace", "/api/hud/remove"):
                     mods_dir, mod_arg, base, sub, custom = hud_target(cfg, b["stage"], mod)
                     every = bool(b.get("every")) and not custom and b.get("role") != "sky"   # a custom stage's picture and a sky are its own

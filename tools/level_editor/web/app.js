@@ -7,6 +7,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { createPeds } from './peds.js';
 import { openHud, hudGameChanged } from './hud.js';
+import { openTex, texGameChanged } from './tex.js';
 
 // The GS modulates and blends the bytes as they are: no color management (texture, vertex and interface colors stay raw).
 THREE.ColorManagement.enabled = false;
@@ -2411,6 +2412,7 @@ function setGameState(s) {
   game.running = s !== 'closed';
   showGame();
   hudGameChanged();
+  texGameChanged();
 }
 function showGame() {
   const s = game.state, where = title(gameStage() || stageName);
@@ -3819,6 +3821,12 @@ function openHudDialog() {
             game: () => ({ running: game.state === 'running', dirty }), reload: reloadGame });
 }
 $('hud').onclick = openHudDialog;
+// the Textures dialog (web/tex.js): every picture of the stage; it writes into the mod at once, like the HUD's
+$('texBtn').onclick = () => {
+  if (!stageName) return;
+  openTex({ stage: stageName, title: title(stageName), mod: modNow, api, msg, ask, mods: () => modList, newMod: NEW_MOD, chooseMod,
+            scene: () => [...stageTex.keys()], game: () => ({ running: game.state === 'running', dirty }), reload: reloadGame });
+};
 $('drop').onclick = dropToGround;
 $('dup').onclick = duplicate;
 $('del').onclick = remove;
