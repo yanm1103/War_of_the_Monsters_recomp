@@ -833,6 +833,14 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   the dialog: 255 nodes, 6 links per node and 450 paths (a two-way link is one path; the game ignores the rest). A stage without its own
   net gives the CPUs nowhere to go: CAPITOL and TRAINING have 2 nodes, METRO none (a METRO-based custom stage leaves the CPU lists unless
   it brings its own).
+  The road button next to it opens the same dialog for the **vehicle net** (`.FOP`): the roads and flight paths of the cars, helicopters,
+  flying saucers and tanks (`FORMATS.md`, "Path nets"). The node type is a list (0 car street, 1 helicopter, 2 flying saucer, 3 tank and
+  truck, which only VEGAS has) and each link has a width and a drop (how far below the path a helicopter may fly when it chases a target,
+  times 10; the disc's car streets all have 0, its helicopters' links 0 to 26 and its saucers' up to 101; the widths run 5 to 12 for cars,
+  7 to 29 for helicopters and 8 to 111 for saucers). A road is two-way when both ends link to each other, and Link
+  rewrites the width and the drop on both ends. Limits shown: 255 nodes and 6 links per node. The view draws the net only while the dialog is
+  open, or all the time with **Layers > Vehicle net** (yellow cars, green helicopters, pink saucers, orange tanks). File rules as for the
+  AI net (`PTS/<STAGE>.FOP`); a net of one node gives the vehicles nowhere to drive, and none at all brings back the game's 2 default nodes.
 - **Stage picture:** the picture button (lower right of the view) saves the middle 2:1 band of the view, 512x256, as
   `mods/<mod>/levelpics/<name>.png` for a custom stage (`<id>`) and for Training, Lake Powell and Tokyo DM; the other game stages have
   their picture in `SHELL.TEX` (make a custom stage on one). The stage select picks it up the next time the game starts.
@@ -866,7 +874,7 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
 - **View bars:** on the top left, the tool: **Move** (**G**) and **Turn** (**R**, about the vertical only) for the gizmo, and
   **Snap** with its steps (10 units and 15 degrees by default; they also set the arrow keys' step). On the top right: **Game
   look** (**L**), **Grid** (a line every 100 units, or every snap step when it is smaller, and a stronger one every 1000, at the
-  base of the selection), **Layers** (Pedestrians and Collision), the cameras, Focus, Frame all and the shortcuts. The gizmo's arrows
+  base of the selection), **Layers** (Pedestrians, Collision and Vehicle net), the cameras, Focus, Frame all and the shortcuts. The gizmo's arrows
   have the colors of the X, Y and Z fields; the selected object's amber outline shows through what stands in front of it, the
   others of a selection (orange) only where they are in view. A deleted object shows as a red dashed box where it was while it is
   selected; with **Changed** on, every deleted one does (a click on the box selects it), and a green box marks each changed object.

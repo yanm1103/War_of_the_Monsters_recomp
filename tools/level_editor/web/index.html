@@ -133,6 +133,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <button id="sptBtn" class="icon ghost" title="Start points: where the monsters appear (a file of the mod)" aria-label="Start points"><i class="ic" style="--ic:url(vendor/mdi/account-group-outline.svg)"></i></button>
       <button id="pupBtn" class="icon ghost" title="Power-ups: the health, stamina and other pickups lying in the stage (a file of the mod)" aria-label="Power-ups"><i class="ic" style="--ic:url(vendor/mdi/package-variant-closed.svg)"></i></button>
       <button id="aipBtn" class="icon ghost" title="AI net: the paths the computer monsters walk (a file of the mod)" aria-label="AI net"><i class="ic" style="--ic:url(vendor/mdi/vector-polyline-plus.svg)"></i></button>
+      <button id="fopBtn" class="icon ghost" title="Vehicle net: the roads and flight paths of the cars, helicopters, flying saucers and tanks (a file of the mod)" aria-label="Vehicle net"><i class="ic" style="--ic:url(vendor/mdi/road-variant.svg)"></i></button>
       <button id="picBtn" class="icon ghost" title="Use this view as the stage's picture on the stage select (a custom stage, Training, Lake Powell or Tokyo DM)" aria-label="Stage picture"><i class="ic" style="--ic:url(vendor/mdi/image-edit-outline.svg)"></i></button>
       <button id="keysBtn" class="icon ghost" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><i class="ic" style="--ic:url(vendor/mdi/keyboard-outline.svg)"></i></button>
     </div>
@@ -141,6 +142,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <label class="switch" title="Pedestrian groups (violet cones) and their sidewalks (cyan lanes), faint, while you edit objects (P). The Pedestrians mode edits them."><input type="checkbox" id="pedsOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/walk.svg)"></i><span class="tx">Pedestrians</span><kbd>P</kbd></label>
       <label class="switch" title="What the game collides with, with your changes applied: triangles green (buildings, a prop's coll_ meshes), convex hulls cyan (hull_ meshes), trigger volumes and animated parts as orange boxes; dimmer is a broken state of a building. What touches the selection stays bright."><input type="checkbox" id="collOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/cube-scan.svg)"></i><span class="tx">Collision</span><kbd>C</kbd></label>
       <div class="help" id="collInfo" hidden></div>
+      <label class="switch" title="The vehicle net drawn in the view, its roads colored by who drives them: yellow cars, green helicopters, pink flying saucers, orange tanks. The Vehicle net dialog shows it too."><input type="checkbox" id="fopOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/road-variant.svg)"></i><span class="tx">Vehicle net</span></label>
     </div>
     <div id="notes">
       <div id="winNote" class="callout warn" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span id="winText"></span>
@@ -478,28 +480,30 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
     <div class="dlg-foot"><button type="button" id="sptReset" title="Takes the mod's file away: the stage's own points (or power-ups) come back">Back to the disc's</button><button type="button" data-close>Close</button><button id="sptSave" type="button" class="primary">Save</button></div>
   </form>
 </dialog>
-<dialog id="aipDlg" class="dlg spt" aria-labelledby="aipTitle">
+<dialog id="netDlg" class="dlg spt" aria-labelledby="netTitle">
   <form method="dialog">
-    <div class="dlg-head"><h2 id="aipTitle">AI net</h2>
+    <div class="dlg-head"><h2 id="netTitle">AI net</h2>
       <button type="button" data-close class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
     <div class="dlg-body">
-      <p class="muted" id="aipText"></p>
-      <div id="aipList"></div>
+      <p class="muted" id="netText"></p>
+      <div id="netList"></div>
       <div class="gd-btns">
-        <button type="button" id="aipAdd" title="Adds a node where the middle of the view meets the stage; with a node selected, linked to it both ways">Add node at the view's aim</button>
-        <label class="fl" style="flex-direction:row;align-items:center;gap:6px">Width <input id="aipWidth" type="number" min="0" max="255" value="20" style="width:5em"></label>
-        <label class="fl" style="flex-direction:row;align-items:center;gap:6px">Type <input id="aipType" type="number" min="0" max="255" value="0" style="width:4em"></label>
+        <button type="button" id="netAdd" title="Adds a node where the middle of the view meets the stage; with a node selected, linked to it both ways">Add node at the view's aim</button>
+        <label class="fl" style="flex-direction:row;align-items:center;gap:6px">Width <input id="netWidth" type="number" min="0" max="255" value="20" style="width:5em"></label>
+        <label class="fl" id="netDropLbl" hidden style="flex-direction:row;align-items:center;gap:6px" title="How far below the path a helicopter may fly when it chases a target, times 10">Drop <input id="netDrop" type="number" min="0" max="255" value="0" style="width:4.5em"></label>
+        <label class="fl" id="netTypeLbl" style="flex-direction:row;align-items:center;gap:6px">Type <input id="netType" type="number" min="0" max="255" value="0" style="width:4em"></label>
+        <label class="fl" id="netTypeSelLbl" hidden style="flex-direction:row;align-items:center;gap:6px">Type <select id="netTypeSel"></select></label>
       </div>
       <div class="gd-btns">
-        <label class="fl" style="flex-direction:row;align-items:center;gap:6px">Selected node and node # <input id="aipTo" type="number" min="1" style="width:5em"></label>
-        <button type="button" id="aipLink" title="Link the selected node and that one, both ways, with the width above">Link</button>
-        <button type="button" id="aipUnlink" title="Take out every link between the two">Unlink</button>
-        <button type="button" id="aipClear" title="Take every node away (a net of your own from scratch)">Clear the net</button>
+        <label class="fl" style="flex-direction:row;align-items:center;gap:6px">Selected node and node # <input id="netTo" type="number" min="1" style="width:5em"></label>
+        <button type="button" id="netLink" title="Link the selected node and that one, both ways, with the width above">Link</button>
+        <button type="button" id="netUnlink" title="Take out every link between the two">Unlink</button>
+        <button type="button" id="netClear" title="Take every node away (a net of your own from scratch)">Clear the net</button>
       </div>
-      <div class="help" id="aipInfo"></div>
-      <div class="callout err" id="aipErr" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-circle-outline.svg)"></i><span></span></div>
+      <div class="help" id="netInfo"></div>
+      <div class="callout err" id="netErr" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-circle-outline.svg)"></i><span></span></div>
     </div>
-    <div class="dlg-foot"><button type="button" id="aipReset" title="Takes the mod's file away: the stage's own net comes back">Back to the disc's</button><button type="button" data-close>Close</button><button id="aipSave" type="button" class="primary">Save</button></div>
+    <div class="dlg-foot"><button type="button" id="netReset" title="Takes the mod's file away: the stage's own net comes back">Back to the disc's</button><button type="button" data-close>Close</button><button id="netSave" type="button" class="primary">Save</button></div>
   </form>
 </dialog>
 <dialog id="gridDlg" class="dlg" aria-labelledby="gdTitle">

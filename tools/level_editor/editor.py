@@ -694,13 +694,15 @@ POINT_KINDS = {
             "caps": lambda: [lvl.PUP_MAX_ACTIVE], "lists": lambda: list(lvl.PUP_TYPES)},
     "AIP": {"read": lambda p: lvl.read_aip(p), "build": lambda pts: lvl.build_aip(pts),
             "caps": lambda: [lvl.AIP_NODES, lvl.AIP_MAX_PATHS, lvl.AIP_LINKS], "lists": lambda: []},
+    "FOP": {"read": lambda p: lvl.read_fop(p), "build": lambda pts: lvl.build_fop(pts),
+            "caps": lambda: [lvl.FOP_NODES, 0, lvl.FOP_LINKS], "lists": lambda: list(lvl.FOP_TYPES)},
 }
 
 
 def point_kind(k):
     k = str(k or "SPT").upper()
     if k not in POINT_KINDS:
-        raise ValueError("kind is SPT, PUP or AIP")
+        raise ValueError("kind is SPT, PUP, AIP or FOP")
     return k
 
 
@@ -754,6 +756,9 @@ def save_spt(cfg, b, ext="SPT"):
             warn.append("The net makes %d paths; the game keeps %d and ignores the rest (\"Exceeded AiPathNet::MAX_PATHS\")." % (n, lvl.AIP_MAX_PATHS))
         if len(pts) < 2:
             warn.append("A net of fewer than 2 nodes gives the AI nowhere to walk.")
+    elif ext == "FOP":
+        if len(pts) == 1:
+            warn.append("A net of one node gives the vehicles nowhere to drive.")
     elif len(pts) > lvl.PUP_MAX_ACTIVE:
         warn.append("The game keeps %d power-ups at a time, you placed %d: the extra ones are not created." % (lvl.PUP_MAX_ACTIVE, len(pts)))
     os.makedirs(os.path.dirname(path), exist_ok=True)

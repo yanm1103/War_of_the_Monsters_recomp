@@ -96,11 +96,47 @@ def main():
         out = editor.save_spt(cfg, {"mod": "", "name": "MYCITY", "points": [{"type": 0, "pos": [0, 0, 0]}]}, "PUP")
         assert os.path.isfile(os.path.join(sd, "MYCITY.PUP")) and out["source"] == "mod", out
         try:
-            editor.point_kind("FOP")
+            editor.point_kind("PED")
         except ValueError:
             pass
         else:
-            raise AssertionError("kind FOP accepted")
+            raise AssertionError("kind PED accepted")
+        # the vehicle net: every disc .FOP reads, rebuilds and reads back the same net, and an unchanged net rebuilds to the same records
+        # (up to the unused link slots, which the game never reads)
+        vdir = os.path.join(editor.stage_root(cfg["disc"], "CENTRAL"), "PTS")
+        seen = 0
+        for f in sorted(os.listdir(vdir)):
+            if f.upper().endswith(".FOP"):
+                p = os.path.join(vdir, f)
+                net = lvl.read_fop(p)
+                assert all(0 <= n["type"] <= 3 for n in net), f
+                tmpf = os.path.join(tmp, "x.FOP")
+                open(tmpf, "wb").write(lvl.build_fop(net))
+                assert lvl.read_fop(tmpf) == net, f
+                seen += 1
+        assert seen >= 10, seen
+        net = lvl.read_fop(os.path.join(vdir, "VEGAS.FOP"))
+        assert {n["type"] for n in net} == {0, 1, 2, 3} and any(l["drop"] == 26 for n in net for l in n["links"]), "VEGAS: all four types, a 26 drop"
+        r = editor.stage_spt(cfg, "M", "CENTRAL", "FOP")
+        assert r["source"] == "disc" and len(r["points"]) == 60 and r["caps"] == [255, 0, 6] and len(r["lists"]) == 4, r["source"]
+        net = [{"pos": [0.0, 0.0, 0.0], "type": 1, "links": [{"to": 1, "width": 12, "drop": 26}]},
+               {"pos": [100.0, 0.0, 50.0], "type": 1, "links": [{"to": 0, "width": 12, "drop": 26}]}]
+        out = editor.save_spt(cfg, {"mod": "M", "name": "CENTRAL", "points": net}, "FOP")
+        assert os.path.isfile(os.path.join(tmp, "M", "PTS", "CENTRAL.FOP")) and out["source"] == "mod" and not out["warnings"], out
+        assert out["points"][0]["links"] == [{"to": 1, "width": 12, "drop": 26}] and out["points"][1]["pos"] == [100.0, 0.0, 50.0]
+        raw = open(os.path.join(tmp, "M", "PTS", "CENTRAL.FOP"), "rb").read()
+        assert len(raw) == 8 + 2 * 64 and raw[8 + 0x2C] == 12 and raw[8 + 0x33] == 26 and raw[8 + 0x32] == 1, raw[:80].hex()
+        assert len(editor.save_spt(cfg, {"mod": "M", "name": "CENTRAL", "points": [dict(net[0], links=[])]}, "FOP")["warnings"]) == 1     # one node: nowhere to drive
+        for bad in ([{"pos": [0, 0, 0], "links": [{"to": 5, "width": 1}]}], [{"pos": [0, 0, 0], "links": [{"to": 0, "width": 1}]}],
+                    [{"pos": [0, 0, 0], "links": [{"to": 0, "width": 1}] * 7}], [{"pos": [0, 0, 0], "type": 4}],
+                    [{"pos": [0, 0, 0], "links": [{"to": 0, "width": 1, "drop": 256}]}]):
+            try:
+                lvl.build_fop(bad)
+            except ValueError:
+                continue
+            raise AssertionError("accepted %r" % (bad,))
+        editor.save_spt(cfg, {"mod": "M", "name": "CENTRAL", "reset": True}, "FOP")
+        assert not os.path.exists(os.path.join(tmp, "M", "PTS", "CENTRAL.FOP"))
         # the AI net: every disc .AIP reads, rebuilds and reads back the same net; paths counted as the game does
         ddir = os.path.join(editor.stage_root(cfg["disc"], "CENTRAL"), "PTS")
         want = {"ISLAND": 418, "TOKYO": 304, "VEGAS": 187}

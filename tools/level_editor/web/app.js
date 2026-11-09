@@ -3144,7 +3144,7 @@ async function loadPoints(kind) {
   } catch (e) { if (id === ptLoadId[kind]) pt[kind] = ptEmpty(kind); }
   updatePtView(kind);
 }
-const loadSpt = () => { loadPoints('SPT'); loadPoints('PUP'); loadAip(); };
+const loadSpt = () => { loadPoints('SPT'); loadPoints('PUP'); loadNet('AIP'); loadNet('FOP'); };
 // A cone for each point (colored; white when selected); a start point has a line for the way the monster faces, a power-up is a ball on its rest height
 function updatePtView(kind) {
   const old = ptViews[kind];
@@ -3285,180 +3285,230 @@ $('sptReset').onclick = async () => {
 };
 $('sptDlg').addEventListener('close', () => { if (ptKeep(ptKind) !== ptSaved[ptKind]) loadPoints(ptKind); });   // closed without saving: back to the file's points
 
-// ------------------------------------------------------------------ AI net (.AIP)
-// The paths the computer monsters walk: nodes (position, a type that splits the net into sub-nets) and directed links with a width (the
-// lane is width * 10 to each side). Edited like the start points, in a file of the mod (editor.py kind AIP; tools/lvl.py read_aip/build_aip).
-let aip = { points: [], caps: [255, 450, 6], source: 'disc' }, aipSaved = '[]', aipSel = -1, aipView = null, aipLoadId = 0;
-const aipKeep = () => JSON.stringify(aip.points);
-async function loadAip() {
+// ------------------------------------------------------------------ AI net (.AIP) and vehicle net (.FOP)
+// Both are graphs of nodes with directed links, edited in one dialog and kept as a file of the mod (editor.py kinds AIP and FOP; tools/lvl.py
+// read_aip/build_aip and read_fop/build_fop). AIP: the paths the computer monsters walk; a node type splits the net into sub-nets and a
+// link's width is the lane (width * 10 to each side). FOP: the roads of the cars, helicopters, flying saucers and tanks; the node type says
+// who drives there and a link has a width and a drop (how far below the path a helicopter may fly, times 10).
+const NET_WORDS = {
+  AIP: { title: 'AI net', noun: 'AI net', width: 20 },
+  FOP: { title: 'Vehicle net', noun: 'vehicle net', width: 10 },
+};
+const FOP_COLORS = [0xFFD24A, 0x5EE0A0, 0xFF6FB5, 0xFF8A3D];      // car street, helicopter, flying saucer, tank and truck
+const netColor = (kind, type) => (kind === 'AIP' ? (type ? 0x36C5F0 : 0xB57BFF) : (FOP_COLORS[type] ?? 0xFFFFFF));
+const newNet = (caps) => ({ points: [], caps, source: 'disc', lists: [], saved: '[]', sel: -1, view: null, loadId: 0 });
+const nets = { AIP: newNet([255, 450, 6]), FOP: newNet([255, 0, 6]) };
+let netKind = 'AIP', fopOn = store.get('fop', '0') === '1';
+const netKeep = (n) => JSON.stringify(n.points);
+const netTake = (n, r) => Object.assign(n, { points: r.points, caps: r.caps, source: r.source, lists: r.lists || [], saved: JSON.stringify(r.points), sel: -1 });
+async function loadNet(kind) {
   if (!stageName) return;
-  const id = ++aipLoadId;
+  const n = nets[kind], id = ++n.loadId;
   try {
-    const r = await api(`/api/spt?name=${encodeURIComponent(stageName)}&mod=${encodeURIComponent(modNow || '')}&kind=AIP`);
-    if (id !== aipLoadId) return;
-    aip = r;
-    aipSaved = aipKeep();
-    aipSel = -1;
-  } catch (e) { if (id === aipLoadId) aip = { points: [], caps: [255, 450, 6], source: 'disc' }; }
-  updateAipView();
+    const r = await api(`/api/spt?name=${encodeURIComponent(stageName)}&mod=${encodeURIComponent(modNow || '')}&kind=${kind}`);
+    if (id !== n.loadId) return;
+    netTake(n, r);
+  } catch (e) { if (id === n.loadId) netTake(n, { points: [], caps: n.caps, source: 'disc', lists: n.lists }); }
+  updateNetView(kind);
 }
-const aipTwoWay = (a, b) => aip.points[a].links.some((l) => l.to === b) && aip.points[b].links.some((l) => l.to === a);
-function aipPaths() {   // as the game counts them: a two-way link is one path
+const netTwoWay = (n, a, b) => n.points[a].links.some((l) => l.to === b) && n.points[b].links.some((l) => l.to === a);
+function netPaths(n) {   // as the game counts them: a two-way link is one path
   const seen = new Set();
-  aip.points.forEach((n, i) => n.links.forEach((l) => seen.add(aipTwoWay(i, l.to) ? `${Math.min(i, l.to)}-${Math.max(i, l.to)}` : `${i}>${l.to}`)));
+  n.points.forEach((p, i) => p.links.forEach((l) => seen.add(netTwoWay(n, i, l.to) ? `${Math.min(i, l.to)}-${Math.max(i, l.to)}` : `${i}>${l.to}`)));
   return seen.size;
 }
-function updateAipView() {
-  if (aipView) { scene.remove(aipView); aipView.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); }); aipView = null; }
-  if (!aip.points.length) return;
-  aipView = new THREE.Group();
-  const up = new THREE.Vector3(0, 6, 0), pts = [], selPts = [];
-  aip.points.forEach((n, i) => n.links.forEach((l) => {
-    if (aipTwoWay(i, l.to) && l.to < i) return;
-    const a = toThree(n.pos).add(up), b = toThree(aip.points[l.to].pos).add(up);
-    (i === aipSel || l.to === aipSel ? selPts : pts).push(a, b);
+function updateNetView(kind) {
+  const n = nets[kind];
+  if (n.view) { scene.remove(n.view); n.view.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); }); n.view = null; }
+  if (!n.points.length) return;
+  n.view = new THREE.Group();
+  n.view.visible = kind === 'AIP' || fopOn || ($('netDlg').open && netKind === kind);
+  const up = new THREE.Vector3(0, 6, 0), byColor = new Map();
+  n.points.forEach((p, i) => p.links.forEach((l) => {
+    if (netTwoWay(n, i, l.to) && l.to < i) return;
+    const c = i === n.sel || l.to === n.sel ? 0xFFC233 : netColor(kind, p.type);
+    if (!byColor.has(c)) byColor.set(c, []);
+    byColor.get(c).push(toThree(p.pos).add(up), toThree(n.points[l.to].pos).add(up));
   }));
-  const lines = (p, color) => {
-    const o = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(p), new THREE.LineBasicMaterial({ color, depthTest: false }));
+  for (const [color, pts] of byColor) {
+    const o = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color, depthTest: false }));
     o.renderOrder = 997;
     o.raycast = () => {};
-    return o;
-  };
-  if (pts.length) aipView.add(lines(pts, 0xB57BFF));
-  if (selPts.length) aipView.add(lines(selPts, 0xFFC233));
-  aip.points.forEach((n, i) => {
-    const m = new THREE.Mesh(new THREE.SphereGeometry(i === aipSel ? 11 : 7, 10, 8), new THREE.MeshBasicMaterial({ color: i === aipSel ? 0xFFFFFF : n.type ? 0x36C5F0 : 0xB57BFF, depthTest: false }));
-    m.position.copy(toThree(n.pos)).add(up);
+    n.view.add(o);
+  }
+  n.points.forEach((p, i) => {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(i === n.sel ? 11 : 7, 10, 8), new THREE.MeshBasicMaterial({ color: i === n.sel ? 0xFFFFFF : netColor(kind, p.type), depthTest: false }));
+    m.position.copy(toThree(p.pos)).add(up);
     m.renderOrder = 998;
     m.raycast = () => {};
-    aipView.add(m);
+    n.view.add(m);
   });
-  scene.add(aipView);
+  scene.add(n.view);
 }
-const aipErr = (t) => { $('aipErr').hidden = !t; if (t) $('aipErr').querySelector('span').textContent = t; };
-function aipInfo() {
-  const n = aip.points.length, p = aipPaths();
-  $('aipInfo').textContent = `${n} of ${aip.caps[0]} nodes · ${p} of ${aip.caps[1]} paths (a two-way link is one path) · ${aip.caps[2]} links at most per node`;
+const netErr = (t) => { $('netErr').hidden = !t; if (t) $('netErr').querySelector('span').textContent = t; };
+function netInfo() {
+  const n = nets[netKind], cap = n.caps;
+  $('netInfo').textContent = netKind === 'AIP'
+    ? `${n.points.length} of ${cap[0]} nodes · ${netPaths(n)} of ${cap[1]} paths (a two-way link is one path) · ${cap[2]} links at most per node`
+    : `${n.points.length} of ${cap[0]} nodes · ${cap[2]} links at most per node · a road is two-way when both ends link to each other`;
 }
-function aipRows() {
-  const box = $('aipList');
+function netRows() {
+  const kind = netKind, n = nets[kind], box = $('netList');
   box.textContent = '';
   const mk = (tag, attrs = {}, text = '') => { const e = document.createElement(tag); Object.assign(e, attrs); if (text) e.textContent = text; return e; };
-  const head = mk('div', { className: 'spt-row spt-head aip' });
+  const head = mk('div', { className: 'spt-row spt-head net ' + kind });
   for (const t of ['#', 'Type', 'x', 'y', 'z', 'Links to', '']) head.append(mk('span', {}, t));
   box.append(head);
-  const redraw = () => { updateAipView(); aipInfo(); };
-  aip.points.forEach((n, k) => {
-    const row = mk('div', { className: 'spt-row aip' + (k === aipSel ? ' sel' : '') });
-    row.onclick = () => { aipSel = k; aipRows(); updateAipView(); };
+  const redraw = () => { updateNetView(kind); netInfo(); };
+  n.points.forEach((p, k) => {
+    const row = mk('div', { className: 'spt-row net ' + kind + (k === n.sel ? ' sel' : '') });
+    row.onclick = () => { n.sel = k; netRows(); updateNetView(kind); };
     const num = (v, set, step = 1) => {
       const i = mk('input', { type: 'number', step, value: Math.round(v * 100) / 100 });
       i.onclick = (e) => e.stopPropagation();
       i.onchange = () => { const x = parseFloat(i.value); if (Number.isFinite(x)) { set(x); redraw(); } };
       return i;
     };
-    const links = n.links.map((l) => `${l.to + 1}${aipTwoWay(k, l.to) ? '' : '→'}(w${l.width})`).join('  ');
+    const typeCell = kind === 'AIP' ? num(p.type, (x) => { p.type = Math.max(0, Math.min(255, Math.round(x))); }) : (() => {
+      const s = mk('select', {});
+      n.lists.forEach((name, t) => s.append(mk('option', { value: t, selected: t === p.type }, `${t}: ${name}`)));
+      s.onclick = (e) => e.stopPropagation();
+      s.onchange = () => { p.type = parseInt(s.value, 10); redraw(); };
+      return s;
+    })();
+    const links = p.links.map((l) => `${l.to + 1}${netTwoWay(n, k, l.to) ? '' : '→'}(w${l.width}${kind === 'FOP' && l.drop ? ` d${l.drop}` : ''})`).join('  ');
     const here = mk('button', { type: 'button', title: 'Move this node to where the middle of the view meets the stage' }, 'Aim');
-    here.onclick = (e) => { e.stopPropagation(); n.pos = viewPoint().map((x) => Math.round(x * 10) / 10); aipRows(); redraw(); };
+    here.onclick = (e) => { e.stopPropagation(); p.pos = viewPoint().map((x) => Math.round(x * 10) / 10); netRows(); redraw(); };
     const del = mk('button', { type: 'button', title: 'Delete this node and its links' }, '×');
     del.onclick = (e) => {
       e.stopPropagation();
-      aip.points.splice(k, 1);
-      for (const m of aip.points) m.links = m.links.filter((l) => l.to !== k).map((l) => ({ to: l.to > k ? l.to - 1 : l.to, width: l.width }));
-      aipSel = -1;
-      aipRows();
+      n.points.splice(k, 1);
+      for (const m of n.points) m.links = m.links.filter((l) => l.to !== k).map((l) => Object.assign({}, l, { to: l.to > k ? l.to - 1 : l.to }));
+      n.sel = -1;
+      netRows();
       redraw();
     };
-    const cells = [mk('span', {}, `${k + 1}`), num(n.type, (x) => { n.type = Math.max(0, Math.min(255, Math.round(x))); }),
-                   num(n.pos[0], (x) => { n.pos[0] = x; }), num(n.pos[1], (x) => { n.pos[1] = x; }), num(n.pos[2], (x) => { n.pos[2] = x; }),
+    const cells = [mk('span', {}, `${k + 1}`), typeCell,
+                   num(p.pos[0], (x) => { p.pos[0] = x; }), num(p.pos[1], (x) => { p.pos[1] = x; }), num(p.pos[2], (x) => { p.pos[2] = x; }),
                    mk('span', { title: 'A number alone is a two-way link; an arrow marks a one-way link out of this node' }, links), mk('span', {}, '')];
     cells[cells.length - 1].append(here, del);
     row.append(...cells);
     box.append(row);
   });
 }
-function aipLinkBoth(a, b, width) {
+// the numbers a new link takes from the dialog: AIP a width; FOP a width and a drop
+const netWidth = () => Math.max(0, Math.min(255, parseInt($('netWidth').value, 10) || 0));
+const netDrop = () => Math.max(0, Math.min(255, parseInt($('netDrop').value, 10) || 0));
+const netLinkAttrs = () => (netKind === 'FOP' ? { width: netWidth(), drop: netDrop() } : { width: netWidth() });
+function netLinkBoth(n, a, b) {
+  const attrs = netLinkAttrs();
   const add = (x, y) => {
-    const ex = aip.points[x].links.find((l) => l.to === y);
-    if (ex) { ex.width = width; return true; }
-    if (aip.points[x].links.length >= aip.caps[2]) return false;
-    aip.points[x].links.push({ to: y, width });
+    const ex = n.points[x].links.find((l) => l.to === y);
+    if (ex) { Object.assign(ex, attrs); return true; }
+    if (n.points[x].links.length >= n.caps[2]) return false;
+    n.points[x].links.push(Object.assign({ to: y }, attrs));
     return true;
   };
   return add(a, b) && add(b, a);
 }
-$('aipBtn').onclick = async () => {
-  await loadAip();
-  $('aipText').textContent = aip.source === 'mod' ? `The AI net this mod keeps for ${title(stageName)}.` : `${title(stageName)}'s own AI net; Save keeps your version in the mod.`;
-  aipErr('');
-  aipRows();
-  aipInfo();
-  $('aipDlg').showModal();
-};
-const aipWidth = () => Math.max(0, Math.min(255, parseInt($('aipWidth').value, 10) || 20));
-$('aipAdd').onclick = () => {
-  if (aip.points.length >= aip.caps[0]) { aipErr(`A net holds at most ${aip.caps[0]} nodes.`); return; }
-  const from = aipSel, node = { pos: viewPoint().map((x) => Math.round(x * 10) / 10), type: Math.max(0, Math.min(255, parseInt($('aipType').value, 10) || 0)), links: [], w: 0, sel: 0, tail: '' };
-  aip.points.push(node);
-  const k = aip.points.length - 1;
-  if (from >= 0 && from < k && !aipLinkBoth(from, k, aipWidth())) {
-    aip.points.pop();
-    for (const m of aip.points) m.links = m.links.filter((l) => l.to !== k);
-    aipErr(`Node ${from + 1} already has ${aip.caps[2]} links.`);
+async function openNet(kind) {
+  netKind = kind;
+  await loadNet(kind);
+  const n = nets[kind], w = NET_WORDS[kind], s = title(stageName);
+  $('netTitle').textContent = w.title;
+  $('netText').textContent = n.source === 'mod' ? `The ${w.noun} this mod keeps for ${s}.` : `${s}'s own ${w.noun}; Save keeps your version in the mod.`;
+  $('netTypeLbl').hidden = kind !== 'AIP';
+  $('netTypeSelLbl').hidden = kind !== 'FOP';
+  $('netDropLbl').hidden = kind !== 'FOP';
+  const sel = $('netTypeSel');
+  sel.textContent = '';
+  n.lists.forEach((name, t) => { const o = document.createElement('option'); o.value = t; o.textContent = `${t}: ${name}`; sel.append(o); });
+  $('netWidth').value = w.width;
+  netErr('');
+  netRows();
+  netInfo();
+  $('netDlg').showModal();
+  updateNetView(kind);       // after the dialog is open: that is what shows the vehicle net
+}
+$('aipBtn').onclick = () => openNet('AIP');
+$('fopBtn').onclick = () => openNet('FOP');
+$('fopOn').checked = fopOn;
+$('fopOn').onchange = (e) => { fopOn = e.target.checked; store.set('fop', fopOn ? '1' : '0'); updateNetView('FOP'); };
+$('netAdd').onclick = () => {
+  const n = nets[netKind];
+  if (n.points.length >= n.caps[0]) { netErr(`A net holds at most ${n.caps[0]} nodes.`); return; }
+  const type = netKind === 'AIP' ? Math.max(0, Math.min(255, parseInt($('netType').value, 10) || 0)) : (parseInt($('netTypeSel').value, 10) || 0);
+  const from = n.sel, node = { pos: viewPoint().map((x) => Math.round(x * 10) / 10), type, links: [], w: 0, sel: 0, tail: '' };
+  n.points.push(node);
+  const k = n.points.length - 1;
+  if (from >= 0 && from < k && !netLinkBoth(n, from, k)) {
+    n.points.pop();
+    for (const m of n.points) m.links = m.links.filter((l) => l.to !== k);
+    netErr(`Node ${from + 1} already has ${n.caps[2]} links.`);
     return;
   }
-  aipSel = k;
-  aipErr('');
-  aipRows();
-  updateAipView();
-  aipInfo();
+  n.sel = k;
+  netErr('');
+  netRows();
+  updateNetView(netKind);
+  netInfo();
 };
-$('aipLink').onclick = () => {
-  const b = parseInt($('aipTo').value, 10) - 1, a = aipSel;
-  if (a < 0) { aipErr('Select a node (click its row) first.'); return; }
-  if (!(b >= 0 && b < aip.points.length) || b === a) { aipErr('Type the number of another node.'); return; }
-  if (!aipLinkBoth(a, b, aipWidth())) { aipErr(`A node holds at most ${aip.caps[2]} links.`); return; }
-  aipErr('');
-  aipRows();
-  updateAipView();
-  aipInfo();
+$('netLink').onclick = () => {
+  const n = nets[netKind], b = parseInt($('netTo').value, 10) - 1, a = n.sel;
+  if (a < 0) { netErr('Select a node (click its row) first.'); return; }
+  if (!(b >= 0 && b < n.points.length) || b === a) { netErr('Type the number of another node.'); return; }
+  if (!netLinkBoth(n, a, b)) { netErr(`A node holds at most ${n.caps[2]} links.`); return; }
+  netErr('');
+  netRows();
+  updateNetView(netKind);
+  netInfo();
 };
-$('aipUnlink').onclick = () => {
-  const b = parseInt($('aipTo').value, 10) - 1, a = aipSel;
-  if (a < 0 || !(b >= 0 && b < aip.points.length)) { aipErr('Select a node, then type the number of the other one.'); return; }
-  aip.points[a].links = aip.points[a].links.filter((l) => l.to !== b);
-  aip.points[b].links = aip.points[b].links.filter((l) => l.to !== a);
-  aipErr('');
-  aipRows();
-  updateAipView();
-  aipInfo();
+$('netUnlink').onclick = () => {
+  const n = nets[netKind], b = parseInt($('netTo').value, 10) - 1, a = n.sel;
+  if (a < 0 || !(b >= 0 && b < n.points.length)) { netErr('Select a node, then type the number of the other one.'); return; }
+  n.points[a].links = n.points[a].links.filter((l) => l.to !== b);
+  n.points[b].links = n.points[b].links.filter((l) => l.to !== a);
+  netErr('');
+  netRows();
+  updateNetView(netKind);
+  netInfo();
 };
-$('aipClear').onclick = () => { aip.points = []; aipSel = -1; aipErr(''); aipRows(); updateAipView(); aipInfo(); };
-async function aipPost(body) {
-  aipErr('');
+$('netClear').onclick = () => {
+  const n = nets[netKind];
+  n.points = [];
+  n.sel = -1;
+  netErr('');
+  netRows();
+  updateNetView(netKind);
+  netInfo();
+};
+async function netPost(body) {
+  const kind = netKind, n = nets[kind];
+  netErr('');
   try {
-    const r = await api('/api/spt', Object.assign({ mod: modNow || '', name: stageName, kind: 'AIP' }, body));
-    aip = r;
-    aipSaved = aipKeep();
-    aipSel = -1;
-    aipRows();
-    updateAipView();
-    aipInfo();
+    const r = await api('/api/spt', Object.assign({ mod: modNow || '', name: stageName, kind }, body));
+    netTake(n, r);
+    netRows();
+    updateNetView(kind);
+    netInfo();
     return r;
-  } catch (e) { aipErr(cleanError(e).text); return null; }
+  } catch (e) { netErr(cleanError(e).text); return null; }
 }
-$('aipSave').onclick = async () => {
-  const r = await aipPost({ points: aip.points });
+$('netSave').onclick = async () => {
+  const r = await netPost({ points: nets[netKind].points });
   if (!r) return;
-  $('aipDlg').close();
-  msg(`Saved an AI net of ${r.points.length} nodes in the mod` + (r.warnings.length ? '. ' + r.warnings.join(' ') : '. Restart the stage to see it'),
+  $('netDlg').close();
+  msg(`Saved a ${NET_WORDS[netKind].noun} of ${r.points.length} nodes in the mod` + (r.warnings.length ? '. ' + r.warnings.join(' ') : '. Restart the stage to see it'),
       { level: r.warnings.length ? 'warn' : 'ok', toast: true });
 };
-$('aipReset').onclick = async () => {
-  const r = await aipPost({ reset: true });
-  if (r) msg("The stage's own AI net is back (the mod's file is gone)", { level: 'ok', toast: true });
+$('netReset').onclick = async () => {
+  const r = await netPost({ reset: true });
+  if (r) msg(`The stage's own ${NET_WORDS[netKind].noun} is back (the mod's file is gone)`, { level: 'ok', toast: true });
 };
-$('aipDlg').addEventListener('close', () => { if (aipKeep() !== aipSaved) loadAip(); });
+$('netDlg').addEventListener('close', () => {      // closed without saving: back to the file's net
+  const n = nets[netKind];
+  if (netKeep(n) !== n.saved) loadNet(netKind); else updateNetView(netKind);
+});
 // A floor over the new rectangle: a prop of the mod (a visible plate and a coll_ slab), placed at the rectangle's center
 $('gdFloor').onclick = async () => {
   if (!modNow) { gdErr('Choose a mod first: the floor is a prop saved in it.'); return; }
@@ -4240,7 +4290,7 @@ showMode();
 // the editor program quits a few seconds after its page closes (a reload asks again at once and keeps it)
 window.addEventListener('pagehide', () => { try { navigator.sendBeacon('/api/bye', '{}'); } catch (e) { /* ignore */ } });
 if (new URLSearchParams(location.search).has('debug')) {
-  window.wotmDebug = { camera, fly, flyStep, setView, select, selectMany, items, listed, dropToGround, nudge, duplicate, remove,
+  window.wotmDebug = { nets, openNet, loadNet, camera, fly, flyStep, setView, select, selectMany, items, listed, dropToGround, nudge, duplicate, remove,
                        undo, buildPatch, posOf, setLook, scene, renderer, gsLights, peds, selectPed, setPeds, addPed, pedFromInputs,
                        redo, resetAll, applyPatch, frameAll, resetSel, gameLine, post, setRunning, applyTheme, refreshList, gameBox,
                        msg, toast, openOutput, closeOutput, showStatus, setGameState, readCheck, gameResult,

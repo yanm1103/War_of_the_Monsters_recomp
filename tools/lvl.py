@@ -2518,6 +2518,60 @@ def build_aip(nodes):
     return b"".join(out)
 
 
+FOP_NODES = 255                 # a points file holds 255 records (the in-game net has room for 256)
+FOP_LINKS = 6
+FOP_TYPES = ("Car street", "Helicopter", "Flying saucer", "Tank and truck")     # the node types 0..3 (3: VEGAS only)
+
+
+def read_fop(path):
+    """A .FOP as the editor's vehicle net: [{"pos": [x, y, z], "type", "links": [{"to", "width", "drop"}], "w", "sel", "tail"}]. The links
+    are directed (a road has one on each end); only the low 16 bits of a link count; `drop` (0x33..0x38, per link) is how far below the
+    path a helicopter may fly, times 10; `tail` keeps the unread bytes 0x39..0x3B as hex. Links to a missing node are dropped."""
+    pts = read_points(path)
+    out = []
+    for p in pts:
+        r = p["raw"]
+        links = [{"to": p["links"][j] & 0xFFFF, "width": r[0x2C + j], "drop": r[0x33 + j]} for j in range(max(0, min(p["nlinks"], FOP_LINKS)))
+                 if 0 <= (p["links"][j] & 0xFFFF) < len(pts)]
+        out.append({"pos": [float(v) for v in p["pos"][:3]], "type": r[0x32], "links": links, "w": p["pos"][3], "sel": r[0x3C],
+                    "tail": r[0x39:0x3C].hex()})
+    return out
+
+
+def build_fop(nodes):
+    """The bytes of a .FOP for those nodes (type 0..3, at most 6 links per node to an existing other node, width and drop 0..255)."""
+    if len(nodes) > FOP_NODES:
+        raise ValueError("a .FOP holds at most %d nodes (it has %d)" % (FOP_NODES, len(nodes)))
+    out = [struct.pack("<II", POINTS_MAGIC, len(nodes))]
+    for k, nd in enumerate(nodes):
+        pos, links, t = nd.get("pos"), nd.get("links") or [], nd.get("type", 0)
+        if not (isinstance(pos, (list, tuple)) and len(pos) == 3 and all(isinstance(v, (int, float)) and math.isfinite(v) for v in pos)):
+            raise ValueError("node %d: the position is three numbers" % (k + 1))
+        if not isinstance(t, int) or isinstance(t, bool) or not 0 <= t < len(FOP_TYPES):
+            raise ValueError("node %d: the type is 0 to %d" % (k + 1, len(FOP_TYPES) - 1))
+        if len(links) > FOP_LINKS:
+            raise ValueError("node %d has %d links; at most %d" % (k + 1, len(links), FOP_LINKS))
+        rec = bytearray(64)
+        struct.pack_into("<4f", rec, 0, pos[0], pos[1], pos[2], float(nd.get("w") or 0.0))
+        struct.pack_into("<i", rec, 0x10, len(links))
+        for j, l in enumerate(links):
+            to, w, dr = l.get("to"), l.get("width", 10), l.get("drop", 0)
+            if not isinstance(to, int) or isinstance(to, bool) or not 0 <= to < len(nodes) or to == k:
+                raise ValueError("node %d: link %d goes to a node that does not exist (or to itself)" % (k + 1, j + 1))
+            for what, v in (("width", w), ("drop", dr)):
+                if not isinstance(v, int) or isinstance(v, bool) or not 0 <= v <= 255:
+                    raise ValueError("node %d: link %d %s is 0 to 255" % (k + 1, j + 1, what))
+            struct.pack_into("<i", rec, 0x14 + 4 * j, to)
+            rec[0x2C + j] = w
+            rec[0x33 + j] = dr
+        rec[0x32] = t
+        tail = bytes.fromhex(nd.get("tail") or "")
+        rec[0x39:0x39 + len(tail[:3])] = tail[:3]
+        rec[0x3C] = int(nd.get("sel") or 0) & 0xFF
+        out.append(bytes(rec))
+    return b"".join(out)
+
+
 def describe_point(ext, p):
     r, n = p["raw"], min(p["nlinks"], 6)
     if ext == "SPT":
