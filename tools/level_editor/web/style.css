@@ -442,6 +442,7 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 #layersMenu .switch { height: 28px; }
 #layersMenu .switch .ic { color: var(--muted); }
 #layersMenu .switch .tx { flex: 1; }
+#layersMenu .help { margin: -2px 0 2px 36px; max-width: 230px; }
 /* a narrow view: the bars keep only their icons (each title says what it does) */
 @container (max-width: 820px) {
   .float .lbl { display: none; }

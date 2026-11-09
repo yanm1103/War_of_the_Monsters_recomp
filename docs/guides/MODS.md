@@ -866,7 +866,7 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
 - **View bars:** on the top left, the tool: **Move** (**G**) and **Turn** (**R**, about the vertical only) for the gizmo, and
   **Snap** with its steps (10 units and 15 degrees by default; they also set the arrow keys' step). On the top right: **Game
   look** (**L**), **Grid** (a line every 100 units, or every snap step when it is smaller, and a stronger one every 1000, at the
-  base of the selection), **Layers** (the Pedestrians layer), the cameras, Focus, Frame all and the shortcuts. The gizmo's arrows
+  base of the selection), **Layers** (Pedestrians and Collision), the cameras, Focus, Frame all and the shortcuts. The gizmo's arrows
   have the colors of the X, Y and Z fields; the selected object's amber outline shows through what stands in front of it, the
   others of a selection (orange) only where they are in view. A deleted object shows as a red dashed box where it was while it is
   selected; with **Changed** on, every deleted one does (a click on the box selects it), and a green box marks each changed object.
@@ -916,6 +916,14 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   move it to another sidewalk. The changes go in the patch's `peds` ("Level patches"); Check lists where each group walks, and a
   group the game would skip is a problem that selects it. In the Objects mode the **Pedestrians** layer (the view's **Layers**
   menu, or **P**) shows the markers faint, not clickable.
+- **Collision layer:** the **Collision** switch of the view's **Layers** menu (or **C**) draws what the game collides with, over
+  the stage and through the walls, with the edits applied (the server applies the patch to a fresh copy of the stage, as Check
+  does, `tools/level_editor/collview.py`, `POST /api/collision`; the layer reads it again a moment after each edit). Triangle
+  collision (the buildings' and a prop's `coll_` meshes) is green, convex hulls (a prop's `hull_` meshes) are cyan, and trigger
+  volumes (the camera's) and parts that animate are orange boxes, drawn as the world box the grid lists them with. A dimmer shade is
+  a broken state of a building (it collides only after the building breaks). What touches the selection keeps its color and the
+  rest fades. The menu says how many paths and triangles are drawn. `python tools/level_editor/test_collision.py` is the
+  server-side test.
 - **Fight HUD dialog:** the fight HUD pictures this stage carries (`tools/lvlhud.py`: bar frame and bars, special icon, BOSS
   label, player numbers, font, pickup ring, hint box, cinema bars, buttons), each row with the disc's picture (**Original**), the
   mod's (**In your mod**, or "Not replaced"), the size, format and file. **Replace…** (or a picture dropped on the row) takes an

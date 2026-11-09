@@ -139,6 +139,8 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
     <div id="layersMenu" class="float menu" hidden role="menu" aria-label="Layers">
       <div class="sec-title">Layers</div>
       <label class="switch" title="Pedestrian groups (violet cones) and their sidewalks (cyan lanes), faint, while you edit objects (P). The Pedestrians mode edits them."><input type="checkbox" id="pedsOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/walk.svg)"></i><span class="tx">Pedestrians</span><kbd>P</kbd></label>
+      <label class="switch" title="What the game collides with, with your changes applied: triangles green (buildings, a prop's coll_ meshes), convex hulls cyan (hull_ meshes), trigger volumes and animated parts as orange boxes; dimmer is a broken state of a building. What touches the selection stays bright."><input type="checkbox" id="collOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/cube-scan.svg)"></i><span class="tx">Collision</span><kbd>C</kbd></label>
+      <div class="help" id="collInfo" hidden></div>
     </div>
     <div id="notes">
       <div id="winNote" class="callout warn" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span id="winText"></span>
@@ -445,6 +447,8 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
         <h3>View</h3>
         <dl class="kl">
           <dt><kbd>L</kbd></dt><dd>Game look</dd>
+          <dt><kbd>P</kbd></dt><dd>Pedestrians layer</dd>
+          <dt><kbd>C</kbd></dt><dd>Collision layer</dd>
           <dt><kbd>1</kbd> / <kbd>2</kbd></dt><dd>Objects / Pedestrians</dd>
         </dl>
         <h3>File</h3>

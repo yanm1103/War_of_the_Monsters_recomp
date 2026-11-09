@@ -11,6 +11,7 @@ import { openTex, texGameChanged } from './tex.js';
 import { openLight, lightGameChanged, lightLookChanged, lightClose } from './light.js';
 import { initArrange } from './arrange.js';
 import { openTerrain } from './terrain.js';
+import { initColl } from './coll.js';
 
 // The GS modulates and blends the bytes as they are: no color management (texture, vertex and interface colors stay raw).
 THREE.ColorManagement.enabled = false;
@@ -257,6 +258,7 @@ let skyViews = { dome: null, clouds: null };   // the models swapped into the sk
 let stageRoot = null, skyRoot = null, env = null;   // env: the stage's fog, background and lights (/api/stage, RST/<STAGE>.MRS)
 // pedestrians (web/peds.js): a layer shown with P; pedSel is the marker the gizmo holds (never together with an object)
 const peds = createPeds({ THREE, scene, toThree, toGame });
+const coll = initColl({ THREE, scene });   // the Collision layer (C): what the game collides with, patch applied (web/coll.js)
 let discPeds = null, pedSel = null, stageGrid = null, stageWalls = 0;   // stageGrid: the disc's collision grid (/api/stage)
 
 function resize() {
@@ -837,6 +839,7 @@ function showUndo() {
   $('save').classList.toggle('dirty', dirty);
   showStatus();
   queueBudget();
+  queueColl();
 }
 
 // ------------------------------------------------------------------ the status bar: last message, save, check, game, counts
@@ -904,6 +907,57 @@ function showBudget() {
           (r.full ? `\nIt ran out: ${r.full}` : ''));
 }
 
+// The Collision layer: the server applies the patch to a fresh copy of the stage and sends the shapes the game collides with
+// (/api/collision, tools/level_editor/collview.py). Asked for when the layer is on, a moment after each edit; the paths that touch the
+// selection keep their color and the rest fade.
+let collOn = store.get('coll', '0') === '1', collTimer = 0, collKey = '', collSeq = 0, collFailed = false;
+function queueColl() {
+  clearTimeout(collTimer);
+  if (!collOn || !stageName) return;
+  collTimer = setTimeout(refreshColl, 600);
+}
+async function refreshColl() {
+  if (!collOn || !stageName) return;
+  const body = { name: stageName, mod: modNow, patch: buildPatch() };
+  const key = JSON.stringify(body);
+  if (key === collKey && coll.loaded) return;
+  const seq = ++collSeq;
+  $('collInfo').textContent = 'Reading the collision…';
+  try {
+    const res = await api('/api/collision', body);
+    if (seq !== collSeq || body.name !== stageName) return;   // a newer edit or another stage came meanwhile
+    coll.set(res);
+    collKey = key;
+    collFailed = false;
+    collHighlight();
+  } catch (e) {
+    if (seq !== collSeq) return;
+    coll.clear();
+    collKey = '';
+    if (!collFailed) msg(`Couldn't read the collision: ${cleanError(e).text}`, { level: 'warn', toast: true });
+    collFailed = true;
+  }
+  showColl();
+}
+function collHighlight() {
+  coll.highlight(isDeleted(sel) ? null : group.filter((it) => it.node.visible).map(gameBox));
+}
+function showColl() {
+  const i = coll.info;
+  $('collOn').checked = collOn;
+  $('collInfo').hidden = !collOn;
+  if (collOn && coll.loaded) {
+    $('collInfo').textContent = `${i.paths} collision paths · ${i.triangles} triangles · ${i.boxes} drawn as boxes`;
+  } else if (collOn && collFailed) $('collInfo').textContent = 'No collision to show';
+}
+function setColl(on) {
+  collOn = on;
+  store.set('coll', on ? '1' : '0');
+  coll.setVisible(on);
+  if (on) refreshColl(); else { clearTimeout(collTimer); collSeq++; }
+  showColl();
+}
+
 // ------------------------------------------------------------------ loading
 async function loadStage(name) {
   $('busyText').textContent = `Loading ${title(name)}…`;
@@ -917,6 +971,7 @@ async function loadStage(name) {
     lightClose();
     stageName = name;
     ui.budget = null; budgetKey = '';
+    coll.clear(); collKey = ''; collSeq++;
     $('keepNote').hidden = true;
     $('winNote').hidden = true;
     winHidden = false;
@@ -1223,6 +1278,7 @@ function showSel() {
   $('tTurn').disabled = pm;   // pedestrian markers only move
   $('tTurn').title = pm ? 'Pedestrian markers only move' : 'Turn tool (R)';
   syncBoxes();
+  if (collOn) collHighlight();
   refreshList();
   showHint();
   hover.dirty = true;
@@ -2881,6 +2937,9 @@ setGrid(store.get('grid', '0') === '1');
 $('grid').onchange = (e) => { setGrid(e.target.checked); store.set('grid', e.target.checked ? '1' : '0'); };
 $('look').onchange = (e) => setLook(e.target.checked);
 $('pedsOn').onchange = (e) => setPeds(e.target.checked);
+$('collOn').onchange = (e) => setColl(e.target.checked);
+coll.setVisible(collOn);
+showColl();
 // the view bar: fly or orbit, focus, the layers menu, the shortcuts
 $('vFly').onclick = () => { if (!fly.on) setView(true); };
 $('vOrbit').onclick = () => { if (fly.on) setView(false); };
@@ -4138,6 +4197,7 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'f') focusSelection();
   else if (k === 'l') setLook(!gameLook);
   else if (k === 'p') { if (editMode === 'objects') setPeds(!pedsOn); }
+  else if (k === 'c') setColl(!collOn);
   else if (k === '1') setMode('objects');
   else if (k === '2') setMode('peds');
   else if (k === 'escape') select(null);
@@ -4186,7 +4246,7 @@ if (new URLSearchParams(location.search).has('debug')) {
                        msg, toast, openOutput, closeOutput, showStatus, setGameState, readCheck, gameResult,
                        setMode, turnBy, showSummary, secOf, SECTIONS, get mode() { return modeNow(); },
                        refreshPedList, setPedLive, slideInput, slideDone, showPed, pedOfEntry, openHudDialog, chooseMod,
-                       get pedsLayer() { return pedsOn; },
+                       get pedsLayer() { return pedsOn; }, coll, setColl, refreshColl, get collOn() { return collOn; },
                        ask, askUnsaved, unsavedCount, switchMod, setMod, moveTo, fillMods, pickMod, openSettings, checkPaths, showPaths,
                        showWinner, winnerOf, checkFromServer, init, addProp, showPropMenu, openImport, doImport, ipRead, loadPropModels, openTerrainDlg,
                        get propRecs() { return propRecs; }, get propModels() { return propModels; },

@@ -49,6 +49,7 @@ import pedsapi  # noqa: E402 - the pedestrians (web/peds.js)
 import lvlprop  # noqa: E402 - new props from Blender (Import .glb)
 import lvlterrain  # noqa: E402 - a prop from a heightmap (New terrain)
 import lvlorig  # noqa: E402 - an original object of another stage as a prop (Ctrl+P)
+import collview  # noqa: E402 - the stage's collision shapes for the Collision layer
 
 WEB = os.path.join(HERE, "web")
 CONFIG = os.path.join(os.path.expanduser("~"), ".wotm_level_editor.json")
@@ -559,6 +560,22 @@ def budget_patch(disc, name, patch, mod_dir=None, pts_root=None):
             "interactives": {"used": int(lp.interactives_used), "total": lvl.INTERACTIVES,
                              "disc": int(sum(lp.interactives_before))},
             "skipped": int(lp.stats.get("skipped", 0)), "full": full}
+
+
+def collision_patch(disc, name, patch, mod_dir=None):
+    """The collision the game would have with the patch (objects, then props): boxes, hulls and triangles (collview.py)."""
+    root = stage_root(disc, name)
+    with contextlib.redirect_stdout(io.StringIO()):
+        st = lvl.Stage(name, root)
+        lp = lvl.LevelPatch(st)
+        lp.apply(patch)
+        if mod_dir and patch.get("props"):
+            try:
+                lp.apply_props(patch, mod_dir)
+            except lvl.PatchError:
+                pass                    # the arena is full: what got in is drawn
+        st.grid = lvl.Grid(st.img, st.grid.addr)
+    return collview.collision_view(st)
 
 
 def bad_mod(mod):
@@ -1593,6 +1610,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/api/budget":      # the status bar's arena and slots meters (nothing is saved)
                 return self.send(200, budget_patch(cfg["disc"], base_of(cfg, b["name"]), b["patch"], mod_folder(cfg, b.get("mod")),
                                                    points_root(cfg, b["name"])))
+            if self.path == "/api/collision":   # the Collision layer: the shapes the game collides with, patch applied
+                return self.send(200, collision_patch(cfg["disc"], base_of(cfg, b["name"]), b["patch"], mod_folder(cfg, b.get("mod"))))
             if self.path == "/api/paths":       # Settings' badges for what is typed (nothing is saved)
                 return self.send(200, path_states(b))
             if self.path == "/api/props/import":   # Import .glb: a new prop in the mod, built for the open stage

@@ -14,10 +14,9 @@ Ideias para facilitar a vida de quem faz mod (o que o editor ainda não tem; cad
 5. **Prefab e inclinação:** salvar a seleção como prefab (posições relativas ao centro, com a fase de origem de cada objeto) para colar em outra fase; girar props em X e Y (o patch só tem `heading`, então pede também o `wotm_levelpatch.inc`).
 6. **Rede de veículos (`.FOP`):** o mesmo diálogo do `.AIP`, com os tipos 0 a 3 (rua, helicóptero, disco voador, tanque) e o campo `drop`; é o único arquivo de pontos sem editor.
 7. **Teste no jogo configurável:** escolher monstro, modo e CPUs, e "Testar daqui" (ponto de partida na câmera).
-8. **Colisão na vista:** botão que desenha caixas, hulls e `coll_*` (dados de `lvl.py collision`).
-9. **Editar o `stage.json` depois de criado:** nome, narrador, RANDOM, base.
-10. **Precisam do runtime:** pontos de vida das construções originais, tipo do pickup (carro estacionado para carro no trânsito, `id2` bit 0), escala por objeto.
-11. **Menores:** régua entre dois pontos, captura de tela, "Empacotar mod" em zip, minimapa; reabrir o diálogo de terreno com os números e o PNG que ficaram na pasta do prop (`terrain.json`, `heightmap.png`).
+8. **Editar o `stage.json` depois de criado:** nome, narrador, RANDOM, base.
+9. **Precisam do runtime:** pontos de vida das construções originais, tipo do pickup (carro estacionado para carro no trânsito, `id2` bit 0), escala por objeto.
+10. **Menores:** régua entre dois pontos, captura de tela, "Empacotar mod" em zip, minimapa; reabrir o diálogo de terreno com os números e o PNG que ficaram na pasta do prop (`terrain.json`, `heightmap.png`).
 
 ## Fora da ordem (até o dono escolher)
 - **4 jogadores sempre a 60:** com 4 vistas, ~80% dos quadros saem a 60 e o resto a 30; quem segura é o EE (mediana ~14 ms, p90 ~17,5 ms). Candidatos, pelo perfil das amostras do EE (`PS2X_HOSTPROF=2` + `_RAW=1`, resolvido pelo `wotm.map` do mesmo build): o envoltório do VU0 traduzido (`executeVU0Microprogram` copia ~1 KB de estado em cada sentido, ~3%) e o `checkpointDue` fora de linha (~3%), ambos costura do PS2Recomp; a montagem do pacote do VU1 que o `wotm.exe` descarta (`pktAddVu1ObjAsm`, ~4%, arriscado: item G3 de `723b110:docs/investigacoes/2026-10-23/performance_vistas.md`). Na janela, as partículas ainda no modo imediato do rlgl (~0,6 ms por vista). Comparar alternando na mesma corrida (a luta IA x IA não se repete).
