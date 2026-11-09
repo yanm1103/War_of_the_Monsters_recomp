@@ -21,7 +21,7 @@ const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) +
 // [foreground token, background token, minimum]
 const PAIRS = [['fg', 'surface-1', 4.5], ['fg-2', 'surface-1', 4.5], ['muted', 'surface-1', 4.5], ['muted', 'surface-2', 4.5], ['muted', 'bg', 4.5],
   ['accent-text', 'surface-1', 4.5], ['ok', 'surface-1', 4.5], ['warn', 'surface-1', 4.5], ['danger', 'surface-1', 4.5],
-  ['control', 'input-bg', 3], ['control', 'surface-1', 3]];
+  ['control', 'input-bg', 3], ['control', 'surface-1', 3], ['changed', 'bg', 3]];
 let bad = 0;
 for (const [name, t] of Object.entries(sets)) {
   for (const [a, b, min] of PAIRS) {

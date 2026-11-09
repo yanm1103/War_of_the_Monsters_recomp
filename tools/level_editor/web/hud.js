@@ -176,6 +176,7 @@ async function replace(r, every, file = null) {
     say(`${r.label}: replaced in mod "${ctx.mod}"` + (every && r.every > 1 ? ` on ${r.every} stages` : ''), 'ok');
   } catch (e) { say(`Couldn't replace ${r.label}: ${e.message}`, 'err'); }
   await refresh();
+  if (ctx.changed) ctx.changed();      // the view draws the mod's picture
 }
 
 async function remove(r, every) {
@@ -189,6 +190,7 @@ async function remove(r, every) {
     say(`${r.label}: the disc's picture is back`, 'ok');
   } catch (e) { say(`Couldn't remove ${r.label}: ${e.message}`, 'err'); }
   await refresh();
+  if (ctx.changed) ctx.changed();
 }
 
 export async function openHud(opts) {

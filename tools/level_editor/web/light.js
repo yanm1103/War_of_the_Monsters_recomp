@@ -206,6 +206,8 @@ function lightRow(i) {
   };
   const whole = mkReset({ name: n, focus: () => pc, show: () => hueDiffers(i) || pctDiffers(i) || hDiffers(i) || pDiffers(i),
     value: () => `${toHex(split(o().rgb).hue)}, ${split(o().rgb).pct} %, ${r1(o().h)}°, ${r1(o().p)}°`, apply: () => { cur.lights[i] = clone(o()); } }, lightRs);
+  whole.classList.add('lt-rs-all');      // a text button: the circular arrows beside it reset one number
+  whole.append('Reset light');
   const cRs = mkReset({ name: `${n} color`, focus: () => color, show: () => hueDiffers(i), value: () => toHex(split(o().rgb).hue),
     apply: () => { c().rgb = mixRgb(i, 'o', 'c'); } }, lightRs);
   return el('div', { class: 'lt-light' }, el('div', { class: 'lt-lh' }, el('b', {}, `Light ${i + 1}`), whole, cRs, color),

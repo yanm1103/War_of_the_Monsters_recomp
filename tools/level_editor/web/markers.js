@@ -8,7 +8,7 @@ export const isNet = (kind) => kind === 'AIP' || kind === 'FOP';
 // kind -> the rail's mode, the words, the icon of the mode and of its rows, the key that picks the mode
 export const LAYERS = {
   SPT: { mode: 'spt', key: '3', title: 'Start points', noun: 'start points', one: 'start point', many: 'start points', icon: 'flag-outline', hint: 'where the monsters appear' },
-  PUP: { mode: 'pup', key: '4', title: 'Power-ups', noun: 'power-ups', one: 'power-up', many: 'power-ups', icon: 'heart-plus-outline', hint: 'the pickups lying in the stage' },
+  PUP: { mode: 'pup', key: '4', title: 'Power-ups', noun: 'power-ups', one: 'power-up', many: 'power-ups', icon: 'heart-plus-outline', hint: 'the power-ups lying in the stage' },
   AIP: { mode: 'aip', key: '5', title: 'AI net', noun: 'AI net', one: 'AI net node', many: 'AI net nodes', icon: 'graph-outline', hint: 'the paths the computer monsters walk' },
   FOP: { mode: 'fop', key: '6', title: 'Vehicle net', noun: 'vehicle net', one: 'vehicle net node', many: 'vehicle net nodes', icon: 'road-variant', hint: 'the roads and flight paths of the vehicles' },
 };

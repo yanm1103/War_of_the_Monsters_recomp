@@ -59,7 +59,7 @@ const edge = spawn(browser, ['--headless=new', `--remote-debugging-port=${DBG}`,
 let failures = 0;
 const done = (code) => {
   killTree(server); killTree(edge);
-  setTimeout(() => { if (!args.includes('--keep')) fs.rmSync(tmp, { recursive: true, force: true }); process.exit(code); }, 500);
+  setTimeout(() => { if (!args.includes('--keep')) try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch { /* Edge still holds its profile: the exit code comes from the checks */ } process.exit(code); }, 500);
 };
 process.on('uncaughtException', (e) => { console.error(e); done(1); });
 
@@ -103,7 +103,10 @@ async function until(expr, tries = 40, gap = 250) {
   for (let i = 0; i < tries; i++) { if (await ev(expr).catch(() => false)) return true; await sleep(gap); }
   return false;
 }
+// --only <text>: only the checks whose name has the text (the rest of the page is loaded as usual); for trying one out
+const only = args.includes('--only') ? args[args.indexOf('--only') + 1] : '';
 async function check(name, fn) {
+  if (only && !name.includes(only)) return;
   try { await fn(); console.log('ok    ' + name); } catch (e) {
     if (KNOWN.has(name)) { console.log('known ' + name + ' (' + String(e.message).slice(0, 120) + ')'); return; }
     failures++; console.log('FAIL  ' + name + ': ' + String(e.message).slice(0, 300));
@@ -532,6 +535,45 @@ await check('Move my changes to another mod keeps a draft that is in no mod yet'
   must(await until(`document.getElementById('busy').hidden && ${D}.items().length > 20 && ${D}.unsavedCount() === 0`, 240, 500), 'the stage did not open again clean');
   must(await ev(`${D}.modNow`) === 'smoke', 'the mod in use is ' + await ev(`${D}.modNow`));
 });
+await check('a marker file that fails to save keeps the draft and stops Save and switch; a saved draft moved to another mod leaves nothing unsaved', async () => {
+  await ev(`${D}.layersReady()`);
+  await goMode('spt');
+  const n0 = await layerN('SPT');
+  await ev(`document.getElementById('mkAdd').click()`);
+  await goMode('objects');
+  await ev(`window.__fetch = window.fetch; window.fetch = (u, o) => String(u).startsWith('/api/spt') && o && o.method === 'POST'
+    ? Promise.resolve(new Response(JSON.stringify({ error: 'disk full' }), { status: 500, headers: { 'Content-Type': 'application/json' } })) : window.__fetch(u, o)`);
+  const other = await ev(`[...document.getElementById('stage').options].map((o) => o.value).find((v) => v !== ${JSON.stringify(stage)})`);
+  await ev(`(() => { const s = document.getElementById('stage'); s.value = ${JSON.stringify(other)}; s.dispatchEvent(new Event('change')); })()`);
+  await answer('save');
+  must(await until(`document.getElementById('save').getAttribute('aria-busy') === null`, 60), 'Save and switch never finished: ' + await ev("document.getElementById('status').innerText"));
+  await ev(`window.fetch = window.__fetch`);
+  must(await ev(`document.getElementById('stage').value`) === stage, 'the editor went to the other stage after a failed save');
+  must(await layerN('SPT') === n0 + 1 && await ev(`${D}.layersDirty()`), 'the draft is gone after the failed save');
+  const saved = await ev(`${D}.post('save')`);
+  must(saved === true, 'a later Save, with the disk back, did not finish: ' + saved);
+  must(await ev(`${D}.unsavedCount()`) === 0, 'something stays unsaved after Save');
+  await goMode('spt');                            // the file goes away again
+  await ev(`document.getElementById('mkReset').click()`);
+  await answer('go');
+  must(await until(`${D}.lay('SPT').points.length === ${n0}`, 40), 'Back to the disc\'s did not bring the stage\'s own points');
+  // a layer draft moved to a mod and saved there: the stage is not left "Unsaved changes"
+  fs.mkdirSync(path.join(mods, 'smoke3'), { recursive: true });
+  await ev(`document.getElementById('mkAdd').click()`);
+  await ev(`${D}.moveTo('smoke3', false)`);
+  await sleep(500);
+  must(await ev(`${D}.post('save')`) === true, 'Save into the other mod did not finish');
+  must(await ev(`${D}.unsavedCount()`) === 0 && await ev(`!${D}.dirty`), 'Save left unsaved changes: ' + await ev(`${D}.unsavedCount()`));
+  must(await ev(`document.title.endsWith('*')`) === false, 'the title keeps its asterisk');
+  await ev(`document.getElementById('mkReset').click()`);
+  await answer('go');
+  must(await until(`${D}.lay('SPT').points.length === ${n0}`, 40), 'the other mod\'s file did not go');
+  await ev(`${D}.moveTo('smoke', false)`);
+  await sleep(500);
+  await goMode('objects');
+  await ev(`${D}.loadStage(${JSON.stringify(stage)})`);
+  must(await until(`document.getElementById('busy').hidden && ${D}.items().length > 20 && ${D}.unsavedCount() === 0`, 240, 500), 'the stage did not open again clean');
+});
 await check('the Net links: a node shows its links, Link joins two nodes both ways, Two-way and the cut work from the right panel', async () => {
   await goMode('aip');
   must(await until(`${D}.lay('AIP').points.length > 2`, 80), 'the stage has too few AI net nodes');
@@ -950,6 +992,8 @@ await check('the Link tool in the vehicle net: a new link takes the Width and th
   await ev(`${D}.linkNodes(${a}, ${b}, false)`);
   const Q = await pts('FOP');
   must(Q[a].links.some((l) => l.to === b && l.width === 12 && l.drop === 26) && Q[b].links.some((l) => l.to === a && l.width === 12 && l.drop === 26), 'the new link does not take 12 and 26: ' + JSON.stringify([a, b, Q[a].links, Q[b].links, await ev(`[document.getElementById('mkErr').textContent, ${D}.markerCtx().kind, ${D}.markerCtx().sel, ${D}.lay('FOP').caps, ${D}.linkTool.on]`)]));
+  must(await ev(`[...document.querySelectorAll('#mkLinkList li .to')].length > 0 && [...document.querySelectorAll('#mkLinkList li .to')].every((e) => e.scrollWidth <= e.clientWidth + 1)`), 'the node a link goes to is cut off in the right panel');
+  await shot('vehicle_net_links');
   await ev(`${D}.setLinkTool(false)`);
   must(await ev(`document.getElementById('mkNewType').value === '${Q[b].type}'`), 'the type of the next new node does not follow the selected node: ' + await ev(`document.getElementById('mkNewType').value`));
   const n0 = await layerN('FOP');

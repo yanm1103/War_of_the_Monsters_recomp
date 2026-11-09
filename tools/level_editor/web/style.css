@@ -755,10 +755,13 @@ button.small-btn { height: 22px; padding: 0 8px; font-size: 12px; flex: none; }
 .mk-links li { display: grid; grid-template-columns: minmax(0, 1fr) 56px auto auto; gap: 6px; align-items: center; }
 .mk-links li.in { grid-template-columns: minmax(0, 1fr); color: var(--fg-2); font-size: 12px; }
 .mk-links li.inlink { grid-template-columns: minmax(0, 1fr) auto; }
-.mk-links li.fop { grid-template-columns: minmax(0, 1fr) 52px 52px auto auto; }
+/* a vehicle net link has two more numbers: the node it goes to and the cut button take the first row, the numbers and Two-way the second */
+.mk-links li.fop { grid-template-columns: 52px 52px minmax(0, 1fr) auto; }
+.mk-links li.fop > .to { grid-column: 1 / 4; grid-row: 1; }
+.mk-links li.fop > .icon { grid-column: 4; grid-row: 1; }
 .mk-links .to { justify-content: flex-start; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px; }
 .mk-links input[type=number] { min-width: 0; width: 100%; padding: 0 4px; }
-.mk-links .two { display: inline-flex; gap: 4px; align-items: center; font-size: 11px; color: var(--fg-2); cursor: pointer; }
+.mk-links .two { display: inline-flex; gap: 4px; align-items: center; min-height: 24px; font-size: 12px; color: var(--fg-2); cursor: pointer; }
 .mk-links .none { color: var(--muted); font-size: 12px; display: block; }
 .mk-linkadd { display: flex; gap: 6px; }
 .mk-linkadd > button { flex: 1; justify-content: flex-start; }
@@ -874,6 +877,7 @@ button.small-btn { height: 22px; padding: 0 8px; font-size: 12px; flex: none; }
 #lightDlg .lt-row > .lt-rs.lt-rs { grid-column: 4; }
 #lightDlg .lt-rs { width: 24px; height: 24px; min-width: 24px; padding: 0; color: var(--fg-2); }
 #lightDlg .lt-rs .ic { width: 16px; height: 16px; }
+#lightDlg .lt-rs.lt-rs-all { width: auto; padding: 0 8px 0 4px; gap: 2px; font-size: 12px; }
 #lightDlg .lt-rs[hidden] { display: none; }
 #lightDlg .lt-lab { user-select: none; }
 #lightDlg .lt-dirhint { margin-top: 8px; }
@@ -897,9 +901,10 @@ button.small-btn { height: 22px; padding: 0 8px; font-size: 12px; flex: none; }
 .mk-label.hot { color: var(--accent-text); border-color: var(--accent-text); border-left-color: var(--c, var(--accent-text)); z-index: 2; }
 /* a marker as the view draws it: the rows of the lists and the legend (app.js shapeSwatch); --c is its color */
 .shape { display: inline-block; width: 10px; height: 10px; flex: none; background: var(--c); }
-.shape.ball { border-radius: 50%; }
+.shape.ball { border-radius: 50%; box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 45%, transparent); }
 .shape.cube { border-radius: 2px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 45%, transparent); }
-.shape.cone { width: 11px; height: 12px; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.shape.cone { position: relative; width: 11px; height: 12px; clip-path: polygon(50% 0, 100% 100%, 0 100%); background: color-mix(in srgb, var(--fg) 45%, transparent); }
+.shape.cone::before { content: ""; position: absolute; left: 2px; right: 2px; top: 3.5px; bottom: 1.5px; background: var(--c); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 :is(#list, #pedList, #mkList) li.it > .k:has(.shape) { display: inline-flex; align-items: center; justify-content: center; }
 .legend .shape { margin: 0 3px; }
 /* the minimap (minimap.js): lower right of the view; the canvas is 220 x 220 whatever its size on the screen */
@@ -941,7 +946,8 @@ dialog.dock .dlg-foot { padding: 10px 16px; }
 /* forced colors (Windows high contrast): focus and the "on" state are drawn with outlines, which the system keeps */
 @media (forced-colors: active) {
   :focus-visible { outline: 2px solid Highlight !important; outline-offset: 1px; }
-  .tgl:has(> input:checked), .chip:has(input:checked), .rtab.on, #rail > button.on, button.toggle.on, .seg > button.on { outline: 2px solid Highlight; outline-offset: -2px; }
+  .tgl:has(> input:checked), .chip:has(input:checked), .rtab.on, #rail > button.on, button.toggle.on, .seg > button.on, #mkLinkTool.on, #mkLink.on { outline: 2px solid Highlight; outline-offset: -2px; }
+  .mk-state .dot, #status .dot, .chip .dot, #rail > button.mode.dirty::after { forced-color-adjust: none; border: 1px solid CanvasText; }
   .switch input:checked + .track { outline: 2px solid Highlight; }
 }
 

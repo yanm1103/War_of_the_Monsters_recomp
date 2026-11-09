@@ -799,16 +799,49 @@ function removeCopy(item) {
   for (const a of item.attached) if (a.copy) removeCopy(a);
 }
 
+// ------------------------------------------------------------------ the mod's pictures in the view
+// The stage's textures take the mod's PNG where it has one (Textures, Fight HUD and sky) and the disc's picture back where it has not.
+// A texture keeps the disc's image the first time it is swapped. What draws the texture follows: the objects, the sky, the props.
+const texOrig = new WeakMap();
+let picGen = 0;
+async function syncPictures() {
+  const gen = ++picGen, name = stageName, mod = modNow;
+  if (!name || !stageTex.size) return;
+  let rows;
+  try { rows = (await api(`/api/texs?stage=${encodeURIComponent(name)}&mod=${encodeURIComponent(mod || '')}`)).rows || []; } catch (e) { return; }
+  for (const r of rows) {
+    const t = r.file === 'tex' ? stageTex.get(r.tex) : null;
+    if (!t) continue;
+    if (!texOrig.has(t)) texOrig.set(t, t.image);
+    const orig = texOrig.get(t);
+    let img = orig;
+    if (r.mod) {
+      try {
+        const res = await fetch(`/api/hudimg?src=mod&stage=${encodeURIComponent(name)}&mod=${encodeURIComponent(mod)}&png=${encodeURIComponent(r.png)}&t=${Date.now().toString(36)}`, { cache: 'no-store' });
+        if (!res.ok) continue;
+        const blob = await res.blob();
+        img = typeof ImageBitmap !== 'undefined' && orig instanceof ImageBitmap
+          ? await createImageBitmap(blob, { imageOrientation: 'flipY', premultiplyAlpha: 'none', colorSpaceConversion: 'none' })
+          : await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = URL.createObjectURL(blob); });
+      } catch (e) { continue; }
+    }
+    if (gen !== picGen || name !== stageName) return;      // a newer sync or another stage took over
+    if (t.image !== img) { t.image = img; t.dispose(); t.needsUpdate = true; }
+  }
+}
+
 // ------------------------------------------------------------------ new props
 // The mod's models (/api/props) and, for this stage's, the preview's scene; its materials name the stage texture (tex<id>)
+let propLoadGen = 0;       // a load that is no longer the newest writes into its own map and leaves the view's alone
 async function loadPropModels(mod) {
-  propModels = new Map();
+  const gen = ++propLoadGen, map = new Map();
+  propModels = map;
   if (!mod) { refreshSkySelects(); return; }
   let list = [];
   try { list = (await api(`/api/props?mod=${encodeURIComponent(mod)}`)).props || []; } catch (e) { msg(`Couldn't list the props of mod "${mod}": ${cleanError(e).text}`, { level: 'warn' }); }
   await Promise.all(list.map(async (p) => {
     const pm = { info: p, scene: null };
-    propModels.set(p.model, pm);
+    map.set(p.model, pm);
     if (p.error || !p.preview || p.stage !== baseOf(stageName)) return;
     try {
       const gltf = await new GLTFLoader().loadAsync(`/api/propglb?mod=${encodeURIComponent(mod)}&model=${encodeURIComponent(p.model)}`);
@@ -823,7 +856,7 @@ async function loadPropModels(mod) {
       pm.scene = gltf.scene;
     } catch (e) { p.error = `its preview does not load (${cleanError(e).text})`; }
   }));
-  refreshSkySelects();      // the models are new: what lists them follows, whoever asked for them
+  if (gen === propLoadGen) refreshSkySelects();      // the models are new: what lists them follows, whoever asked for them
 }
 // the sky selects follow the mod's models (not while one is open)
 function refreshSkySelects() {
@@ -1236,6 +1269,7 @@ async function loadStage(name) {
       if (!o.isMesh) return;
       for (const m of [].concat(o.material)) { const t = /^tex(\d+)$/.exec(m.name || ''); if (t && m.map) stageTex.set(+t[1], m.map); }
     });
+    syncPictures();      // the mod's pictures over the disc's
     propRecs = [];
     propRoot = new THREE.Group();
     propRoot.name = 'new props';
@@ -2557,6 +2591,7 @@ canvas.addEventListener('pointerup', (e) => {
   // are scenery there, so the click never falls through to them.
   if (layerOf()) {
     const L = lay(layerOf()), link = linkOn(e.ctrlKey || e.metaKey);
+    if (link && e.altKey) { const m = pickMarker(e); if (m >= 0) selectMarker(m); return; }      // Alt+click: select that node, tool still on
     if (link && L.sel >= 0) { linkClick(e); return; }      // the Link tool: the click joins or cuts, or puts a new node on the ground
     if (!link && (e.shiftKey || e.ctrlKey)) return;
     const m = pickMarker(e);
@@ -2717,7 +2752,11 @@ async function postNow(kind, save, extra) {
   }
   const mod = modNow;
   if (writes && lightDirty()) await lightSave();       // the open Light and fog panel's file goes with the stage's
-  if (writes && layersDirty()) await saveLayers();     // so do the marker layers' (start points, power-ups, the nets): an error in one shows in its panel and the patch still saves
+  // so do the marker layers' (start points, power-ups, the nets): an error in one shows in its panel. A plain Save still writes the patch,
+  // but nothing goes on from a layer that did not save (Test, Reload, and the switches that drop the draft read the false)
+  let layersOk = true, layersWrote = false;
+  if (writes && layersDirty()) { layersWrote = true; layersOk = await saveLayers(); }
+  if (!layersOk && kind !== 'save') return false;
   const { here, ...rest } = extra;       // here: Test from here / Reload from here (the view's aim as the start point)
   const body = Object.assign({ name: stageName, mod, patch: buildPatch(), save, since: writes ? fileStamp : undefined }, testBody(here ? aimStart() : null), rest);
   const wasRunning = game.running;
@@ -2760,7 +2799,12 @@ async function postNow(kind, save, extra) {
                   toast: bad ? false : kind === 'save' });
       if (bad) toast(`Saved, but the check found ${chk.n} ${chk.n === 1 ? 'problem' : 'problems'}`, 'warn', ['Show', () => openOutput('check')]);
     } else if (kind === 'save') {
-      msg(`Nothing to save: your mod has no changes for ${title(stageName)}`, { toast: true });
+      // the server wrote no stage file: the patch is what the mod already has (an empty patch moved to a mod without a file, for one)
+      savedJson = JSON.stringify(body.patch);
+      if (res.stamp !== undefined) fileStamp = res.stamp;
+      dirty = JSON.stringify(buildPatch()) !== savedJson;
+      if (!dirty) removeDraft(); else queueDraft();
+      if (!layersWrote) msg(`Nothing to save: your mod has no changes for ${title(stageName)}`, { toast: true });
     }
     if (res.launched) {
       game.seen = ''; game.stage = stageName; game.result = null;
@@ -2775,7 +2819,7 @@ async function postNow(kind, save, extra) {
     }
     showUndo();
     refreshList();
-    return true;
+    return layersOk;
   } catch (e) {
     game.pending = false;
     if (kind === 'test' || kind === 'reload') setGameState(wasRunning ? 'running' : 'closed');
@@ -3078,6 +3122,7 @@ function setMod(v, keepDrafts = false) {
   cfg.mod = v;
   winHidden = false;
   loadSpt(keepDrafts);      // each mod keeps its own marker files
+  syncPictures();
   fillMods();
   showWinner();
   api('/api/config', { mod: v }).catch((err) => msg(`Couldn't keep the mod in the settings: ${cleanError(err).text}`, { level: 'err' }));
@@ -4697,7 +4742,7 @@ $('mkType').onchange = () => markerEdit(`change the ${layerOf() === 'SPT' ? 'lis
 $('mkTypeNum').onchange = () => markerEdit(`change the type of ${markerLabel()}`, (p) => { p.type = clamp255($('mkTypeNum').value); });
 $('mkFlag').onchange = () => markerEdit(`change ${markerLabel()}`, (p) => {
   if (layerOf() === 'SPT') p.snap = $('mkFlag').checked;
-  else p.flags = $('mkFlag').checked ? (p.flags & 7 ? p.flags : 7) : 0;
+  else p.flags = $('mkFlag').checked ? p.flags | 1 : p.flags & ~1;      // only the shadow bit: the others change how the game settles the power-up
 });
 $('mkRotL').onclick = () => markerEdit(`turn ${markerLabel()}`, (p) => { p.heading = r1(wrapDeg(p.heading + 90)); });
 $('mkRotR').onclick = () => markerEdit(`turn ${markerLabel()}`, (p) => { p.heading = r1(wrapDeg(p.heading - 90)); });
@@ -5391,9 +5436,9 @@ $('nsOk').onclick = async () => {
   const base = $('nsBase').value;
   // the patch carries the base's handles: it comes along only when the open stage has that base
   const withPatch = $('nsCopy').checked && baseOf(stageName) === base;
-  if (isDirty() && !withPatch) {
-    // the open stage is replaced by the new one: its changes go nowhere unless they are saved first
-    const v = await new Promise((r) => askUnsaved(`${title(stageName)} has ${changesText(unsavedCount())}, and the new stage does not take them.`, 'Save and create', r));
+  if ((isDirty() && !withPatch) || layersDirty() || lightDirty()) {
+    // the open stage is replaced by the new one: its changes go nowhere unless they are saved first (the copy carries the patch, not the marker drafts or the light panel)
+    const v = await new Promise((r) => askUnsaved(`${title(stageName)} has ${changesText(unsavedCount())}, and the new stage does not take ${withPatch ? 'the ones in Light and fog, start points, power-ups and nets' : 'them'}.`, 'Save and create', r));
     if (v === 'cancel' || (v === 'save' && !(await post('save')))) return;
   }
   let res;
@@ -5521,7 +5566,7 @@ $('ipName').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); do
 // the Fight HUD dialog (web/hud.js): it writes into the mod at once; its messages show as toasts over it
 function openHudDialog() {
   if (!stageName) return;
-  openHud({ stage: stageName, title: title(stageName), titleOf: title, mod: modNow, api, log, msg, ask,
+  openHud({ stage: stageName, title: title(stageName), titleOf: title, mod: modNow, api, log, msg, ask, changed: syncPictures,
             mods: () => modList, newMod: NEW_MOD, chooseMod,
             game: () => ({ running: game.state === 'running', dirty }), reload: reloadGame });
 }
@@ -5561,7 +5606,7 @@ $('lightBtn').onclick = () => openTool(() => {
 // the Textures dialog (web/tex.js): every picture of the stage; it writes into the mod at once, like the HUD's
 $('texBtn').onclick = () => {
   if (!stageName) return;
-  openTex({ stage: stageName, title: title(stageName), mod: modNow, api, msg, ask, mods: () => modList, newMod: NEW_MOD, chooseMod,
+  openTex({ stage: stageName, title: title(stageName), mod: modNow, api, msg, ask, changed: syncPictures, mods: () => modList, newMod: NEW_MOD, chooseMod,
             scene: () => [...stageTex.keys()], game: () => ({ running: game.state === 'running', dirty }), reload: reloadGame });
 };
 $('drop').onclick = dropToGround;
@@ -5917,7 +5962,7 @@ showUndoButtons();
 // the editor program quits a few seconds after its page closes (a reload asks again at once and keeps it)
 window.addEventListener('pagehide', () => { try { navigator.sendBeacon('/api/bye', '{}'); } catch (e) { /* ignore */ } });
 if (new URLSearchParams(location.search).has('debug')) {
-  window.wotmDebug = { aimStart, nets, selectMarker, addMarker, loadLayer, saveLayers, layersDirty, dirtyLayers, layerUndo, layerRedo, lay, get layer() { return layerOf(); }, camera, fly, flyStep, setView, select, selectMany, items, listed, dropToGround, nudge, duplicate, remove,
+  window.wotmDebug = { syncPictures, aimStart, nets, selectMarker, addMarker, loadLayer, saveLayers, layersDirty, dirtyLayers, layerUndo, layerRedo, lay, get layer() { return layerOf(); }, camera, fly, flyStep, setView, select, selectMany, items, listed, dropToGround, nudge, duplicate, remove,
                        undo, buildPatch, posOf, setLook, scene, renderer, gsLights, peds, selectPed, setPeds, addPed, pedFromInputs,
                        redo, resetAll, applyPatch, frameAll, resetSel, gameLine, post, setRunning, applyTheme, refreshList, gameBox,
                        msg, toast, openOutput, closeOutput, showStatus, setGameState, readCheck, gameResult,

@@ -57,7 +57,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
     <button id="modePeds" class="mode" title="Pedestrians: the groups of people and the sidewalks they walk (2)" aria-label="Pedestrians" aria-pressed="false"><i class="ic" style="--ic:url(vendor/mdi/walk.svg)"></i></button>
     <span class="rsep" role="separator"></span>
     <button id="modeSpt" class="mode" aria-pressed="false" title="Start points: where the monsters appear (3)" aria-label="Start points"><i class="ic" style="--ic:url(vendor/mdi/flag-outline.svg)"></i></button>
-    <button id="modePup" class="mode" aria-pressed="false" title="Power-ups: the health, stamina and other pickups lying in the stage (4)" aria-label="Power-ups"><i class="ic" style="--ic:url(vendor/mdi/heart-plus-outline.svg)"></i></button>
+    <button id="modePup" class="mode" aria-pressed="false" title="Power-ups: the health, stamina, special and cloak power-ups lying in the stage (4)" aria-label="Power-ups"><i class="ic" style="--ic:url(vendor/mdi/heart-plus-outline.svg)"></i></button>
     <button id="modeAip" class="mode" aria-pressed="false" title="AI net: the paths the computer monsters walk (5)" aria-label="AI net"><i class="ic" style="--ic:url(vendor/mdi/graph-outline.svg)"></i></button>
     <button id="modeFop" class="mode" aria-pressed="false" title="Vehicle net: the roads and flight paths of the cars, helicopters, flying saucers and tanks (6)" aria-label="Vehicle net"><i class="ic" style="--ic:url(vendor/mdi/road-variant.svg)"></i></button>
     <button id="toggleLeft" aria-pressed="true" title="Show or hide the list of objects" aria-label="Show or hide the list"><i class="ic" style="--ic:url(vendor/mdi/page-layout-sidebar-left.svg)"></i></button>
@@ -125,10 +125,10 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
         <label class="field suf" id="mkDropLbl" title="How far below the path a helicopter may fly when it chases a target, times 10"><i class="pre">Drop</i><input id="mkDropN" type="number" min="0" max="255" value="0" aria-label="Drop of a new link"></label>
       </div>
       <div id="mkLinkRow" class="mk-linkrow" hidden>
-        <button type="button" id="mkLinkTool" aria-pressed="false" title="Link tool (K): with a node selected, click another node, in the view or in the list, to link them; click a linked node to cut the link. Shift+click: one way. Click the ground: a new node, linked. Esc stops. Holding Ctrl does the same without the tool."><i class="ic" style="--ic:url(vendor/mdi/link-variant.svg)"></i><span class="lbl">Link</span><kbd>K</kbd></button>
+        <button type="button" id="mkLinkTool" aria-pressed="false" title="Link tool (K): with a node selected, click another node, in the view or in the list, to link them; click a linked node to cut the link. Shift+click: one way. Alt+click: select a node and link from it. Click the ground: a new node, linked. Esc stops. Holding Ctrl does the same without the tool."><i class="ic" style="--ic:url(vendor/mdi/link-variant.svg)"></i><span class="lbl">Link</span><kbd>K</kbd></button>
         <label class="switch" title="After a link, the node you linked to is the selected one, so that 1, 2, 3, 4 takes three clicks"><input type="checkbox" id="mkChain" checked><span class="track"></span><span class="tx">Go on from the new node</span></label>
       </div>
-      <div id="mkLinkHow" class="help" hidden>Select a node, press <b>Link</b>, then click another node to join them. Click a linked node to cut it.<br>Shift+click joins one way only. Click the ground to add a node. Esc stops.</div>
+      <div id="mkLinkHow" class="help" hidden>Select a node, press <b>Link</b>, then click another node to join them. Click a linked node to cut it.<br>Shift+click joins one way only. Alt+click selects another node to link from. Click the ground to add a node. Esc stops.</div>
       <ul id="mkList" role="listbox" aria-label="Markers"></ul>
       <div id="mkNone" class="list-empty" hidden>
         <i class="ic" id="mkNoneIc" style="--ic:url(vendor/mdi/flag-outline.svg)"></i>
@@ -206,7 +206,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <label class="switch" title="What the game collides with, with your changes applied: triangles green (buildings, a prop's coll_ meshes), convex hulls cyan (hull_ meshes), trigger volumes and animated parts as orange boxes; dimmer is a broken state of a building. What touches the selection stays bright."><input type="checkbox" id="collOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/cube-scan.svg)"></i><span class="tx">Collision</span><kbd>C</kbd></label>
       <div class="help" id="collInfo" hidden></div>
       <label class="switch" title="Start points: a cone for each place a monster appears, labeled with its place in its list, with a line for the way it faces. Faint while you edit something else; the Start points mode (3) edits them."><input type="checkbox" id="sptOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/flag-outline.svg)"></i><span class="tx">Start points</span></label>
-      <label class="switch" title="Power-ups: a ball for each pickup lying in the stage: green health, blue stamina, red special weapon, amber story items; a gray cube for the cloak. Faint while you edit something else; the Power-ups mode (4) edits them."><input type="checkbox" id="pupOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/heart-plus-outline.svg)"></i><span class="tx">Power-ups</span></label>
+      <label class="switch" title="Power-ups: a marker for each power-up lying in the stage: green health, blue stamina, red special weapon, amber story items; a gray cube for the cloak. Faint while you edit something else; the Power-ups mode (4) edits them."><input type="checkbox" id="pupOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/heart-plus-outline.svg)"></i><span class="tx">Power-ups</span></label>
       <label class="switch" title="The AI net: the paths the computer monsters walk. Faint while you edit something else; the AI net mode (5) edits it."><input type="checkbox" id="aipOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/graph-outline.svg)"></i><span class="tx">AI net</span></label>
       <label class="switch" title="The vehicle net drawn in the view, its roads colored by who drives them: yellow cars, green helicopters, pink flying saucers, orange tanks. Faint while you edit something else; the Vehicle net mode (6) edits it."><input type="checkbox" id="fopOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/road-variant.svg)"></i><span class="tx">Vehicle net</span></label>
     </div>
@@ -609,6 +609,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
         <dl class="kl">
           <dt><kbd>K</kbd></dt><dd>Link tool: click a node, then another, to join them; click a linked node to cut it</dd>
           <dt><kbd>Shift</kbd>+Click</dt><dd>In the Link tool: a link that goes one way, from the selected node</dd>
+          <dt><kbd>Alt</kbd>+Click</dt><dd>In the Link tool: select that node and go on from it</dd>
           <dt><kbd>Ctrl</kbd>+Click</dt><dd>The Link tool, while the key is held</dd>
           <dt>Click the ground</dt><dd>In the Link tool: a new node there, linked to the selected one</dd>
           <dt><kbd>Esc</kbd></dt><dd>Leave the Link tool, then deselect</dd>

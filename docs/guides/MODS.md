@@ -767,7 +767,7 @@ it in its own window instead (`pywebview` when installed, otherwise Edge/Chrome 
 after its page closes (a reload of the page keeps it). The release zip carries it as `WotM_LevelEditor.exe`, next to `wotm.exe`
 (`tools/build_level_editor.ps1`), whose mods folder is the one the game reads. The page is in English, with a dark, a light and a
 System theme (the one the OS uses), in the settings (the cog at the top right).
-- **Top bar:** the stage (switching with unsaved changes asks: Cancel, Discard, or Save and switch), the mod (a list of the mods
+- **Top bar:** the stage (switching with unsaved changes asks: Cancel, Discard, or Save and switch; when a marker file (start points, power-ups, nets) fails to save, the editor stays on the stage with its draft), the mod (a list of the mods
   folder's mods and **New mod…**, which asks for a name; **File** ▸ **Pack mod…** downloads the mod's whole folder
   as `<mod>.zip` (one top folder named like the mod, so it unpacks into `mods/`; hidden files and `__pycache__` stay out, and so do
   the sources kept in `mods/_<mod>_src/`; a mod over 400 MB is refused: zip its folder by hand; what you have not saved is not in
@@ -844,7 +844,7 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   colors). **Remove from mod** deletes it (the stage then uses the disc's file). Closing the panel with numbers not saved puts the view back.
   Every number has a small reset button (tooltip "Back to the original", also a double-click on its label) that shows only when the number
   differs from the stage's disc file (for a custom stage, its base stage's file), whatever the mod's own file has; a light has one for its
-  color, strength, heading and pitch and one for the whole light, and **Reset all** in the footer puts every number back. A reset is an
+  color, strength, heading and pitch and a **Reset light** button for the whole light, and **Reset all** in the footer puts every number back. A reset is an
   edit like typing: the view follows it, it counts as unsaved until **Save to mod**, and the server's `/api/mrs` reply carries the disc's
   numbers as `original`. The game reads the file when the
   stage loads (Reload in game). The fog ending before it starts is flagged: the game then draws no fog. `python tools/level_editor/test_mrs.py`
@@ -857,7 +857,7 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   proportion than the game's asks first), **Save original as PNG** (to edit it) and, when the mod has one, **Remove**. A picture the editor
   finds no palette for shows its original in grey (a "No palette" tag): the game still draws the replacement in its own colors. The dialog
   writes into the mod at once, outside Undo, in the mod's `LVL/` (a custom stage's own folder for its pictures, as the Fight HUD dialog does);
-  with the game open, **Reload in game** sits at the bottom. `python tools/level_editor/test_textures.py` is its server-side test.
+  with the game open, **Reload in game** sits at the bottom. The 3D view draws the mod's PNG over the disc's for the stage's `.TEX` pictures (objects, sky, props), on load, on a mod switch and right after a Replace or Remove here or in Fight HUD and sky. `python tools/level_editor/test_textures.py` is its server-side test.
 - **Stage size** (Stage tab ▸ Size; a panel docked at the right, not modal): the rectangle of the collision grid (`grid` in the patch), four numbers and "Grow every side by 1000"; the view draws the disc's rectangle in grey and the patch's in blue;
   it can only grow. Check reports a rectangle the game would skip. For a stage with boundary walls (CENTRAL, VEGAS, CAPITOL) the dialog also has
   a checkbox that sets `"walls": "off"`. "Apply and add a floor over it" also builds a prop `FL_<stage>` in the mod (a dark gray visible plate 0.6 under
@@ -921,7 +921,7 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
     that exists keeps its own. With **Go on from the new node** on (the default) the node just linked becomes the selected one, so 1, 2, 3, 4
     is three clicks; off, the selection stays. While the tool is on, a rubber band runs from the selected node to the node or the ground under
     the pointer and a chip beside it says what the click does ("Link 2 and 3", "Cut 2 and 3", "New node"); the gizmo is hidden. **Ctrl** held
-    is the tool without turning it on, and **Esc** leaves it before it lets go of the selection. A node never passes 6 links: the click that
+    is the tool without turning it on, **Alt**+click selects the clicked node and goes on from it (the tool stays on), and **Esc** leaves it before it lets go of the selection. A node never passes 6 links: the click that
     would is refused with a message naming the node, and nothing changes. **Add** makes a node linked to the selected one, of its type, and
     selects the new node, so repeated Add draws a path; **Ctrl+Z** takes any of these back. Past 450 paths the AI net's meter fills and a message says the game ignores the rest.
 - **Stage picture:** Stage tab ▸ Pictures ▸ Stage picture saves the middle 2:1 band of the view, 512x256, as

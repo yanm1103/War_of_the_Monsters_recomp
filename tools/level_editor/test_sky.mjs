@@ -54,7 +54,7 @@ const edge = spawn(browser, ['--headless=new', `--remote-debugging-port=${DBG}`,
 let failures = 0;
 const done = (code) => {
   killTree(server); killTree(edge);
-  setTimeout(() => { if (!args.includes('--keep')) fs.rmSync(tmp, { recursive: true, force: true }); process.exit(code); }, 500);
+  setTimeout(() => { if (!args.includes('--keep')) try { fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch { /* Edge still holds its profile: the exit code comes from the checks */ } process.exit(code); }, 500);
 };
 process.on('uncaughtException', (e) => { console.error(e); done(1); });
 
@@ -306,6 +306,29 @@ if (shotFile) {
   fs.mkdirSync(path.dirname(shotFile), { recursive: true });
   fs.writeFileSync(shotFile, Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).result.data, 'base64'));
 }
+await check("a replaced picture shows in the view, and the disc's comes back when it is removed", async () => {
+  await loadStage('CENTRAL');
+  const px = () => ev(`(() => { const t = ${D}.stageTex.get(240); if (!t) return null; const im = t.image, c = document.createElement('canvas'); c.width = im.width; c.height = im.height;
+    const g = c.getContext('2d'); g.drawImage(im, 0, 0); return [...g.getImageData(im.width >> 1, im.height >> 1, 1, 1).data]; })()`);
+  const before = await px();
+  must(before && before[3] > 0, 'no picture 240 in the view: ' + before);
+  const png = await ev(`(() => { const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'); g.fillStyle = '#ff0000'; g.fillRect(0, 0, 64, 64); return c.toDataURL('image/png').split(',')[1]; })()`);
+  const post = async (p, b) => {
+    const r = await fetch(`http://127.0.0.1:${PORT}/api/${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+    if (!r.ok) throw new Error(p + ': ' + (await r.text()));
+  };
+  await post('tex/replace', { stage: 'CENTRAL', mod: 'skymod', png: 'central_t0240.png', data: png });
+  await ev(`${D}.moveTo('skymod', false)`);
+  let after = null;
+  for (let i = 0; i < 40 && !(after && after[0] > 200 && after[1] < 50); i++) { await sleep(250); after = await px(); }
+  must(after && after[0] > 200 && after[1] < 50, 'the view still draws the disc picture: ' + after + ' (was ' + before + ')');
+  await post('tex/remove', { stage: 'CENTRAL', mod: 'skymod', png: 'central_t0240.png' });
+  await ev(`${D}.syncPictures()`);
+  let back = null;
+  for (let i = 0; i < 40 && !(back && back.join() === before.join()); i++) { await sleep(250); back = await px(); }
+  must(back && back.join() === before.join(), 'the disc picture did not come back: ' + back + ' (was ' + before + ')');
+});
+
 
 await check('a stage with no replaceable sky says so and disables the selects', async () => {
   await importModel('skymod', 'CANYON2', 'A', glb.B);

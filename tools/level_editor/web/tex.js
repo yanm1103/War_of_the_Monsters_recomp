@@ -167,6 +167,7 @@ async function replace(r, file = null) {
     say(`${idText(r)}: replaced in mod "${ctx.mod}"`, 'ok');
   } catch (e) { say(`Couldn't replace ${idText(r)}: ${e.message}`, 'err'); }
   await refresh();
+  if (ctx.changed) ctx.changed();      // the view draws the mod's picture
 }
 
 async function remove(r) {
@@ -181,6 +182,7 @@ async function remove(r) {
     say(`${idText(r)}: the disc's picture is back`, 'ok');
   } catch (e) { say(`Couldn't remove ${idText(r)}: ${e.message}`, 'err'); }
   await refresh();
+  if (ctx.changed) ctx.changed();
 }
 
 export async function openTex(opts) {
