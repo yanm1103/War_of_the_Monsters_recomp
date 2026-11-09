@@ -297,6 +297,25 @@ await check('the Add prop and Layers menus open and close', async () => {
     must(await until(`document.getElementById(${JSON.stringify(m)}).hidden`, 12), 'Esc did not close ' + m);
   }
 });
+await check('menus: one open at a time, a click outside closes, arrows walk, Esc gives the focus back to the button', async () => {
+  await ev(`document.getElementById('addProp').click()`);
+  must(await ev(`!document.getElementById('propMenu').hidden`), 'Add prop did not open');
+  await ev(`document.getElementById('layersBtn').click()`);
+  must(await ev(`document.getElementById('propMenu').hidden && !document.getElementById('layersMenu').hidden`), 'opening Layers did not close Add prop');
+  must(await ev(`document.getElementById('layersBtn').getAttribute('aria-expanded')`) === 'true', 'aria-expanded is not true on the open menu');
+  must(await ev(`document.getElementById('addProp').getAttribute('aria-expanded')`) === 'false', 'aria-expanded stayed true on the closed menu');
+  await ev(`document.querySelector('#layersMenu input[type=checkbox]').focus()`);
+  const first = await ev('document.activeElement.id');
+  await key('ArrowDown', 'ArrowDown', 40);
+  must(await ev('document.activeElement.id') !== first, 'ArrowDown did not move inside the menu');
+  await esc();
+  must(await ev(`document.getElementById('layersMenu').hidden`), 'Esc did not close the menu');
+  must(await ev(`document.activeElement.id`) === 'layersBtn', 'the focus did not go back to the button');
+  await ev(`document.getElementById('layersBtn').click()`);
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 700, y: 500, button: 'left', clickCount: 1 });
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 700, y: 500, button: 'left', clickCount: 1 });
+  must(await until(`document.getElementById('layersMenu').hidden`, 10), 'a click outside did not close the menu');
+});
 await check('the bars over the view never cover each other or the menus, from 1600 wide down to 900', async () => {
   const size = (w, h) => send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
   try {

@@ -9,6 +9,7 @@ import { createPeds } from './peds.js';
 import { openHud, hudGameChanged } from './hud.js';
 import { openTex, texGameChanged } from './tex.js';
 import { openLight, lightGameChanged, lightLookChanged, lightClose, lightDirty, lightSave } from './light.js';
+import { popover } from './menu.js';
 import { initArrange } from './arrange.js';
 import { openTerrain } from './terrain.js';
 import { initColl } from './coll.js';
@@ -3163,15 +3164,8 @@ showColl();
 $('vFly').onclick = () => { if (!fly.on) setView(true); };
 $('vOrbit').onclick = () => { if (fly.on) setView(false); };
 $('focusSel').onclick = focusSelection;
-function showLayers(open) {
-  $('layersMenu').hidden = !open;
-  $('layersBtn').classList.toggle('on', open);
-  $('layersBtn').setAttribute('aria-expanded', open);
-}
-$('layersBtn').onclick = () => showLayers($('layersMenu').hidden);
-document.addEventListener('pointerdown', (e) => {   // a click anywhere else closes the layers menu
-  if (!$('layersMenu').hidden && !e.target.closest('#layersMenu, #layersBtn')) showLayers(false);
-}, true);
+const layersPop = popover({ button: $('layersBtn'), menu: $('layersMenu') });
+function showLayers(open) { layersPop.set(open); }
 function showKeys() {
   if (document.querySelector('dialog[open]')) return;
   showLayers(false);
@@ -3190,16 +3184,13 @@ $('pdDup').onclick = duplicate;
 $('pdDel').onclick = remove;
 
 // Add prop: the mod's models made for this stage, and Import .glb (lvlprop.py on the server; the model lands in mods/<mod>/props/)
-function showPropMenu(open = $('propMenu').hidden) {
-  $('propMenu').hidden = !open;
-  if (open) {   // under the button
+const propPop = popover({ button: $('addProp'), menu: $('propMenu'), onOpen: fillPropMenu });
+function showPropMenu(open = !propPop.isOpen) { propPop.set(open); }
+function fillPropMenu() {
+  {   // under the button
     const r = $("addProp").getBoundingClientRect(), pr = $("propMenu").offsetParent?.getBoundingClientRect();
     if (pr) $("propMenu").style.left = `${Math.max(8, Math.round(r.left - pr.left))}px`;
   }
-  $('addProp').classList.toggle('on', open);
-  $('addProp').setAttribute('aria-expanded', open);
-  if (!open) return;
-  showLayers(false);
   $('pmMod').textContent = modNow ? `mod "${modNow}"` : 'no mod';
   const list = $('pmList'), all = [...propModels.values()], here = all.filter((pm) => pm.info.stage === baseOf(stageName));
   list.textContent = '';
@@ -3416,10 +3407,6 @@ function pickSky(kind, v) {
 }
 $('pmSky').onchange = (e) => pickSky('dome', e.target.value);
 $('pmClouds').onchange = (e) => pickSky('clouds', e.target.value);
-$('addProp').onclick = () => showPropMenu();
-document.addEventListener('pointerdown', (e) => {   // a click anywhere else closes it
-  if (!$('propMenu').hidden && !e.target.closest('#propMenu, #addProp')) showPropMenu(false);
-}, true);
 let ipData = null, ipTitle = '';
 const ipInput = Object.assign(document.createElement('input'), { type: 'file', accept: '.glb,model/gltf-binary' });
 // The patch's "clear": the meshes the server tagged bare (the stage's scenery with no handle) leave the view
@@ -4824,8 +4811,6 @@ window.addEventListener('keydown', (e) => {
   }
   if (field) return;
   if (k === '?' && !ctrl && !e.altKey) { e.preventDefault(); showKeys(); return; }
-  if (k === 'escape' && !$('layersMenu').hidden) { showLayers(false); return; }   // the menu first, the selection stays
-  if (k === 'escape' && !$('propMenu').hidden) { showPropMenu(false); return; }
   if (ctrl && k === 'd') { e.preventDefault(); duplicate(); }
   else if (e.ctrlKey && k === 'a') { e.preventDefault(); if (editMode === 'objects') selectMany(listed()); }
   else if (k === 'delete') remove();
