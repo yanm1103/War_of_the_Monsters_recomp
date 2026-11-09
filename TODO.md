@@ -7,8 +7,7 @@ O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado s
 - **Fora do caminho crítico:** oracle para funções com chamadas; cobertura com gameplay para realimentar o `boot_coverage_asm.csv` (`57d4afd:docs/investigacoes/2026-10-19/pendencias_oracle_cobertura.md`, seções 2 e 3).
 
 ## Editor de fase
-Rearranjar fases existentes (mover, girar, apagar, duplicar prédios e objetos, inclusive de outra fase) com um editor que grava o patch JSON por fase em `mods/<mod>/levels/` (`docs/guides/MODS.md`, "Level patches"; aplicado pelo `wotm_levelpatch.inc`). Fase nova do zero fica para depois.
-4. **Objetos novos vindos do Blender** (plano em `docs/investigacoes/2026-11-06/objetos_blender_plano.md`; conversor `tools/lvlprop.py`, diário `props_passo0_1.md`; a carga na fase, o editor e a imagem própria do material já existem, `MODS.md`, "props" e "New props"): falta do passo 6 o LOD (o custo por quadro não pede: 10 props de ~1000 triângulos não mudam o FPS). A base de uma fase do zero existe: `clear`, "Delete every object", tamanho, chão e terreno `coll_*` com árvore de caixas montam uma arena vazia (`MODS.md`, "Level patches" e "Stage size"). Os editores de pontos de partida (`.SPT`), power-ups (`.PUP`), rede da IA (`.AIP`) e rede de veículos (`.FOP`) existem (botões da barra, `MODS.md`, "Stage size" e seguintes). Os passos 4 e 7 saíram com o pacote CT32 na arena e o texId dado na carga, sem `.TEX` no mod. Textura própria: UV fora de 0..1 é preso na borda (sem repetir).
+Rearranjar fases existentes (mover, girar, apagar, duplicar prédios e objetos, inclusive de outra fase) com um editor que grava o patch JSON por fase em `mods/<mod>/levels/` (`docs/guides/MODS.md`, "Level patches"; aplicado pelo `wotm_levelpatch.inc`).
 
 Ideias para facilitar a vida de quem faz mod (o que o editor ainda não tem; cada uma só no editor, salvo onde disser), na ordem sugerida:
 5. **Inclinação:** falta ver no jogo um monstro batendo num prop inclinado (a matriz e a caixa estão provadas, a colisão por triângulos e por casco, não). O prefab não leva objetos de outra fase do jogo (o handle é um endereço do arquivo da fase): isso pede juntar `.TEX`/`.RTX` e a imagem do prédio na fase de destino.
@@ -20,3 +19,4 @@ Ideias para facilitar a vida de quem faz mod (o que o editor ainda não tem; cad
 
 ## Descartado
 - **Customs de tipo chefe na eliminação:** a seleção segue recusando Goliath, Jelly, Cerebulon e Mecha (o diálogo 8 só conhece as colunas 1 a 10); o dono decidiu não fazer.
+- **LOD dos props do Blender:** o custo por quadro não pede (10 props de ~1000 triângulos não mudam o FPS); o dono decidiu não fazer.
