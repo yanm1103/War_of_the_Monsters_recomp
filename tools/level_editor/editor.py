@@ -2090,8 +2090,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.path in ("/api/save", "/api/test", "/api/reload", "/api/hud/replace", "/api/hud/remove",
                              "/api/tex/replace", "/api/tex/remove"):
                 mod = (b.get("mod") or "").strip()
-                # Test without saving writes nothing: no mod needed
-                if bad_mod(mod) and not (self.path == "/api/test" and not b.get("save", True) and not mod):
+                # Test (or Reload) without saving writes nothing: no mod needed
+                if bad_mod(mod) and not (self.path in ("/api/test", "/api/reload") and not b.get("save", True) and not mod):
                     return self.send(400, {"error": bad_mod_reason(mod), "code": "mod"})
                 if self.path in ("/api/tex/replace", "/api/tex/remove"):
                     mods_dir, mod_arg, base, sub, _custom = hud_target(cfg, b["stage"], mod)
@@ -2113,6 +2113,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(409, {"error": "the game is already open", "code": "running", "stage": GAME["stage"]})
                 if self.path == "/api/test" and not b.get("save", True):
                     return self.send(200, {"ok": True, "lines": [], "launched": launch_game(cfg, name, b.get("training", True), b.get("options"))})
+                if self.path == "/api/reload" and not b.get("save", True):      # "Test without my changes": the file on disk, nothing written
+                    reload_game(name, (b.get("options") or {}).get("here"))
+                    return self.send(200, {"ok": True, "lines": [], "reloading": True})
                 res = check_patch(cfg["disc"], base_of(cfg, name), b["patch"], mod_folder(cfg, mod), points_root(cfg, name))
                 res["saved"] = save_patch(cfg, mod, name, b["patch"])
                 # another mod with this stage's file that loads later wins in the game: the page says so (not a check problem)

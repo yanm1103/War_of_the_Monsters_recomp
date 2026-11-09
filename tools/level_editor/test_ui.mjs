@@ -46,8 +46,10 @@ fs.mkdirSync(path.join(mods, 'smoke'), { recursive: true });
 const cfgFile = path.join(tmp, 'settings.json');
 fs.writeFileSync(cfgFile, JSON.stringify({ mods, mod: 'smoke', game: '', elf: '', cwd: '', theme: 'dark' }));
 
+const serverLog = path.join(tmp, 'server.log');
+const serverOut = fs.openSync(serverLog, 'w');
 const server = spawn(process.platform === 'win32' ? 'python' : 'python3', [path.join(HERE, 'editor.py'), '--serve', '--port', String(PORT)],
-  { cwd: REPO, stdio: 'ignore', env: { ...process.env, WOTM_LEVEL_EDITOR_CONFIG: cfgFile, WOTM_LEVEL_EDITOR_NAMES: path.join(tmp, 'names.json') } });
+  { cwd: REPO, stdio: ['ignore', serverOut, serverOut], env: { ...process.env, WOTM_LEVEL_EDITOR_CONFIG: cfgFile, WOTM_LEVEL_EDITOR_NAMES: path.join(tmp, 'names.json') } });
 const edgePaths = ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
   'C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/microsoft-edge', '/usr/bin/google-chrome', '/usr/bin/chromium'];
 const browser = edgePaths.find((p) => fs.existsSync(p));
@@ -116,7 +118,8 @@ if (!loaded) {
   console.log('FAIL  the stage did not load in 3 minutes (disc configured?)');
   console.log(await ev(`JSON.stringify({ ready: document.readyState, url: location.href, debug: !!window.wotmDebug, busy: (document.getElementById('busyText') || {}).textContent,
     status: (document.querySelector('#status .msg .tx') || {}).textContent, stage: (document.getElementById('stage') || {}).value })`).catch((e) => String(e)));
-  console.log('page errors:', pageErrors.join(' | ') || '(none)');
+  console.log('page errors:', pageErrors.slice(0, 5).join(' | ') || '(none)');
+  console.log('server alive:', server.exitCode === null, '| server log:', fs.readFileSync(serverLog, 'utf8').slice(-1500) || '(empty)');
   failures++; done(1); await sleep(60000);
 }
 console.log('stage:', await ev('document.getElementById("stage").value + ", " + window.wotmDebug.items().length + " items"'));
@@ -154,6 +157,22 @@ await check('Save writes the patch into the mod and saving the undone state remo
   await ev(`window.wotmDebug.post('save')`);
   must(await until(`window.wotmDebug.unsavedCount() === 0`, 80), 'the second Save did not finish');
   must(!fs.existsSync(levelFile), 'the file stayed after saving the original state; the patch is ' + await ev('JSON.stringify(window.wotmDebug.buildPatch())'));
+});
+
+await check('an emptied X field puts the number back instead of moving the object to 0', async () => {
+  await ev('window.wotmDebug.select(window.wotmDebug.items().find((x) => x.rec.info.handle === ' + JSON.stringify(first) + ' && !x.copy))');
+  const before = await ev('document.getElementById("px").value');
+  must(before !== '', 'the X field is empty after selecting');
+  await ev(`(() => { const f = document.getElementById('px'); f.value = ''; f.dispatchEvent(new Event('change')); })()`);
+  must(await ev('document.getElementById("px").value') === before, 'the field did not get its number back');
+  must(await ev('window.wotmDebug.buildPatch().objects.length') === 0, 'the object moved');
+  must(await ev('window.wotmDebug.history.length') === 0 || await ev('window.wotmDebug.unsavedCount()') === 0, 'it counts as a change');
+});
+await check('a click on the gizmo that moves nothing is not an edit', async () => {
+  const h0 = await ev('window.wotmDebug.history.length');
+  await ev(`(() => { const g = window.wotmDebug.gizmo; g.dispatchEvent({ type: 'dragging-changed', value: true }); g.dispatchEvent({ type: 'dragging-changed', value: false }); })()`);
+  must(await ev('window.wotmDebug.history.length') === h0, 'a history step was left');
+  must(await ev('window.wotmDebug.unsavedCount()') === 0 && await ev('window.wotmDebug.dirty') === false, 'the stage is marked as changed');
 });
 
 await ev('window.wotmDebug.select(null)').catch(() => {});

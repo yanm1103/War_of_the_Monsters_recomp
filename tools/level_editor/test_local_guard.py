@@ -44,6 +44,11 @@ def main():
     assert ask("POST", "/api/bye", **{"Content-Type": "application/json", "Origin": "http://localhost:%d" % port,
                                        "Host": "localhost:%d" % port})[0] == 200
     assert ask("POST", "/api/bye", **{"Content-Type": "application/json", "Sec-Fetch-Site": "same-origin"})[0] == 200
+    # Reload without saving needs no mod (the game reloads the file on disk): with no game it fails on that, not on the mod
+    code, j = ask("POST", "/api/reload", b'{"name":"CENTRAL","mod":"","save":false}', **{"Content-Type": "application/json"})
+    assert code == 400 and j.get("code") != "mod" and "no game" in j["error"], (code, j)
+    code, j = ask("POST", "/api/reload", b'{"name":"CENTRAL","mod":"","save":true}', **{"Content-Type": "application/json"})
+    assert code == 400 and j.get("code") == "mod", (code, j)
     # another site's page: no-cors fetch / form with a text/plain body, or any cross-site Origin
     code, j = ask("POST", "/api/config", b'{"game":"x.exe"}', **{"Content-Type": "text/plain", "Origin": "https://evil.example"})
     assert code == 403 and j["code"] == "forbidden", (code, j)

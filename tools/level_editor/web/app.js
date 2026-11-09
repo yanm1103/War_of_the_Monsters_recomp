@@ -1972,17 +1972,24 @@ function carry(start) {
   for (const [a, m0] of start.att) setWorldMatrix(a.node, delta.clone().multiply(m0));
 }
 
-let dragStart = null;
+let dragStart = null, dragPre = null;
 gizmo.addEventListener('dragging-changed', (e) => {
   orbit.enabled = !e.value && !fly.on;
   if (e.value) dragged = true;
   showHint();
+  if (e.value && (pedSel || sel)) dragPre = { dirty, future, check: ui.check.state };   // what a click that moves nothing puts back
   if (e.value && pedSel) snapshot('move ' + pedTitle(pedSel).toLowerCase());
   else if (e.value && sel) {
     snapshot((gizmo.getMode() === 'rotate' ? 'turn ' : 'move ') + whatSel());
     dragStart = startMove();
   } else {
     dragStart = null;
+    if (dragPre && history.length && JSON.stringify(buildPatch()) === history[history.length - 1].p) {
+      history.pop();                         // a click on the gizmo that did not move anything is not an edit
+      future = dragPre.future; dirty = dragPre.dirty; ui.check.state = dragPre.check;
+      showUndo();
+    }
+    dragPre = null;
     refreshList();
   }
 });
@@ -2022,6 +2029,8 @@ function focusSelection() {
 
 function editFromInputs() {
   if (!sel || isDeleted(sel)) return;
+  // an emptied (or half-typed) field is not a 0: the number that was there comes back and nothing moves
+  if (['px', 'py', 'pz', 'ph'].some((id) => $(id).value.trim() === '' || !Number.isFinite(+$(id).value))) { showProps(); return; }
   snapshot('edit ' + whatSel());
   const start = startMove();
   setWorld(sel.node, [+$('px').value, +$('py').value, +$('pz').value], +$('ph').value, sel.rec, tiltFromInputs());
@@ -2271,7 +2280,8 @@ canvas.addEventListener('pointerup', (e) => {
     const x0 = Math.min(a.x, z.x), x1 = Math.max(a.x, z.x), y0 = Math.min(a.y, z.y), y1 = Math.max(a.y, z.y);
     const kinds = shownKinds();
     const inside = items().filter((it) => {
-      if (!kinds.has(it.rec.info.kind) || !visibleChain(it.node)) return false;
+      // a new prop counts as a prop, as the list and Ctrl+A count it
+      if (!kinds.has(it.rec.info.kind === 'newprop' ? 'prop' : it.rec.info.kind) || !visibleChain(it.node)) return false;
       const bx = new THREE.Box3().setFromObject(it.node);
       if (bx.isEmpty()) return false;
       const p = bx.getCenter(new THREE.Vector3()).project(camera);
@@ -2419,7 +2429,7 @@ async function post(kind, save = true, extra = {}) {
                    : `${FAILED[kind] || kind}: no stage is open yet.`, { level: 'err', toast: true });
     return false;
   }
-  const writes = kind === 'save' || kind === 'reload' || (kind === 'test' && save);
+  const writes = kind === 'save' || (kind === 'reload' && save) || (kind === 'test' && save);
   if (writes && !modNow) {
     const m = await pickMod('save', { save: 'Save', test: 'Save and test', reload: 'Save and reload' }[kind]);
     if (!m) return false;
@@ -2557,7 +2567,7 @@ function askRunning(save, ex = {}) {
       same ? `It is on ${title(stageName)}. Reload this stage in it, or restart the game? Only a restart applies the Test options' monsters and CPUs.`
            : `It is on ${title(on)}. Restart it on ${title(stageName)}?`,
       [['cancel', 'Cancel'], ['restart', 'Restart game', !same]].concat(same ? [['reload', 'Reload in game', true]] : []),
-      (v) => { if (v === 'restart') post('test', save, Object.assign({}, ex, { restart: true })); else if (v === 'reload') post('reload', true, ex.here ? { here: true } : {}); });
+      (v) => { if (v === 'restart') post('test', save, Object.assign({}, ex, { restart: true })); else if (v === 'reload') post('reload', save, ex.here ? { here: true } : {}); });   // "Test without them": the file on disk, not a save
 }
 // Where "Test from here" starts you: the surface the middle of the view meets, and the game heading the view looks along (0 is +Y and 90 is
 // +X, as the start points' heading counts)
@@ -4374,6 +4384,11 @@ $('nsOk').onclick = async () => {
   const base = $('nsBase').value;
   // the patch carries the base's handles: it comes along only when the open stage has that base
   const withPatch = $('nsCopy').checked && baseOf(stageName) === base;
+  if (dirty && !withPatch) {
+    // the open stage is replaced by the new one: its changes go nowhere unless they are saved first
+    const v = await new Promise((r) => askUnsaved(`${title(stageName)} has ${changesText(unsavedCount())}, and the new stage does not take them.`, 'Save and create', r));
+    if (v === 'cancel' || (v === 'save' && !(await post('save')))) return;
+  }
   let res;
   try {
     res = await api('/api/stage/new', { mod: modNow, id, name: $('nsName').value.trim(), base, narrator: $('nsNarr').value.trim(),
