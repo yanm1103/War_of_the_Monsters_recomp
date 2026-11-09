@@ -63,7 +63,7 @@
     faces) becomes a `COLL_VOL` of its planes, one leaf per `hull_*` mesh; without one, the 6-plane box of the visual stands in. `--light auto`
     (default) turns on dirLight (0x100, the stage's three parallel lights) on the OBJECTs without COLOR_0 and leaves it off on the
     ones with it (light baked in Blender); `vertex` and `dir` force it off or on. `info <prop
-    dir> [--at ADDR]` relocates a prop (default the level arena, 0x3E00000) and reads every node, packet and fixup back;
+    dir> [--at ADDR]` relocates a prop (default the level arena, 0x3700000) and reads every node, packet and fixup back;
     `load_prop(folder)` returns the `Prop` (`ngp`, `ptr`, `root`, `textures`, `bounds`, `relocate(at)`, `resolve(at, ctx_of)`) the
     level patch uses, and `stage_ctx` the context a texId takes. `modkit.py level prop <mod> <in.glb> --stage <STAGE> [--name N]` builds the prop into `mods/<mod>/props/<NAME>/` (extracted disc folder). Standard library only.
   - `ngp.decode_mesh`: port of the native `decodeObject` (texture per section, ADC like the GS, sprites), used by `gltf.py`.

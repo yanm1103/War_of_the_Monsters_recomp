@@ -15,7 +15,7 @@ level patch places in the stage (docs/FORMATS.md, ".NGP image", "Fixups", "Meshe
 - `<NAME>.preview.glb`: the generated packets decoded back (what the game draws), in tools/lvlglb.py's conventions (game units,
   raw GS colors, materials named `tex<texId>`, with no image unless `--preview-tex` embeds the stage's);
 - `prop.json`: stage, textures (slot -> texId), template (rule and the OBJECT it found), bounds, collision, counts.
-`info` loads a prop, relocates it to ADDR (default the level arena, 0x3E00000) and walks it with the readers of ngp.py and
+`info` loads a prop, relocates it to ADDR (default the level arena, 0x3700000) and walks it with the readers of ngp.py and
 vifpkt.py: every node, packet and fixup has to be readable there.
 
 Tree: root GROUP (flags 0x0003, no high byte) -> one OBJECT per texture (more when a texture passes the 13-bit numVerts) +
@@ -53,7 +53,7 @@ BASE = 0xA00000
 NAME_RE = re.compile(r"^[A-Z0-9_]{1,8}$")
 UNITS_PER_METER = 18.0
 MAX_NUMVERTS = 0x1FFF          # _hierobject.bits.numVerts, 13 bits
-ARENA = 0x3E00000              # the level patch arena (PS2_RAM_SIZE - 2 MB), info's default address
+ARENA = 0x3700000              # the level patch arena (PS2_RAM_SIZE - 1 MB - its 8 MB), info's default address
 ROOT_FLAGS = 0x0003            # visual + collision, no option byte (hdTraversePath stops at flags & (option << 8))
 COLL_FLAGS = 0x0102            # the GROUP the stages' building collision leaves hang from
 MAX_STATES = 4                 # states of a destructible prop (the .glb's state0_, state1_...)

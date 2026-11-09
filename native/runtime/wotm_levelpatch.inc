@@ -5,7 +5,7 @@
 // FORMATS.md ("Stage objects", "Stage collision"); tools/lvl.py patch aplica o mesmo patch na imagem do disco, na mesma ordem e com
 // as mesmas contas, e confere a colisao do resultado. Os nos novos (ROTATE no lugar de um TRANSLATE que gira, GROUP que segura o
 // original e as copias, a espinha clonada de cada copia com o estado de animacao das partes animadas dela, acoes refeitas, o ANIM_MGR
-// que registra as CHAR_INSTANCEs clonadas, caminhos de colisao e nos de lista das celulas) vao para a arena de 1 MB abaixo do MB dos ganchos (wotm_mods_hooks::kLevelArena), refeita a cada carga. Cada entrada
+// que registra as CHAR_INSTANCEs clonadas, caminhos de colisao e nos de lista das celulas) vao para a arena de 8 MB abaixo do MB dos ganchos (wotm_mods_hooks::kLevelArena), refeita a cada carga. Cada entrada
 // confere antes de escrever o que pode tomar da arena e dos 1024 Interactives; a que nao cabe e pulada inteira.
 // WOTM_LEVELPATCH_SHALLOW=1 faz copias rasas e WOTM_LEVELPATCH_BREAK quebra copias ou originais na luta (diagnostico, NATIVE.md).
 // O JSON e procurado e lido a cada carga da fase (findPatch): o editor grava e a recarga (wotm_levelreload.inc, RESTART) ja o pega.
@@ -256,7 +256,7 @@ struct Stage
     uint32_t alloc(uint32_t size, uint32_t align = 4)
     {
         const uint32_t a = (arenaTop + align - 1) & ~(align - 1);
-        if (a + size > kArenaEnd) throw PatchError("a arena de 1 MB encheu");
+        if (a + size > kArenaEnd) throw PatchError("a arena de 8 MB encheu");
         std::memset(ram + a, 0, size);
         arenaTop = a + size;
         stats["arena bytes"] = int(arenaTop - kArena);

@@ -375,7 +375,7 @@ Compares, per object and in numbers, what the VU1 microcode would send to the GS
   address (`fileStatus.ngpAddr[ngpLoaded]`, right after the stage NGP) becomes 0x2000000. The monster NGPs and, behind them, the RTX and TEX
   of the stage and of the monsters go up; only the stage NGP stays below. Relocation (`dbsRelocateViaPtrListFile`) adds "address -
   0xA00000" in 32 bits and works at any address. `WOTM_HIGHRAM=0` goes back to the PS2 contiguous load (with 8 monsters, Metro goes past
-  32 MB and freezes). Loads above 32 MB stop 2 MB before the end of RAM (`kHighCeiling`): the last MB holds the hooks' data and the one below it the level patch arena (`MODS.md`, "Level patches"). The `[wotm] carga da fase` line says how much is left to the end of RAM, and `N de 1000 texIds` warns near the ceiling of
+  32 MB and freezes). Loads above 32 MB stop 9 MB before the end of RAM (`kHighCeiling`): the last MB holds the hooks' data and the 8 MB below it the level patch arena (`MODS.md`, "Level patches"). The `[wotm] carga da fase` line says how much is left to the end of RAM, and `N de 1000 texIds` warns near the ceiling of
   `texInfo`. The `VRAM residente até ..., cache de texturas com N KB` line gives the end of the `.RTX` files (`startVramAddr`) and the space of the cache
   of the `.TEX` files up to `lastVramTexAddr`. `wotm.exe` draws from RAM and does not depend on the cache. In Canyon with 4 players and 4 AIs: 238
   texIds, 2134 KB of cache and 20.8 MB free in RAM; with 1 player: 196 texIds and 2164 KB. In Capitol with 4 players (jelly and

@@ -708,7 +708,7 @@ def ped_net_segments(net):
     return out
 
 
-ARENA_SIZE = 0x100000           # the hook's arena for new nodes (wotm_mods_hooks::kLevelArenaSize)
+ARENA_SIZE = 0x800000           # the hook's arena for new nodes (wotm_mods_hooks::kLevelArenaSize)
 ANIM_OPS = (25, 17, 35, 38)     # CHAR_INSTANCE, ANIM_XFORM, SKEL_BONE, ANIM_SCALE: the animated parts
 ANIM_STATE_OPS = (17, 38)       # ANIM_XFORM, ANIM_SCALE: keep per-instance state (visible, rotation, dirty bits) of their CHAR_INSTANCE
 ID2_MAX = 0x7FF                 # ActAnim::ids.anim and _hierhead::id2 have 11 bits
@@ -871,7 +871,7 @@ class LevelPatch:
         d = self.img.d
         pad = (-(self.img.base + len(d))) % align
         if pad + size > self.arena_free():
-            raise PatchError("the 1 MB arena is full")
+            raise PatchError("the 8 MB arena is full")
         d.extend(bytes(pad + size))
         self.stats["arena bytes"] = self.img.base + len(d) - self.arena
         return self.img.base + len(d) - size

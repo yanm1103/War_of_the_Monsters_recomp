@@ -603,7 +603,7 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   breaking some buildings cuts traffic links; in other stages it moves pickups), so those happen only when the original breaks. An
   animated part the game itself drives by its id (a level script, a boss) only moves in the original. Deleting an object cuts the
   dominoes of its neighbours aimed at it.
-- Copies cost room: each one takes arena bytes (1 MB for the whole patch) and slots in the game's table of breakable objects (1024).
+- Copies cost room: each one takes arena bytes (8 MB for the whole patch) and slots in the game's table of breakable objects (1024).
   An entry whose copies do not fit is skipped before anything is written. `lvl.py patch` and the log print the table's use:
   `interactives: 348 of 1024 before the patch, 355 after (...)`.
 - Objects that sit on a building (water tanks and vents on the roof, items on its sidewalk base) are pickups of their own and do not
@@ -634,7 +634,7 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   of 200-unit cells (`python tools/lvl.py collision <FASE>` prints it; 7 x 7 to 102 x 40 cells): the game collides, shoots and sees only
   inside it, and a box outside is refused. The new rectangle must hold the disc's one (it can only grow) and have at most 65536 cells
   (cols = floor(width / 200) + 1). The patch builds the grid in the arena (8 bytes a cell: the cell and its list of moving objects,
-  `csListArr`, which the game indexes by cell, so the disc's one is too short; 1 MB for the whole patch), lists every path
+  `csListArr`, which the game indexes by cell, so the disc's one is too short; 8 MB for the whole patch), lists every path
   again in the cells its box covers and points the image's root to it; it runs before the entries, so props and copies see it. A bad
   rectangle is skipped with a line (`[fase]   grid pulada: ...`) and the stage keeps the disc's grid. Log: `grid: 36 x 36 celulas (eram 18 x 16)...`.
 - `walls` (at the top beside `objects`): `"walls": "off"` turns the stage's invisible boundary walls off, so a monster can leave the
@@ -1010,7 +1010,7 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   --shallow`) clones only the handle, its `INTERACTIVE_STATE` and its `DESTRUCTIBLE`, and `WOTM_LEVELPATCH_BREAK` breaks the copies or the
   originals at a set time (`NATIVE.md`, variables). Every path through a changed handle gets its box redone (by the disc's rule, or the old box
   carried by the handle's change for animated chains and camera triggers) and its cell lists redone, and the `GROUP`s above the handle
-  get their spheres grown to cover the object (the drawing culls a `GROUP` by its sphere). New nodes go to a 1 MB arena below the hooks'
+  get their spheres grown to cover the object (the drawing culls a `GROUP` by its sphere). New nodes go to an 8 MB arena below the hooks'
   last MB (`wotm_mods_hooks::kLevelArena`; loads above 32 MB stop at `kHighCeiling`). Then `peds` (`wotm_levelpeds.inc`): `segments`
   rewrites `PathNet::ped` in RAM, a deleted group loses its id (a plain `TRANSLATE`), a moved or recounted one is rewritten in
   place, and new groups (`TRANSLATE` 0xBB8 with a `NULL`) hang from a new `GROUP` in the world `GROUP`'s first slot, which holds
