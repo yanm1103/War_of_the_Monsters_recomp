@@ -118,7 +118,7 @@ function aimText() {
 function build() {
   dlg = el('dialog', { id: 'testDlg', class: 'dlg', 'aria-labelledby': 'testTitle' });
   dlg.append(el('form', { method: 'dialog' },
-    el('div', { class: 'dlg-head' }, el('h2', { id: 'testTitle' }, 'Test in game'),
+    el('div', { class: 'dlg-head' }, el('h2', { id: 'testTitle' }, 'Test options'),
       el('button', { type: 'button', 'data-close': true, class: 'icon ghost', title: 'Close (Esc)', 'aria-label': 'Close' }, icon('close'))),
     el('div', { class: 'dlg-body' },
       el('div', { class: 'sec-title' }, 'You'),

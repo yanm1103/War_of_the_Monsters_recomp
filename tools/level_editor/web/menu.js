@@ -5,7 +5,9 @@
 // The caller keeps the menu's contents and its place on the page (style.css); onOpen fills it just before it shows.
 const openMenus = new Set();
 
-export function popover({ button, menu, onOpen, onClose }) {
+//   place: true puts the menu (position: fixed, in the body) under the button, kept inside the window
+//   closeOnItem: true closes it when one of its buttons is chosen (a switch or a field stays open)
+export function popover({ button, menu, onOpen, onClose, place, closeOnItem }) {
   const walkable = () => [...menu.querySelectorAll('button:not(:disabled), input[type=checkbox]:not(:disabled)')]
     .filter((e) => e.getClientRects().length > 0);
   const api = {
@@ -16,6 +18,12 @@ export function popover({ button, menu, onOpen, onClose }) {
       if (on) for (const o of [...openMenus]) if (o !== api) o.set(false);
       if (on && onOpen) onOpen();
       menu.hidden = !on;
+      if (on && place) {
+        document.body.append(menu);
+        const r = button.getBoundingClientRect();
+        menu.style.left = `${Math.max(8, Math.min(Math.round(r.left), innerWidth - menu.offsetWidth - 8))}px`;
+        menu.style.top = `${Math.round(r.bottom + 4)}px`;
+      }
       button.classList.toggle('on', on);
       button.setAttribute('aria-expanded', String(on));
       if (on) openMenus.add(api); else { openMenus.delete(api); if (onClose) onClose(); }
@@ -23,6 +31,7 @@ export function popover({ button, menu, onOpen, onClose }) {
     toggle() { api.set(!api.isOpen); },
   };
   button.addEventListener('click', () => api.toggle());
+  if (closeOnItem) menu.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && !b.disabled) { api.set(false); } });
   // a click anywhere else
   document.addEventListener('pointerdown', (e) => {
     if (api.isOpen && !menu.contains(e.target) && !button.contains(e.target)) api.set(false);

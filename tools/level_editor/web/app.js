@@ -931,7 +931,8 @@ function showStatus(changedN) {
   const c = ui.check;
   const ck = stField('check', c.state === 'ok' ? 'Check passed' : c.state === 'bad' ? `${c.n} ${c.n === 1 ? 'problem' : 'problems'}`
                      : c.state === 'stale' ? 'Not checked since the last change' : 'Not checked',
-                     { ok: 'ok', bad: 'err' }[c.state] || 'idle');
+                     { ok: 'ok', bad: 'err' }[c.state] || 'idle',
+                     c.state === 'none' || c.state === 'stale' ? 'Run the check (File > Check collision)' : 'Opens the Check tab');
   ck.querySelector('.ic').style.setProperty('--ic', `url(vendor/mdi/${c.state === 'bad' ? 'alert-circle-outline' : c.state === 'ok' ? 'check-circle-outline' : 'shield-check-outline'}.svg)`);
   showBudget();
   const n = group.length || (pedSel ? 1 : 0);
@@ -2783,7 +2784,7 @@ function showGame() {
   }
   ind.title = s === 'running' ? `The game the editor opened is running, on ${where}` : '';
   const test = $('test'), rl = $('reload');
-  test.disabled = $('testHere').disabled = s === 'starting';
+  test.disabled = $('testHere').disabled = $('testMenuBtn').disabled = s === 'starting';
   test.classList.toggle('primary', s === 'closed');
   rl.disabled = s !== 'running';
   rl.hidden = s === 'closed';        // there is nothing to reload until a game is open (Test in game opens one)
@@ -3119,6 +3120,9 @@ $('keepClose').onclick = () => { $('keepNote').hidden = true; };
 $('winClose').onclick = () => { winHidden = true; $('winNote').hidden = true; };
 $('check').onclick = () => post('check');
 $('save').onclick = () => post('save');
+// the top bar's menus: File (stages, pack, check) and the Test button's chevron (from here, options)
+popover({ button: $('fileBtn'), menu: $('fileMenu'), place: true, closeOnItem: true });
+popover({ button: $('testMenuBtn'), menu: $('testMenu'), place: true, closeOnItem: true });
 function testGame(here) {
   if (here && !aimStart(true)) {
     msg("Test from here starts you where the middle of the view meets the stage: aim the view at the ground or a roof first", { level: 'warn', toast: true });
@@ -3142,6 +3146,8 @@ $('reload').onclick = reloadGame;
 // the Output: tabs, Copy, Clear, hide; the status bar's fields open it on their tab (or close it when it is there already)
 document.querySelectorAll('#output .tab').forEach((b) => (b.onclick = () => openOutput(b.dataset.tab)));
 document.querySelectorAll('#status .st').forEach((b) => (b.onclick = () => {
+  // "Not checked" in the status bar runs the check (its result shows in the Check tab); a result already there is opened or closed
+  if (b.classList.contains('check') && (ui.check.state === 'none' || ui.check.state === 'stale') && stageName) { post('check'); return; }
   if (!$('output').hidden && outTab === b.dataset.tab) closeOutput(); else openOutput(b.dataset.tab);
 }));
 $('outToggle').onclick = () => ($('output').hidden ? openOutput() : closeOutput());

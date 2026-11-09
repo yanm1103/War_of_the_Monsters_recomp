@@ -206,9 +206,9 @@ kbd { font: 600 11px/1 var(--font-mono); padding: 2px 5px; border: 1px solid var
 @keyframes dot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
 /* in a narrower window the main buttons keep only their icon (the title says what they do), and the game's state its stage */
 @media (max-width: 1439px) {
-  #check .lbl, #save .lbl, #test .lbl, #reload .lbl { display: none; }
-  #check, #save, #test, #reload { width: var(--h-ctl); padding: 0; }
-  #check .ic, #save .ic, #test .ic, #reload .ic { width: 18px; height: 18px; }
+  #save .lbl, #test .lbl, #reload .lbl { display: none; }
+  #save, #test, #reload { width: var(--h-ctl); padding: 0; }
+  #save .ic, #test .ic, #reload .ic { width: 18px; height: 18px; }
 }
 @media (max-width: 1099px) {
   .game-ind .where { display: none; }
@@ -840,3 +840,15 @@ button.small-btn { height: 22px; padding: 0 8px; font-size: 12px; flex: none; }
            background: color-mix(in srgb, var(--surface-1) 78%, transparent); backdrop-filter: blur(8px); border: 1px solid var(--line);
            border-radius: var(--r-lg); box-shadow: var(--shadow-pop); }
 #minimap[hidden] { display: none; }
+
+/* the top bar's menus (File, Test): fixed under their button (menu.js moves them to the body) */
+.menu-fixed { position: fixed; z-index: 30; flex-direction: column; align-items: stretch; gap: 2px; padding: 6px; min-width: 200px; }
+.menu-fixed button.wide { height: 32px; }
+.menu-fixed .lbl { display: inline !important; }
+#fileBtn { padding: 0 8px; }
+#fileBtn .chev, #leftHead .chev { width: 16px; height: 16px; }
+/* Test in game with a chevron for Test from here and Test options */
+.split { display: inline-flex; }
+.split > #test { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.split > .split-more { width: 26px; padding: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; border-left: 1px solid color-mix(in srgb, #000 25%, var(--accent)); }
+.split > .split-more .ic { width: 16px; height: 16px; }

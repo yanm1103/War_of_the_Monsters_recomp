@@ -363,6 +363,30 @@ await check('Display: game look, grid, minimap and the overlays are in one menu;
   await shot('display_menu');
   await ev(`document.getElementById('layersBtn').click()`);
 });
+await check('top bar: File menu holds the stage and mod commands; Test has a chevron for Test from here and Test options', async () => {
+  must(await ev(`!document.getElementById('bar').querySelector('#newStage, #editStage, #packMod, #check, #testHere, #testOpts')`), 'a command is still loose on the bar');
+  await ev(`document.getElementById('fileBtn').click()`);
+  const m = await ev(`(() => { const f = document.getElementById('fileMenu'); const r = f.getBoundingClientRect(); return JSON.stringify({ open: !f.hidden, body: f.parentElement === document.body,
+    all: ['newStage','editStage','packMod','check'].every((i) => f.contains(document.getElementById(i))), under: r.top >= document.getElementById('fileBtn').getBoundingClientRect().bottom, inside: r.right <= innerWidth }); })()`);
+  must(m === '{"open":true,"body":true,"all":true,"under":true,"inside":true}', 'File menu: ' + m);
+  await shot('file_menu');
+  await ev(`document.getElementById('newStage').click()`);
+  must(await until(`document.getElementById('stageDlg').open && document.getElementById('fileMenu').hidden`, 40), 'New stage did not open, or the menu stayed open');
+  await esc();
+  await ev(`document.getElementById('testMenuBtn').click()`);
+  must(await ev(`!document.getElementById('testMenu').hidden && ['testHere','testOpts'].every((i) => document.getElementById('testMenu').contains(document.getElementById(i)))`), 'the Test menu is not as expected');
+  await shot('test_menu');
+  await ev(`document.getElementById('testOpts').click()`);
+  must(await until(`document.getElementById('testDlg').open && document.getElementById('testMenu').hidden`, 40), 'Test options did not open or the menu stayed');
+  must(await ev(`document.getElementById('testTitle').textContent`) === 'Test options', 'the dialog is still titled "Test in game"');
+  await esc();
+  must(await ev(`document.getElementById('reload').hidden`), 'Reload in game shows with no game open');
+});
+await check('the status bar runs the check when there is none, and shows its result', async () => {
+  must(await ev(`document.querySelector('#status .check').title.startsWith('Run the check')`), 'the status field does not offer to run it');
+  await ev(`document.querySelector('#status .check').click()`);
+  must(await until(`window.wotmDebug.ui.check.state === 'ok' || window.wotmDebug.ui.check.state === 'bad'`, 240, 500), 'the check did not finish');
+});
 await check('menus: one open at a time, a click outside closes, arrows walk, Esc gives the focus back to the button', async () => {
   await ev(`document.getElementById('addProp').click()`);
   must(await ev(`!document.getElementById('propMenu').hidden`), 'Add prop did not open');
