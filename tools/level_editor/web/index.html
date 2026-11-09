@@ -128,6 +128,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <button id="frame" class="icon ghost" title="Frame the whole stage (Home)" aria-label="Frame all"><i class="ic" style="--ic:url(vendor/mdi/fit-to-screen-outline.svg)"></i></button>
       <button id="gridBtn" class="icon ghost" title="Stage size: the collision grid's rectangle (what the game collides, shoots and sees across); a bigger one lets objects go farther out" aria-label="Stage size"><i class="ic" style="--ic:url(vendor/mdi/arrow-expand-all.svg)"></i></button>
       <button id="sptBtn" class="icon ghost" title="Start points: where the monsters appear (a file of the mod)" aria-label="Start points"><i class="ic" style="--ic:url(vendor/mdi/account-group-outline.svg)"></i></button>
+      <button id="pupBtn" class="icon ghost" title="Power-ups: the health, stamina and other pickups lying in the stage (a file of the mod)" aria-label="Power-ups"><i class="ic" style="--ic:url(vendor/mdi/package-variant-closed.svg)"></i></button>
       <button id="picBtn" class="icon ghost" title="Use this view as the stage's picture on the stage select (a custom stage, Training, Lake Powell or Tokyo DM)" aria-label="Stage picture"><i class="ic" style="--ic:url(vendor/mdi/image-edit-outline.svg)"></i></button>
       <button id="keysBtn" class="icon ghost" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><i class="ic" style="--ic:url(vendor/mdi/keyboard-outline.svg)"></i></button>
     </div>
@@ -456,13 +457,13 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <p class="muted" id="sptText"></p>
       <div id="sptList"></div>
       <div class="gd-btns">
-        <select id="sptNewList" aria-label="List of the new point"></select>
+        <select id="sptNewList" aria-label="List or type of the new point"></select>
         <button type="button" id="sptAdd" title="Adds a point where the middle of the view meets the stage">Add at the view's aim</button>
       </div>
       <div class="help" id="sptInfo"></div>
       <div class="callout err" id="sptErr" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-circle-outline.svg)"></i><span></span></div>
     </div>
-    <div class="dlg-foot"><button type="button" id="sptReset" title="Takes the mod's file away: the stage's own points come back">Back to the disc's</button><button type="button" data-close>Close</button><button id="sptSave" type="button" class="primary">Save</button></div>
+    <div class="dlg-foot"><button type="button" id="sptReset" title="Takes the mod's file away: the stage's own points (or power-ups) come back">Back to the disc's</button><button type="button" data-close>Close</button><button id="sptSave" type="button" class="primary">Save</button></div>
   </form>
 </dialog>
 <dialog id="gridDlg" class="dlg" aria-labelledby="gdTitle">

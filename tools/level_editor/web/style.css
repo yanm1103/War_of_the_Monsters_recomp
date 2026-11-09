@@ -444,6 +444,7 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 dialog.spt { width: min(96vw, 860px); }
 #sptList { max-height: 46vh; overflow: auto; }
 .spt-row { display: grid; grid-template-columns: 2em minmax(0, 2.4fr) repeat(3, minmax(0, 1fr)) minmax(0, 1fr) 4em auto; gap: 6px; align-items: center; padding: 3px 4px; border-radius: 6px; cursor: pointer; }
+.spt-row.pup { grid-template-columns: 2em minmax(0, 2.4fr) repeat(3, minmax(0, 1fr)) 4em auto; }
 .spt-row.sel { outline: 1px solid var(--accent, #4aa3ff); }
 .spt-row input[type=number], .spt-row select { min-width: 0; width: 100%; }
 .spt-head { font-size: 12px; opacity: 0.7; cursor: default; }

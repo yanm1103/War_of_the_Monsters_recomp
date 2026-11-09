@@ -2939,136 +2939,173 @@ function gdApply() {
   return true;
 }
 $('gdOk').onclick = gdApply;
-// ------------------------------------------------------------------ start points (.SPT)
-// Where the monsters appear: four lists (story, the players', the CPUs', respawn; tools/lvl.py SPT_LISTS) in a file of the mod
-// (mods/<mod>/PTS/<STAGE>.SPT, or the custom stage's folder), not in the patch: the dialog's Save writes it. editor.py stage_spt/save_spt.
-const SPT_COLORS = [0xFFC233, 0x4AE08A, 0xF0605A, 0x36C5F0];
-let spt = { points: [], caps: [1, 2, 20, 20], lists: [], source: 'disc' };
-let sptView = null, sptSel = -1, sptLoadId = 0;
-const sptKeep = () => JSON.stringify(spt.points);
-let sptSaved = '[]';
-async function loadSpt() {
+// ------------------------------------------------------------------ start points (.SPT) and power-ups (.PUP)
+// Two point files of the stage, edited in one dialog (the kind picks the columns) and kept in the mod, not in the patch: Save writes
+// mods/<mod>/PTS/<STAGE>.<ext> (or the custom stage's folder). SPT: where the monsters appear, four lists (tools/lvl.py SPT_LISTS);
+// PUP: the health, stamina and other pickups (PUP_TYPES), each at its rest height. editor.py stage_spt/save_spt, kind SPT | PUP.
+const PT_COLORS = { SPT: [0xFFC233, 0x4AE08A, 0xF0605A, 0x36C5F0], PUP: [0xF0605A, 0x4AE08A, 0x36C5F0] };
+const PT_WORDS = { SPT: ['start point', 'start points'], PUP: ['power-up', 'power-ups'] };
+const ptEmpty = (kind) => ({ points: [], caps: kind === 'SPT' ? [1, 2, 20, 20] : [100], lists: [], source: 'disc' });
+const pt = { SPT: ptEmpty('SPT'), PUP: ptEmpty('PUP') };     // what the files hold (edited in place by the dialog)
+const ptSaved = { SPT: '[]', PUP: '[]' };
+const ptViews = { SPT: null, PUP: null };
+const ptLoadId = { SPT: 0, PUP: 0 };
+let ptKind = 'SPT', ptSel = -1;
+const ptKeep = (kind) => JSON.stringify(pt[kind].points);
+// the color of a point: SPT by list, PUP by what it gives (health red, stamina green, the rest blue)
+const ptColor = (kind, p) => PT_COLORS[kind][kind === 'SPT' ? p.list : p.type < 3 || p.type === 6 ? 0 : p.type < 6 || p.type === 7 ? 1 : 2] ?? 0xAAAAAA;
+async function loadPoints(kind) {
   if (!stageName) return;
-  const id = ++sptLoadId;
+  const id = ++ptLoadId[kind];
   try {
-    const r = await api(`/api/spt?name=${encodeURIComponent(stageName)}&mod=${encodeURIComponent(modNow || '')}`);
-    if (id !== sptLoadId) return;
-    spt = r;
-    sptSaved = sptKeep();
-    sptSel = -1;
-    updateSptView();
-  } catch (e) { if (id === sptLoadId) { spt = { points: [], caps: [1, 2, 20, 20], lists: [], source: 'disc' }; updateSptView(); } }
+    const r = await api(`/api/spt?name=${encodeURIComponent(stageName)}&mod=${encodeURIComponent(modNow || '')}&kind=${kind}`);
+    if (id !== ptLoadId[kind]) return;
+    pt[kind] = r;
+    ptSaved[kind] = ptKeep(kind);
+    if (kind === ptKind) ptSel = -1;
+  } catch (e) { if (id === ptLoadId[kind]) pt[kind] = ptEmpty(kind); }
+  updatePtView(kind);
 }
-// A cone for each point (colored by list; amber when selected) with a line for the way the monster faces
-function updateSptView() {
-  if (sptView) { scene.remove(sptView); sptView.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); }); sptView = null; }
-  if (!spt.points.length) return;
-  sptView = new THREE.Group();
-  spt.points.forEach((p, k) => {
-    const col = k === sptSel ? 0xFFFFFF : SPT_COLORS[p.list] ?? 0xAAAAAA;
-    const cone = new THREE.Mesh(new THREE.ConeGeometry(14, 50, 14), new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true, opacity: 0.9 }));
+const loadSpt = () => { loadPoints('SPT'); loadPoints('PUP'); };
+// A cone for each point (colored; white when selected); a start point has a line for the way the monster faces, a power-up is a ball on its rest height
+function updatePtView(kind) {
+  const old = ptViews[kind];
+  if (old) { scene.remove(old); old.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); }); ptViews[kind] = null; }
+  if (!pt[kind].points.length) return;
+  const g = new THREE.Group();
+  pt[kind].points.forEach((p, k) => {
+    const col = kind === ptKind && k === ptSel ? 0xFFFFFF : ptColor(kind, p);
+    const mat = new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true, opacity: 0.9 });
     const base = toThree(p.pos);
-    cone.position.copy(base).add(new THREE.Vector3(0, 25, 0));
-    cone.renderOrder = 998;
-    cone.raycast = () => {};
-    const h = (p.heading * Math.PI) / 180, fwd = toThree([p.pos[0] - Math.sin(h) * 60, p.pos[1] + Math.cos(h) * 60, p.pos[2] + 25]);
-    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([base.clone().add(new THREE.Vector3(0, 25, 0)), fwd]),
-                                new THREE.LineBasicMaterial({ color: col, depthTest: false }));
-    line.renderOrder = 998;
-    line.raycast = () => {};
-    sptView.add(cone, line);
+    const mesh = new THREE.Mesh(kind === 'SPT' ? new THREE.ConeGeometry(14, 50, 14) : new THREE.SphereGeometry(10, 12, 8), mat);
+    mesh.position.copy(base).add(new THREE.Vector3(0, kind === 'SPT' ? 25 : 14, 0));
+    mesh.renderOrder = 998;
+    mesh.raycast = () => {};
+    g.add(mesh);
+    if (kind === 'SPT') {
+      const h = (p.heading * Math.PI) / 180, fwd = toThree([p.pos[0] - Math.sin(h) * 60, p.pos[1] + Math.cos(h) * 60, p.pos[2] + 25]);
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([base.clone().add(new THREE.Vector3(0, 25, 0)), fwd]),
+                                  new THREE.LineBasicMaterial({ color: col, depthTest: false }));
+      line.renderOrder = 998;
+      line.raycast = () => {};
+      g.add(line);
+    }
   });
-  scene.add(sptView);
+  ptViews[kind] = g;
+  scene.add(g);
 }
-const sptNames = (k) => `${k + 1}`;
-function sptRows() {
-  const box = $('sptList');
+function ptRows() {
+  const kind = ptKind, d = pt[kind], box = $('sptList');
   box.textContent = '';
+  box.dataset.kind = kind;
   const mk = (tag, attrs = {}, text = '') => { const e = document.createElement(tag); Object.assign(e, attrs); if (text) e.textContent = text; return e; };
-  const head = mk('div', { className: 'spt-row spt-head' });
-  for (const t of ['#', 'List', 'x', 'y', 'z', 'Heading', 'Ground', '']) head.append(mk('span', {}, t));
+  const head = mk('div', { className: 'spt-row spt-head ' + kind.toLowerCase() });
+  for (const t of kind === 'SPT' ? ['#', 'List', 'x', 'y', 'z', 'Heading', 'Ground', ''] : ['#', 'Type', 'x', 'y', 'z (rest)', 'Shadow', '']) head.append(mk('span', {}, t));
   box.append(head);
-  spt.points.forEach((p, k) => {
-    const row = mk('div', { className: 'spt-row' + (k === sptSel ? ' sel' : '') });
-    row.onclick = () => { sptSel = k; updateSptView(); sptRows(); };
+  const redraw = () => { updatePtView(kind); ptInfo(); };
+  d.points.forEach((p, k) => {
+    const row = mk('div', { className: 'spt-row ' + kind.toLowerCase() + (k === ptSel ? ' sel' : '') });
+    row.onclick = () => { ptSel = k; updatePtView(kind); ptRows(); };
     const num = (v, set, step = 1) => {
       const i = mk('input', { type: 'number', step, value: Math.round(v * 100) / 100 });
       i.onclick = (e) => e.stopPropagation();
-      i.onchange = () => { const x = parseFloat(i.value); if (Number.isFinite(x)) { set(x); updateSptView(); sptInfo(); } };
+      i.onchange = () => { const x = parseFloat(i.value); if (Number.isFinite(x)) { set(x); redraw(); } };
       return i;
     };
+    const key = kind === 'SPT' ? 'list' : 'type';
     const sel = mk('select');
-    spt.lists.forEach((n, li) => sel.append(new Option(`${li}: ${n}`, li)));
-    sel.value = p.list;
+    d.lists.forEach((n, li) => sel.append(new Option(`${li}: ${n}`, li)));
+    sel.value = p[key];
     sel.onclick = (e) => e.stopPropagation();
-    sel.onchange = () => { p.list = parseInt(sel.value, 10); updateSptView(); sptInfo(); };
-    const snap = mk('input', { type: 'checkbox', checked: !!p.snap, title: 'Ground: the point drops to the floor (or roof) under it when a monster appears' });
-    snap.onclick = (e) => e.stopPropagation();
-    snap.onchange = () => { p.snap = snap.checked; };
+    sel.onchange = () => { p[key] = parseInt(sel.value, 10); redraw(); };
+    const flag = mk('input', { type: 'checkbox' });
+    if (kind === 'SPT') {
+      flag.checked = !!p.snap;
+      flag.title = 'Ground: the point drops to the floor (or roof) under it when a monster appears';
+      flag.onchange = () => { p.snap = flag.checked; };
+    } else {
+      flag.checked = (p.flags & 1) !== 0;
+      flag.title = 'Shadow under the power-up (the game then keeps it on the floor)';
+      flag.onchange = () => { p.flags = flag.checked ? (p.flags & 7 ? p.flags : 7) : 0; };
+    }
+    flag.onclick = (e) => e.stopPropagation();
     const here = mk('button', { type: 'button', title: 'Move this point to where the middle of the view meets the stage' }, 'Aim');
-    here.onclick = (e) => { e.stopPropagation(); const v = viewPoint(); p.pos = v.map((x) => Math.round(x * 10) / 10); updateSptView(); sptRows(); sptInfo(); };
+    here.onclick = (e) => { e.stopPropagation(); p.pos = viewPoint().map((x) => Math.round(x * 10) / 10); ptRows(); redraw(); };
     const del = mk('button', { type: 'button', title: 'Delete this point' }, '×');
-    del.onclick = (e) => { e.stopPropagation(); spt.points.splice(k, 1); sptSel = -1; updateSptView(); sptRows(); sptInfo(); };
-    row.append(mk('span', {}, sptNames(k)), sel, num(p.pos[0], (x) => { p.pos[0] = x; }), num(p.pos[1], (x) => { p.pos[1] = x; }),
-               num(p.pos[2], (x) => { p.pos[2] = x; }), num(p.heading, (x) => { p.heading = wrapDeg(x); }, 5), snap, mk('span', {}, ''));
-    row.lastChild.append(here, del);
+    del.onclick = (e) => { e.stopPropagation(); d.points.splice(k, 1); ptSel = -1; ptRows(); redraw(); };
+    const cells = [mk('span', {}, `${k + 1}`), sel, num(p.pos[0], (x) => { p.pos[0] = x; }), num(p.pos[1], (x) => { p.pos[1] = x; }),
+                   num(p.pos[2], (x) => { p.pos[2] = x; })];
+    if (kind === 'SPT') cells.push(num(p.heading, (x) => { p.heading = wrapDeg(x); }, 5));
+    cells.push(flag, mk('span', {}, ''));
+    cells[cells.length - 1].append(here, del);
+    row.append(...cells);
     box.append(row);
   });
 }
-function sptInfo() {
-  const n = (k) => spt.points.filter((p) => p.list === k).length;
-  $('sptInfo').textContent = spt.lists.map((_n, k) => `${k}: ${n(k)} of ${spt.caps[k]}`).join(' · ') + ` · ${spt.points.length} of 255 points`;
+function ptInfo() {
+  const d = pt[ptKind], n = (k) => d.points.filter((p) => p[ptKind === 'SPT' ? 'list' : 'type'] === k).length;
+  $('sptInfo').textContent = ptKind === 'SPT'
+    ? d.lists.map((_n, k) => `${k}: ${n(k)} of ${d.caps[k]}`).join(' · ') + ` · ${d.points.length} of 255 points`
+    : `${d.points.length} power-ups (the game keeps ${d.caps[0]} at a time; the file holds 255)`;
 }
-const sptErr = (t) => { $('sptErr').hidden = !t; if (t) $('sptErr').querySelector('span').textContent = t; };
-$('sptBtn').onclick = async () => {
-  await loadSpt();
-  $('sptText').textContent = spt.source === 'mod'
-    ? `The points this mod keeps for ${title(stageName)}.`
-    : `${title(stageName)}'s own points; Save keeps your version in the mod.`;
+const ptErr = (t) => { $('sptErr').hidden = !t; if (t) $('sptErr').querySelector('span').textContent = t; };
+async function openPoints(kind) {
+  ptKind = kind;
+  ptSel = -1;
+  await loadPoints(kind);
+  const d = pt[kind], w = PT_WORDS[kind][1];
+  $('sptTitle').textContent = kind === 'SPT' ? 'Start points' : 'Power-ups';
+  $('sptText').textContent = d.source === 'mod' ? `The ${w} this mod keeps for ${title(stageName)}.`
+                                                : `${title(stageName)}'s own ${w}; Save keeps your version in the mod.`;
   const nl = $('sptNewList');
   nl.textContent = '';
-  spt.lists.forEach((n, k) => nl.append(new Option(`${k}: ${n}`, k)));
-  nl.value = '2';
-  sptErr('');
-  sptRows();
-  sptInfo();
+  d.lists.forEach((n, k) => nl.append(new Option(`${k}: ${n}`, k)));
+  nl.value = kind === 'SPT' ? '2' : '0';
+  $('sptDlg').dataset.kind = kind;
+  ptErr('');
+  ptRows();
+  ptInfo();
   $('sptDlg').showModal();
-};
+}
+$('sptBtn').onclick = () => openPoints('SPT');
+$('pupBtn').onclick = () => openPoints('PUP');
 $('sptAdd').onclick = () => {
-  if (spt.points.length >= 255) { sptErr('A stage holds at most 255 start points.'); return; }
-  const v = viewPoint();
-  spt.points.push({ list: parseInt($('sptNewList').value, 10), pos: v.map((x) => Math.round(x * 10) / 10), heading: 0, snap: true, w: 0, sel: 0 });
-  sptSel = spt.points.length - 1;
-  sptErr('');
-  updateSptView();
-  sptRows();
-  sptInfo();
+  const kind = ptKind, d = pt[kind];
+  if (d.points.length >= 255) { ptErr(`A stage holds at most 255 ${PT_WORDS[kind][1]}.`); return; }
+  const pos = viewPoint().map((x) => Math.round(x * 10) / 10), v = parseInt($('sptNewList').value, 10);
+  d.points.push(kind === 'SPT' ? { list: v, pos, heading: 0, snap: true, w: 0, sel: 0 } : { type: v, pos, flags: 7, w: 0, sel: 0 });
+  ptSel = d.points.length - 1;
+  ptErr('');
+  updatePtView(kind);
+  ptRows();
+  ptInfo();
 };
-async function sptPost(body) {
-  sptErr('');
+async function ptPost(body) {
+  const kind = ptKind;
+  ptErr('');
   try {
-    const r = await api('/api/spt', Object.assign({ mod: modNow || '', name: stageName }, body));
-    spt = r;
-    sptSaved = sptKeep();
-    sptSel = -1;
-    updateSptView();
-    sptRows();
-    sptInfo();
+    const r = await api('/api/spt', Object.assign({ mod: modNow || '', name: stageName, kind }, body));
+    pt[kind] = r;
+    ptSaved[kind] = ptKeep(kind);
+    ptSel = -1;
+    updatePtView(kind);
+    ptRows();
+    ptInfo();
     return r;
-  } catch (e) { sptErr(cleanError(e).text); return null; }
+  } catch (e) { ptErr(cleanError(e).text); return null; }
 }
 $('sptSave').onclick = async () => {
-  const r = await sptPost({ points: spt.points });
+  const kind = ptKind, r = await ptPost({ points: pt[kind].points });
   if (!r) return;
   $('sptDlg').close();
-  msg(`Saved ${r.points.length} start points in the mod` + (r.warnings.length ? '. ' + r.warnings.join(' ') : '. Restart the stage to see them'),
+  msg(`Saved ${r.points.length} ${PT_WORDS[kind][1]} in the mod` + (r.warnings.length ? '. ' + r.warnings.join(' ') : '. Restart the stage to see them'),
       { level: r.warnings.length ? 'warn' : 'ok', toast: true });
 };
 $('sptReset').onclick = async () => {
-  const r = await sptPost({ reset: true });
-  if (r) msg("The stage's own start points are back (the mod's file is gone)", { level: 'ok', toast: true });
+  const kind = ptKind, r = await ptPost({ reset: true });
+  if (r) msg(`The stage's own ${PT_WORDS[kind][1]} are back (the mod's file is gone)`, { level: 'ok', toast: true });
 };
-$('sptDlg').addEventListener('close', () => { if (sptKeep() !== sptSaved) loadSpt(); });   // closed without saving: back to the file's points
+$('sptDlg').addEventListener('close', () => { if (ptKeep(ptKind) !== ptSaved[ptKind]) loadPoints(ptKind); });   // closed without saving: back to the file's points
 // A floor over the new rectangle: a prop of the mod (a visible plate and a coll_ slab), placed at the rectangle's center
 $('gdFloor').onclick = async () => {
   if (!modNow) { gdErr('Choose a mod first: the floor is a prop saved in it.'); return; }

@@ -2420,6 +2420,40 @@ def build_spt(points):
     return b"".join(out)
 
 
+PUP_MAX_ACTIVE = 100            # PowerUps::m_powerUps[100]: the 101st is refused
+PUP_TYPES = ("Health 25", "Health 50", "Health 100", "Stamina 25", "Stamina 50", "Stamina 100", "Health 10", "Stamina 10 (no regen)",
+             "Special weapon", "Cloak") + tuple("Story item %d" % k for k in range(10, 20))
+PUP_FLAGS = 7                   # shadow, the update re-settles it, the settling also lowers the rest height (439 of 528 points)
+
+
+def read_pup(path):
+    """A .PUP as the editor's power-ups: [{"type", "pos": [x, y, z], "flags", "w", "sel"}] (z is the rest height; the rotation is random)."""
+    return [{"type": p["raw"][0x2C], "pos": [float(v) for v in p["pos"][:3]], "flags": p["raw"][0x2D], "w": p["pos"][3],
+             "sel": p["raw"][0x3C]} for p in read_points(path)]
+
+
+def build_pup(points):
+    """The bytes of a .PUP for those power-ups (type 0..19, flags 0..255). ValueError for a bad point or more than 255."""
+    if len(points) > 255:
+        raise ValueError("a .PUP holds at most 255 power-ups (it has %d)" % len(points))
+    out = [struct.pack("<II", POINTS_MAGIC, len(points))]
+    for k, p in enumerate(points):
+        t, pos, fl = p.get("type"), p.get("pos"), p.get("flags", PUP_FLAGS)
+        if not isinstance(t, int) or isinstance(t, bool) or not 0 <= t < len(PUP_TYPES):
+            raise ValueError("power-up %d: the type is 0 to %d" % (k + 1, len(PUP_TYPES) - 1))
+        if not isinstance(fl, int) or isinstance(fl, bool) or not 0 <= fl <= 255:
+            raise ValueError("power-up %d: the flags are 0 to 255" % (k + 1))
+        if not (isinstance(pos, (list, tuple)) and len(pos) == 3 and all(isinstance(v, (int, float)) and math.isfinite(v) for v in pos)):
+            raise ValueError("power-up %d: the position is three numbers" % (k + 1))
+        rec = bytearray(64)
+        struct.pack_into("<4f", rec, 0, pos[0], pos[1], pos[2], float(p.get("w") or 0.0))
+        rec[0x2C] = t
+        rec[0x2D] = fl
+        rec[0x3C] = int(p.get("sel") or 0) & 0xFF
+        out.append(bytes(rec))
+    return b"".join(out)
+
+
 def describe_point(ext, p):
     r, n = p["raw"], min(p["nlinks"], 6)
     if ext == "SPT":

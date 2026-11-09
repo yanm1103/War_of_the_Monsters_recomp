@@ -39,6 +39,17 @@ def main():
         pass
     else:
         raise AssertionError("256 points accepted")
+    # the .PUP codec: the disc's file round-trips byte for byte; limits
+    pup = os.path.join(editor.stage_root(cfg["disc"], "CENTRAL"), "PTS", "CENTRAL.PUP")
+    pp = lvl.read_pup(pup)
+    assert len(pp) == 35 and all(0 <= p["type"] < len(lvl.PUP_TYPES) for p in pp), len(pp)
+    assert lvl.build_pup(pp) == open(pup, "rb").read(), "pup round trip"
+    for bad in ({"type": 20, "pos": [0, 0, 0]}, {"type": 0, "pos": [0, 0]}, {"type": 0, "pos": [0, 0, 0], "flags": 256}):
+        try:
+            lvl.build_pup([bad])
+        except ValueError:
+            continue
+        raise AssertionError("accepted %r" % (bad,))
     tmp = tempfile.mkdtemp(prefix="spttest_")
     try:
         cfg["mods"] = tmp
@@ -74,6 +85,22 @@ def main():
         out = editor.save_spt(cfg, {"mod": "", "name": "MYCITY", "points": mine[:2]})
         assert os.path.isfile(os.path.join(sd, "MYCITY.SPT")) and out["source"] == "mod" and len(out["points"]) == 2, out
         assert not os.path.exists(os.path.join(tmp, "M", "PTS")), "a custom stage wrote into the mod's PTS"
+        # power-ups: same routes with kind PUP, in the mod's PTS/<STAGE>.PUP, apart from the start points
+        r = editor.stage_spt(cfg, "M", "CENTRAL", "PUP")
+        assert r["source"] == "disc" and len(r["points"]) == 35 and r["caps"] == [100] and len(r["lists"]) == 20, r["source"]
+        out = editor.save_spt(cfg, {"mod": "M", "name": "CENTRAL", "points": [{"type": 8, "pos": [1.0, 2.0, 3.0], "flags": 7}] * 101}, "PUP")
+        assert os.path.isfile(os.path.join(tmp, "M", "PTS", "CENTRAL.PUP")) and len(out["points"]) == 101 and len(out["warnings"]) == 1, out
+        assert editor.stage_spt(cfg, "M", "CENTRAL")["source"] == "disc"           # the .SPT is untouched
+        out = editor.save_spt(cfg, {"mod": "M", "name": "CENTRAL", "reset": True}, "PUP")
+        assert out["source"] == "disc" and not os.path.exists(os.path.join(tmp, "M", "PTS")), out["source"]
+        out = editor.save_spt(cfg, {"mod": "", "name": "MYCITY", "points": [{"type": 0, "pos": [0, 0, 0]}]}, "PUP")
+        assert os.path.isfile(os.path.join(sd, "MYCITY.PUP")) and out["source"] == "mod", out
+        try:
+            editor.point_kind("AIP")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("kind AIP accepted")
         # the editor's pedestrian panel and check read the same file through points_root
         root = editor.points_root(cfg, "MYCITY")
         assert len(lvl.read_spt(os.path.join(root, "PTS", "CENTRAL.SPT"))) == 2

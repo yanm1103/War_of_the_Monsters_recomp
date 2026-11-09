@@ -563,9 +563,9 @@ def points_root(cfg, name):
     return root
 
 
-def spt_files(cfg, mod, name):
-    """Where a stage's start points live for this mod: (mod_file, custom): the file the mod keeps them in (the first .SPT of a custom
-    stage's folder, else <ID>.SPT there; a game stage's mods/<mod>/PTS/<NAME>.SPT) and the custom stage record or None. Raises
+def spt_files(cfg, mod, name, ext="SPT"):
+    """Where a stage's .SPT or .PUP lives for this mod: (mod_file, custom): the file the mod keeps it in (the first .<ext> of a custom
+    stage's folder, else <ID>.<ext> there; a game stage's mods/<mod>/PTS/<NAME>.<ext>) and the custom stage record or None. Raises
     ValueError for a bad mod name (a custom stage keeps its own mod's)."""
     name = (name or "").upper()
     c = custom_stages(cfg).get(name)
@@ -573,33 +573,52 @@ def spt_files(cfg, mod, name):
         raise ValueError(bad_mod_reason(mod))
     if c:
         folder = os.path.join(cfg["mods"], c["mod"], "stages", c["folder"])
-        have = sorted(f for f in os.listdir(folder) if f.upper().endswith(".SPT"))
-        return os.path.join(folder, have[0] if have else c["id"].upper() + ".SPT"), c
-    return os.path.join(cfg["mods"], mod, "PTS", name + ".SPT"), None
+        have = sorted(f for f in os.listdir(folder) if f.upper().endswith("." + ext))
+        return os.path.join(folder, have[0] if have else c["id"].upper() + "." + ext), c
+    return os.path.join(cfg["mods"], mod, "PTS", name + "." + ext), None
 
 
-def stage_spt(cfg, mod, name):
-    """The stage's start points as the game will read them with this mod: {"points", "caps", "lists", "source": "mod" | "disc",
-    "file"}. A custom stage reads its own folder's .SPT, else the base's; a game stage the mod's PTS/<NAME>.SPT, else the disc's."""
+# what differs between the two kinds of point file: the codec and the lists the dialog offers (SPT: the four lists; PUP: the types)
+POINT_KINDS = {
+    "SPT": {"read": lambda p: lvl.read_spt(p), "build": lambda pts: lvl.build_spt(pts),
+            "caps": lambda: list(lvl.SPT_CAPS), "lists": lambda: list(lvl.SPT_LISTS)},
+    "PUP": {"read": lambda p: lvl.read_pup(p), "build": lambda pts: lvl.build_pup(pts),
+            "caps": lambda: [lvl.PUP_MAX_ACTIVE], "lists": lambda: list(lvl.PUP_TYPES)},
+}
+
+
+def point_kind(k):
+    k = str(k or "SPT").upper()
+    if k not in POINT_KINDS:
+        raise ValueError("kind is SPT or PUP")
+    return k
+
+
+def stage_spt(cfg, mod, name, ext="SPT"):
+    """The stage's start points (.SPT) or power-ups (.PUP) as the game will read them with this mod: {"points", "caps", "lists",
+    "source": "mod" | "disc", "file"}. A custom stage reads its own folder's file, else the base's; a game stage the mod's
+    PTS/<NAME>.<ext>, else the disc's."""
+    kind = POINT_KINDS[ext]
     name = (name or "").upper()
-    caps = {"caps": list(lvl.SPT_CAPS), "lists": list(lvl.SPT_LISTS)}
+    caps = {"caps": kind["caps"](), "lists": kind["lists"]()}
     c = custom_stages(cfg).get(name)
     if c or not bad_mod(mod):
-        path, c = spt_files(cfg, mod, name)
+        path, c = spt_files(cfg, mod, name, ext)
         if os.path.isfile(path):
-            return dict(caps, points=lvl.read_spt(path), source="mod", file=path)
+            return dict(caps, points=kind["read"](path), source="mod", file=path)
     base = c["base"] if c else name
-    disc = os.path.join(stage_root(cfg["disc"], base), "PTS", base + ".SPT")
+    disc = os.path.join(stage_root(cfg["disc"], base), "PTS", base + "." + ext)
     if os.path.isfile(disc):
-        return dict(caps, points=lvl.read_spt(disc), source="disc", file="")
+        return dict(caps, points=kind["read"](disc), source="disc", file="")
     return dict(caps, points=[], source="disc", file="")
 
 
-def save_spt(cfg, b):
-    """Writes the start points ({"mod", "name", "points"}) into the mod, or takes the mod's file away with "reset": true (the disc's
-    points come back). Returns stage_spt's reply plus "warnings" (a list holding more points than the game keeps)."""
+def save_spt(cfg, b, ext="SPT"):
+    """Writes the points ({"mod", "name", "points"}) into the mod, or takes the mod's file away with "reset": true (the disc's points
+    come back). Returns stage_spt's reply plus "warnings" (more points than the game keeps)."""
+    kind = POINT_KINDS[ext]
     mod, name = (b.get("mod") or "").strip(), (b.get("name") or "").upper()
-    path, c = spt_files(cfg, mod, name)
+    path, c = spt_files(cfg, mod, name, ext)
     if b.get("reset"):
         if os.path.isfile(path):
             os.remove(path)
@@ -607,23 +626,26 @@ def save_spt(cfg, b):
                 os.rmdir(os.path.dirname(path))     # the mod's PTS folder, when that was all it held (never a custom stage's)
             except OSError:
                 pass
-        return dict(stage_spt(cfg, mod, name), warnings=[])
+        return dict(stage_spt(cfg, mod, name, ext), warnings=[])
     pts = b.get("points")
     if not isinstance(pts, list):
-        raise ValueError("The start points are a list")
-    data = lvl.build_spt(pts)
+        raise ValueError("The points are a list")
+    data = kind["build"](pts)
     warn = []
-    for k, cap in enumerate(lvl.SPT_CAPS):
-        n = sum(1 for p in pts if p.get("list") == k)
-        if n > cap:
-            warn.append("List %d (%s) has room for %d, you placed %d: each extra one overwrites the last." % (
-                k, lvl.SPT_LISTS[k], cap, n))
+    if ext == "SPT":
+        for k, cap in enumerate(lvl.SPT_CAPS):
+            n = sum(1 for p in pts if p.get("list") == k)
+            if n > cap:
+                warn.append("List %d (%s) has room for %d, you placed %d: each extra one overwrites the last." % (
+                    k, lvl.SPT_LISTS[k], cap, n))
+    elif len(pts) > lvl.PUP_MAX_ACTIVE:
+        warn.append("The game keeps %d power-ups at a time, you placed %d: the extra ones are not created." % (lvl.PUP_MAX_ACTIVE, len(pts)))
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "wb") as f:
         f.write(data)
     os.replace(tmp, path)
-    return dict(stage_spt(cfg, mod, name), warnings=warn)
+    return dict(stage_spt(cfg, mod, name, ext), warnings=warn)
 
 
 # the stages whose select picture a mod's levelpics/<name>.png replaces (SHELL.TEX has none of them), and the custom stages' <id>
@@ -1330,7 +1352,7 @@ class Handler(BaseHTTPRequestHandler):
                                        "have": have, "winner": winner, "others": [m for m in have if m != mod]})
             if u.path == "/api/spt":            # the stage's start points as the game reads them with this mod
                 try:
-                    return self.send(200, stage_spt(cfg, q.get("mod", ""), q.get("name", "")))
+                    return self.send(200, stage_spt(cfg, q.get("mod", ""), q.get("name", ""), point_kind(q.get("kind"))))
                 except (ValueError, OSError) as e:
                     return self.send(400, {"error": str(e)})
             if u.path == "/api/props":          # the mod's props (props/*/prop.json)
@@ -1434,7 +1456,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(400, {"error": str(e), "code": "prop"})
             if self.path == "/api/spt":            # write the start points into the mod (or "reset": back to the disc's)
                 try:
-                    return self.send(200, save_spt(cfg, b))
+                    return self.send(200, save_spt(cfg, b, point_kind(b.get("kind"))))
                 except (ValueError, OSError) as e:
                     return self.send(400, {"error": str(e)})
             if self.path == "/api/props/floor":    # a floor prop over the grid's rectangle
