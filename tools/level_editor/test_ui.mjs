@@ -77,6 +77,7 @@ const pageErrors = [];
 ws.onmessage = (m) => {
   const d = JSON.parse(m.data);
   if (d.id && pending.has(d.id)) { pending.get(d.id)(d); pending.delete(d.id); return; }
+  if (d.method === 'Page.javascriptDialogOpening') { send('Page.handleJavaScriptDialog', { accept: true }); return; }     // "leave this page?" on a reload with changes
   if (d.method === 'Log.entryAdded' && d.params.entry.level === 'error') pageErrors.push('log: ' + d.params.entry.text + ' ' + (d.params.entry.url || ''));
   if (d.method === 'Runtime.consoleAPICalled' && d.params.type === 'error') pageErrors.push('console: ' + JSON.stringify(d.params.args.map((a) => a.value || a.description)).slice(0, 300));
   if (d.method === 'Runtime.exceptionThrown') pageErrors.push(JSON.stringify(d.params.exceptionDetails).slice(0, 300));
@@ -470,6 +471,7 @@ await check('the object list works from the keyboard: section header, arrows, En
   must(await ev(`document.activeElement.classList.contains('it') && document.activeElement._item.rec.info.handle === ${JSON.stringify(want)}`), 'the row lost the focus when the list was redrawn');
   must(await ev(`document.activeElement.getAttribute('aria-selected')`) === 'true', 'the row is not aria-selected');
   await key('ArrowUp', 'ArrowUp', 38);
+  must(await ev('window.wotmDebug.buildPatch().objects.length') === 0, 'an arrow in the list also moved the selected object');
   await key('Home', 'Home', 36);
   must(await ev(`document.activeElement.classList.contains('sec')`), 'Home did not go to the first header');
   await ev('window.wotmDebug.select(null); document.activeElement.blur()');
@@ -481,9 +483,54 @@ await check('the Pedestrians mode and back', async () => {
   await ev('document.getElementById("modeObjects").click()');
   must(await until(`window.wotmDebug.mode === 'objects'`, 20), 'mode: ' + await ev('window.wotmDebug.mode'));
 });
+const reloadPage = async () => {
+  await send('Page.navigate', { url: `http://127.0.0.1:${PORT}/?debug` });
+  await sleep(1500);
+  must(await until('!!(window.wotmDebug && window.wotmDebug.stageRoot && window.wotmDebug.items().length > 20)', 240, 500), 'the page did not load again');
+};
+const draftKey = 'wotmLevelEditor.draft.smoke|' + stage;
+await check('an unsaved draft survives a reload and is offered back (Restore, then Discard)', async () => {
+  await ev('window.wotmDebug.select(window.wotmDebug.items().find((x) => x.rec.info.handle === ' + JSON.stringify(first) + ' && !x.copy)); window.wotmDebug.nudge(0, 0, 1, false)');
+  must(await until(`localStorage.getItem(${JSON.stringify(draftKey)}) !== null`, 20, 250), 'no draft was kept in the browser');
+  const size = await ev(`localStorage.getItem(${JSON.stringify(draftKey)}).length`);
+  must(size < 20000, 'the draft is not light: ' + size + ' characters');
+  await reloadPage();
+  must(await until(`document.getElementById('askDlg').open && document.getElementById('askTitle').textContent.startsWith('Restore')`, 40), 'the draft was not offered');
+  must(await ev('window.wotmDebug.buildPatch().objects.length') === 0, 'the page started with the changes in before the answer');
+  await answer('restore');
+  must(await ev('window.wotmDebug.buildPatch().objects.length') === 1, 'Restore did not bring the changes back: ' + await ev(`JSON.stringify({ patch: window.wotmDebug.buildPatch(), draft: localStorage.getItem(${JSON.stringify(draftKey)}), dirty: window.wotmDebug.dirty, ask: document.getElementById('askDlg').open })`));
+  must(await ev('window.wotmDebug.unsavedCount()') >= 1, 'the restored changes are not counted as unsaved');
+  await reloadPage();                          // still unsaved: offered again, and this time thrown away
+  must(await until(`document.getElementById('askDlg').open`, 40), 'the draft was not offered the second time');
+  await answer('discard');
+  must(await ev('window.wotmDebug.buildPatch().objects.length') === 0, 'Discard kept the changes');
+  must(await ev(`localStorage.getItem(${JSON.stringify(draftKey)})`) === null, 'the discarded draft is still in the browser');
+  await reloadPage();
+  await sleep(1000);
+  must(await ev(`!document.getElementById('askDlg').open`), 'a discarded draft was offered again');
+});
+await check('a mod file that changed on disk is not overwritten without asking', async () => {
+  await ev('window.wotmDebug.select(window.wotmDebug.items().find((x) => x.rec.info.handle === ' + JSON.stringify(first) + ' && !x.copy)); window.wotmDebug.nudge(0, 0, 1, false)');
+  await ev(`window.wotmDebug.post('save')`);
+  must(await until(`window.wotmDebug.unsavedCount() === 0`, 80), 'the first Save did not finish');
+  must(await ev(`localStorage.getItem(${JSON.stringify(draftKey)})`) === null, 'a Save left its draft behind');
+  fs.writeFileSync(levelFile, JSON.stringify({ objects: [], names: { '0x1': 'by hand' } }));
+  const later = new Date(Date.now() + 5000);
+  fs.utimesSync(levelFile, later, later);
+  await ev('window.wotmDebug.undo()');
+  await ev(`window.wotmDebug.post('save')`);
+  must(await until(`document.getElementById('askDlg').open && document.getElementById('askTitle').textContent === 'The file changed on disk'`, 40), 'no question about the changed file');
+  await answer('cancel');
+  must(JSON.parse(fs.readFileSync(levelFile, 'utf8')).names['0x1'] === 'by hand', 'Cancel overwrote the file');
+  await ev(`window.wotmDebug.post('save')`);
+  await answer('go');
+  must(await until(`window.wotmDebug.unsavedCount() === 0`, 80), 'Overwrite did not finish');
+  must(!fs.existsSync(levelFile) || !JSON.stringify(JSON.parse(fs.readFileSync(levelFile, 'utf8'))).includes('by hand'), 'Overwrite kept the hand-edited file');
+});
 await check('no script error in the page', async () => {
-  // the browser asks for a favicon the editor has none of; the 403 is the refused POST this test makes on purpose
-  const bad = pageErrors.filter((e) => !/favicon\.ico/.test(e) && !/403 \(Forbidden\) http:\/\/127\.0\.0\.1:\d+\/api\/config/.test(e));
+  // the browser asks for a favicon the editor has none of; the 403 and the 409 are refusals this test provokes on purpose
+  const bad = pageErrors.filter((e) => !/favicon\.ico/.test(e) && !/403 \(Forbidden\) http:\/\/127\.0\.0\.1:\d+\/api\/config/.test(e)
+    && !/409 \(Conflict\) http:\/\/127\.0\.0\.1:\d+\/api\/save/.test(e));
   must(bad.length === 0, bad.join(' | '));
 });
 

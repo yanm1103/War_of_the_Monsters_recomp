@@ -58,6 +58,57 @@ const store = {
   set(k, v) { try { localStorage.setItem('wotmLevelEditor.' + k, v); } catch (e) { /* no storage */ } },
 };
 
+// ------------------------------------------------------------------ the unsaved draft, kept in the browser
+// What is not saved survives a crashed tab, a closed window or a program that quit: the patch is copied to localStorage a moment after
+// each change (only the patch, text of a few KB; a patch over DRAFT_MAX is not kept, and only the DRAFT_KEEP newest drafts stay, so it
+// can always fit) and offered back when that stage opens in that mod. A save, or going back to the saved state, removes it.
+const DRAFT_MAX = 200 * 1024, DRAFT_KEEP = 3;
+let draftTimer = 0, draftHold = false, draftTooBig = false;
+const draftKey = () => `draft.${modNow}|${stageName}`;
+function draftIndex() { try { return JSON.parse(store.get('draftIndex', '[]')) || []; } catch (e) { return []; } }
+function removeDraft(key = draftKey()) {
+  clearTimeout(draftTimer);
+  try { localStorage.removeItem('wotmLevelEditor.' + key); } catch (e) { /* no storage */ }
+  store.set('draftIndex', JSON.stringify(draftIndex().filter((k) => k !== key)));
+}
+function readDraft() {
+  if (!modNow || !stageName) return null;
+  try { const d = JSON.parse(store.get(draftKey(), 'null')); return d && typeof d.patch === 'string' ? d : null; } catch (e) { return null; }
+}
+function writeDraft() {
+  if (draftHold || !stageName || !modNow || openFailed || !stageRoot) return;
+  const key = draftKey();
+  if (!dirty) { removeDraft(key); draftTooBig = false; return; }
+  const patch = JSON.stringify(buildPatch());
+  if (patch.length > DRAFT_MAX) {
+    removeDraft(key);
+    if (!draftTooBig) { draftTooBig = true; msg('This stage has too many changes for the automatic backup in the browser: save often', { level: 'warn', toast: true }); }
+    return;
+  }
+  draftTooBig = false;
+  store.set(key, JSON.stringify({ patch, saved: savedJson, at: Date.now() }));
+  const keep = [key, ...draftIndex().filter((k) => k !== key)];
+  for (const old of keep.slice(DRAFT_KEEP)) { try { localStorage.removeItem('wotmLevelEditor.' + old); } catch (e) { /* no storage */ } }
+  store.set('draftIndex', JSON.stringify(keep.slice(0, DRAFT_KEEP)));
+}
+const queueDraft = () => { clearTimeout(draftTimer); draftTimer = setTimeout(writeDraft, 800); };
+// the stage has just opened: a draft of it that is not the saved state is offered back
+function offerDraft() {
+  const d = readDraft();
+  if (!d || d.patch === savedJson) { if (d) removeDraft(); return; }
+  draftHold = true;
+  const when = new Date(d.at).toLocaleString([], { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' });
+  const moved = d.saved !== savedJson;
+  ask('Restore your unsaved changes?', `${title(stageName)} had changes that were not saved (${when}) when the editor closed or stopped.` +
+      (moved ? ' The mod\'s file is not the one they were made on: they go on top of the file as it is now.' : ''),
+      [['discard', 'Discard them'], ['restore', 'Restore', true]], (v) => {
+        draftHold = false;
+        if (v === 'restore') { restoreTo(d.patch); msg('Restored the changes that were not saved', { level: 'ok', toast: true }); }
+        else if (v === 'discard') removeDraft();
+        else queueDraft();
+      }, { icon: 'restore' });
+}
+
 // ------------------------------------------------------------------ messages: the Output drawer, the status bar and toasts
 // The Output has three tabs: Messages (everything the page says), Check (the last check, its problems and the raw lvl.py output)
 // and Game (the game's [fase] lines, in words and as they are). The drawer opens by itself only on an error.
@@ -584,6 +635,7 @@ function showHint() {
 let stageBases = {};     // a custom stage's name -> the game stage it is built on (its files, its handles, its props)
 let stageMeta = {};      // a custom stage's name -> its listing entry (id, title, base, mod, narrator, random)
 const baseOf = (n) => stageBases[n] || n;
+let fileStamp = 0;     // when the mod's file for this stage last changed, as the server told (Save sends it back: a file that changed meanwhile is asked about)
 let cfg = {}, stageName = '', recs = [], byHandle = new Map(), itemOf = new Map(), sel = null, group = [], dirty = false;
 // undo and redo: {p: the patch as JSON before the change, label}; savedJson: the patch the mod's file holds
 let history = [], future = [], savedJson = '';
@@ -908,6 +960,7 @@ function showUndo() {
   $('redo').title = r ? `Redo: ${r.label} (Ctrl+Y)` : 'Nothing to redo (Ctrl+Y)';
   $('save').classList.toggle('dirty', isDirty());
   if (!$('stageTab').hidden && stageName && !document.activeElement?.matches?.('#pmSky, #pmClouds')) fillSkySelects();
+  queueDraft();
   showStatus();
   queueBudget();
   queueColl();
@@ -1034,6 +1087,7 @@ function setColl(on) {
 // the stage that did not open (the select shows it, nothing of it is on screen): Save, Check and Test refuse until it opens
 let openFailed = '';
 async function loadStage(name) {
+  draftHold = true; clearTimeout(draftTimer);      // no draft is written while the stage opens: the old stage's patch is not this one's
   $('busyText').textContent = `Loading ${title(name)}…`;
   $('busy').hidden = false;
   openFailed = '';
@@ -1057,6 +1111,7 @@ async function loadStage(name) {
     const mod = modNow;
     const info = await api(`/api/stage?name=${encodeURIComponent(name)}&mod=${encodeURIComponent(mod)}`);
     stageHave = info.have || [];
+    fileStamp = info.stamp || 0;
     const gltf = await new GLTFLoader().loadAsync(`/api/glb?name=${encodeURIComponent(name)}`);
     env = info.env || null;
     discPeds = info.peds || null;
@@ -1115,8 +1170,11 @@ async function loadStage(name) {
     msg(`${title(name)}: ${recs.length} objects, ${pc.groups} pedestrian groups` +
         (n ? `; mod "${mod}" changes ${n} ${n === 1 ? 'object' : 'objects'}` : '') +
         (info.patch.peds ? (n ? ' and the pedestrians' : `; mod "${mod}" changes the pedestrians`) : ''));
+    draftHold = false;
+    offerDraft();
   } catch (e) {
     const er = cleanError(e);
+    draftHold = false;
     // what was on screen is gone and what is half built is not a stage: nothing may be saved as if it were this one
     for (const r of [stageRoot, skyRoot]) if (r) scene.remove(r);
     stageRoot = skyRoot = null;
@@ -1203,13 +1261,13 @@ $('list').addEventListener('keydown', (e) => {
   const li = e.target.closest && e.target.closest('li');
   if (!li || e.altKey) return;
   const rows = [...$('list').children], i = rows.indexOf(li);
-  const go = (j) => { const t = rows[Math.max(0, Math.min(rows.length - 1, j))]; if (t) { e.preventDefault(); t.focus(); } };
+  const go = (j) => { const t = rows[Math.max(0, Math.min(rows.length - 1, j))]; if (t) { e.preventDefault(); e.stopPropagation(); t.focus(); } };
   if (e.key === 'ArrowDown') go(i + 1);
   else if (e.key === 'ArrowUp') go(i - 1);
   else if (e.key === 'Home') go(0);
   else if (e.key === 'End') go(rows.length - 1);
   else if ((e.key === 'Enter' || e.key === ' ') && li._item) {
-    e.preventDefault();
+    e.preventDefault(); e.stopPropagation();   // (the arrows would also nudge the selection: the window's keys must not see them)
     if (e.shiftKey || e.ctrlKey) select(li._item, 'toggle');
     else { select(li._item); if (li._item.node.visible) focus(li._item); }
   }
@@ -2505,7 +2563,7 @@ async function postNow(kind, save, extra) {
   const mod = modNow;
   if (writes && lightDirty()) await lightSave();       // the open Light and fog panel's file goes with the stage's
   const { here, ...rest } = extra;       // here: Test from here / Reload from here (the view's aim as the start point)
-  const body = Object.assign({ name: stageName, mod, patch: buildPatch(), save }, testBody(here ? aimStart() : null), rest);
+  const body = Object.assign({ name: stageName, mod, patch: buildPatch(), save, since: writes ? fileStamp : undefined }, testBody(here ? aimStart() : null), rest);
   const wasRunning = game.running;
   if (kind === 'test') setGameState('starting');
   if (kind === 'reload') setGameState('reloading');
@@ -2535,7 +2593,9 @@ async function postNow(kind, save, extra) {
     const rel = `mods/${mod}/levels/${stageName}.json`;
     if (res.saved) {
       savedJson = JSON.stringify(body.patch);
+      if (res.stamp !== undefined) fileStamp = res.stamp;
       dirty = JSON.stringify(buildPatch()) !== savedJson;   // an edit made while saving stays unsaved
+      if (!dirty) removeDraft(); else queueDraft();
       ui.savedAt = Date.now();
       const removed = /^removed /.test(res.saved);
       const text = removed ? `Removed ${rel}: your mod no longer changes ${title(stageName)}` : `Saved to ${rel}`;
@@ -2564,6 +2624,12 @@ async function postNow(kind, save, extra) {
     game.pending = false;
     if (kind === 'test' || kind === 'reload') setGameState(wasRunning ? 'running' : 'closed');
     if (kind === 'test' && e.code === 'running') { game.stage = e.data.stage || game.stage; setRunning(true); askRunning(save, extra); return false; }
+    if (e.code === 'changed') {      // the mod's file changed on disk after the editor read it: never overwritten without asking
+      ask('The file changed on disk', `${e.message} Saving now replaces what is there with your version.`,
+          [['cancel', 'Cancel'], ['go', 'Overwrite', true]],
+          (v) => { if (v === 'go') post(kind, save, Object.assign({}, extra, { overwrite: true })); }, { icon: 'alert-outline' });
+      return false;
+    }
     const er = cleanError(e);
     const where = /wotm\.exe/.test(er.text) ? 'game' : /disc image/.test(er.text) ? 'iso' : '';
     const action = e.code === 'mod' ? ['Choose mod', () => $('mod').focus()]
@@ -4977,7 +5043,7 @@ window.addEventListener('keydown', (e) => {
   else if (k === '2') setMode('peds');
   else if (k === 'escape') { if (ruler.on) setRuler(false); else select(null); }
 });
-window.addEventListener('beforeunload', (e) => { if (isDirty()) { e.preventDefault(); e.returnValue = ''; } });
+window.addEventListener('beforeunload', (e) => { if (dirty) writeDraft(); if (isDirty()) { e.preventDefault(); e.returnValue = ''; } });
 
 // /api/init or /api/config's reply. load: open the stage (again); Settings without a new disc or mods folder leaves the scene alone
 function init(r, load = true) {

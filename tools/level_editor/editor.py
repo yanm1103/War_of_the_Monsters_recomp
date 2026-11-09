@@ -1517,6 +1517,15 @@ def game_stage_lines(cfg):
         return []
 
 
+def file_stamp(path):
+    """When a file last changed, in microseconds (a whole number a page can hold), or 0 when it is not there. The page sends it back
+    with Save: a file that changed in between (by hand, by another editor, by modkit.py) is not overwritten without asking."""
+    try:
+        return os.stat(path).st_mtime_ns // 1000
+    except OSError:
+        return 0
+
+
 def save_patch(cfg, mod, name, patch):
     """Writes (or, empty, removes) mods/<mod>/levels/<STAGE>.json; through a .tmp, since a running game may read it at any time."""
     path = patch_path(cfg, mod, name)
@@ -1901,7 +1910,8 @@ class Handler(BaseHTTPRequestHandler):
                                                 "cell": st.grid.cell, "cols": st.grid.cols, "rows": st.grid.rows} if st.grid else None,
                                        "walls": STAGES.walls(cfg["disc"], base),
                                        "peds": pedsapi.stage_peds(st, points_root(cfg, q["name"]) or stage_root(cfg["disc"], base)),
-                                       "have": have, "winner": winner, "others": [m for m in have if m != mod]})
+                                       "have": have, "winner": winner, "others": [m for m in have if m != mod],
+                                       "stamp": file_stamp(patch_path(cfg, q["mod"], q["name"])) if q.get("mod") and not bad_mod(q["mod"]) else 0})
             if u.path == "/api/spt":            # the stage's start points as the game reads them with this mod
                 try:
                     return self.send(200, stage_spt(cfg, q.get("mod", ""), q.get("name", ""), point_kind(q.get("kind"))))
@@ -2117,8 +2127,13 @@ class Handler(BaseHTTPRequestHandler):
                 if self.path == "/api/reload" and not b.get("save", True):      # "Test without my changes": the file on disk, nothing written
                     reload_game(name, (b.get("options") or {}).get("here"))
                     return self.send(200, {"ok": True, "lines": [], "reloading": True})
+                # the file changed since the page read it (b["since"], from /api/stage or the last save): ask before overwriting
+                if b.get("since") is not None and not b.get("overwrite") and file_stamp(patch_path(cfg, mod, name)) != b["since"]:
+                    return self.send(409, {"error": "mods/%s/levels/%s.json changed on disk after the editor read it (by hand, or by another program)."
+                                                    % (mod, name), "code": "changed"})
                 res = check_patch(cfg["disc"], base_of(cfg, name), b["patch"], mod_folder(cfg, mod), points_root(cfg, name))
                 res["saved"] = save_patch(cfg, mod, name, b["patch"])
+                res["stamp"] = file_stamp(patch_path(cfg, mod, name))
                 # another mod with this stage's file that loads later wins in the game: the page says so (not a check problem)
                 res["winner"] = patch_winner(cfg, mod, name)
                 res["have"] = [m for m in list_mods(cfg) if os.path.isfile(patch_path(cfg, m, name))]

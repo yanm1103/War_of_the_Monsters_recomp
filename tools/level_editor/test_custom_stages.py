@@ -144,6 +144,27 @@ def main():
                 assert e.code == 400
             else:
                 raise AssertionError("accepted " + repr(bad["name"]))
+        # a file that changed after the page read it is not overwritten without asking: /api/stage tells its stamp, Save sends it back
+        lv = os.path.join(mods, "m", "levels", "CENTRAL.json")
+        assert not os.path.exists(lv) and get("/api/stage?name=CENTRAL&mod=m")["stamp"] == 0
+        first = post("/api/save", {"name": "CENTRAL", "mod": "m", "patch": {"objects": [], "names": {"0x1": "a"}}, "since": 0})
+        assert first["stamp"] > 0 and first["stamp"] == get("/api/stage?name=CENTRAL&mod=m")["stamp"], first
+        with open(lv, "w") as f:                  # somebody edits it by hand
+            json.dump({"objects": [], "names": {"0x1": "by hand"}}, f)
+        os.utime(lv, (first["stamp"] / 1e6 + 5, first["stamp"] / 1e6 + 5))
+        try:
+            post("/api/save", {"name": "CENTRAL", "mod": "m", "patch": {"objects": [], "names": {"0x1": "b"}}, "since": first["stamp"]})
+        except urllib.error.HTTPError as e:
+            assert e.code == 409 and json.loads(e.read())["code"] == "changed"
+        else:
+            raise AssertionError("overwrote a file that changed on disk")
+        with open(lv) as f:
+            assert json.load(f)["names"]["0x1"] == "by hand"
+        again = post("/api/save", {"name": "CENTRAL", "mod": "m", "patch": {"objects": [], "names": {"0x1": "b"}},
+                                   "since": first["stamp"], "overwrite": True})
+        with open(lv) as f:
+            assert json.load(f)["names"]["0x1"] == "b" and again["stamp"] != first["stamp"]
+        post("/api/save", {"name": "CENTRAL", "mod": "m", "patch": {"objects": [], "names": {"0x1": "c"}}, "since": again["stamp"]})
         srv.shutdown()
     print("ok")
 
