@@ -338,6 +338,23 @@ body.scrubbing, body.scrubbing * { cursor: ew-resize !important; user-select: no
 .fl > input:disabled { border-style: dashed; }
 .help { color: var(--muted); font-size: 11px; line-height: 16px; margin-top: 4px; }
 /* actions: full-width buttons with their key on the right */
+/* Arrange: the mode picker, then one pane of rows for the mode */
+#secArrange .ar-body { display: flex; flex-direction: column; gap: 8px; }
+#secArrange .ar-body > select { width: 100%; }
+#secArrange .ar-pane { display: flex; flex-direction: column; gap: 8px; }
+#secArrange .ar-pane[hidden] { display: none; }
+#secArrange .ar-row { display: grid; grid-template-columns: 88px 78px 1fr; gap: 8px; align-items: center; }
+#secArrange .ar-row > label { color: var(--fg-2); }
+#secArrange .ar-row > select { grid-column: 2 / -1; width: 100%; }
+#secArrange .ar-row .unit { color: var(--muted); font-size: 12px; line-height: 14px; }
+#secArrange .ar-lbl { color: var(--muted); font-size: 12px; margin-top: 2px; }
+#secArrange .xyz.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#secArrange .ar-btns { display: flex; gap: 6px; }
+#secArrange .ar-btns > button { flex: 1; }
+#secArrange .ar-sw { width: 100%; font-size: 13px; }
+#secArrange .ar-note { margin-top: 0; color: var(--warn); }
+#secArrange .ar-note:empty { display: none; }
+#secArrange .help { margin-top: 0; }
 .actions { display: flex; flex-direction: column; gap: 6px; }
 .actions > button, button.wide { width: 100%; justify-content: flex-start; padding: 0 8px; }
 .actions > button .lbl { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; }

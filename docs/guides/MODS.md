@@ -883,6 +883,15 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   holds the object's name and the model's; **Details** (closed at first) the size, the model id, the damage states, the collision
   boxes, the place on the disc and what it rests on (a click selects it). A deleted object stays in the list, struck through:
   picking it shows **Restore**, which puts it back (with Move objects on top, the objects that were on it too).
+- **Arrange** (in Actions' panel, closed at first; works on the whole selection, and with Move objects on top on what rests on it;
+  one undo step each; the button says how many copies it makes, at most 500 at a time): **Row of copies** (the count includes the
+  original, the distance between neighbours in X, Y and Z, and a turn each copy adds to the one before), **Circle of copies** (count,
+  arc, the point to go around, filled with the selection's middle, or where the view looks for a single object, with buttons for
+  both; the copies turn around the circle unless that is off), **Mirror** (across X = or Y = a value, with the originals kept as
+  copies or moved; the heading is mirrored but the models are not flipped), **Align** (the boxes' lowest, middle or highest side
+  along X, Y or Z; bottoms, middles or tops for Z) and **Spread evenly** (the two outermost stay, the others go between them with
+  equal gaps or equal distances between their middles). Align needs two objects and Spread three. The copies are the new
+  selection.
 - **Several objects:** Shift+click (or Ctrl+click, also in the list) adds or takes out one, Shift+left drag selects the ones whose
   middle falls in the box (only the kinds on in the list), **Ctrl+A** selects everything the list shows. The gizmo and the fields
   act on the last one picked (amber outline and row); the others (orange) follow it by the same move or turn, and Drop, Duplicate,

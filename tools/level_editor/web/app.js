@@ -9,6 +9,7 @@ import { createPeds } from './peds.js';
 import { openHud, hudGameChanged } from './hud.js';
 import { openTex, texGameChanged } from './tex.js';
 import { openLight, lightGameChanged, lightLookChanged, lightClose } from './light.js';
+import { initArrange } from './arrange.js';
 
 // The GS modulates and blends the bytes as they are: no color management (texture, vertex and interface colors stay raw).
 THREE.ColorManagement.enabled = false;
@@ -1361,6 +1362,7 @@ function showActions() {
   const rs = new Set();
   for (const it of group) { rs.add(it.rec); if (carryOn) for (const a of it.rec.item.attached) rs.add(a.rec); }
   $('reset').disabled = ![...rs].some((r) => !r.prop && changed(r));
+  arrange.changed();
   $('reset').title = $('reset').disabled ? 'Nothing to restore: it is where the disc has it'
     : "Back to the disc's place, copies removed (with Move objects on top, also the objects on it)";
 }
@@ -1909,24 +1911,29 @@ function duplicate() {
   const box = new THREE.Box3();
   for (const it of group) box.expandByObject(it.node);
   const step = Math.max(40, box.getSize(new THREE.Vector3()).x + 20);
-  const made = [], done = new Set();
-  const copyOf = (it) => {
-    const p = posOf(it);
-    const at = [p[0] + step, p[1], p[2]];
-    const c = it.rec.prop ? makeProp(Object.assign({ id: newPropId(), model: it.rec.prop.model, pos: at, heading: headingOf(it) }, it.rec.extra || {}))
-      : makeCopy(it.rec, at, headingOf(it));
-    done.add(it);
-    return c;
-  };
-  for (const it of group) {
-    if (!it.node.visible || done.has(it)) continue;
-    const c = copyOf(it);
-    made.push(c);
-    if ($('carry').checked) for (const a of it.attached) if (a.node.visible && !group.includes(a)) c.attached.push(copyOf(a));
-  }
-  const on = done.size - made.length;
+  const { made, on } = copyGroup([(p, h) => [[p[0] + step, p[1], p[2]], h]]);
   msg(`Copied ${countText(made)}` + (on ? ` and ${on} ${on === 1 ? 'object' : 'objects'} on top` : ''), { level: 'ok', toast: true });
   selectMany(made);
+}
+// One copy of an item, placed by `place`: ([x, y, z], heading) -> [[x, y, z], heading] (a new prop for a new prop, else a copy of the object)
+function cloneItem(it, place) {
+  const [at, h] = place(posOf(it), headingOf(it));
+  return it.rec.prop ? makeProp(Object.assign({ id: newPropId(), model: it.rec.prop.model, pos: at, heading: h }, it.rec.extra || {}))
+    : makeCopy(it.rec, at, h);
+}
+// The selection (and, with Move objects on top, what rests on it) copied once for each placer. made: the copies of the selected ones.
+function copyGroup(placers) {
+  const made = [];
+  let on = 0;
+  for (const place of placers) {
+    for (const it of group) {
+      if (!it.node.visible) continue;
+      const c = cloneItem(it, place);
+      made.push(c);
+      if ($('carry').checked) for (const a of it.attached) if (a.node.visible && !group.includes(a)) { c.attached.push(cloneItem(a, place)); on++; }
+    }
+  }
+  return { made, on };
 }
 // "Hotel", "3 buildings" or "5 objects"
 const KIND_WORDS = { destr: ['building', 'buildings'], pickup: ['pickup', 'pickups'], prop: ['prop', 'props'], newprop: ['new prop', 'new props'] };
@@ -1981,6 +1988,69 @@ function resetSel() {
   }
   selectMany([...rs].map((r) => r.item));
 }
+
+// ------------------------------------------------------------------ Arrange (web/arrange.js): the selection copied or moved by rule
+const arrangeItems = () => (isDeleted(sel) ? [] : group.filter((it) => it.node.visible));
+function gameBox(it) {   // the item's box in the game's axes, and where it stands (its origin); an object without a mesh counts as its point
+  const b = new THREE.Box3().setFromObject(it.node);
+  const pos = posOf(it);
+  if (b.isEmpty()) return { min: pos, max: pos, pos };
+  return { min: [b.min.x, -b.max.z, b.min.y], max: [b.max.x, -b.min.z, b.max.y], pos };
+}
+const arrangeCarried = (it) => ($('carry').checked ? it.attached.filter((a) => a.node.visible && !group.includes(a)) : []);
+function placeItem(it, place) {
+  const [p, h] = place(posOf(it), headingOf(it));
+  setWorld(it.node, p, h, it.rec);
+}
+// One copy of the selection for each placer; the copies become the selection. Returns how many objects it made.
+function arrangeCopies(placers, what) {
+  const src = arrangeItems();
+  if (!src.length || !placers.length) return 0;
+  const label = countText(src);
+  snapshot(`${what} ${whatSel()}`);
+  const { made, on } = copyGroup(placers);
+  const n = made.length + on;
+  msg(`Made ${n} ${n === 1 ? 'copy' : 'copies'} of ${label}`, { level: 'ok', toast: ['Undo', undo] });
+  selectMany(made);
+  return n;
+}
+// The selection, and what it carries, moved by one rule
+function arrangeMove(place, what) {
+  const src = arrangeItems();
+  if (!src.length) return 0;
+  snapshot(`${what} ${whatSel()}`);
+  for (const it of src) { placeItem(it, place); for (const a of arrangeCarried(it)) placeItem(a, place); }
+  msg(`Moved ${countText(src)}`, { level: 'ok', toast: ['Undo', undo] });
+  showProps();
+  refreshList();
+  return src.length;
+}
+// shifts[k]: how far the k-th selected object goes along the axis (0 X, 1 Y, 2 Z)
+function arrangeShifts(axis, shifts, what) {
+  const src = arrangeItems();
+  if (!src.length) return 0;
+  if (!shifts.some((s) => Math.abs(s) > 0.05)) { msg('They are already in line', { level: 'info', toast: true }); return 0; }
+  snapshot(`${what} ${whatSel()}`);
+  src.forEach((it, k) => {
+    const place = (p, h) => { const q = p.slice(); q[axis] += shifts[k]; return [q, h]; };
+    placeItem(it, place);
+    for (const a of arrangeCarried(it)) placeItem(a, place);
+  });
+  msg(`${what === 'align' ? 'Aligned' : 'Spread'} ${countText(src)}`, { level: 'ok', toast: ['Undo', undo] });
+  showProps();
+  refreshList();
+  return src.length;
+}
+const arrange = initArrange($('secArrange'), {
+  boxes: () => arrangeItems().map(gameBox),
+  view: () => viewPoint(),
+  carryCount: () => arrangeItems().reduce((n, it) => n + arrangeCarried(it).length, 0),
+  copies: arrangeCopies,
+  moveAll: arrangeMove,
+  shifts: arrangeShifts,
+  scrub: (inp) => scrubField(inp),
+  msg,
+});
 
 // picking: a click that did not drag (Shift/Ctrl: add or take out); Shift + left drag: box select
 const ndc = (e) => {
@@ -4088,7 +4158,7 @@ window.addEventListener('pagehide', () => { try { navigator.sendBeacon('/api/bye
 if (new URLSearchParams(location.search).has('debug')) {
   window.wotmDebug = { camera, fly, flyStep, setView, select, selectMany, items, listed, dropToGround, nudge, duplicate, remove,
                        undo, buildPatch, posOf, setLook, scene, renderer, gsLights, peds, selectPed, setPeds, addPed, pedFromInputs,
-                       redo, resetAll, applyPatch, frameAll, resetSel, gameLine, post, setRunning, applyTheme, refreshList,
+                       redo, resetAll, applyPatch, frameAll, resetSel, gameLine, post, setRunning, applyTheme, refreshList, gameBox,
                        msg, toast, openOutput, closeOutput, showStatus, setGameState, readCheck, gameResult,
                        setMode, turnBy, showSummary, secOf, SECTIONS, get mode() { return modeNow(); },
                        refreshPedList, setPedLive, slideInput, slideDone, showPed, pedOfEntry, openHudDialog, chooseMod,
