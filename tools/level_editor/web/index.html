@@ -160,6 +160,8 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <label class="switch" title="The vehicle net drawn in the view, its roads colored by who drives them: yellow cars, green helicopters, pink flying saucers, orange tanks. The Vehicle net dialog shows it too."><input type="checkbox" id="fopOn"><span class="track"></span><i class="ic" style="--ic:url(vendor/mdi/road-variant.svg)"></i><span class="tx">Vehicle net</span></label>
     </div>
     <div id="notes">
+      <div id="openNote" class="callout err" hidden role="alert"><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span id="openText"></span>
+        <button id="openRetry" type="button" class="ghost small-btn" title="Open the stage again">Retry</button></div>
       <div id="winNote" class="callout warn" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span id="winText"></span>
         <button id="winClose" class="icon ghost" title="Hide this note" aria-label="Hide"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
       <div id="keepNote" class="callout warn" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-outline.svg)"></i><span id="keepText"></span>

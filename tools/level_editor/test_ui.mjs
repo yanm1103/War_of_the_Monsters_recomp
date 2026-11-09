@@ -3,17 +3,25 @@
 //
 // Needs the disc configured (the stage is read from it), Node 22 (the WebSocket is Node's own) and Edge or Chrome. Nothing of
 // yours is touched: the editor program runs with its own settings file (WOTM_LEVEL_EDITOR_CONFIG) and a temporary mods folder,
-// on port 47393, with Edge headless (software rendering: the first stage takes a while).
+// on free ports, with Edge headless (software rendering: the first stage takes a while).
 // Run: node tools/level_editor/test_ui.mjs            (--keep leaves the temporary folder; --shots <dir> saves a PNG per dialog)
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
-const PORT = 47393, DBG = 9335;
+// free ports each run (a program left over from an earlier run can never answer for this one)
+const freePort = () => new Promise((res) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
+const PORT = await freePort(), DBG = await freePort();
+// kill a program and what it started (on Windows kill() only reaches the launcher, and Edge has helper processes)
+const killTree = (c) => {
+  if (!c || !c.pid) return;
+  try { if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(c.pid), '/T', '/F'], { stdio: 'ignore' }); else c.kill(); } catch { /* gone */ }
+};
 const args = process.argv.slice(2);
 const shotsDir = args.includes('--shots') ? args[args.indexOf('--shots') + 1] : '';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -43,12 +51,12 @@ const server = spawn(process.platform === 'win32' ? 'python' : 'python3', [path.
 const edgePaths = ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
   'C:/Program Files/Google/Chrome/Application/chrome.exe', '/usr/bin/microsoft-edge', '/usr/bin/google-chrome', '/usr/bin/chromium'];
 const browser = edgePaths.find((p) => fs.existsSync(p));
-if (!browser) { console.error('no Edge or Chrome found'); server.kill(); process.exit(2); }
+if (!browser) { console.error('no Edge or Chrome found'); killTree(server); process.exit(2); }
 const edge = spawn(browser, ['--headless=new', `--remote-debugging-port=${DBG}`, '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
   '--disable-gpu-sandbox', `--user-data-dir=${path.join(tmp, 'profile')}`, '--window-size=1600,900', 'about:blank'], { stdio: 'ignore' });
 let failures = 0;
 const done = (code) => {
-  try { server.kill(); edge.kill(); } catch { /* gone */ }
+  killTree(server); killTree(edge);
   setTimeout(() => { if (!args.includes('--keep')) fs.rmSync(tmp, { recursive: true, force: true }); process.exit(code); }, 500);
 };
 process.on('uncaughtException', (e) => { console.error(e); done(1); });
@@ -189,6 +197,30 @@ await check('no script error in the page', async () => {
   // the browser asks for a favicon the editor has none of; the 403 is the refused POST this test makes on purpose
   const bad = pageErrors.filter((e) => !/favicon\.ico/.test(e) && !/403 \(Forbidden\) http:\/\/127\.0\.0\.1:\d+\/api\/config/.test(e));
   must(bad.length === 0, bad.join(' | '));
+});
+
+await check('a stage that does not open: a note with Retry, nothing is saved, and it opens again', async () => {
+  await ev(`window.wotmDebug.loadStage('NOSUCHSTAGE')`);
+  must(await ev('window.wotmDebug.openFailed') === 'NOSUCHSTAGE', 'openFailed is not set');
+  must(await ev('!document.getElementById("openNote").hidden'), 'the note is hidden');
+  must(await ev(`window.wotmDebug.items().length`) === 0, 'items of the old stage are still there');
+  must(await ev(`window.wotmDebug.post('save')`) === false, 'Save went through with no stage open');
+  must(!fs.existsSync(path.join(mods, 'smoke', 'levels', 'NOSUCHSTAGE.json')), 'a file was written for the stage that did not open');
+  await shot('open_failed');
+  await ev(`window.wotmDebug.loadStage(${JSON.stringify(stage)})`);
+  must(await ev('window.wotmDebug.openFailed') === '', 'openFailed stayed');
+  must(await ev('document.getElementById("openNote").hidden'), 'the note stayed');
+  must(await ev('window.wotmDebug.items().length') > 20, 'the stage did not come back');
+});
+await check('with the program gone, Save says so and offers Copy patch', async () => {
+  killTree(server);
+  await sleep(800);
+  await ev('window.wotmDebug.nudge(0, 0, 1, false)').catch(() => {});
+  must(await ev(`window.wotmDebug.post('save')`) === false, 'Save said yes');
+  const text = await ev('document.querySelector("#status .msg .tx").textContent');
+  must(/isn't answering/.test(text), 'the message is: ' + text);
+  must(await ev('!!document.querySelector("#toasts button")'), 'no Copy patch button on the toast');
+  await shot('offline');
 });
 
 console.log(failures ? `${failures} FAILED` : 'test_ui: ok');

@@ -39,7 +39,13 @@ const wrapDeg = (a) => ((a + 180) % 360 + 360) % 360 - 180;
 const normHandle = (h) => '0x' + parseInt(String(h), 16).toString(16).toUpperCase();
 
 async function api(path, body) {
-  const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+  let r;
+  try {
+    r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+  } catch (e) {          // no answer at all: the program quit (its window closed, or it was stopped), not a fault of the request
+    throw Object.assign(new Error("The editor program isn't answering. It may have been closed. What you changed stays in this window " +
+                                  'until you start the editor again; Copy patch keeps it.'), { code: 'offline' });
+  }
   const j = await r.json();
   if (!r.ok) throw Object.assign(new Error(j.error || r.statusText), { status: r.status, code: j.code, data: j });
   return j;
@@ -1022,9 +1028,13 @@ function setColl(on) {
 }
 
 // ------------------------------------------------------------------ loading
+// the stage that did not open (the select shows it, nothing of it is on screen): Save, Check and Test refuse until it opens
+let openFailed = '';
 async function loadStage(name) {
   $('busyText').textContent = `Loading ${title(name)}…`;
   $('busy').hidden = false;
+  openFailed = '';
+  $('openNote').hidden = true;
   hoverBox.visible = false;
   hover.item = null;
   try {
@@ -1104,11 +1114,24 @@ async function loadStage(name) {
         (info.patch.peds ? (n ? ' and the pedestrians' : `; mod "${mod}" changes the pedestrians`) : ''));
   } catch (e) {
     const er = cleanError(e);
+    // what was on screen is gone and what is half built is not a stage: nothing may be saved as if it were this one
+    for (const r of [stageRoot, skyRoot]) if (r) scene.remove(r);
+    stageRoot = skyRoot = null;
+    recs = []; byHandle = new Map(); itemOf = new Map(); propRecs = []; history = []; future = [];
+    select(null);
+    dirty = false;
+    try { savedJson = JSON.stringify(buildPatch()); } catch (x) { savedJson = ''; }
+    openFailed = name;
+    $('openText').textContent = `${title(name)} didn't open: ${er.text}`;
+    $('openNote').hidden = false;
+    showUndo();
+    refreshList();
     msg(`Couldn't open ${title(name)}: ${er.text}`, { level: 'err', detail: er.detail });
   } finally {
     $('busy').hidden = true;
   }
 }
+$('openRetry').onclick = () => { if (openFailed) loadStage(openFailed); };
 
 function frameAll() {
   const box = new THREE.Box3();
@@ -2391,6 +2414,11 @@ function showWinner() {
 const FAILED = { check: 'Check failed', save: "Couldn't save", test: "Couldn't start the game", reload: "Couldn't reload the game" };
 // Check, Save, Test in game or Reload in game; true when the server did it. Saving with no mod chosen asks which one first.
 async function post(kind, save = true, extra = {}) {
+  if (openFailed || !stageRoot) {       // a patch built from nothing would be saved over this stage's file
+    msg(openFailed ? `${FAILED[kind] || kind}: ${title(openFailed)} didn't open, so there is nothing to ${kind}. Use Retry on the note over the view.`
+                   : `${FAILED[kind] || kind}: no stage is open yet.`, { level: 'err', toast: true });
+    return false;
+  }
   const writes = kind === 'save' || kind === 'reload' || (kind === 'test' && save);
   if (writes && !modNow) {
     const m = await pickMod('save', { save: 'Save', test: 'Save and test', reload: 'Save and reload' }[kind]);
@@ -2461,6 +2489,7 @@ async function post(kind, save = true, extra = {}) {
     const er = cleanError(e);
     const where = /wotm\.exe/.test(er.text) ? 'game' : /disc image/.test(er.text) ? 'iso' : '';
     const action = e.code === 'mod' ? ['Choose mod', () => $('mod').focus()]
+      : e.code === 'offline' ? ['Copy patch', async () => toast(await copyText(JSON.stringify(buildPatch(), null, 1)) ? 'Patch copied' : "Couldn't copy the patch", 'info')]
       : e.code === 'settings' || /Settings/.test(er.text) ? ['Open settings', () => openSettings(where)] : undefined;
     msg(`${FAILED[kind] || kind}: ${er.text}`, { level: 'err', detail: er.detail, toast: action });
     return false;
@@ -4771,7 +4800,7 @@ if (new URLSearchParams(location.search).has('debug')) {
                        refreshPedList, setPedLive, slideInput, slideDone, showPed, pedOfEntry, openHudDialog, chooseMod,
                        get pedsLayer() { return pedsOn; }, coll, setColl, refreshColl, get collOn() { return collOn; },
                        ask, askUnsaved, unsavedCount, switchMod, setMod, moveTo, fillMods, pickMod, openSettings, checkPaths, showPaths,
-                       showWinner, winnerOf, checkFromServer, init, addProp, showPropMenu, openImport, doImport, ipRead, loadPropModels, openTerrainDlg,
+                       showWinner, winnerOf, checkFromServer, init, loadStage, get openFailed() { return openFailed; }, addProp, showPropMenu, openImport, doImport, ipRead, loadPropModels, openTerrainDlg,
                        get propRecs() { return propRecs; }, get propModels() { return propModels; },
                        get stageHave() { return stageHave; }, set stageHave(v) { stageHave = v; },
                        get modList() { return modList; }, set modList(v) { modList = v; }, get savedJson() { return savedJson; },
