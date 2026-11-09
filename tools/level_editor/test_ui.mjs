@@ -355,14 +355,44 @@ await check('Display: game look, grid, minimap and the overlays are in one menu;
   must(await vis(`!!window.wotmDebug.ptViews.SPT && window.wotmDebug.ptViews.SPT.visible`), 'start points are not drawn by default');
   await ev(`document.getElementById('sptOn').click()`);
   must(await vis(`!window.wotmDebug.ptViews.SPT.visible`), 'start points stayed drawn');
-  await ev(`document.getElementById('sptBtn').click()`);     // its own dialog draws them, always
+  await ev(`document.getElementById('layersBtn').click()`);     // the menu first (its Esc comes before a tool's)
+  await ev(`document.getElementById('sptBtn').click()`);     // its own panel draws them, always
   must(await until(`document.getElementById('sptDlg').open && window.wotmDebug.ptViews.SPT.visible`, 40), 'the dialog does not draw its start points');
   await esc();
-  must(await until(`!document.getElementById('sptDlg').open && !window.wotmDebug.ptViews.SPT.visible`, 40), 'the start points stayed drawn after the dialog closed');
+  must(await until(`!document.getElementById('sptDlg').open && !window.wotmDebug.ptViews.SPT.visible`, 40), 'the start points stayed drawn after the dialog closed: ' + await ev(`JSON.stringify({ open: document.getElementById('sptDlg').open, vis: window.wotmDebug.ptViews.SPT.visible, focus: document.activeElement.id || document.activeElement.tagName, inDlg: document.getElementById('sptDlg').contains(document.activeElement) })`));
+  await ev(`document.getElementById('layersBtn').click()`);
   await ev(`document.getElementById('sptOn').click()`);
   must(await vis(`window.wotmDebug.ptViews.SPT.visible`), 'start points did not come back');
   await shot('display_menu');
   await ev(`document.getElementById('layersBtn').click()`);
+});
+await check('tool panels dock over the right panel, not modal: the width follows, one tool at a time, the right panel can be resized', async () => {
+  const W = () => ev(`Math.round(document.getElementById('right').getBoundingClientRect().width)`);
+  const w0 = await W();
+  must(w0 < 400, 'the right panel is already wide: ' + w0);
+  await ev(`document.getElementById('sptBtn').click()`);
+  must(await until(`document.getElementById('sptDlg').open`, 40), 'Start points did not open');
+  must(await until(`document.getElementById('right').getBoundingClientRect().width >= 439`, 20), 'the right panel did not widen: ' + await W());
+  const g = JSON.parse(await ev(`(() => { const d = document.getElementById('sptDlg').getBoundingClientRect(), r = document.getElementById('right').getBoundingClientRect();
+    return JSON.stringify({ modal: !!document.querySelector('dialog:modal'), dl: Math.round(d.left), rl: Math.round(r.left), dt: Math.round(d.top), rt: Math.round(r.top), dh: Math.round(d.height), rh: Math.round(r.height) }); })()`));
+  must(!g.modal, 'the panel is modal');
+  must(Math.abs(g.dl - g.rl) <= 2 && Math.abs(g.dt - g.rt) <= 2 && Math.abs(g.dh - g.rh) <= 2, 'the panel is not where the right panel is: ' + JSON.stringify(g));
+  // the camera is free while it is open: the aim takes where the view looks now
+  must(await ev(`!!window.wotmDebug.aimStart()`), 'the view has no aim point with the panel open');
+  await shot('dock_spt');
+  // another tool: the first closes (nothing unsaved), the second opens
+  await ev(`document.getElementById('aipBtn').click()`);
+  must(await until(`document.getElementById('netDlg').open && !document.getElementById('sptDlg').open`, 40), 'the AI net did not replace Start points');
+  await shot('dock_net');
+  await esc();
+  must(await until(`!document.getElementById('netDlg').open`, 20), 'the AI net panel did not close');
+  must(await until(`document.getElementById('right').getBoundingClientRect().width <= ${w0 + 1}`, 20), 'the right panel did not go back: ' + await W());
+  // the edge: the arrows resize, double click puts it back
+  await ev(`document.getElementById('rightGrip').focus()`);
+  await key('ArrowLeft', 'ArrowLeft', 37);
+  must(await until(`Math.round(document.getElementById('right').getBoundingClientRect().width) === ${w0 + 16}`, 20), 'the arrow did not widen the panel: ' + await W());
+  await ev(`document.getElementById('rightGrip').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+  must(await until(`Math.round(document.getElementById('right').getBoundingClientRect().width) === ${w0}`, 20), 'a double click did not put it back: ' + await W());
 });
 await check('top bar: File menu holds the stage and mod commands; Test has a chevron for Test from here and Test options', async () => {
   must(await ev(`!document.getElementById('bar').querySelector('#newStage, #editStage, #packMod, #check, #testHere, #testOpts')`), 'a command is still loose on the bar');

@@ -219,6 +219,7 @@ async function reset() {
   } catch (e) { ctx.msg(`Couldn't go back to the disc's file: ${e.message}`, { level: 'err', toast: true }); }
 }
 
+export async function lightRequestClose() { if (dlg && dlg.open) await requestClose(); }
 export async function openLight(opts) {
   if (!dlg) build();
   ctx = { ...opts };

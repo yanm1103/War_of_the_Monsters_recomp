@@ -8,7 +8,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { createPeds } from './peds.js';
 import { openHud, hudGameChanged } from './hud.js';
 import { openTex, texGameChanged } from './tex.js';
-import { openLight, lightGameChanged, lightLookChanged, lightClose, lightDirty, lightSave } from './light.js';
+import { openLight, lightGameChanged, lightLookChanged, lightClose, lightDirty, lightSave, lightRequestClose } from './light.js';
 import { popover } from './menu.js';
 import { initArrange } from './arrange.js';
 import { openTerrain } from './terrain.js';
@@ -123,7 +123,7 @@ function msg(text, o = {}) {
   for (const t of lines) addLine(tab, lineEl(t, level, o));
   const last = lines[lines.length - 1];
   if (level !== 'muted' && o.status !== false) setStatusMsg(last, level, tab);
-  const tst = o.toast !== undefined ? o.toast : !!document.querySelector('dialog[open]') && level !== 'muted';
+  const tst = o.toast !== undefined ? o.toast : !!document.querySelector('dialog:modal') && level !== 'muted';
   if (tst) toast(last, level, Array.isArray(tst) ? tst : null);
   if (level === 'err' && o.open !== false) openOutput(o.open || tab);
 }
@@ -175,7 +175,7 @@ function placeToasts() {
   b.style.bottom = Math.max(8, innerHeight - r.bottom + 12) + 'px';
 }
 function toast(text, level = 'info', action = null) {
-  const box = $('toasts'), host = document.querySelector('dialog[open]') || document.body;
+  const box = $('toasts'), host = document.querySelector('dialog:modal') || document.body;
   if (box.parentElement !== host) host.appendChild(box);
   placeToasts();
   const t = document.createElement('div'), x = document.createElement('span');
@@ -209,7 +209,7 @@ document.addEventListener('close', (e) => {
   const box = $('toasts');
   if (e.target instanceof HTMLDialogElement && e.target.contains(box)) {
     document.body.appendChild(box);
-    const other = document.querySelector('dialog[open]');
+    const other = document.querySelector('dialog:modal');
     if (other) other.appendChild(box);
   }
 }, true);
@@ -3201,7 +3201,7 @@ $('focusSel').onclick = focusSelection;
 const layersPop = popover({ button: $('layersBtn'), menu: $('layersMenu') });
 function showLayers(open) { layersPop.set(open); }
 function showKeys() {
-  if (document.querySelector('dialog[open]')) return;
+  if (document.querySelector('dialog:modal')) return;
   showLayers(false);
   $('keysDlg').showModal();
 }
@@ -3499,7 +3499,7 @@ function gdInfo() {
   const cols = Math.floor((hi[0] - lo[0]) / c) + 1, rows = Math.floor((hi[1] - lo[1]) / c) + 1;
   $('gdInfo').textContent = `${cols} × ${rows} cells of ${c} units (${cols * rows} of 65536 allowed).`;
 }
-$('gridBtn').onclick = () => {
+$('gridBtn').onclick = () => openTool(() => {
   if (!stageGrid) { msg('This stage has no collision grid to resize', { level: 'warn', toast: true }); return; }
   const g = stageGrid;
   $('gdText').textContent = `The disc's grid is x ${Math.round(g.min[0])} to ${Math.round(g.max[0])}, y ${Math.round(g.min[1])} to ${Math.round(g.max[1])} (${g.cols} × ${g.rows} cells). ` +
@@ -3510,8 +3510,8 @@ $('gridBtn').onclick = () => {
   $('gdWalls').checked = keep.top.walls === 'off';
   $('gdClear').checked = keep.top.clear === 'scenery';
   $('gdErr').hidden = true;
-  $('gridDlg').showModal();
-};
+  $('gridDlg').show();
+});
 for (const id of ['gdMinX', 'gdMinY', 'gdMaxX', 'gdMaxY']) $(id).oninput = () => { gdInfo(); $('gdErr').hidden = true; };
 $('gdGrow').onclick = () => { const [lo, hi] = gdVals(); gdFill({ min: lo.map((v) => v - 1000), max: hi.map((v) => v + 1000) }); };
 $('gdReset').onclick = () => gdFill(null);
@@ -3677,11 +3677,11 @@ async function openPoints(kind) {
   ptErr('');
   ptRows();
   ptInfo();
-  $('sptDlg').showModal();
+  $('sptDlg').show();
   updatePtView(kind);
 }
-$('sptBtn').onclick = () => openPoints('SPT');
-$('pupBtn').onclick = () => openPoints('PUP');
+$('sptBtn').onclick = () => openTool(() => openPoints('SPT'));
+$('pupBtn').onclick = () => openTool(() => openPoints('PUP'));
 $('sptAdd').onclick = () => {
   const kind = ptKind, d = pt[kind];
   if (d.points.length >= 255) { ptErr(`A stage holds at most 255 ${PT_WORDS[kind][1]}.`); return; }
@@ -3870,12 +3870,12 @@ async function openNet(kind) {
   netErr('');
   netRows();
   netInfo();
-  $('netDlg').showModal();
+  $('netDlg').show();
   updateNetView(kind);
   updateNetView(kind);       // after the dialog is open: that is what shows the vehicle net
 }
-$('aipBtn').onclick = () => openNet('AIP');
-$('fopBtn').onclick = () => openNet('FOP');
+$('aipBtn').onclick = () => openTool(() => openNet('AIP'));
+$('fopBtn').onclick = () => openTool(() => openNet('FOP'));
 $('fopOn').checked = fopOn;
 $('fopOn').onchange = (e) => { fopOn = e.target.checked; store.set('fop', fopOn ? '1' : '0'); updateNetView('FOP'); };
 
@@ -4390,7 +4390,7 @@ function palRender(follow = false) {
 }
 function palPick(r) { $('palDlg').close(); r.run(); }
 function openPalette() {
-  if (!stageName || document.querySelector('dialog[open]')) return;
+  if (!stageName || document.querySelector('dialog:modal')) return;
   $('palQ').value = '';
   palTab = 'add';
   setPalTab('add');
@@ -4649,13 +4649,13 @@ async function restoreEnv(name, mod) {   // the panel closed with numbers nobody
     applyLook();
   } catch (e) { /* the stage load shows its own errors */ }
 }
-$('lightBtn').onclick = () => {
+$('lightBtn').onclick = () => openTool(() => {
   if (!stageName) return;
   const name = stageName;
   openLight({ stage: name, title: title(name), mod: modNow, api, msg, ask, changed: showUndo, mods: () => modList, newMod: NEW_MOD, chooseMod,
               preview: previewEnv, restore: () => restoreEnv(name, modNow), look: () => gameLook, setLook,
               game: () => ({ running: game.state === 'running', dirty }), reload: reloadGame });
-};
+});
 // the Textures dialog (web/tex.js): every picture of the stage; it writes into the mod at once, like the HUD's
 $('texBtn').onclick = () => {
   if (!stageName) return;
@@ -4750,7 +4750,7 @@ const ADVANCED = new Set(['elf', 'cwd', 'iso']);
 let canBrowse = false, isClone = false;
 const themePicked = () => document.querySelector('#sTheme input:checked')?.value || 'dark';
 function openSettings(focusKey = '') {
-  if (document.querySelector('dialog[open]')) return;
+  if (document.querySelector('dialog:modal')) return;
   for (const [k, id] of Object.entries(PATHS)) $(id).value = cfg[k] || '';
   const t = document.documentElement.dataset.theme;
   document.querySelectorAll('#sTheme input').forEach((r) => (r.checked = r.value === t));
@@ -4816,6 +4816,90 @@ function askDraft(dlg) {
       (v) => { if (v === 'discard') dlg.close('cancel'); else if (v === 'save') g.save(); }, { icon: 'content-save-alert-outline' });
 }
 for (const id of Object.keys(draftGuard)) $(id).addEventListener('cancel', (e) => { if (draftGuard[id].dirty()) { e.preventDefault(); askDraft($(id)); } });
+
+// ---- the right panel's width, and the tool panels (docks) that fill its place. A dock is a non-modal dialog: the view, the camera and
+// the objects stay in use while it is open (Aim takes the point the camera looks at now). It takes the right panel's width, widened to
+// DOCK_MIN while it is open and put back after, unless the user dragged the edge meanwhile.
+const RIGHT_DEFAULT = 304, RIGHT_MIN = 280, DOCK_MIN = 440;
+const rightMax = () => Math.max(RIGHT_MIN, Math.min(720, Math.floor(innerWidth * 0.5)));
+let rightW = Math.round(+store.get('rightW', RIGHT_DEFAULT)) || RIGHT_DEFAULT, dockRestore;    // dockRestore: undefined none, null: the user chose
+function syncDockBox() {
+  const r = $('right').getBoundingClientRect(), s = document.documentElement.style;
+  s.setProperty('--dock-top', `${Math.round(r.top)}px`);
+  s.setProperty('--dock-w', `${Math.round(r.width)}px`);
+  s.setProperty('--dock-h', `${Math.round(r.height)}px`);
+}
+function applyRightW(w, keep = true) {
+  const v = Math.max(RIGHT_MIN, Math.min(rightMax(), Math.round(w)));
+  if (keep) { rightW = v; store.set('rightW', String(v)); }
+  document.documentElement.style.setProperty('--right-w', `${v}px`);
+  syncDockBox();
+}
+function syncDockOpen() {
+  const any = !!document.querySelector('dialog.dock[open]');
+  if (any && dockRestore === undefined) { dockRestore = rightW; if (rightW < DOCK_MIN) applyRightW(DOCK_MIN, false); }
+  else if (!any && dockRestore !== undefined) { if (dockRestore !== null) applyRightW(dockRestore, false); dockRestore = undefined; }
+}
+new MutationObserver(syncDockOpen).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['open'] });
+new ResizeObserver(syncDockBox).observe($('right'));
+window.addEventListener('resize', () => applyRightW(dockRestore === undefined ? rightW : Math.max(rightW, DOCK_MIN), false));
+{
+  const grip = $('rightGrip');
+  const now = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--right-w')) || rightW;
+  grip.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    grip.classList.add('drag');
+  });
+  grip.addEventListener('pointermove', (e) => { if (grip.classList.contains('drag')) { applyRightW(innerWidth - e.clientX, false); } });
+  const end = () => {
+    if (!grip.classList.contains('drag')) return;
+    grip.classList.remove('drag');
+    rightW = Math.round(now()); store.set('rightW', String(rightW));
+    if (dockRestore !== undefined) dockRestore = null;     // the width is the user's now: it stays when the tool closes
+  };
+  grip.addEventListener('pointerup', end);
+  grip.addEventListener('pointercancel', end);
+  grip.addEventListener('dblclick', () => { applyRightW(RIGHT_DEFAULT); if (dockRestore !== undefined) dockRestore = null; });
+  grip.addEventListener('keydown', (e) => {
+    const step = e.shiftKey ? 64 : 16;
+    if (e.key === 'ArrowLeft') applyRightW(now() + step); else if (e.key === 'ArrowRight') applyRightW(now() - step);
+    else if (e.key === 'Home') applyRightW(RIGHT_DEFAULT); else return;
+    if (dockRestore !== undefined) dockRestore = null;
+    e.preventDefault();
+  });
+  applyRightW(rightW, false);
+}
+// Esc, and the close button, on a dock: an unsaved draft is asked about first
+function requestDockClose(dlg, then) {
+  if (dlg.id === 'lightDlg') { lightRequestClose().then(() => { if (!dlg.open && then) then(); }); return; }
+  const g = draftGuard[dlg.id];
+  if (g && g.dirty()) {
+    ask('Close with unsaved changes?', `You changed the ${g.what()} and did not save them. Closing throws the changes away.`,
+        [['keep', 'Keep editing'], ['discard', 'Discard'], ['save', 'Save to mod', true]],
+        async (v) => {
+          if (v === 'discard') dlg.close('cancel');
+          else if (v === 'save') { g.save(); return; }
+          if (!dlg.open && then) then();
+        }, { icon: 'content-save-alert-outline' });
+    return;
+  }
+  dlg.close('cancel');
+  if (then) then();
+}
+for (const id of ['sptDlg', 'netDlg', 'gridDlg']) {
+  $(id).addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.defaultPrevented) return;
+    e.preventDefault(); e.stopPropagation();
+    requestDockClose($(id));
+  });
+}
+// Open a tool: if another one is open, that one is closed first (asking about an unsaved draft)
+function openTool(fn) {
+  const cur = document.querySelector('dialog.dock[open]');
+  if (!cur) { fn(); return; }
+  requestDockClose(cur, fn);
+}
 document.querySelectorAll('dialog [data-close]').forEach((b) => b.addEventListener('click', () => {
   const dlg = b.closest('dialog');
   if (draftGuard[dlg.id] && draftGuard[dlg.id].dirty()) askDraft(dlg); else dlg.close('cancel');

@@ -50,6 +50,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
   <button id="testOpts" type="button" class="ghost wide" role="menuitem" title="Test options: your monster, the CPUs, training mode"><i class="ic" style="--ic:url(vendor/mdi/tune.svg)"></i><span class="lbl">Test options…</span></button>
 </div>
 <main>
+  <div id="rightGrip" role="separator" aria-orientation="vertical" aria-label="Resize the right panel" tabindex="0" title="Drag to resize the right panel (double click: back to the usual width)"></div>
   <nav id="rail" aria-label="Modes">
     <button id="modeObjects" class="mode on" title="Objects: move, turn, copy and delete the stage's buildings, pickups and props (1)" aria-label="Objects"><i class="ic" style="--ic:url(vendor/mdi/cube-outline.svg)"></i></button>
     <button id="modePeds" class="mode" title="Pedestrians: the groups of people and the sidewalks they walk (2)" aria-label="Pedestrians"><i class="ic" style="--ic:url(vendor/mdi/walk.svg)"></i></button>
@@ -537,7 +538,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
     <p class="keys-note">The letter keys are where W, A, S, D, Q and E sit on a QWERTY keyboard, on any layout.</p>
   </form>
 </dialog>
-<dialog id="sptDlg" class="dlg spt" aria-labelledby="sptTitle">
+<dialog id="sptDlg" class="dlg spt dock" aria-labelledby="sptTitle">
   <form method="dialog">
     <div class="dlg-head"><h2 id="sptTitle">Start points</h2>
       <button type="button" data-close class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
@@ -554,7 +555,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
     <div class="dlg-foot"><button type="button" id="sptReset" title="Takes the mod's file away: the stage's own points (or power-ups) come back">Back to the disc's</button><button type="button" data-close>Close</button><button id="sptSave" type="button" class="primary">Save</button></div>
   </form>
 </dialog>
-<dialog id="netDlg" class="dlg spt" aria-labelledby="netTitle">
+<dialog id="netDlg" class="dlg spt dock" aria-labelledby="netTitle">
   <form method="dialog">
     <div class="dlg-head"><h2 id="netTitle">AI net</h2>
       <button type="button" data-close class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
@@ -580,7 +581,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
     <div class="dlg-foot"><button type="button" id="netReset" title="Takes the mod's file away: the stage's own net comes back">Back to the disc's</button><button type="button" data-close>Close</button><button id="netSave" type="button" class="primary">Save</button></div>
   </form>
 </dialog>
-<dialog id="gridDlg" class="dlg" aria-labelledby="gdTitle">
+<dialog id="gridDlg" class="dlg dock" aria-labelledby="gdTitle">
   <form method="dialog">
     <div class="dlg-head"><h2 id="gdTitle">Stage size</h2>
       <button type="button" data-close class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
