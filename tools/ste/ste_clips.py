@@ -62,6 +62,18 @@ ID_MAP = {
     34: ('JUMP_UP', True, 40 / 60.0, {'segs': [(0.30, 0.40, 1.0)], 'pingpong': True, 'zscale': 0.43}),                    # descendo
     35: ('JUMP_UP', False, 0.5, {'segs': [(0.38, 0.62, 1.0)], 'zscale': 0.43}),    # impacto do pouso (camada): do ar ao agachado
     39: ('JUMP_UP', False, 0.5, {'segs': [(0.62, 0.96, 1.0)]}),                    # recupera o pouso: do agachado a pe
+    # objetos: o jogo agarra o objeto entre 80% e 95% do pegar (StatePickUp, estica a 30 quadros) e solta no arremesso em
+    # 45% (StateThrow, estica a 60), 35% (2 maos, 0x37), 38% (monstro) e 50% (dardo): o gesto do STE e deformado para que a
+    # mao chegue ao chao / passe a velocidade maxima nesse ponto (knots = [(saida, entrada)]).
+    41: ('1HAND_PICKUP', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.87, 0.38), (1, 0.60)]}),            # pegar do chao (1 mao)
+    42: ('LIFT2HAND', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.87, 0.42), (1, 0.60)]}),               # pegar objeto grande (2 maos)
+    49: ('CATCH_1HAND', False, 0.5, {'settle': True}),                                                     # pegar no ar
+    52: ('1HAND_THROW', False, 1.0, {'settle': True, 'knots': [(0, 0), (0.45, 0.50), (1, 1)]}),                # jogar objeto de 1 mao (solta em 45%)
+    54: ('1HAND_THROW', False, 0.4, {'settle': True, 'knots': [(0, 0), (0.50, 0.50), (1, 1)]}),                # dardo (solta em 50%)
+    55: ('THROW_2HAND', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.37, 0.25), (1, 1)]}),                # jogar com 2 maos no alvo (35-38%)
+    56: ('THROW_2HAND_OBJECT', False, 40 / 60.0, {'settle': True, 'knots': [(0, 0), (0.37, 0.25), (1, 1)]}),   # jogar com 2 maos para a frente
+    172: ('LIFTING_OBJECT', True, None),     # parado segurando objeto grande ou monstro
+    173: ('WALK_LIFTING_OBJECT', True, None),   # andar/correr carregando
     # golpes: cada slot do Togera (.CHR, `tools/chr_dump.py disc/RST/LIZARD.CHR`) acerta com um localizador (0x803 mao D, 0x80B
     # boca, 0x818 a frente da cabeca, 0x816/0x817 meio e ponta da cauda) numa janela fixa da animacao; o golpe do STE com a mesma
     # parte do corpo entra no comprimento do slot, com o golpe dentro da janela (strike: eff = parte, win = janela do slot).
@@ -260,7 +272,7 @@ def make_clip(sk, an, wid, cycle, seconds=None, opts=None):
     joints = {nm: [] for nm in names}
     prev = [None] * len(names)
     root = sk['parent'].index(-1)
-    knots = strike_knots(sk, an, opts['strike'], frames / FPS) if opts.get('strike') else None
+    knots = strike_knots(sk, an, opts['strike'], frames / FPS) if opts.get('strike') else opts.get('knots')   # knots: [(saida, entrada)]
     uin = (lambda uo: warp(knots, uo)) if knots else (lambda uo: uo)
     k_travel, root0 = 1.0, None
     if opts.get('strike'):   # o STE avanca o monstro pelo golpe (a cabecada anda 400 unidades): limita a um avanco que o jogo aguente
