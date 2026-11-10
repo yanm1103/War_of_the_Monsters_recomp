@@ -17,8 +17,36 @@ More details in the README file ([tools/release/README.txt](tools/release/README
 
 Found a bug? Open an [issue](https://github.com/yanm1103/War_of_the_Monsters_recomp/issues) and attach `wotm.log` (along your save files).
 
+## Features
+**Gameplay**
+- Up to 4 players, story mode included, with every ending movie shown at the end
+- Up to 8 simultaneous monsters
+- Playable bosses: Cerebulon and Goliath Prime
+- Custom monsters: Godzilla (90s, 1954 and 2000 skins), CJ and Mecha
+- Army (toggleable): military units spawn and try to take you down
+- Brand new training mode
+- Debug menu (F1) and cheats
+
+**Interface**
+- New monster select menu with 3D preview
+- Damage indicators
+- New HUD for enemies
+- "Recompiled options" panel: remappable keyboard, mouse and gamepad controls, plus display settings
+- Photo mode (F9 or L3+R3): pictures are saved to `screenshots/`
+
+**Graphics and camera**
+- Modern game camera (mouse look)
+- Dynamic resolution support
+- Higher display rates
+- Native GPU rendering instead of emulating the PS2's GS
+
+**Modding**
+- Mod kit (`WotM_ModKit.exe`): extracts textures as PNG and sounds as WAV, builds skins and custom monsters
+- Level editor (`WotM_LevelEditor.exe`): edit stages in 3D and test them in game
+- Online [model museum](https://yanm1103.github.io/wotm-model-museum/) for monsters, which you can export
+
 ## Mods
-PNG Textures, skins and custom monsters go in the `mods\` folder next to `wotm.exe`. The release ships with Goliath Prime and Cerebulon as playable custom monsters (these are just for fun, don't open issues if they can't jump or can't do any other specific actions!).
+PNG Textures, skins and custom monsters go in the `mods\` folder next to `wotm.exe`. The release ships with Goliath Prime, Cerebulon, Mecha, CJ and Godzilla as playable custom monsters (these are just for fun, don't open issues if they can't jump or can't do any other specific actions!).
 
 To make your own mods, check the reference: [docs/guides/MODS.md](docs/guides/MODS.md).
 
