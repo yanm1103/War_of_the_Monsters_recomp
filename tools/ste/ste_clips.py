@@ -21,7 +21,11 @@ import anim as A
 
 FPS = 60.0
 
-# id do WotM -> (nome da animacao no STE, ciclo?, duracao em s ou None = a do STE). So entra o que foi conferido olhando.
+LAID_UP = {'turn': [90, 0, 0], 'shift': [0, 62.3, 15.1]}        # de costas (80, 86)
+LAID_DOWN = {'turn': [-90, 0, 0], 'shift': [0, -63.3, 17.5]}    # de bruços (81, 85)
+
+# id do WotM -> (nome da animacao no STE, ciclo?, duracao em s ou None = a do STE[, opcoes]). So entra o que foi conferido olhando.
+# Opcoes: 'laid' (retarget --own), 'still' (2 quadros iguais, o 1o do clipe), 'settle' (tira a deriva da raiz de um clipe unico).
 ID_MAP = {
     90: ('NORMAL_IDLE', True, None),
     1: ('WALK', True, None),
@@ -34,6 +38,23 @@ ID_MAP = {
     60: ('BLOCK', True, None),          # bloqueio: guarda que fecha o ciclo
     160: ('ATOMICBREATH_CHARGE_FULL', False, 1.2),   # especial, preparo: o STE leva 3,3 s; termina perto da pose do sopro
     161: ('ATOMICBREATH_FIRE', True, None),          # especial, sopro: fecha o ciclo (162, o fim do sopro, fica com a base)
+    # reacoes a dano: o jogo estica a animacao ao tempo do tranco (StateRecoil::transitionInto chama animationSetTotalRunFrames).
+    # O lado e o do movimento da cabeca no STE (+x = direita do monstro), nao o do nome da animacao.
+    70: ('JERKBACK_B_BODY', False, None),   # golpe de frente: empurrado para tras (e a reacao padrao)
+    69: ('STAGGER_F_BODY', False, None),    # golpe por tras: empurrado para a frente
+    67: ('JERKBACK_R_HEAD', False, None),   # empurrado para +x
+    68: ('JERKBACK_L_HEAD', False, None),   # empurrado para -x
+    71: ('BLOCKHIT_F_HIGH_STAND', False, None),      # golpe bloqueado
+    77: ('BLOCK_HEAVY_BODY_FORWARD', False, None),   # golpe forte bloqueado: empurrado para tras
+    # caido: o jogo deita o monstro (gira a pose guardada em pe e a desloca); o clipe e a pose vista no chao e "laid" a desfaz.
+    # Valores medidos no Togera: 1o quadro do levantar (87/88) contra o fim de 85/86 girado Rx(+-90), 31 ossos, desvio < 2.
+    80: ('KOED_FACEUP_IDLE', False, None, {'laid': LAID_UP}),
+    81: ('KOED_FACEDOWN_IDLE', False, None, {'laid': LAID_DOWN}),
+    85: ('KOED_FACEDOWN_IDLE', False, None, {'laid': LAID_DOWN, 'still': True}),   # pouso, 2 quadros (o jogo estica a 60)
+    86: ('KOED_FACEUP_IDLE', False, None, {'laid': LAID_UP, 'still': True}),
+    87: ('KOED_FACEDOWN_GETUP', False, None, {'settle': True}),        # levantar de bruços (o jogo estica a 60 campos)
+    88: ('KOED_FACEUP_GETUP_ATTACK', False, None, {'settle': True}),   # de costas: so esta comeca na pose deitada (o rolar nao encadeia)
+    120: ('SLUMP', False, None),            # morte em pe: cai de frente e termina na pose de KOED_FACEDOWN_IDLE
 }
 
 
@@ -127,21 +148,24 @@ def world_pose(sk, lt, lq):
     return out
 
 
-def make_clip(sk, an, wid, cycle, seconds=None):
+def make_clip(sk, an, wid, cycle, seconds=None, opts=None):
+    opts = opts or {}
     frames = max(2, int(round((seconds or an['dur']) * FPS)))
     if not cycle:
         frames += 1
+    if opts.get('still'):
+        frames = 2
     names = [jname(x) for x in sk['name']]
     joints = {nm: [] for nm in names}
     prev = [None] * len(names)
     root = sk['parent'].index(-1)
     drift = (0.0, 0.0)
-    if cycle:   # o STE anda o monstro pela raiz; no WotM quem anda e o jogo: tira a deriva horizontal do ciclo
+    if cycle or opts.get('settle'):   # o STE anda o monstro pela raiz; no WotM quem anda e o jogo: tira a deriva horizontal
         p0 = world_pose(sk, *sample_local(sk, an, 0.0, cycle))[root][1]
         p1 = world_pose(sk, *sample_local(sk, an, 1.0, cycle))[root][1]
         drift = (p1[0] - p0[0], p1[1] - p0[1])
     for f in range(frames):
-        u = f / float(frames if cycle else frames - 1)
+        u = 0.0 if opts.get('still') else f / float(frames if cycle else frames - 1)
         lt, lq = sample_local(sk, an, u, cycle)
         W = world_pose(sk, lt, lq)
         for i, nm in enumerate(names):
@@ -159,7 +183,10 @@ def make_clip(sk, an, wid, cycle, seconds=None):
             for k in ks:
                 k[4] = round(k[4] - mx, 4)
                 k[5] = round(k[5] - my, 4)
-    return {'name': 'a%d' % wid, 'frames': frames, 'joints': joints}
+    clip = {'name': 'a%d' % wid, 'frames': frames, 'joints': joints}
+    if opts.get('laid'):
+        clip['laid'] = opts['laid']
+    return clip
 
 
 def load(iso, fn):
@@ -181,13 +208,20 @@ def main(argv):
         return 0
     out = argv[2]
     ids = sorted(ID_MAP)
+    table = dict(ID_MAP)
     if '--ids' in argv:
         ids = [int(x) for x in argv[argv.index('--ids') + 1].split(',')]
+    if '--as' in argv:   # pre-visualizacao: ID=NOME,ID=NOME poe qualquer animacao do STE num id (uma vez), sem mexer no ID_MAP
+        ids = []
+        for it in argv[argv.index('--as') + 1].split(','):
+            k, v = it.split('=')
+            table[int(k)] = (v, False, None)
+            ids.append(int(k))
     byname = {a.get('name'): a for a in anims if a.get('name')}
     clips = []
     for wid in ids:
-        nm, cycle, secs = ID_MAP[wid]
-        clips.append(make_clip(sk, byname[nm], wid, cycle, secs))
+        nm, cycle, secs = table[wid][:3]
+        clips.append(make_clip(sk, byname[nm], wid, cycle, secs, table[wid][3] if len(table[wid]) > 3 else None))
         print('a%d <- %s (%d quadros, %s)' % (wid, nm, clips[-1]['frames'], 'ciclo' if cycle else 'uma vez'))
     with open(out, 'w', encoding='utf-8') as f:
         json.dump({'clips': clips}, f, separators=(',', ':'))
