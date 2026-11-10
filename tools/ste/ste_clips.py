@@ -72,6 +72,14 @@ ID_MAP = {
     54: ('1HAND_THROW', False, 0.4, {'settle': True, 'knots': [(0, 0), (0.50, 0.50), (1, 1)]}),                # dardo (solta em 50%)
     55: ('THROW_2HAND', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.37, 0.25), (1, 1)]}),                # jogar com 2 maos no alvo (35-38%)
     56: ('THROW_2HAND_OBJECT', False, 40 / 60.0, {'settle': True, 'knots': [(0, 0), (0.37, 0.25), (1, 1)]}),   # jogar com 2 maos para a frente
+    # agarrar (StateGrapple: pega a vitima entre 50% e 60% do alcance; StateGrappleOHAttack: o golpe acerta em 50%): o LIFT
+    # termina com as maos no alto e o DROP comeca ai, entao o golpe na vitima erguida e o DROP, com a batida da mao em 50%.
+    170: ('GRAB', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.55, 0.42), (1, 1)]}),     # esticar o braco para pegar
+    185: ('GRAB', False, 20 / 60.0, {'settle': True, 'knots': [(0, 0), (0.55, 0.42), (1, 1)]}),   # agarrar no vazio
+    171: ('LIFT', False, 0.5, {'settle': True}),                                              # erguer a vitima
+    177: ('DROP', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.5, 0.18), (1, 0.5)]}),    # bater com a vitima erguida
+    186: ('DROP', False, 1.0, {'settle': True, 'knots': [(0, 0), (0.5, 0.18), (1, 0.5)]}),    # golpe final (especial)
+    174: ('LIFTED', True, None),             # vitima: segurada no ar pelo agressor
     172: ('LIFTING_OBJECT', True, None),     # parado segurando objeto grande ou monstro
     173: ('WALK_LIFTING_OBJECT', True, None),   # andar/correr carregando
     # golpes: cada slot do Togera (.CHR, `tools/chr_dump.py disc/RST/LIZARD.CHR`) acerta com um localizador (0x803 mao D, 0x80B
