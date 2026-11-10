@@ -29,3 +29,6 @@ O protótipo não traz modelo, textura nem arquivo novo de monstro. O ogro, se e
 - **Orfãos nas fases**: um percorredor que siga destrutíveis, LOD, scripts e colisão, ou o cálculo da cobertura em bytes por nó, para achar malhas sem dono. Vale também no retail (`disc/`).
 - **Texturas**: listar os ids de `.TEX`/`.RTX` que nenhum nó referencia (lista 1 do `.PTR`).
 - Outras builds (Oct 22 2002, demo da revista OPM 64) podem ter os arquivos que a de fevereiro já removeu.
+
+## `ISO/MAD 02.bin` (PS2 Monthly Artwork Disc, volume `MAD_02`)
+CD híbrido Mac/PC (modo 1, setores de 2352 bytes) com materiais de imprensa de vários jogos; o nosso fica em `WAROFTHE/`: 10 capturas `.TIF` e dois `.DOC` (release e ficha, "March 20..."). As capturas mostram só monstros do jogo final (Agamo, Congar, Ultra-V, Preytor, Robo-47) e o texto só traz o marketing padrão ("secret monsters"). Nada de ogro, modelo ou arquivo do jogo; as demais pastas são de outros jogos.
