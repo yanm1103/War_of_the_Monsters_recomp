@@ -8,6 +8,8 @@ A native Windows port of **War of the Monsters** (PS2, 2003), built from the sta
 
 [🧌 Also check out the online model museum](https://yanm1103.github.io/wotm-model-museum/)
 
+[💬 Join the Discord](https://discord.gg/sBw3DjVvPN)
+
 ## Play
 1. unzip
 2. open `wotm.exe` 
