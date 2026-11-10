@@ -17,7 +17,7 @@ do fluxo de rotacoes. Dois fluxos, um bloco por no, na ordem dos nos:
 - rotacao (a partir de u32@0x3c): cabecalho {no, N, 0, 0} + 6 B (s16 x,y,z da chave 0, t=0) + (N-1) x {u16 t, s16 x,y,z};
   w = sqrt(1-x^2-y^2-z^2).
 """
-import struct, math, re
+import struct, math, re, collections
 import skeleton as K
 
 
@@ -146,31 +146,28 @@ def parse_compressed_animations(b, names):
 
 
 def name_animations(b, anims):
-    """Poe `name` nas animacoes comprimidas: os nomes <MONSTRO>_... da tabela (ordem alfabetica) seguem a ordem dos ids.
-    So aceita se a contagem bater; devolve True se nomeou."""
+    """Poe `name` nas animacoes comprimidas a partir da tabela de entradas do bundle (skeleton.entry_names): o nome de cada
+    entrada sem o prefixo do monstro (GODZILLA2K_WALK -> WALK)."""
     nm = K.names_of(b)
-    pre = None
+    root = None
     for n in nm:
-        m = re.match(r'(.+?_)', n)
+        m = re.match(r'(.+?)_', n)
         if m and n.upper().endswith('_SKELETON') and '.' not in n:
-            pre = m.group(1).upper()
-    comp = sorted((a for a in anims if len(a['nodes']) > 1 and 'cmp' == a.get('kind')), key=lambda a: a['id'])
-    if not pre or not comp:
-        return False
-    base = [n for n in nm if n.startswith(pre) and not n.lower().endswith(('.pwk', '.edf', '.pal')) and '|' not in n
-            and '_mesh' not in n.lower() and '_skeleton' not in n.lower() and 'camera' not in n.lower() and '_g2_' not in n.lower()]
-    # nomes de som (grito, rugido...) tambem comecam com o prefixo; tenta filtros cada vez mais agressivos ate a contagem bater
-    snd = [r'_(SHOUT|SCREECH|OOF)', r'_ROAR_\d|_ROAR_QUICK|_RND$|_ONESHOT$']
-    cand = base
-    for k in range(len(snd) + 1):
-        cand = [n for n in base if not any(re.search(p, n.upper()) for p in snd[:k])]
-        if len(cand) == len(comp):
-            break
-    else:
-        return False
-    for a, n in zip(comp, cand):
-        a['name'] = n[len(pre):]
-    return True
+            root = m.group(1)
+    names = K.entry_names(b)
+    pre = re.compile(r'^%s[A-Z]?_' % re.escape(root), re.I) if root else None
+    todo = [a for a in anims if a.get('kind') == 'cmp' and a['id'] in names]
+    for a in todo:
+        a['name'] = pre.sub('', names[a['id']][1]) if pre else names[a['id']][1]
+    # prefixo que o nome do monstro nao cobre (JAGUAR_, GODZILLA_, LARVAE_): tira o primeiro termo se a maioria o compartilha
+    first = collections.Counter(a['name'].split('_')[0] for a in todo if '_' in a['name'])
+    if first:
+        tok, n = first.most_common(1)[0]
+        if n * 2 >= len(todo):
+            for a in todo:
+                if a['name'].startswith(tok + '_'):
+                    a['name'] = a['name'][len(tok) + 1:]
+    return len(todo)
 
 
 def parse_animations(b, sk_names=None):

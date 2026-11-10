@@ -11,7 +11,8 @@ No bundle (.cmp/.bdp):
 import struct, math, re
 
 
-def names_of(b):
+def _name_table(b):
+    """(posicao da tabela, offsets dos nomes) ou None: u32 N + N offsets crescentes (relativos ao u32 N)."""
     d = b.d
     o = 0x78 + 18 * len(b.entries)
     for p in range(o, o + 400, 2):
@@ -19,13 +20,37 @@ def names_of(b):
         if 20 < n < 4000:
             offs = struct.unpack_from('<%dI' % min(n, 6), d, p + 4)
             if all(offs[i] < offs[i + 1] for i in range(len(offs) - 1)) and offs[0] < 6000:
-                offs = struct.unpack_from('<%dI' % n, d, p + 4)
-                out = []
-                for of in offs:
-                    s = p + of
-                    out.append(re.sub(r'^[\x01-\x1f]\d{0,3}', '', d[s:d.index(b'\0', s)].decode('latin1')))   # o .cmp prefixa <ctrl>000
-                return out
-    return []
+                return p, struct.unpack_from('<%dI' % n, d, p + 4)
+    return None
+
+
+def names_of(b):
+    t = _name_table(b)
+    if not t:
+        return []
+    p, offs = t
+    d = b.d
+    return [re.sub(r'^[\x01-\x1f]\d{0,3}', '', d[p + of:d.index(b'\0', p + of)].decode('latin1')) for of in offs]   # o .cmp prefixa <ctrl>000
+
+
+def entry_names(b):
+    """{id da entrada: nome}: depois das strings ha 1 registro de 16 B por entrada {id, tipo, indice do nome, n, extra}
+    (tipo 4 = animacao)."""
+    t = _name_table(b)
+    if not t:
+        return {}
+    p, offs = t
+    d = b.d
+    nm = names_of(b)
+    e = d.index(b'\0', p + max(offs)) + 1
+    while e < len(d) and d[e] == 0xff:
+        e += 1
+    out = {}
+    for i in range((b.base - e) // 16):
+        eid, typ, ni, _, _ = struct.unpack_from('<HHIII', d, e + 16 * i)
+        if ni < len(nm):
+            out[eid] = (typ, nm[ni])
+    return out
 
 
 def find_tree(b):
