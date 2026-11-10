@@ -1,11 +1,11 @@
 # ABOUTME: Monta o zip do release (item 14 do TODO.md): wotm.exe do build_dev, PDB, DLLs, kit de mods, mods, licencas e o texto do jogador.
 # ABOUTME: Confere que o exe e do commit atual e que nada do disco entrou (so os MECHA.* do mod Mecha, decisao do dono).
 #
-# Uso: powershell -ExecutionPolicy Bypass -File tools\release.ps1 [-Runtime <pasta>] [-Build build_dev] [-Out <pasta>] [-AllowDirty]
+# Uso: powershell -ExecutionPolicy Bypass -File tools\release.ps1 [-Runtime <pasta>] [-Build build_dev] [-Out <pasta>] [-AllowDirty] [-AllowStale]
 # -Build build_avx (configure_avx.bat, PS2X_ARCH=AVX): zip WotM-<versao>-win64-compat, para CPU sem AVX2.
 # Antes: a tag do release no repo (git tag v0.1.0) e build_runtime.bat, para o exe sair com a versao certa (wotm_version.hpp).
 # Sai em <runtime>\release\: WotM-<versao>-win64.zip e .sha256. Fora do repo: o exe tem o codigo traduzido do jogo.
-param([string]$Runtime = '', [string]$Build = 'build_dev', [string]$Out = '', [switch]$AllowDirty)
+param([string]$Runtime = '', [string]$Build = 'build_dev', [string]$Out = '', [switch]$AllowDirty, [switch]$AllowStale)
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
@@ -31,7 +31,8 @@ $now = (& $git -C $repo describe --tags --always --dirty).Trim()
 $verFile = Join-Path $Runtime "$Build\wotm_gen\wotm_version.gen.h"
 if (-not (Test-Path $verFile)) { Fail "falta $verFile (compile com build_runtime.bat)" }
 $built = ([regex]::Match((Get-Content $verFile -Raw), '"([^"]+)"')).Groups[1].Value
-if ($built -ne $now) { Fail "o exe e da versao '$built' e o repo esta em '$now': rode build_runtime.bat de novo" }
+if ($built -ne $now -and $AllowStale) { Write-Host "AVISO: exe da versao '$built', repo em '$now' (-AllowStale): o zip leva o nome do exe" -ForegroundColor Yellow; $now = $built }
+elseif ($built -ne $now) { Fail "o exe e da versao '$built' e o repo esta em '$now': rode build_runtime.bat de novo" }
 if ($now -like '*-dirty' -and -not $AllowDirty) { Fail "repo com mudancas locais ($now): commite antes (ou -AllowDirty para teste)" }
 if ((Get-Item $exe).LastWriteTime -lt (Get-Item $verFile).LastWriteTime) { Fail 'o wotm.exe e mais velho que a versao gravada: o ultimo build falhou?' }
 
