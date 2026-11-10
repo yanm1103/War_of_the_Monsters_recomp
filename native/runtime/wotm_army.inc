@@ -379,13 +379,11 @@ bool wake(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, const Unit &u,
         wr32(rdram, n + 4, rd32(rdram, kActive + 4));
         wr32(rdram, kActive + 4, n);
         if (const uint32_t nn = rd32(rdram, n + 4)) wr32(rdram, phys(nn) + 8, n);
-        callVirtual(rdram, ctx, runtime, p, 0x3C);   // regen: vida cheia, drawMe, casa
+        callVirtual(rdram, ctx, runtime, p, 0x3C);   // regen: drawMe, casa; a vida sai da regen em 0 (um veiculo reciclado morria no 1o quadro), por isso o wrF abaixo
     }
     else
-    {
         call(rdram, ctx, runtime, fn::hierSetCsDrawMe__FP3_csUc, {cs, 1u});
-        wrF(rdram, p + kPkHealth, rdF(rdram, p + kPkMaxHealth));
-    }
+    wrF(rdram, p + kPkHealth, rdF(rdram, p + kPkMaxHealth));
     wr32(rdram, p + kPkRegenTimer, 0x7FFFFFFFu);
     wr8(rdram, cs + kCsTestCollision, 1u);
     wr16(rdram, p + kPkFlags, uint16_t(rd16(rdram, p + kPkFlags) | (u.kind == KHeli ? 2u : 0xAu)));
