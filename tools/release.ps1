@@ -2,6 +2,7 @@
 # ABOUTME: Confere que o exe e do commit atual e que nada do disco entrou (so os MECHA.* do mod Mecha, decisao do dono).
 #
 # Uso: powershell -ExecutionPolicy Bypass -File tools\release.ps1 [-Runtime <pasta>] [-Build build_dev] [-Out <pasta>] [-AllowDirty]
+# -Build build_avx (configure_avx.bat, PS2X_ARCH=AVX): zip WotM-<versao>-win64-compat, para CPU sem AVX2.
 # Antes: a tag do release no repo (git tag v0.1.0) e build_runtime.bat, para o exe sair com a versao certa (wotm_version.hpp).
 # Sai em <runtime>\release\: WotM-<versao>-win64.zip e .sha256. Fora do repo: o exe tem o codigo traduzido do jogo.
 param([string]$Runtime = '', [string]$Build = 'build_dev', [string]$Out = '', [switch]$AllowDirty)
@@ -69,7 +70,7 @@ while ($queue.Count) {
 }
 
 # --- pasta do pacote ----------------------------------------------------------------------------------------------------------------
-$name = "WotM-$now-win64"
+$name = if ($Build -eq 'build_avx') { "WotM-$now-win64-compat" } else { "WotM-$now-win64" }
 $stage = Join-Path $outFull $name
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force $stage | Out-Null

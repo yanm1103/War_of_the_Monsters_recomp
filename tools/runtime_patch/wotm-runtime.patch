@@ -417,15 +417,30 @@ index 589d768..f5d7b1c 100644
 +    ps2x_stage_ffmpeg_runtime_dlls(wotm)
 +endif()
 diff --git a/ps2xRuntime/cmake/ReleaseMode.cmake b/ps2xRuntime/cmake/ReleaseMode.cmake
-index 92ef0d5..6d014de 100644
+index 92ef0d5..ed7048c 100644
 --- a/ps2xRuntime/cmake/ReleaseMode.cmake
 +++ b/ps2xRuntime/cmake/ReleaseMode.cmake
-@@ -4,6 +4,26 @@ check_ipo_supported(RESULT IPO_SUPPORTED OUTPUT IPO_ERROR)
+@@ -1,9 +1,41 @@
++# WotM: PS2X_ARCH=AVX2 (padrao) ou AVX (build "compat" para CPU sem AVX2/FMA, ex.: Sandy/Ivy Bridge ou AVX2 mascarado).
++set(PS2X_ARCH "AVX2" CACHE STRING "CPU baseline: AVX2 or AVX")
++set_property(CACHE PS2X_ARCH PROPERTY STRINGS AVX2 AVX)
++if(PS2X_ARCH STREQUAL "AVX")
++    set(PS2X_ARCH_MSVC "/arch:AVX")
++    set(PS2X_ARCH_GNU "-mavx")
++    add_compile_definitions(WOTM_ARCH_AVX=1)
++else()
++    set(PS2X_ARCH_MSVC "/arch:AVX2")
++    set(PS2X_ARCH_GNU -mavx2 -mbmi2 -mlzcnt -mpopcnt)
++endif()
++
+ include(CheckIPOSupported)
+ 
+ check_ipo_supported(RESULT IPO_SUPPORTED OUTPUT IPO_ERROR)
  
  function(EnableFastReleaseMode TargetName)
      message("> Enabling optimization for: ${TargetName}")
 +    if(PS2X_FAST_LINK AND NOT MSVC)
-+        target_compile_options(${TargetName} PRIVATE -O2 -mavx2 -mbmi2 -mlzcnt -mpopcnt)
++        target_compile_options(${TargetName} PRIVATE -O2 ${PS2X_ARCH_GNU})
 +        return()
 +    endif()
 +    if(PS2X_FAST_LINK)
@@ -433,7 +448,7 @@ index 92ef0d5..6d014de 100644
 +        # O link cai de ~25 min para segundos/minutos; o codigo fica um pouco mais lento (sem inline entre arquivos).
 +        if(MSVC)
 +            target_compile_options(${TargetName} PRIVATE
-+                $<$<CONFIG:Release>:/O2 /Ob2 /Oi /Gy /Gw /GF /Zc:inline /fp:fast /DNDEBUG /arch:AVX2 /GS- /Qspectre->)
++                $<$<CONFIG:Release>:/O2 /Ob2 /Oi /Gy /Gw /GF /Zc:inline /fp:fast /DNDEBUG ${PS2X_ARCH_MSVC} /GS- /Qspectre->)
 +            # WotM: PDB so com os simbolos publicos (sem /Zi) e .map, para o amostrador do host (PS2X_HOSTPROF) e os [CRASH]
 +            # darem nomes; /OPT:REF /OPT:ICF mantem o binario como sem /DEBUG
 +            get_target_property(_wotmType ${TargetName} TYPE)
@@ -447,6 +462,15 @@ index 92ef0d5..6d014de 100644
      if(MSVC)
          target_compile_options(${TargetName} PRIVATE
              $<$<CONFIG:Release>:
+@@ -17,7 +49,7 @@ function(EnableFastReleaseMode TargetName)
+                 /Zc:inline # remove unreferenced inline
+                 /fp:fast # fast math (graphics friendly)
+                 /DNDEBUG
+-                /arch:AVX2 # Advanced Vector Extensions 2
++                ${PS2X_ARCH_MSVC} # CPU baseline
+                 /GS- # Disable Buffer Security Check (faster)
+                 /Qspectre- # Disable Spectre mitigations (faster)
+             >
 diff --git a/ps2xRuntime/include/ps2_runtime.h b/ps2xRuntime/include/ps2_runtime.h
 index 4b9242c..2efd4d5 100644
 --- a/ps2xRuntime/include/ps2_runtime.h

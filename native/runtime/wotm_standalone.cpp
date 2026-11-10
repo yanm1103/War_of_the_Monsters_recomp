@@ -114,6 +114,11 @@ constexpr const wchar_t *kTitle = L"War of the Monsters Recompiled";
 // O build inteiro sai com /arch:AVX2 (ReleaseMode.cmake do PS2Recomp): sem AVX2 a CPU cai com instrucao ilegal em qualquer ponto.
 // AVX2 de verdade: AVX, FMA e OSXSAVE (cpuid 1, ECX), o Windows salvando XMM e YMM (XCR0 bits 1 e 2) e AVX2 (cpuid 7, EBX bit 5).
 // So inteiros e chamadas, sem copia de memoria: o compilador nao gera instrucao VEX aqui mesmo com /arch:AVX2.
+#ifdef WOTM_ARCH_AVX
+constexpr const char *kCpuLevel = "AVX";
+#else
+constexpr const char *kCpuLevel = "AVX2";
+#endif
 bool cpuHasAvx2()
 {
 #ifdef _WIN32
@@ -122,6 +127,12 @@ bool cpuHasAvx2()
     const int maxLeaf = r[0];
     __cpuid(r, 1);
     const unsigned ecx = static_cast<unsigned>(r[2]);
+#ifdef WOTM_ARCH_AVX
+    // Build compat (PS2X_ARCH=AVX): so AVX e OSXSAVE; FMA e AVX2 nao sao usados.
+    if (!(ecx & (1u << 27)) || !(ecx & (1u << 28)))
+        return false;
+    return (_xgetbv(0) & 6u) == 6u;
+#endif
     if (!(ecx & (1u << 27)) || !(ecx & (1u << 28)) || !(ecx & (1u << 12)))
         return false;
     if ((_xgetbv(0) & 6u) != 6u)
@@ -787,8 +798,8 @@ void wotmSystemLog()
     GlobalMemoryStatusEx(&mem);
     const double gb = 1024.0 * 1024.0 * 1024.0;
     const char *wine = GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "wine_get_version") ? ", Wine" : "";
-    std::fprintf(stderr, "[wotm] sistema: Windows %lu.%lu.%lu%s; %s (%lu threads, AVX2 %s); RAM %.1f GB (%.1f GB livres)\n", major, minor,
-                 build, wine, b, GetActiveProcessorCount(ALL_PROCESSOR_GROUPS), cpuHasAvx2() ? "sim" : "NAO", mem.ullTotalPhys / gb,
+    std::fprintf(stderr, "[wotm] sistema: Windows %lu.%lu.%lu%s; %s (%lu threads, %s %s); RAM %.1f GB (%.1f GB livres)\n", major, minor,
+                 build, wine, b, GetActiveProcessorCount(ALL_PROCESSOR_GROUPS), kCpuLevel, cpuHasAvx2() ? "sim" : "NAO", mem.ullTotalPhys / gb,
                  mem.ullAvailPhys / gb);
     std::fflush(stderr);
 #endif
