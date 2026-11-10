@@ -55,6 +55,19 @@ ID_MAP = {
     87: ('KOED_FACEDOWN_GETUP', False, None, {'settle': True}),        # levantar de bruços (o jogo estica a 60 campos)
     88: ('KOED_FACEUP_GETUP_ATTACK', False, None, {'settle': True}),   # de costas: so esta comeca na pose deitada (o rolar nao encadeia)
     120: ('SLUMP', False, None),            # morte em pe: cai de frente e termina na pose de KOED_FACEDOWN_IDLE
+    # golpes: cada slot do Togera (.CHR, `tools/chr_dump.py disc/RST/LIZARD.CHR`) acerta com um localizador (0x803 mao D, 0x80B
+    # boca, 0x818 a frente da cabeca, 0x816/0x817 meio e ponta da cauda) numa janela fixa da animacao; o golpe do STE com a mesma
+    # parte do corpo entra no comprimento do slot, com o golpe dentro da janela (strike: eff = parte, win = janela do slot).
+    10: ('JAB_R', False, 0.4, {'strike': {'eff': 'hand_r', 'win': (0.55, 0.99)}}),            # soco rapido
+    22: ('UPPERCUT', False, 40 / 60.0, {'strike': {'eff': 'hand_r', 'win': (0.47, 0.85)}}),   # soco que lanca
+    17: ('HMMR_FIN', False, 0.4, {'strike': {'eff': 'hand_r', 'win': (0.60, 0.99)}}),         # pancada de mao e ombro
+    16: ('COMBO_BITE', False, 40 / 60.0, {'strike': {'eff': 'head', 'win': (0.44, 0.74), 'mode': 'abs'}}),   # mordida que atordoa
+    18: ('COMBO_BITE', False, 0.4, {'strike': {'eff': 'head', 'win': (0.25, 0.85), 'mode': 'abs'}}),         # mordida
+    19: ('COMBO_BITE', False, 0.4, {'strike': {'eff': 'head', 'win': (0.50, 0.99), 'mode': 'abs'}}),         # mordida
+    15: ('HEADBUTT', False, 80 / 60.0, {'strike': {'eff': 'head', 'win': (0.20, 0.59), 'mode': 'abs'}}),     # cabecada
+    12: ('TAIL_FULL_SPIN', False, 70 / 60.0, {'strike': {'eff': 'tail', 'win': (0.25, 0.48)}}),   # cauda forte (lanca)
+    21: ('TAIL_SNAP', False, 50 / 60.0, {'strike': {'eff': 'tail', 'win': (0.22, 0.49)}}),    # cauda leve
+    20: ('TAIL_REVERSAL', False, 50 / 60.0, {'strike': {'eff': 'tail', 'win': (0.01, 0.49)}}),   # cauda, acerta desde o comeco
 }
 
 
@@ -148,6 +161,51 @@ def world_pose(sk, lt, lq):
     return out
 
 
+EFFECTORS = {'hand_r': 'R Hand', 'hand_l': 'L Hand', 'head': 'Head', 'tail': None, 'foot_r': 'R Foot', 'foot_l': 'L Foot'}
+
+
+def effector_index(sk, e):
+    names = sk['name']
+    if e == 'tail':
+        return max(i for i, n in enumerate(names) if 'Tail' in n)
+    return [i for i, n in enumerate(names) if n.endswith(EFFECTORS[e])][0]
+
+
+def strike_knots(sk, an, strike, out_dur):
+    """Deformacao do tempo de um golpe: [(u de saida, u de entrada)]. Acha o golpe do STE (o instante de maior velocidade da
+    parte do corpo `strike['eff']` e o comeco do balanco, quando ela ainda andava a menos de 20% disso) e o poe dentro da janela
+    de acerto do slot (`strike['win']`, fracao da animacao do Togera), a 30% dela, no ritmo original. Antes e depois, o tempo
+    se estica para fechar o comprimento `out_dur`."""
+    ei = effector_index(sk, strike['eff'])
+    pel = [i for i, nm in enumerate(sk['name']) if nm.endswith('Pelvis')][0]
+    n = max(20, int(an['dur'] * FPS))
+    Ws = [world_pose(sk, *sample_local(sk, an, f / float(n), False)) for f in range(n + 1)]
+    ps = [W[ei][1] for W in Ws]
+    if strike.get('mode') == 'abs':   # a parte inteira (o corpo avanca com ela): velocidade no mundo
+        sp = [sum((ps[f + 1][k] - ps[f][k]) ** 2 for k in range(3)) ** 0.5 for f in range(n)]
+    else:   # velocidade para fora a partir da pelvis (o soco recua antes de ir: so o que sai conta)
+        rr = [sum((Ws[f][ei][1][k] - Ws[f][pel][1][k]) ** 2 for k in range(3)) ** 0.5 for f in range(n + 1)]
+        sp = [max(0.0, rr[f + 1] - rr[f]) for f in range(n)]
+    c = max(range(n), key=lambda f: sp[f])
+    a = max([f for f in range(c) if sp[f] < 0.2 * sp[c]] or [0])
+    cu, au = (c + 0.5) / n, a / float(n)
+    w0, w1 = strike['win']
+    oc = w0 + 0.3 * (w1 - w0)
+    oa = max(0.02, oc - (cu - au) * an['dur'] / out_dur)
+    knots = [(0.0, 0.0)]
+    if au > 0.01 and oa > 0.0 and oa < oc:
+        knots.append((oa, au))
+    knots += [(oc, cu), (1.0, 1.0)]
+    return knots
+
+
+def warp(knots, uo):
+    for (o0, i0), (o1, i1) in zip(knots, knots[1:]):
+        if uo <= o1:
+            return i0 + (i1 - i0) * (uo - o0) / (o1 - o0) if o1 > o0 else i1
+    return 1.0
+
+
 def make_clip(sk, an, wid, cycle, seconds=None, opts=None):
     opts = opts or {}
     frames = max(2, int(round((seconds or an['dur']) * FPS)))
@@ -159,18 +217,29 @@ def make_clip(sk, an, wid, cycle, seconds=None, opts=None):
     joints = {nm: [] for nm in names}
     prev = [None] * len(names)
     root = sk['parent'].index(-1)
+    knots = strike_knots(sk, an, opts['strike'], frames / FPS) if opts.get('strike') else None
+    uin = (lambda uo: warp(knots, uo)) if knots else (lambda uo: uo)
+    k_travel, root0 = 1.0, None
+    if opts.get('strike'):   # o STE avanca o monstro pelo golpe (a cabecada anda 400 unidades): limita a um avanco que o jogo aguente
+        r0 = world_pose(sk, *sample_local(sk, an, 0.0, False))[root][1]
+        far = max(((lambda p: ((p[0] - r0[0]) ** 2 + (p[1] - r0[1]) ** 2) ** 0.5)(
+            world_pose(sk, *sample_local(sk, an, f / 20.0, False))[root][1])) for f in range(21))
+        k_travel, root0 = min(1.0, opts.get('maxtravel', 40.0) / far) if far > 1e-6 else 1.0, r0
     drift = (0.0, 0.0)
     if cycle or opts.get('settle'):   # o STE anda o monstro pela raiz; no WotM quem anda e o jogo: tira a deriva horizontal
         p0 = world_pose(sk, *sample_local(sk, an, 0.0, cycle))[root][1]
         p1 = world_pose(sk, *sample_local(sk, an, 1.0, cycle))[root][1]
         drift = (p1[0] - p0[0], p1[1] - p0[1])
     for f in range(frames):
-        u = 0.0 if opts.get('still') else f / float(frames if cycle else frames - 1)
+        u = 0.0 if opts.get('still') else uin(f / float(frames if cycle else frames - 1))
         lt, lq = sample_local(sk, an, u, cycle)
         W = world_pose(sk, lt, lq)
+        shift = (0.0, 0.0)
+        if root0 is not None:
+            shift = ((W[root][1][0] - root0[0]) * (1 - k_travel), (W[root][1][1] - root0[1]) * (1 - k_travel))
         for i, nm in enumerate(names):
             R, t = W[i]
-            t = (t[0] - drift[0] * u, t[1] - drift[1] * u, t[2])
+            t = (t[0] - drift[0] * u - shift[0], t[1] - drift[1] * u - shift[1], t[2])
             q = _quat(R)
             if prev[i] is not None and sum(a * b for a, b in zip(q, prev[i])) < 0:   # mesmo lado: sem salto de sinal
                 q = [-c for c in q]
@@ -223,6 +292,10 @@ def main(argv):
         nm, cycle, secs = table[wid][:3]
         clips.append(make_clip(sk, byname[nm], wid, cycle, secs, table[wid][3] if len(table[wid]) > 3 else None))
         print('a%d <- %s (%d quadros, %s)' % (wid, nm, clips[-1]['frames'], 'ciclo' if cycle else 'uma vez'))
+        st = table[wid][3].get('strike') if len(table[wid]) > 3 else None
+        if st:
+            kn = strike_knots(sk, byname[nm], st, clips[-1]['frames'] / FPS)
+            print('      golpe (%s) janela %s: tempo saida->entrada %s' % (st['eff'], st['win'], ' '.join('%.2f>%.2f' % k for k in kn)))
     with open(out, 'w', encoding='utf-8') as f:
         json.dump({'clips': clips}, f, separators=(',', ':'))
     return 0
