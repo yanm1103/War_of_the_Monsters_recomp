@@ -614,7 +614,12 @@ void plantDiag(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     if (dead < phase && dead >= 0)
     {
         // a cabeca da vez, quando exposta (estados 2 a 4: mordendo), leva um golpe de 1000 do P1 pelo takeHit do jogo
-        const uint32_t h = kPlantHeads + kHeadStride * uint32_t(dead), st = rd32(rdram, h + 0x18), p1 = monster(rdram, 0);
+        // o atacante e o primeiro jogador vivo (com o P1 morto, o P2)
+        uint32_t p1 = 0;
+        for (int i = 0; i < 4 && !p1; ++i)
+            if (alive(rdram, i))
+                p1 = monster(rdram, i);
+        const uint32_t h = kPlantHeads + kHeadStride * uint32_t(dead), st = rd32(rdram, h + 0x18);
         if (st >= 2u && st <= 4u && p1)
         {
             const float f12 = ctx->f[12];
