@@ -1356,7 +1356,7 @@ def original_glb(cfg, stage, handle):
     scene = STAGES.glb(cfg["disc"], base)
     path = os.path.join(CACHE, "orig", "%s-%s-%X.glb" % (base, disc_key(cfg["disc"]), int(handle, 16)))
     if not (os.path.isfile(path) and os.path.getmtime(path) >= os.path.getmtime(scene)
-            and os.path.getmtime(path) >= os.path.getmtime(lvlorig.__file__)):
+            and os.path.getmtime(path) >= module_stamp(lvlorig)):
         with SCENE_GLB["lock"]:            # the last scene read stays: the objects of one stage come one after another
             key = (scene, os.path.getmtime(scene))
             if SCENE_GLB["key"] != key:
