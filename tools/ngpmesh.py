@@ -355,6 +355,8 @@ def encode_skinned(p, bones, nslots):
             break
         if s not in slots:
             slots.append(s)
+    while len(slots) < 3:     # a palette block of 1-2 joints has no third distinct slot: the unused ones (weight 0) repeat
+        slots.append(slots[0])
     w2 = min(ws[1], 0.999)
     a = round(ws[0] * 2048 - w2)
     w = struct.unpack("<f", struct.pack("<f", (a + w2) / 2048.0))[0]
