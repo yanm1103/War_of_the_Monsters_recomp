@@ -10,6 +10,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import ste_model as S
 import skeleton as K
+import anim as A
 
 MONSTERS = [
     ('Godzilla2k', 'Godzilla 2000'), ('Godzilla90s', 'Godzilla 90s'), ('MechaGodzilla2', 'Mechagodzilla 2'),
@@ -44,8 +45,22 @@ def pack_skeleton(b, me):
             return None
         W = K.world(sk, True)
         flat = [c for w in W for c in w[1]]
+        cj = lambda q: (-q[0], -q[1], -q[2], q[3])   # quaternion invertido no disco: o viewer recebe o conjugado
+        lt = [c for t in sk['t'] for c in t]
+        lq = [c for q in sk['q'] for c in cj(q)]
+        anims = []
+        for a in A.parse_animations(b):
+            if a['nk'] < 2 or a['nodes'] != sk['name']:
+                continue
+            cnt, data = [], []
+            for tr, rot in zip(a['tr'], a['rot']):
+                cnt.append([len(tr), len(rot)])
+                data += [c for t in tr for c in t] + [c for q in rot for c in cj(q)]
+            anims.append(dict(name='anim %d (%.2fs)' % (a['id'], a['dur']), nk=a['nk'], dur=a['dur'], cnt=cnt,
+                              data=b64(struct.pack('<%df' % len(data), *data))))
         return dict(names=[n.replace('Bip01 ', '') for n in sk['name']], parent=sk['parent'],
-                    pos=b64(struct.pack('<%df' % len(flat), *flat)), skin=sk['skin'])
+                    pos=b64(struct.pack('<%df' % len(flat), *flat)), skin=sk['skin'],
+                    lt=b64(struct.pack('<%df' % len(lt), *lt)), lq=b64(struct.pack('<%df' % len(lq), *lq)), anims=anims)
     except Exception as ex:
         print('  esqueleto:', ex)
         return None

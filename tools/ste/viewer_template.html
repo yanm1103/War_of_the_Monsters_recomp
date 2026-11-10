@@ -36,6 +36,7 @@
   <label><input type="checkbox" id="wire"> Wireframe</label>
   <label><input type="checkbox" id="nearest"> Pixelado</label>
   <label><input type="checkbox" id="skel"> Esqueleto</label>
+  <label id="animlbl" style="display:none">Animação <select id="anim"><option value="-1">Pose de bind</option></select></label>
   <button id="obj">Exportar OBJ</button>
   <button id="png">Textura PNG</button>
   <span id="info"></span>
@@ -140,10 +141,11 @@ function load(i) {
       for (const j of [p, k]) lp.push(-sp[j*3], sp[j*3+2], sp[j*3+1]); }
     const lc = new Float32Array(lp.length).fill(1), zero = new Float32Array(lp.length), uz = new Float32Array(lp.length / 3 * 2);
     for (let k = 0; k < lc.length; k += 3) { lc[k] = 1; lc[k+1] = 0.9; lc[k+2] = 0.1; }
-    sk = { n: lp.length / 3, bPos: buf(gl.ARRAY_BUFFER, new Float32Array(lp)), bCol: buf(gl.ARRAY_BUFFER, lc), bNrm: buf(gl.ARRAY_BUFFER, zero), bUV: buf(gl.ARRAY_BUFFER, uz) };
+    sk = { n: lp.length / 3, lp: new Float32Array(lp), bPos: buf(gl.ARRAY_BUFFER, new Float32Array(lp)), bCol: buf(gl.ARRAY_BUFFER, lc), bNrm: buf(gl.ARRAY_BUFFER, zero), bUV: buf(gl.ARRAY_BUFFER, uz) };
   }
   const tex = gl.createTexture();
-  cur = { sk, m, pos, nrm, uv, mn, mx, idx, count: idx.length, lcount: lines.length, texture: tex,
+  cancelAnimationFrame(animRaf);
+  cur = { sk, p0, n0, bn, w16, rig: setupRig(m), m, pos, nrm, uv, mn, mx, idx, count: idx.length, lcount: lines.length, texture: tex,
           bPos: buf(gl.ARRAY_BUFFER, pos), bNrm: buf(gl.ARRAY_BUFFER, nrm), bUV: buf(gl.ARRAY_BUFFER, uv), bCol: buf(gl.ARRAY_BUFFER, col),
           bIdx: buf(gl.ELEMENT_ARRAY_BUFFER, idx), bLines: buf(gl.ELEMENT_ARRAY_BUFFER, lines) };
   const img = new Image();
@@ -154,8 +156,83 @@ function load(i) {
   img.src = 'data:image/png;base64,' + m.tex;
   $('tex').src = img.src;
   $('info').textContent = `${nv} vértices · ${m.nt} triângulos · ${m.nbones} ossos`;
+  const as = $('anim'); as.innerHTML = '<option value="-1">Pose de bind</option>';
+  (cur.rig ? cur.rig.anims : []).forEach((a, k) => { const o = document.createElement('option'); o.value = k; o.textContent = a.name; as.appendChild(o); });
+  $('animlbl').style.display = cur.rig && cur.rig.anims.length ? '' : 'none';
   recenter(); draw();
 }
+// ---------- pose / animação (skinning em CPU) ----------
+function worldMats(parent, lt, lq, n) {
+  const W = new Float32Array(12 * n), done = new Uint8Array(n);
+  const f = i => { if (done[i]) return; const p = parent[i]; if (p >= 0) f(p);
+    let x = lq[i*4], y = lq[i*4+1], z = lq[i*4+2], w = lq[i*4+3]; const l = Math.hypot(x, y, z, w) || 1; x /= l; y /= l; z /= l; w /= l;
+    const R = [1-2*(y*y+z*z), 2*(x*y-z*w), 2*(x*z+y*w), 2*(x*y+z*w), 1-2*(x*x+z*z), 2*(y*z-x*w), 2*(x*z-y*w), 2*(y*z+x*w), 1-2*(x*x+y*y)];
+    const t = [lt[i*3], lt[i*3+1], lt[i*3+2]], o = i * 12;
+    if (p < 0) { for (let k = 0; k < 9; k++) W[o+k] = R[k]; for (let k = 0; k < 3; k++) W[o+9+k] = t[k]; }
+    else { const q = p * 12;
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) W[o+r*3+c] = W[q+r*3]*R[c] + W[q+r*3+1]*R[3+c] + W[q+r*3+2]*R[6+c];
+      for (let r = 0; r < 3; r++) W[o+9+r] = W[q+9+r] + W[q+r*3]*t[0] + W[q+r*3+1]*t[1] + W[q+r*3+2]*t[2]; }
+    done[i] = 1; };
+  for (let i = 0; i < n; i++) f(i);
+  return W;
+}
+function setupRig(m) {
+  if (!m.sk) return null;
+  const sk = m.sk, n = sk.parent.length, lt = new Float32Array(bytes(sk.lt).buffer), lq = new Float32Array(bytes(sk.lq).buffer);
+  const rig = { n, parent: sk.parent, skin: sk.skin, lt, lq, bindW: worldMats(sk.parent, lt, lq, n), anims: [] };
+  for (const a of sk.anims || []) {
+    const data = new Float32Array(bytes(a.data).buffer), offs = []; let o = 0;
+    for (const [ntr, nrot] of a.cnt) { offs.push([o, o + ntr * 3]); o += ntr * 3 + nrot * 4; }
+    rig.anims.push({ name: a.name, nk: a.nk, dur: a.dur, cnt: a.cnt, data, offs });
+  }
+  return rig;
+}
+function posePose(an, t) {   // translações/quaternions locais amostrados no tempo t (s)
+  const rig = cur.rig, n = rig.n, lt = new Float32Array(rig.lt), lq = new Float32Array(rig.lq);
+  if (!an) return { lt, lq };
+  const fp = ((t / an.dur) % 1) * an.nk, i0 = Math.floor(fp) % an.nk, i1 = (i0 + 1) % an.nk, a = fp - Math.floor(fp), d = an.data;
+  for (let i = 0; i < n; i++) { const [ntr, nrot] = an.cnt[i], [ot, orr] = an.offs[i];
+    if (ntr > 1) for (let k = 0; k < 3; k++) lt[i*3+k] = d[ot+i0*3+k] * (1 - a) + d[ot+i1*3+k] * a;
+    else if (ntr === 1) for (let k = 0; k < 3; k++) lt[i*3+k] = d[ot+k];
+    if (nrot > 1) { let dot = 0; for (let k = 0; k < 4; k++) dot += d[orr+i0*4+k] * d[orr+i1*4+k]; const s = dot < 0 ? -1 : 1;
+      for (let k = 0; k < 4; k++) lq[i*4+k] = d[orr+i0*4+k] * (1 - a) + s * d[orr+i1*4+k] * a; }
+    else if (nrot === 1) for (let k = 0; k < 4; k++) lq[i*4+k] = d[orr+k]; }
+  return { lt, lq };
+}
+function applyAnim(t) {
+  const rig = cur.rig, ai = +$('anim').value;
+  if (!rig) return;
+  const an = ai >= 0 ? rig.anims[ai] : null, { lt, lq } = posePose(an, t), W = worldMats(rig.parent, lt, lq, rig.n), B = rig.bindW;
+  const S = new Float32Array(12 * rig.n);   // matriz de pele = mundo * inverso(bind)
+  for (let i = 0; i < rig.n; i++) { const o = i * 12;
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) S[o+r*3+c] = W[o+r*3]*B[o+c*3] + W[o+r*3+1]*B[o+c*3+1] + W[o+r*3+2]*B[o+c*3+2];
+    for (let r = 0; r < 3; r++) S[o+9+r] = W[o+9+r] - (S[o+r*3]*B[o+9] + S[o+r*3+1]*B[o+10] + S[o+r*3+2]*B[o+11]); }
+  const m = cur.m, bn = cur.bn, w16 = cur.w16, p0 = cur.p0, n0 = cur.n0, nv = m.nv, pos = cur.pos, nrm = cur.nrm, sk = rig.skin;
+  const ap = (s, x, y, z, out, k, w, tr) => { out[0] += w * (S[s]*x + S[s+1]*y + S[s+2]*z + (tr ? S[s+9] : 0));
+    out[1] += w * (S[s+3]*x + S[s+4]*y + S[s+5]*z + (tr ? S[s+10] : 0)); out[2] += w * (S[s+6]*x + S[s+7]*y + S[s+8]*z + (tr ? S[s+11] : 0)); };
+  const o = [0, 0, 0], q = [0, 0, 0];
+  for (let v = 0; v < nv; v++) {
+    const x = p0[v*3], y = p0[v*3+1], z = p0[v*3+2], nx = n0[v*3] / 127, ny = n0[v*3+1] / 127, nz = n0[v*3+2] / 127;
+    const w = w16[v] / 4096, b0 = sk[bn[v*2]], b1 = sk[bn[v*2+1]];
+    o[0] = o[1] = o[2] = q[0] = q[1] = q[2] = 0;
+    if (b0 >= 0 && b1 >= 0) { ap(b0*12, x, y, z, o, 0, w, true); ap(b1*12, x, y, z, o, 0, 1 - w, true);
+                              ap(b0*12, nx, ny, nz, q, 0, w, false); ap(b1*12, nx, ny, nz, q, 0, 1 - w, false); }
+    else { o[0] = x; o[1] = y; o[2] = z; q[0] = nx; q[1] = ny; q[2] = nz; }
+    pos[v*3] = -o[0]; pos[v*3+1] = o[2]; pos[v*3+2] = o[1]; nrm[v*3] = -q[0]; nrm[v*3+1] = q[2]; nrm[v*3+2] = q[1];
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, cur.bPos); gl.bufferSubData(gl.ARRAY_BUFFER, 0, pos);
+  gl.bindBuffer(gl.ARRAY_BUFFER, cur.bNrm); gl.bufferSubData(gl.ARRAY_BUFFER, 0, nrm);
+  if (cur.sk) { const lp = cur.sk.lp; let k = 0;
+    for (let i = 0; i < rig.n; i++) { const p = rig.parent[i]; if (p < 0) continue;
+      for (const j of [p, i]) { lp[k++] = -W[j*12+9]; lp[k++] = W[j*12+11]; lp[k++] = W[j*12+10]; } }
+    gl.bindBuffer(gl.ARRAY_BUFFER, cur.sk.bPos); gl.bufferSubData(gl.ARRAY_BUFFER, 0, lp); }
+}
+let animRaf = 0;
+function animLoop() { cancelAnimationFrame(animRaf); if (!cur || !cur.rig || +$('anim').value < 0) return;
+  const tick = now => { if (!cur || +$('anim').value < 0) return; applyAnim(now / 1000); draw(); animRaf = requestAnimationFrame(tick); };
+  animRaf = requestAnimationFrame(tick); }
+$('anim').addEventListener('change', () => { cancelAnimationFrame(animRaf); if (+$('anim').value < 0) applyAnim(0); draw(); animLoop(); });
+
 function applyFilter() {
   if (!cur || !cur.img) return; gl.bindTexture(gl.TEXTURE_2D, cur.texture);
   const nearest = $('nearest').checked;
@@ -232,6 +309,7 @@ const h0 = parseInt(hp.n, 10);
 const first = (h0 >= 0 && h0 < MODELS.length) ? h0 : 0; sel.value = first;
 try { if (MODELS.length) { load(first);
   if (hp.mode >= 0) { $('mode').value = hp.mode; }
+  if (hp.anim >= 0 && cur.rig) { $('anim').value = hp.anim; applyAnim(hp.t || 0); if (hp.t === undefined) animLoop(); }
   if (hp.skel) $('skel').checked = true; if (hp.wire) $('wire').checked = true;
   if (hp.d) dist = radius * 2.6 * hp.d; if (hp.yaw !== undefined) yaw = hp.yaw;
   if (hp.ty !== undefined) target[1] = cur.mn[1] + (cur.mx[1] - cur.mn[1]) * hp.ty; draw(); } else $('err').textContent = 'Nenhum modelo embutido.'; } catch (e) { $('err').textContent = String(e); }
