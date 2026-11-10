@@ -21,11 +21,19 @@ import anim as A
 
 FPS = 60.0
 
-# id do WotM -> (nome da animacao no STE, ciclo?). So entra o que foi conferido olhando.
+# id do WotM -> (nome da animacao no STE, ciclo?, duracao em s ou None = a do STE). So entra o que foi conferido olhando.
 ID_MAP = {
-    90: ('NORMAL_IDLE', True),
-    1: ('WALK', True),
-    2: ('RUN', True),
+    90: ('NORMAL_IDLE', True, None),
+    1: ('WALK', True, None),
+    2: ('RUN', True, None),
+    92: ('TAUNT', False, None),
+    130: ('VICTORY', False, None),
+    131: ('ROAR', False, None),
+    142: ('STUNNED', True, None),       # tonto (estrelas): fecha o ciclo
+    74: ('TAZED', True, None),          # chocado: tremor curto que fecha o ciclo
+    60: ('BLOCK', True, None),          # bloqueio: guarda que fecha o ciclo
+    160: ('ATOMICBREATH_CHARGE_FULL', False, 1.2),   # especial, preparo: o STE leva 3,3 s; termina perto da pose do sopro
+    161: ('ATOMICBREATH_FIRE', True, None),          # especial, sopro: fecha o ciclo (162, o fim do sopro, fica com a base)
 }
 
 
@@ -119,8 +127,8 @@ def world_pose(sk, lt, lq):
     return out
 
 
-def make_clip(sk, an, wid, cycle):
-    frames = max(2, int(round(an['dur'] * FPS)))
+def make_clip(sk, an, wid, cycle, seconds=None):
+    frames = max(2, int(round((seconds or an['dur']) * FPS)))
     if not cycle:
         frames += 1
     names = [jname(x) for x in sk['name']]
@@ -178,8 +186,8 @@ def main(argv):
     byname = {a.get('name'): a for a in anims if a.get('name')}
     clips = []
     for wid in ids:
-        nm, cycle = ID_MAP[wid]
-        clips.append(make_clip(sk, byname[nm], wid, cycle))
+        nm, cycle, secs = ID_MAP[wid]
+        clips.append(make_clip(sk, byname[nm], wid, cycle, secs))
         print('a%d <- %s (%d quadros, %s)' % (wid, nm, clips[-1]['frames'], 'ciclo' if cycle else 'uma vez'))
     with open(out, 'w', encoding='utf-8') as f:
         json.dump({'clips': clips}, f, separators=(',', ':'))
