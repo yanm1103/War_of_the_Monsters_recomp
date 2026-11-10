@@ -1845,9 +1845,10 @@ static bool wotmDrawNative(const uint8_t *rdram)
         const bool want = wotm::settings::on(wotm::settings::Interp) && (presentHz > 60 || (presentHz > 0 && slowGame)) && !tooSlow &&
                           !wotm_live::g_localCollect;
         wotm_live::g_interpCull.store(want, std::memory_order_relaxed);
-        const bool trainOverlay = wotm_training::g_on.load(std::memory_order_relaxed) &&
-                                  (wotm_training::g_opts.load(std::memory_order_relaxed) &
-                                   (wotm_training::kShowAttacks | wotm_training::kShowHulls | wotm_training::kShowCapsule));
+        const bool trainOverlay = (wotm_training::g_on.load(std::memory_order_relaxed) &&
+                                   (wotm_training::g_opts.load(std::memory_order_relaxed) &
+                                    (wotm_training::kShowAttacks | wotm_training::kShowHulls | wotm_training::kShowCapsule))) ||
+                                  wotm_trainview::plantBoxOn();
         // par (x, y) misturavel: os dois carimbados, vao de 1 a 4 fields, sem buraco de relogio
         auto pairOk = [](const wotm::Snapshot &x, const wotm::Snapshot &y) {
             const int gap = int(y.fields - x.fields);

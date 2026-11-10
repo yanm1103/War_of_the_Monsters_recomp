@@ -166,9 +166,73 @@ void hullWalk(const wotm::Ram &ram, uint32_t node, const wotm::M4 &m, uint32_t a
     }
 }
 
+// ---- caixas de colisao da planta (WOTM_PLANTBOX=1): os cascos dos dois _cs de cada cabeca, sem precisar do modo treino. O golpe so acerta o
+// _cs do caule (testCollision ligado); o da cabeca e so desenho. Verde: a cabeca esta no estado em que o takeHit tira vida (2 a 4);
+// amarelo: estado 1 (so depois de metade da animacao); magenta: qualquer outro (o golpe colide e e descartado). Cinza: _cs sem teste.
+struct PlantBox
+{
+    uint8_t head, kind;   // kind: 0 caule (o alvo), 1 cabeca (so desenho)
+    uint32_t state;
+    bool test;            // testCollision
+    float pos[3];         // trans do _cs
+    std::vector<float> seg;
+};
+inline bool plantBoxOn()
+{
+    static const bool on = [] { const char *e = std::getenv("WOTM_PLANTBOX"); return e && *e && *e != '0'; }();
+    return on;
+}
+inline std::mutex g_plantMu;
+inline std::vector<PlantBox> g_plantBoxes;
+
+void capturePlant(const wotm::Ram &ram)
+{
+    if (!plantBoxOn())
+        return;
+    constexpr uint32_t kPlant = wotm::sym::plantBoss, kHeads = kPlant + 0x20, kStride = 0x250;
+    std::vector<PlantBox> out;
+    if (ram.ok(kPlant, 0x10B0))
+        for (uint32_t i = 0; i < 3; ++i)
+        {
+            const uint32_t h = kHeads + kStride * i;
+            if (!ram.u32(h + 0x14))   // m_awake
+                continue;
+            const uint32_t state = ram.u32(h + 0x18);
+            for (uint32_t kind = 0; kind < 2; ++kind)
+            {
+                const uint32_t cs = ram.u32(h + (kind ? 0x38u : 0x40u)) & 0x1FFFFFFFu;   // m_headCs +0x38, m_stemCs +0x40
+                if (!ram.ok(cs, 0xB0))
+                    continue;
+                wotm::M4 m = wotm::readM4(ram, cs + 0x20);
+                m.m[3][0] = ram.f32(cs + 0x10);
+                m.m[3][1] = ram.f32(cs + 0x14);
+                m.m[3][2] = ram.f32(cs + 0x18);
+                m.m[0][3] = m.m[1][3] = m.m[2][3] = 0.f;
+                m.m[3][3] = 1.f;
+                if (ram.u8(cs + 0xF))   // scaleMe
+                    m = wotm::mul(wotm::scaleM(ram.f32(cs + 0x80), ram.f32(cs + 0x84), ram.f32(cs + 0x88)), m);
+                PlantBox b{};
+                b.head = uint8_t(i);
+                b.kind = uint8_t(kind);
+                b.state = state;
+                b.test = ram.u8(cs + 0xD) != 0;
+                b.pos[0] = m.m[3][0];
+                b.pos[1] = m.m[3][1];
+                b.pos[2] = m.m[3][2];
+                int budget = 4000;
+                if (const uint32_t ep = ram.u32(cs) & 0x1FFFFFFFu; ram.ok(ep))
+                    hullWalk(ram, ep, m, 0, 0, budget, b.seg);
+                out.push_back(std::move(b));
+            }
+        }
+    std::lock_guard<std::mutex> lk(g_plantMu);
+    g_plantBoxes = std::move(out);
+}
+
 // Na thread do EE (wotmCaptureFrame): cascos, capsulas e vida de cada monstro deste quadro
 void capture(const wotm::Ram &ram)
 {
+    capturePlant(ram);
     if (!g_on.load(std::memory_order_relaxed))
         return;
     const uint32_t opts = g_opts.load(std::memory_order_relaxed);
@@ -398,9 +462,37 @@ void drawCone(const Cone &k, Color c)
     }
 }
 
+void drawPlant()
+{
+    if (!plantBoxOn() || windowsHidden())
+        return;
+    std::vector<PlantBox> boxes;
+    {
+        std::lock_guard<std::mutex> lk(g_plantMu);
+        boxes = g_plantBoxes;
+    }
+    rlDrawRenderBatchActive();
+    rlDisableDepthTest();
+    rlDisableBackfaceCulling();
+    for (const PlantBox &b : boxes)
+    {
+        Color c = Color{150, 150, 150, 200};   // sem teste de colisao
+        if (b.test)
+            c = (b.state >= 2 && b.state <= 4) ? Color{60, 255, 120, 255} : b.state == 1 ? Color{255, 230, 40, 255} : Color{255, 60, 220, 255};
+        for (size_t i = 0; i + 5 < b.seg.size(); i += 6)
+            DrawLine3D(Vector3{b.seg[i], b.seg[i + 1], b.seg[i + 2]}, Vector3{b.seg[i + 3], b.seg[i + 4], b.seg[i + 5]}, c);
+        // a origem do _cs: o pino do caule (quadrado) ou o ponto da cabeca (esfera)
+        DrawSphereWires(Vector3{b.pos[0], b.pos[1], b.pos[2]}, b.kind ? 6.f : 3.f, 4, 8, c);
+    }
+    rlDrawRenderBatchActive();
+    rlEnableBackfaceCulling();
+    rlEnableDepthTest();
+}
+
 // Dentro do BeginMode3D da vista cheia, depois da cena
 void draw3d()
 {
+    drawPlant();
     if (!g_on.load(std::memory_order_relaxed) || windowsHidden())
         return;
     const uint32_t opts = g_opts.load(std::memory_order_relaxed);
