@@ -602,12 +602,78 @@ void swapCameras(uint8_t *rdram, uint32_t v)
     std::memcpy(b, tmp, sizeof tmp);
 }
 
+// Diagnostico (WOTM_PLANTLOG=1): cada golpe que chega a uma cabeca (e por que ela o ignora) e, a cada 2 s, o estado da planta.
+// WOTM_PLANTKILL=<1 a 3>: as N primeiras cabecas morrem sozinhas, a cada uma que morde (o P1 nao precisa bater), para chegar a fase 2 ou 3
+Hook g_headHit{fn::takeHit__13PlantBossHeadP8_fvectorfi};
+void plantDiag(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    static const bool log = std::getenv("WOTM_PLANTLOG") != nullptr;
+    static const int phase = [] { const char *e = std::getenv("WOTM_PLANTKILL"); return e ? std::clamp(std::atoi(e), 0, 3) : 0; }();
+    static uint32_t n = 0;
+    const int32_t dead = static_cast<int32_t>(rd32(rdram, wotm::sym::numDeadHeads));
+    if (dead < phase && dead >= 0)
+    {
+        // a cabeca da vez, quando exposta (estados 2 a 4: mordendo), leva um golpe de 1000 do P1 pelo takeHit do jogo
+        const uint32_t h = kPlantHeads + kHeadStride * uint32_t(dead), st = rd32(rdram, h + 0x18), p1 = monster(rdram, 0);
+        if (st >= 2u && st <= 4u && p1)
+        {
+            const float f12 = ctx->f[12];
+            ctx->f[12] = 1000.f;
+            call(rdram, ctx, runtime, fn::takeHit__13PlantBossHeadP8_fvectorfi, {h, wotm_modes4::kScratch, rd32(rdram, p1 + kId)});
+            ctx->f[12] = f12;
+            std::fprintf(stderr, "[coop] planta: teste, cabeca %d derrubada\n", dead);
+        }
+    }
+    if (log && (n++ % 120u) == 0u)
+    {
+        std::fprintf(stderr, "[plantlog] m_04 %d m_08 %d m_0C %u m_10 %u ciclo %u/%u mortas %d |", static_cast<int32_t>(rd32(rdram, kPlant + 4)),
+                     static_cast<int32_t>(rd32(rdram, kPlant + 8)), rd32(rdram, kPlant + 0xC), rd32(rdram, kPlant + 0x10),
+                     rd32(rdram, kPlant + 0x14), rd32(rdram, kPlant + 0x18), static_cast<int32_t>(rd32(rdram, wotm::sym::numDeadHeads)));
+        for (uint32_t h = 0; h < 3; ++h)
+        {
+            const uint32_t p = kPlantHeads + kHeadStride * h;
+            std::fprintf(stderr, " cab%u: estado %u acordada %u segurando %u flags %x vida %.1f |", h, rd32(rdram, p + 0x18), rd32(rdram, p + 0x14),
+                         rd32(rdram, p + 0x28), rd32(rdram, p + 4) & 0xFFFFu, rdF(rdram, p + 0x1C));
+            if (const uint32_t cs = p + 0x190)
+                std::fprintf(stderr, " pos %.0f,%.0f,%.0f |", rdF(rdram, cs + 0x10), rdF(rdram, cs + 0x14), rdF(rdram, cs + 0x18));
+        }
+        for (int i = 0; i < 2; ++i)
+            if (const uint32_t m = monster(rdram, i); m && (rd32(rdram, m + kCs) & 0x1FFFFFFFu))
+            {
+                const uint32_t cs = rd32(rdram, m + kCs) & 0x1FFFFFFFu;
+                std::fprintf(stderr, " J%d %.0f,%.0f,%.0f id %u |", i + 1, rdF(rdram, cs + 0x10), rdF(rdram, cs + 0x14), rdF(rdram, cs + 0x18), rd32(rdram, m + kId));
+            }
+        std::fprintf(stderr, "\n");
+    }
+}
+void headHitHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    static const bool log = std::getenv("WOTM_PLANTLOG") != nullptr;
+    const uint32_t self = GPR_U32(ctx, 4) & 0x1FFFFFFFu;
+    static int logged = 0;
+    if (log && logged < 300 && ctx->pc == g_headHit.addr && self >= kPlantHeads && self < kPlantHeads + 3 * kHeadStride)
+    {
+        ++logged;
+        const uint32_t h = (self - kPlantHeads) / kHeadStride;
+        const float before = rdF(rdram, self + 0x1C);
+        const float dmg = ctx->f[12];
+        const uint32_t attacker = GPR_U32(ctx, 6);
+        g_headHit.orig(rdram, ctx, runtime);
+        constexpr uint32_t kInfo = wotm::sym::x_8HitEvent_s_takeHitInfo;
+        std::fprintf(stderr, "[plantlog] golpe na cabeca %u: dano %.2f atacante %u tipo %u fonte %u estado %u segurando %u vida %.1f -> %.1f\n", h, dmg,
+                     attacker, rd32(rdram, kInfo + 0xC), rd32(rdram, kInfo + 0x10), rd32(rdram, self + 0x18), rd32(rdram, self + 0x28), before, rdF(rdram, self + 0x1C));
+        return;
+    }
+    g_headHit.orig(rdram, ctx, runtime);
+}
+
 void plantUpdHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
     const int n = ctx->pc == g_plantUpd.addr && !g_inPlant && rd32(rdram, kGameMode) == 1u && rd32(rdram, kPlant) ? players(rdram) : 0;
     if (n < 2)
     {
         g_plantUpd.orig(rdram, ctx, runtime);
+        plantDiag(rdram, ctx, runtime);
         return;
     }
     g_plantN = n;
@@ -633,6 +699,7 @@ void plantUpdHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     g_plantUpd.orig(rdram, ctx, runtime);
     g_inPlant = false;
     wr32(rdram, kMonsters, p1);
+    plantDiag(rdram, ctx, runtime);
     if (movie)
         for (int i = 1; i < n; ++i)
             if (g_plantP[i] && !g_out[i])
@@ -1884,7 +1951,7 @@ void install(PS2Runtime &runtime)
         {&g_highlights, &highlightsHook}, {&g_setPlayerPos, &setPlayerPosHook}, {&g_triggerAnim, &triggerAnimHook}, {&g_bossBar, &bossBarHook}, {&g_reparent, &reparentHook}, {&g_pickups, &pickupsHook},
         {&g_assBoss, &assBossHook}, {&g_spinUpd, &spinUpdHook}, {&g_spinHit, &spinHitHook}, {&g_cannon, &cannonHook}, {&g_bossState, &bossStateHook},
         {&g_bossHit, &bossHitHook}, {&g_genesis, &genesisHook}, {&g_playMovie, &playMovieHook},
-        {&g_plantUpd, &plantUpdHook}, {&g_plantCam, &plantCamHook}, {&g_rootWake, &rootWakeHook}, {&g_rootUpd, &rootUpdHook},
+        {&g_plantUpd, &plantUpdHook}, {&g_headHit, &headHitHook}, {&g_plantCam, &plantCamHook}, {&g_rootWake, &rootWakeHook}, {&g_rootUpd, &rootUpdHook},
         {&g_baseHit, &baseHitHook}, {&g_baseUpd, &baseUpdHook}, {&g_finalUpd, &finalUpdHook}, {&g_tazerUpd, &tazerUpdHook},
         {&g_tokyoUpd, &tokyoUpdHook}, {&g_craterCount, &craterCountHook}, {&g_updCinema, &updCinemaHook}, {&g_endCinema, &endCinemaHook},
         {&g_cleanUp, &cleanUpHook}, {&g_actuator, &actuatorHook},
