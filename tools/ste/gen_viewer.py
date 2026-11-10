@@ -2,9 +2,9 @@
 
 O HTML embute assets do jogo: nao commitar (regra 1 do CLAUDE.md).
 
-uso: python gen_viewer.py <iso> <saida.html>
+uso: python gen_viewer.py <iso> <saida.html> [monstros com animacoes de luta, ex. Godzilla2k Rodan; padrao: todos]
 """
-import sys, base64, json, struct, io
+import sys, base64, json, struct, io, zlib
 import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -24,6 +24,9 @@ MONSTERS = [
 ]
 
 
+ANIM_FOR = set(sys.argv[3:]) or {'all'}   # chaves de MONSTERS cujas animacoes do .cmp entram no HTML ('all' = todos)
+
+
 def b64(buf):
     return base64.b64encode(buf).decode('ascii')
 
@@ -37,7 +40,7 @@ def png_bytes(w, h, rgba):
     return b'\x89PNG\r\n\x1a\n' + ck(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0)) + ck(b'IDAT', zlib.compress(raw, 9)) + ck(b'IEND', b'')
 
 
-def pack_skeleton(b, me):
+def pack_skeleton(b, me, with_cmp_anims=False):
     """nos do esqueleto: nomes, pai e posicao de bind (espaco do modelo); None se nao achar."""
     try:
         sk = K.parse_skeleton(b, me)
@@ -49,15 +52,26 @@ def pack_skeleton(b, me):
         lt = [c for t in sk['t'] for c in t]
         lq = [c for q in sk['q'] for c in cj(q)]
         anims = []
-        for a in A.parse_animations(b):
-            if a['nk'] < 2 or a['nodes'] != sk['name']:
+        for a in A.parse_animations(b, sk['name'] if with_cmp_anims else None):
+            if a['nodes'] != sk['name']:
                 continue
-            cnt, data = [], []
+            # chaves quantizadas em 16 bits (translacao normalizada pelo maximo por no/eixo) e comprimidas com zlib;
+            # o viewer descomprime so quando a animacao e escolhida
+            cnt, mxs, buf = [], [], bytearray()
+            q16 = lambda v: max(-32767, min(32767, int(round(v * 32767))))
             for tr, rot in zip(a['tr'], a['rot']):
                 cnt.append([len(tr), len(rot)])
-                data += [c for t in tr for c in t] + [c for q in rot for c in cj(q)]
-            anims.append(dict(name='anim %d (%.2fs)' % (a['id'], a['dur']), nk=a['nk'], dur=a['dur'], cnt=cnt,
-                              data=b64(struct.pack('<%df' % len(data), *data))))
+                m = [max(abs(k[1 + j]) for k in tr) or 1.0 for j in range(3)]
+                mxs += m
+                for k in tr:
+                    buf += struct.pack('<Hhhh', int(round(k[0] * 65534)), *[q16(k[1 + j] / m[j]) for j in range(3)])
+                for k in rot:
+                    qq = cj(k[1:])
+                    if qq[3] < 0:
+                        qq = tuple(-c for c in qq)
+                    buf += struct.pack('<Hhhh', int(round(k[0] * 65534)), q16(qq[0]), q16(qq[1]), q16(qq[2]))
+            anims.append(dict(name='%s (%.2fs)' % (a.get('name') or 'anim %d' % a['id'], a['dur']), dur=a['dur'], cnt=cnt,
+                              mx=b64(struct.pack('<%df' % len(mxs), *mxs)), z=b64(zlib.compress(bytes(buf), 9))))
         return dict(names=[n.replace('Bip01 ', '') for n in sk['name']], parent=sk['parent'],
                     pos=b64(struct.pack('<%df' % len(flat), *flat)), skin=sk['skin'],
                     lt=b64(struct.pack('<%df' % len(lt), *lt)), lq=b64(struct.pack('<%df' % len(lq), *lq)), anims=anims)
@@ -102,7 +116,8 @@ def main():
                     tag = ext[1:] + ('' if len(ms) == 1 else ' #%d' % me['id'])
                     label = '%s [%s, %d tris]' % (nice, tag, len(m['tris']))
                     print(len(models), label)
-                    models.append(pack_model(label, m, tex, pack_skeleton(b, me)))
+                    # animacoes comprimidas do .cmp pesam ~3 MB por monstro: so para os pedidos na linha de comando
+                    models.append(pack_model(label, m, tex, pack_skeleton(b, me, ('all' in ANIM_FOR or key in ANIM_FOR) and ext == '.cmp')))
             except Exception as ex:
                 print('skip', key + ext, ex)
                 continue

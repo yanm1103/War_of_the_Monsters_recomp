@@ -8,7 +8,7 @@ No bundle (.cmp/.bdp):
 - entrada seguinte: registros de 0x60 bytes a partir de 0x11c: idx, comprimento, ..., +0x24 translacao (3 f),
   +0x3c quaternion (x,y,z,w).
 """
-import struct, math
+import struct, math, re
 
 
 def names_of(b):
@@ -23,7 +23,7 @@ def names_of(b):
                 out = []
                 for of in offs:
                     s = p + of
-                    out.append(d[s:d.index(b'\0', s)].decode('latin1')[3:])
+                    out.append(re.sub(r'^[\x01-\x1f]\d{0,3}', '', d[s:d.index(b'\0', s)].decode('latin1')))   # o .cmp prefixa <ctrl>000
                 return out
     return []
 

@@ -180,23 +180,40 @@ function setupRig(m) {
   if (!m.sk) return null;
   const sk = m.sk, n = sk.parent.length, lt = new Float32Array(bytes(sk.lt).buffer), lq = new Float32Array(bytes(sk.lq).buffer);
   const rig = { n, parent: sk.parent, skin: sk.skin, lt, lq, bindW: worldMats(sk.parent, lt, lq, n), anims: [] };
-  for (const a of sk.anims || []) {
-    const data = new Float32Array(bytes(a.data).buffer), offs = []; let o = 0;
-    for (const [ntr, nrot] of a.cnt) { offs.push([o, o + ntr * 3]); o += ntr * 3 + nrot * 4; }
-    rig.anims.push({ name: a.name, nk: a.nk, dur: a.dur, cnt: a.cnt, data, offs });
-  }
+  for (const a of sk.anims || []) rig.anims.push({ name: a.name, dur: a.dur, cnt: a.cnt, mx: a.mx, z: a.z, data: null, offs: null });
   return rig;
+}
+// descomprime uma animação (zlib, chaves de 16 bits) para floats: por nó ntr chaves (t,x,y,z) e nrot chaves (t,x,y,z,w); t em [0,1]
+async function ensureAnim(a) {
+  if (a.data) return;
+  const buf = await new Response(new Blob([bytes(a.z)]).stream().pipeThrough(new DecompressionStream('deflate'))).arrayBuffer();
+  const dv = new DataView(buf), mx = new Float32Array(bytes(a.mx).buffer);
+  let total = 0; for (const [ntr, nrot] of a.cnt) total += ntr * 4 + nrot * 5;
+  const data = new Float32Array(total), offs = []; let p = 0, o = 0;
+  const s = (i) => Math.max(-1, dv.getInt16(i, true) / 32767);
+  a.cnt.forEach(([ntr, nrot], n) => { offs.push([o, o + ntr * 4]);
+    for (let k = 0; k < ntr; k++, p += 8) { data[o++] = dv.getUint16(p, true) / 65534; for (let j = 0; j < 3; j++) data[o++] = s(p + 2 + j * 2) * mx[n*3+j]; }
+    for (let k = 0; k < nrot; k++, p += 8) { data[o++] = dv.getUint16(p, true) / 65534;
+      const x = s(p + 2), y = s(p + 4), z = s(p + 6); data[o++] = x; data[o++] = y; data[o++] = z; data[o++] = Math.sqrt(Math.max(0, 1 - x*x - y*y - z*z)); } });
+  a.data = data; a.offs = offs;
 }
 function posePose(an, t) {   // translações/quaternions locais amostrados no tempo t (s)
   const rig = cur.rig, n = rig.n, lt = new Float32Array(rig.lt), lq = new Float32Array(rig.lq);
   if (!an) return { lt, lq };
-  const fp = ((t / an.dur) % 1) * an.nk, i0 = Math.floor(fp) % an.nk, i1 = (i0 + 1) % an.nk, a = fp - Math.floor(fp), d = an.data;
+  const u = (t / an.dur) % 1, d = an.data;
+  // acha o segmento [i0,i1] com t_i0 <= u < t_i1 (se u passa da ultima chave < 1, interpola de volta para a primeira)
+  const seg = (o, n, st) => { let i0 = 0; for (let k = 1; k < n; k++) if (d[o + k * st] <= u) i0 = k; else break;
+    const t0 = d[o + i0 * st]; let i1, t1;
+    if (i0 === n - 1) { if (t0 >= 0.9999) return [i0, i0, 0]; i1 = 0; t1 = 1; } else { i1 = i0 + 1; t1 = d[o + i1 * st]; }
+    return [i0, i1, t1 > t0 ? Math.min(1, Math.max(0, (u - t0) / (t1 - t0))) : 0]; };
   for (let i = 0; i < n; i++) { const [ntr, nrot] = an.cnt[i], [ot, orr] = an.offs[i];
-    if (ntr > 1) for (let k = 0; k < 3; k++) lt[i*3+k] = d[ot+i0*3+k] * (1 - a) + d[ot+i1*3+k] * a;
-    else if (ntr === 1) for (let k = 0; k < 3; k++) lt[i*3+k] = d[ot+k];
-    if (nrot > 1) { let dot = 0; for (let k = 0; k < 4; k++) dot += d[orr+i0*4+k] * d[orr+i1*4+k]; const s = dot < 0 ? -1 : 1;
-      for (let k = 0; k < 4; k++) lq[i*4+k] = d[orr+i0*4+k] * (1 - a) + s * d[orr+i1*4+k] * a; }
-    else if (nrot === 1) for (let k = 0; k < 4; k++) lq[i*4+k] = d[orr+k]; }
+    if (ntr > 1) { const [i0, i1, a] = seg(ot, ntr, 4);
+      for (let k = 0; k < 3; k++) lt[i*3+k] = d[ot+i0*4+1+k] * (1 - a) + d[ot+i1*4+1+k] * a; }
+    else if (ntr === 1) for (let k = 0; k < 3; k++) lt[i*3+k] = d[ot+1+k];
+    if (nrot > 1) { const [i0, i1, a] = seg(orr, nrot, 5); let dot = 0;
+      for (let k = 0; k < 4; k++) dot += d[orr+i0*5+1+k] * d[orr+i1*5+1+k]; const s = dot < 0 ? -1 : 1;
+      for (let k = 0; k < 4; k++) lq[i*4+k] = d[orr+i0*5+1+k] * (1 - a) + s * d[orr+i1*5+1+k] * a; }
+    else if (nrot === 1) for (let k = 0; k < 4; k++) lq[i*4+k] = d[orr+1+k]; }
   return { lt, lq };
 }
 function applyAnim(t) {
@@ -231,7 +248,9 @@ let animRaf = 0;
 function animLoop() { cancelAnimationFrame(animRaf); if (!cur || !cur.rig || +$('anim').value < 0) return;
   const tick = now => { if (!cur || +$('anim').value < 0) return; applyAnim(now / 1000); draw(); animRaf = requestAnimationFrame(tick); };
   animRaf = requestAnimationFrame(tick); }
-$('anim').addEventListener('change', () => { cancelAnimationFrame(animRaf); if (+$('anim').value < 0) applyAnim(0); draw(); animLoop(); });
+$('anim').addEventListener('change', async () => { cancelAnimationFrame(animRaf); const k = +$('anim').value;
+  if (k >= 0) await ensureAnim(cur.rig.anims[k]);
+  if (k < 0) applyAnim(0); draw(); animLoop(); });
 
 function applyFilter() {
   if (!cur || !cur.img) return; gl.bindTexture(gl.TEXTURE_2D, cur.texture);
@@ -309,8 +328,8 @@ const h0 = parseInt(hp.n, 10);
 const first = (h0 >= 0 && h0 < MODELS.length) ? h0 : 0; sel.value = first;
 try { if (MODELS.length) { load(first);
   if (hp.mode >= 0) { $('mode').value = hp.mode; }
-  if (hp.anim >= 0 && cur.rig) { $('anim').value = hp.anim; applyAnim(hp.t || 0); if (hp.t === undefined) animLoop(); }
   if (hp.skel) $('skel').checked = true; if (hp.wire) $('wire').checked = true;
+  if (hp.anim >= 0 && cur.rig) { $('anim').value = hp.anim; ensureAnim(cur.rig.anims[hp.anim]).then(() => { applyAnim(hp.t || 0); if (hp.t === undefined) animLoop(); draw(); }); }
   if (hp.d) dist = radius * 2.6 * hp.d; if (hp.yaw !== undefined) yaw = hp.yaw;
   if (hp.ty !== undefined) target[1] = cur.mn[1] + (cur.mx[1] - cur.mn[1]) * hp.ty; draw(); } else $('err').textContent = 'Nenhum modelo embutido.'; } catch (e) { $('err').textContent = String(e); }
 </script>
