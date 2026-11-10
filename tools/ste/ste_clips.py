@@ -55,6 +55,13 @@ ID_MAP = {
     87: ('KOED_FACEDOWN_GETUP', False, None, {'settle': True}),        # levantar de bruços (o jogo estica a 60 campos)
     88: ('KOED_FACEUP_GETUP_ATTACK', False, None, {'settle': True}),   # de costas: so esta comeca na pose deitada (o rolar nao encadeia)
     120: ('SLUMP', False, None),            # morte em pe: cai de frente e termina na pose de KOED_FACEDOWN_IDLE
+    # pulo: o STE tem um unico JUMP_UP com o arco inteiro; o WotM divide em fases (StateJump) e a altura vem da fisica, entao cada
+    # fase e um trecho do JUMP_UP (u = fracao da animacao) e a subida da raiz encolhe para ~0,43 (o Togera embute +40 de altura).
+    30: ('JUMP_UP', False, 20 / 60.0, {'segs': [(0.50, 0.63, 0.55), (0.0, 0.10, 0.45)], 'fade': 0.25, 'zscale': 0.43}),   # agacha e impulsiona
+    33: ('JUMP_UP', True, 40 / 60.0, {'segs': [(0.12, 0.30, 1.0)], 'pingpong': True, 'zscale': 0.43}),                    # subindo (camada)
+    34: ('JUMP_UP', True, 40 / 60.0, {'segs': [(0.30, 0.40, 1.0)], 'pingpong': True, 'zscale': 0.43}),                    # descendo
+    35: ('JUMP_UP', False, 0.5, {'segs': [(0.38, 0.62, 1.0)], 'zscale': 0.43}),    # impacto do pouso (camada): do ar ao agachado
+    39: ('JUMP_UP', False, 0.5, {'segs': [(0.62, 0.96, 1.0)]}),                    # recupera o pouso: do agachado a pe
     # golpes: cada slot do Togera (.CHR, `tools/chr_dump.py disc/RST/LIZARD.CHR`) acerta com um localizador (0x803 mao D, 0x80B
     # boca, 0x818 a frente da cabeca, 0x816/0x817 meio e ponta da cauda) numa janela fixa da animacao; o golpe do STE com a mesma
     # parte do corpo entra no comprimento do slot, com o golpe dentro da janela (strike: eff = parte, win = janela do slot).
@@ -206,6 +213,42 @@ def warp(knots, uo):
     return 1.0
 
 
+def _blend(a, b, w):
+    """Mistura duas poses locais (translacao em lerp, quaternion em nlerp)."""
+    lt = [tuple(x * (1 - w) + y * w for x, y in zip(p, q)) for p, q in zip(a[0], b[0])]
+    lq = []
+    for p, q in zip(a[1], b[1]):
+        s = -1.0 if sum(x * y for x, y in zip(p, q)) < 0 else 1.0
+        v = [x * (1 - w) + s * y * w for x, y in zip(p, q)]
+        n = math.sqrt(sum(c * c for c in v)) or 1.0
+        lq.append(tuple(c / n for c in v))
+    return lt, lq
+
+
+def segs_pose(sk, an, segs, uo, fade):
+    """Pose no instante uo (0..1 do clipe de saida) de uma lista de trechos (u0, u1, parte) da animacao do STE; nas emendas
+    os dois trechos se continuam e se misturam por `fade` (fracao do clipe)."""
+    tot = sum(s[2] for s in segs)
+    starts = [sum(s[2] for s in segs[:i]) for i in range(len(segs))]
+
+    def at(i):
+        u0, u1, share = segs[i]
+        x = (uo * tot - starts[i]) / share
+        return sample_local(sk, an, min(1.0, max(0.0, u0 + (u1 - u0) * x)), False)
+    i = len(segs) - 1
+    for k in range(1, len(segs)):
+        if uo * tot < starts[k] - 1e-9:
+            i = k - 1
+            break
+    pose = at(i)
+    for k in range(1, len(segs)):
+        b = starts[k] / tot
+        if fade and abs(uo - b) < fade / 2:
+            w = (uo - b) / fade + 0.5
+            pose = _blend(at(k - 1), at(k), w * w * (3 - 2 * w))
+    return pose
+
+
 def make_clip(sk, an, wid, cycle, seconds=None, opts=None):
     opts = opts or {}
     frames = max(2, int(round((seconds or an['dur']) * FPS)))
@@ -226,20 +269,35 @@ def make_clip(sk, an, wid, cycle, seconds=None, opts=None):
             world_pose(sk, *sample_local(sk, an, f / 20.0, False))[root][1])) for f in range(21))
         k_travel, root0 = min(1.0, opts.get('maxtravel', 40.0) / far) if far > 1e-6 else 1.0, r0
     drift = (0.0, 0.0)
-    if cycle or opts.get('settle'):   # o STE anda o monstro pela raiz; no WotM quem anda e o jogo: tira a deriva horizontal
+    segs = opts.get('segs')
+    rest_z, first_xy, zs = None, None, opts.get('zscale')
+    if zs is not None:   # a altura do pulo e da fisica do jogo: encolhe a subida da raiz do STE (so para cima) para a que o Togera embute
+        rest_z = world_pose(sk, *sample_local(sk, an, 0.0, False))[root][1][2]
+    if (cycle or opts.get('settle')) and not segs:   # o STE anda o monstro pela raiz; no WotM quem anda e o jogo: tira a deriva horizontal
         p0 = world_pose(sk, *sample_local(sk, an, 0.0, cycle))[root][1]
         p1 = world_pose(sk, *sample_local(sk, an, 1.0, cycle))[root][1]
         drift = (p1[0] - p0[0], p1[1] - p0[1])
     for f in range(frames):
-        u = 0.0 if opts.get('still') else uin(f / float(frames if cycle else frames - 1))
-        lt, lq = sample_local(sk, an, u, cycle)
+        uo = f / float(frames if cycle else frames - 1)
+        u = 0.0 if opts.get('still') else uin(uo)
+        if segs:
+            if opts.get('pingpong'):
+                uo = 1.0 - abs(2.0 * uo - 1.0)
+            lt, lq = segs_pose(sk, an, segs, uo, opts.get('fade', 0.0))
+        else:
+            lt, lq = sample_local(sk, an, u, cycle)
         W = world_pose(sk, lt, lq)
         shift = (0.0, 0.0)
         if root0 is not None:
             shift = ((W[root][1][0] - root0[0]) * (1 - k_travel), (W[root][1][1] - root0[1]) * (1 - k_travel))
+        if segs:   # o corpo nao anda pela raiz: quem anda e o jogo
+            if first_xy is None:
+                first_xy = W[root][1][:2]
+            shift = (W[root][1][0] - first_xy[0], W[root][1][1] - first_xy[1])
+        dz = 0.0 if zs is None else (1.0 - zs) * max(0.0, W[root][1][2] - rest_z)
         for i, nm in enumerate(names):
             R, t = W[i]
-            t = (t[0] - drift[0] * u - shift[0], t[1] - drift[1] * u - shift[1], t[2])
+            t = (t[0] - drift[0] * u - shift[0], t[1] - drift[1] * u - shift[1], t[2] - dz)
             q = _quat(R)
             if prev[i] is not None and sum(a * b for a, b in zip(q, prev[i])) < 0:   # mesmo lado: sem salto de sinal
                 q = [-c for c in q]
