@@ -629,11 +629,24 @@ void plantDiag(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             std::fprintf(stderr, "[coop] planta: teste, cabeca %d derrubada\n", dead);
         }
     }
+    // WOTM_PLANTKILLHELD=1: o jogador que uma cabeca esta segurando morre (uma vez), como quando o tapa ou a mordida o derruba preso
+    static const bool killHeld = std::getenv("WOTM_PLANTKILLHELD") != nullptr;
+    static bool killed = false;
+    if (killHeld && !killed && plantHolding(rdram) && plantAlive(rdram, g_plantTarget))
+    {
+        killed = true;
+        const float f12 = ctx->f[12];
+        ctx->f[12] = 1000.f;
+        call(rdram, ctx, runtime, fn::takeDamage__7MonsterfbP7Monster, {g_plantP[g_plantTarget], 1u, 0u});
+        ctx->f[12] = f12;
+        std::fprintf(stderr, "[coop] planta: teste, jogador %d morreu preso na boca de uma cabeca\n", g_plantTarget + 1);
+    }
     if (log && (n++ % 120u) == 0u)
     {
-        std::fprintf(stderr, "[plantlog] m_04 %d m_08 %d m_0C %u m_10 %u ciclo %u/%u mortas %d |", static_cast<int32_t>(rd32(rdram, kPlant + 4)),
+        std::fprintf(stderr, "[plantlog] m_04 %d m_08 %d m_0C %u m_10 %u ciclo %u/%u base %u mortas %d alvo %d |", static_cast<int32_t>(rd32(rdram, kPlant + 4)),
                      static_cast<int32_t>(rd32(rdram, kPlant + 8)), rd32(rdram, kPlant + 0xC), rd32(rdram, kPlant + 0x10),
-                     rd32(rdram, kPlant + 0x14), rd32(rdram, kPlant + 0x18), static_cast<int32_t>(rd32(rdram, wotm::sym::numDeadHeads)));
+                     rd32(rdram, kPlant + 0x14), rd32(rdram, kPlant + 0x18), rd32(rdram, kPlantBase + 0x14),
+                     static_cast<int32_t>(rd32(rdram, wotm::sym::numDeadHeads)), g_plantTarget);
         for (uint32_t h = 0; h < 3; ++h)
         {
             const uint32_t p = kPlantHeads + kHeadStride * h;
@@ -646,7 +659,8 @@ void plantDiag(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             if (const uint32_t m = monster(rdram, i); m && (rd32(rdram, m + kCs) & 0x1FFFFFFFu))
             {
                 const uint32_t cs = rd32(rdram, m + kCs) & 0x1FFFFFFFu;
-                std::fprintf(stderr, " J%d %.0f,%.0f,%.0f id %u |", i + 1, rdF(rdram, cs + 0x10), rdF(rdram, cs + 0x14), rdF(rdram, cs + 0x18), rd32(rdram, m + kId));
+                std::fprintf(stderr, " J%d %.0f,%.0f,%.0f id %u %s |", i + 1, rdF(rdram, cs + 0x10), rdF(rdram, cs + 0x14), rdF(rdram, cs + 0x18),
+                             rd32(rdram, m + kId), alive(rdram, i) ? "vivo" : "morto");
             }
         std::fprintf(stderr, "\n");
     }
@@ -788,8 +802,27 @@ void baseHitHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
     const bool on = ctx->pc == g_baseHit.addr && (GPR_U32(ctx, 4) & 0x1FFFFFFFu) == kPlantBase;
     const uint32_t attacker = GPR_U32(ctx, 6), before = rd32(rdram, kPlantBase + 0x14);
+    // o corpo de um jogador morto fica encostado na base e a cada quadro bate nela (golpe de contato): a folha tapeava sem parar, e o
+    // tapa jogava o corpo de volta. Golpe de jogador morto ou fora nao conta (no retail o P1 morto e o fim da luta)
+    if (on)
+        for (int i = 0, n = players(rdram); i < n; ++i)
+            if (const uint32_t p = plantPlayer(rdram, i); p && rd32(rdram, p + kId) == attacker && !plantAlive(rdram, i))
+                return;
     g_baseHit.orig(rdram, ctx, runtime);
     const uint32_t after = rd32(rdram, kPlantBase + 0x14);
+    static const bool log = std::getenv("WOTM_PLANTLOG") != nullptr;
+    static int logged = 0;
+    if (log && on && logged < 400)
+    {
+        ++logged;
+        int who = -1;
+        for (int i = 0, n = players(rdram); i < n; ++i)
+            if (const uint32_t p = plantPlayer(rdram, i); p && rd32(rdram, p + kId) == attacker)
+                who = i;
+        constexpr uint32_t kInfo = wotm::sym::x_8HitEvent_s_takeHitInfo;
+        std::fprintf(stderr, "[plantlog] golpe na base: atacante %u (jogador %d, vivo %d) tipo %u fonte %u estado %u -> %u\n", attacker, who + 1,
+                     who >= 0 && plantAlive(rdram, who) ? 1 : 0, rd32(rdram, kInfo + 0xC), rd32(rdram, kInfo + 0x10), before, after);
+    }
     if (!on || after == before || (after != 8u && after != 9u))
         return;
     g_smackee = -1;
@@ -1177,6 +1210,24 @@ int cinemaLead(uint8_t *rdram, int n);
 
 void craterCountHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
+    // WOTM_PLANTSKIP=1: pula a primeira parte do 3-Mile. O jogo termina a parte da cidade quando as 4 chamines (ids 0x2715 a 0x2718)
+    // caem: o threeMileStackDestroyed mata as IAs e liga a contagem (stackCountDown, 779 quadros) que, ao acabar, leva os jogadores
+    // a cratera e acorda a planta (threeMileUpdateCountDown -> PlantBoss::wakeUp). Aqui as 4 caem 3 s depois do comeco da fase.
+    static const bool skip = std::getenv("WOTM_PLANTSKIP") != nullptr;
+    static bool skipped = false;
+    if (skip && ctx->pc == g_craterCount.addr && rd32(rdram, kGameMode) == 1u)
+    {
+        const uint32_t frame = rd32(rdram, wotm::sym::g_frame);
+        if (frame < 60u)
+            skipped = false;
+        else if (!skipped && frame > 180u)
+        {
+            skipped = true;
+            for (uint32_t id = 0x2715u; id < 0x2719u; ++id)
+                call(rdram, ctx, runtime, fn::threeMileStackDestroyed__Fi, {id});
+            std::fprintf(stderr, "[coop] planta: primeira parte pulada (4 chamines derrubadas)\n");
+        }
+    }
     const uint32_t ra = GPR_U32(ctx, 31);
     const int n = ctx->pc == g_craterCount.addr && rd32(rdram, kGameMode) == 1u ? players(rdram) : 0;
     if (!n)
