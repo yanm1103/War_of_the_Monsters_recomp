@@ -72,6 +72,18 @@ ID_MAP = {
     54: ('1HAND_THROW', False, 0.4, {'settle': True, 'knots': [(0, 0), (0.50, 0.50), (1, 1)]}),                # dardo (solta em 50%)
     55: ('THROW_2HAND', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.37, 0.25), (1, 1)]}),                # jogar com 2 maos no alvo (35-38%)
     56: ('THROW_2HAND_OBJECT', False, 40 / 60.0, {'settle': True, 'knots': [(0, 0), (0.37, 0.25), (1, 1)]}),   # jogar com 2 maos para a frente
+    # mais golpes e movimento: 13 e a mao esquerda do combo (slot 2.5 do .CHR); andar e correr de costas = o ciclo ao contrario;
+    # o pisao acerta em 50% (StateStompAttack) e o STOMP tem os dois pes no chao em ~46%; os levantares atacando e a morte
+    # deitada comecam na pose deitada do levantar (87/88), sem `laid` (o jogo nao inclina o monstro nesses).
+    13: ('JAB_L', False, 0.4, {'strike': {'eff': 'hand_l', 'win': (0.55, 0.99)}}),
+    7: ('WALK', True, None, {'reverse': True}),
+    8: ('RUN', True, None, {'reverse': True}),
+    240: ('STOMP', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.5, 0.46), (1, 1)]}),
+    241: ('STOMP', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.5, 0.46), (1, 1)]}),
+    242: ('KOED_FACEDOWN_GETUP_ATTACK', False, 50 / 60.0, {'settle': True}),
+    243: ('KOED_FACEUP_GETUP_ATTACK', False, 50 / 60.0, {'settle': True}),
+    121: ('KNOCKDOWN_FACEDOWN_FINISH', False, 2.0, {'knots': [(0, 0), (0.4, 1), (1, 1)]}),   # morte deitada de bruços: estrebucha e fica
+    122: ('KNOCKDOWN_FACEUP_FINISH', False, 2.0, {'knots': [(0, 0), (0.3, 1), (1, 1)]}),
     # agarrar (StateGrapple: pega a vitima entre 50% e 60% do alcance; StateGrappleOHAttack: o golpe acerta em 50%): o LIFT
     # termina com as maos no alto e o DROP comeca ai, entao o golpe na vitima erguida e o DROP, com a batida da mao em 50%.
     170: ('GRAB', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.55, 0.42), (1, 1)]}),     # esticar o braco para pegar
@@ -300,6 +312,8 @@ def make_clip(sk, an, wid, cycle, seconds=None, opts=None):
     for f in range(frames):
         uo = f / float(frames if cycle else frames - 1)
         u = 0.0 if opts.get('still') else uin(uo)
+        if opts.get('reverse'):   # andar/correr de costas: o mesmo ciclo ao contrario
+            u = (1.0 - u) % 1.0 if cycle else 1.0 - u
         if segs:
             if opts.get('pingpong'):
                 uo = 1.0 - abs(2.0 * uo - 1.0)
