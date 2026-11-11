@@ -75,7 +75,7 @@ ID_MAP = {
     # mais golpes e movimento: 13 e a mao esquerda do combo (slot 2.5 do .CHR); andar e correr de costas = o ciclo ao contrario;
     # o pisao acerta em 50% (StateStompAttack) e o STOMP tem os dois pes no chao em ~46%; os levantares atacando e a morte
     # deitada comecam na pose deitada do levantar (87/88), sem `laid` (o jogo nao inclina o monstro nesses).
-    13: ('JAB_L', False, 0.4, {'strike': {'eff': 'hand_l', 'win': (0.55, 0.99)}}),
+    13: ('JAB_L', False, 0.4, {'turn': True, 'strike': {'eff': 'hand_l', 'win': (0.55, 0.99)}}),
     7: ('WALK', True, None, {'reverse': True}),
     8: ('RUN', True, None, {'reverse': True}),
     240: ('STOMP', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.5, 0.46), (1, 1)]}),
@@ -97,16 +97,16 @@ ID_MAP = {
     # golpes: cada slot do Togera (.CHR, `tools/chr_dump.py disc/RST/LIZARD.CHR`) acerta com um localizador (0x803 mao D, 0x80B
     # boca, 0x818 a frente da cabeca, 0x816/0x817 meio e ponta da cauda) numa janela fixa da animacao; o golpe do STE com a mesma
     # parte do corpo entra no comprimento do slot, com o golpe dentro da janela (strike: eff = parte, win = janela do slot).
-    10: ('JAB_R', False, 0.4, {'strike': {'eff': 'hand_r', 'win': (0.55, 0.99)}}),            # soco rapido
-    22: ('UPPERCUT', False, 40 / 60.0, {'strike': {'eff': 'hand_r', 'win': (0.47, 0.85)}}),   # soco que lanca
-    17: ('HMMR_FIN', False, 0.4, {'strike': {'eff': 'hand_r', 'win': (0.60, 0.99)}}),         # pancada de mao e ombro
-    16: ('COMBO_BITE', False, 40 / 60.0, {'strike': {'eff': 'head', 'win': (0.44, 0.74), 'mode': 'abs'}, 'spin': {'from': 0.78, 'extra': 47}}),   # mordida que atordoa
-    18: ('COMBO_BITE', False, 0.4, {'strike': {'eff': 'head', 'win': (0.25, 0.85), 'mode': 'abs'}, 'spin': {'from': 0.87, 'extra': 47}}),         # mordida
-    19: ('COMBO_BITE', False, 0.4, {'strike': {'eff': 'head', 'win': (0.50, 0.99), 'mode': 'abs'}}),         # mordida
-    15: ('HEADBUTT', False, 80 / 60.0, {'strike': {'eff': 'head', 'win': (0.20, 0.59), 'mode': 'abs'}}),     # cabecada
-    12: ('TAIL_FULL_SPIN', False, 70 / 60.0, {'strike': {'eff': 'tail', 'win': (0.25, 0.48)}, 'spin': {'from': 0.55, 'extra': 205}}),   # cauda forte (lanca)
-    21: ('TAIL_SNAP', False, 50 / 60.0, {'strike': {'eff': 'tail', 'win': (0.22, 0.49)}}),    # cauda leve
-    20: ('TAIL_REVERSAL', False, 50 / 60.0, {'strike': {'eff': 'tail', 'win': (0.01, 0.49)}, 'spin': {'from': 0.55, 'extra': 28}}),   # cauda, acerta desde o comeco
+    10: ('JAB_R', False, 0.4, {'turn': True, 'strike': {'eff': 'hand_r', 'win': (0.55, 0.99)}}),            # soco rapido
+    22: ('UPPERCUT', False, 40 / 60.0, {'turn': True, 'strike': {'eff': 'hand_r', 'win': (0.47, 0.85)}}),   # soco que lanca
+    17: ('HMMR_FIN', False, 0.4, {'turn': True, 'strike': {'eff': 'hand_r', 'win': (0.60, 0.99)}}),         # pancada de mao e ombro
+    16: ('COMBO_BITE', False, 40 / 60.0, {'turn': True, 'strike': {'eff': 'head', 'win': (0.44, 0.74), 'mode': 'abs'}}),   # mordida que atordoa
+    18: ('COMBO_BITE', False, 0.4, {'turn': True, 'strike': {'eff': 'head', 'win': (0.25, 0.85), 'mode': 'abs'}}),         # mordida
+    19: ('COMBO_BITE', False, 0.4, {'turn': True, 'strike': {'eff': 'head', 'win': (0.50, 0.99), 'mode': 'abs'}}),         # mordida
+    15: ('HEADBUTT', False, 80 / 60.0, {'turn': True, 'strike': {'eff': 'head', 'win': (0.20, 0.59), 'mode': 'abs'}}),     # cabecada
+    12: ('TAIL_FULL_SPIN', False, 70 / 60.0, {'turn': True, 'strike': {'eff': 'tail', 'win': (0.25, 0.48)}}),   # cauda forte (lanca)
+    21: ('TAIL_SNAP', False, 50 / 60.0, {'turn': True, 'strike': {'eff': 'tail', 'win': (0.22, 0.49)}}),    # cauda leve
+    20: ('TAIL_REVERSAL', False, 50 / 60.0, {'turn': True, 'strike': {'eff': 'tail', 'win': (0.01, 0.49)}}),   # cauda, acerta desde o comeco
 }
 
 
@@ -322,6 +322,8 @@ def make_clip(sk, an, wid, cycle, seconds=None, opts=None):
         p0 = world_pose(sk, *sample_local(sk, an, 0.0, cycle))[root][1]
         p1 = world_pose(sk, *sample_local(sk, an, 1.0, cycle))[root][1]
         drift = (p1[0] - p0[0], p1[1] - p0[1])
+    pel = [i for i, n in enumerate(sk['name']) if n.endswith('Pelvis')][0]
+    turn_prev, turn_cum, turn_base, turns = None, 0.0, 0.0, []
     for f in range(frames):
         uo = f / float(frames if cycle else frames - 1)
         u = 0.0 if opts.get('still') else uin(uo)
@@ -338,6 +340,18 @@ def make_clip(sk, an, wid, cycle, seconds=None, opts=None):
         if sp and uo > sp['from']:
             x = min(1.0, (uo - sp['from']) / (1.0 - sp['from']))
             W = _spin(W, root, math.radians(-sp['extra'] * x * x * (3 - 2 * x)))   # `extra` no sentido do giro medido (+ = horario visto de cima)
+        if opts.get('turn'):   # o STE gira o personagem no golpe: o clipe sai sem esse giro e a curva vai para o jogo (rootTurn)
+            R0 = W[pel][0]
+            ang = math.degrees(math.atan2(R0[0][1], R0[1][1]))   # frente do quadril: +y local; positivo para +x (o heading do jogo)
+            if turn_prev is not None:
+                d = ang - turn_prev
+                d -= 360.0 * round(d / 360.0)
+                turn_cum += d
+            else:
+                turn_base = ang
+            turn_prev = ang
+            W = _spin(W, root, math.radians(turn_cum))
+            turns.append(round(turn_cum, 1))
         shift = (0.0, 0.0)
         if root0 is not None:
             shift = ((W[root][1][0] - root0[0]) * (1 - k_travel), (W[root][1][1] - root0[1]) * (1 - k_travel))
@@ -364,6 +378,8 @@ def make_clip(sk, an, wid, cycle, seconds=None, opts=None):
     clip = {'name': 'a%d' % wid, 'frames': frames, 'joints': joints}
     if opts.get('laid'):
         clip['laid'] = opts['laid']
+    if turns:
+        clip['turn'] = turns   # graus acumulados por quadro (o "rootTurn" do monster.json); o retarget ignora a chave
     return clip
 
 
@@ -407,6 +423,11 @@ def main(argv):
             print('      golpe (%s) janela %s: tempo saida->entrada %s' % (st['eff'], st['win'], ' '.join('%.2f>%.2f' % k for k in kn)))
     with open(out, 'w', encoding='utf-8') as f:
         json.dump({'clips': clips}, f, separators=(',', ':'))
+    turn = {c['name'][1:]: c['turn'] for c in clips if c.get('turn')}
+    if turn:   # o giro dos golpes: vai no "rootTurn" do monster.json do mod (o jogo gira o monstro por essa curva)
+        with open(os.path.splitext(out)[0] + '.rootturn.json', 'w', encoding='utf-8') as f:
+            json.dump(turn, f, separators=(',', ':'))
+        print('rootTurn: %s' % ' '.join('a%s=%+.0f' % (k, v[-1]) for k, v in turn.items()))
     return 0
 
 
