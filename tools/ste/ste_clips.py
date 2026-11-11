@@ -100,13 +100,13 @@ ID_MAP = {
     10: ('JAB_R', False, 0.4, {'strike': {'eff': 'hand_r', 'win': (0.55, 0.99)}}),            # soco rapido
     22: ('UPPERCUT', False, 40 / 60.0, {'strike': {'eff': 'hand_r', 'win': (0.47, 0.85)}}),   # soco que lanca
     17: ('HMMR_FIN', False, 0.4, {'strike': {'eff': 'hand_r', 'win': (0.60, 0.99)}}),         # pancada de mao e ombro
-    16: ('COMBO_BITE', False, 40 / 60.0, {'strike': {'eff': 'head', 'win': (0.44, 0.74), 'mode': 'abs'}}),   # mordida que atordoa
-    18: ('COMBO_BITE', False, 0.4, {'strike': {'eff': 'head', 'win': (0.25, 0.85), 'mode': 'abs'}}),         # mordida
+    16: ('COMBO_BITE', False, 40 / 60.0, {'strike': {'eff': 'head', 'win': (0.44, 0.74), 'mode': 'abs'}, 'spin': {'from': 0.78, 'extra': 47}}),   # mordida que atordoa
+    18: ('COMBO_BITE', False, 0.4, {'strike': {'eff': 'head', 'win': (0.25, 0.85), 'mode': 'abs'}, 'spin': {'from': 0.87, 'extra': 47}}),         # mordida
     19: ('COMBO_BITE', False, 0.4, {'strike': {'eff': 'head', 'win': (0.50, 0.99), 'mode': 'abs'}}),         # mordida
     15: ('HEADBUTT', False, 80 / 60.0, {'strike': {'eff': 'head', 'win': (0.20, 0.59), 'mode': 'abs'}}),     # cabecada
-    12: ('TAIL_FULL_SPIN', False, 70 / 60.0, {'strike': {'eff': 'tail', 'win': (0.25, 0.48)}}),   # cauda forte (lanca)
+    12: ('TAIL_FULL_SPIN', False, 70 / 60.0, {'strike': {'eff': 'tail', 'win': (0.25, 0.48)}, 'spin': {'from': 0.55, 'extra': 205}}),   # cauda forte (lanca)
     21: ('TAIL_SNAP', False, 50 / 60.0, {'strike': {'eff': 'tail', 'win': (0.22, 0.49)}}),    # cauda leve
-    20: ('TAIL_REVERSAL', False, 50 / 60.0, {'strike': {'eff': 'tail', 'win': (0.01, 0.49)}}),   # cauda, acerta desde o comeco
+    20: ('TAIL_REVERSAL', False, 50 / 60.0, {'strike': {'eff': 'tail', 'win': (0.01, 0.49)}, 'spin': {'from': 0.55, 'extra': 28}}),   # cauda, acerta desde o comeco
 }
 
 
@@ -281,6 +281,19 @@ def segs_pose(sk, an, segs, uo, fade):
     return pose
 
 
+def _spin(W, root, phi):
+    """Gira a pose inteira em volta do eixo vertical que passa pela raiz (phi em radianos, anti-horario)."""
+    c, s = math.cos(phi), math.sin(phi)
+    Rz = [[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]]
+    cx, cy = W[root][1][0], W[root][1][1]
+    out = []
+    for R, t in W:
+        R2 = [[sum(Rz[a][k] * R[k][b] for k in range(3)) for b in range(3)] for a in range(3)]
+        dx, dy = t[0] - cx, t[1] - cy
+        out.append((R2, (cx + c * dx - s * dy, cy + s * dx + c * dy, t[2])))
+    return out
+
+
 def make_clip(sk, an, wid, cycle, seconds=None, opts=None):
     opts = opts or {}
     frames = max(2, int(round((seconds or an['dur']) * FPS)))
@@ -321,6 +334,10 @@ def make_clip(sk, an, wid, cycle, seconds=None, opts=None):
         else:
             lt, lq = sample_local(sk, an, u, cycle)
         W = world_pose(sk, lt, lq)
+        sp = opts.get('spin')   # o golpe do STE termina virado (o STE gira o personagem; o WotM nao): termina o giro, sem estalo no fim
+        if sp and uo > sp['from']:
+            x = min(1.0, (uo - sp['from']) / (1.0 - sp['from']))
+            W = _spin(W, root, math.radians(-sp['extra'] * x * x * (3 - 2 * x)))   # `extra` no sentido do giro medido (+ = horario visto de cima)
         shift = (0.0, 0.0)
         if root0 is not None:
             shift = ((W[root][1][0] - root0[0]) * (1 - k_travel), (W[root][1][1] - root0[1]) * (1 - k_travel))
