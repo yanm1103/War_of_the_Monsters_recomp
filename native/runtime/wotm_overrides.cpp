@@ -206,6 +206,29 @@ namespace
     // A contagem e feita na entrada: o timer1Handler quase sempre bloqueia no sceGsSyncV, e a retomada entra direto no meio da funcao
     // recompilada, sem passar por este envoltorio (um "depois" aqui nao roda). O T1 emulado e zerado para a original somar 0 fields
     // (ela rele D_006F8DBC/D_006F8DE4 depois do vsync e grava de volta o que somamos).
+    // Trinco de vblank no sceGsSyncV do fim do quadro (timer1Handler). No PS2 o quadro termina esperando o PROXIMO vblank depois do
+    // trabalho; um quadro de 17,8 ms (o vblank passou aos 16,7) esperava ate os 33,3 e o jogo contava 2 fields, mesmo com o quadro
+    // seguinte pronto em 12 ms. Com o trinco, um vblank que passou durante o trabalho e ainda nao foi consumido por este sync vale
+    // como o sync: volta na hora, conta 1 field, e o quadro seguinte (curto) espera o vblank dele; o atraso e pago pela folga
+    // dos quadros rapidos. So com exatamente 1 vblank pendente: 2 ou mais (travada de verdade) seguem o caminho de antes.
+    // WOTM_VSYNC_LATCH=0 desliga; WOTM_LATCH_AB=<s> alterna a cada s segundos (comeca desligado) para comparar na mesma corrida.
+    constexpr uint32_t kTimer1SyncRa[2] = {wotm::fn::timer1Handler__FPUi + 0x50u, wotm::fn::timer1Handler__FPUi + 0x64u};
+    const bool g_latchEnabled = [] { const char *e = std::getenv("WOTM_VSYNC_LATCH"); return !PS2X_HW_EMU && (!e || std::atoi(e) != 0); }();
+    const double g_latchAbSecs = [] { const char *e = std::getenv("WOTM_LATCH_AB"); return e ? std::atof(e) : 0.0; }();
+    uint64_t g_latchConsumed = 0;   // ultimo vblank entregue ao jogo por este sync (0 = ainda nao ha)
+    bool g_latchSkip = false;       // o timer1Handler deste quadro decidiu voltar na hora (lido no syncVTapped)
+    bool g_latchLast = false;       // o ultimo quadro usou o trinco (aparece no [field] como L=1)
+    bool latchActive()
+    {
+        if (!g_latchEnabled)
+            return false;
+        if (g_latchAbSecs <= 0.0)
+            return true;
+        static const auto t0 = std::chrono::steady_clock::now();
+        const double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        return (static_cast<long long>(s / g_latchAbSecs) & 1) != 0;
+    }
+
     void timer1HandlerNative(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         if (ctx->pc == kTimer1Handler)
@@ -213,7 +236,21 @@ namespace
             const uint32_t now = hostTics();
             const int32_t elapsed = static_cast<int32_t>(now - g_t1Zero);
             g_t1Zero = now;
-            const uint32_t add = elapsed <= 0 ? 0u : static_cast<uint32_t>(std::min((elapsed + kTicsPerField - 1) / kTicsPerField, 16));
+            uint32_t add = elapsed <= 0 ? 0u : static_cast<uint32_t>(std::min((elapsed + kTicsPerField - 1) / kTicsPerField, 16));
+            g_latchSkip = false;
+            g_latchLast = false;
+            if (latchActive())
+            {
+                const uint64_t tick = runtime->eeScheduler().currentVSyncTick();
+                if (g_latchConsumed != 0u && tick == g_latchConsumed + 1u)
+                {
+                    g_latchSkip = g_latchLast = true;
+                    g_latchConsumed = tick;
+                    add = 1u;
+                }
+                else
+                    g_latchConsumed = tick + 1u;   // espera o proximo, como antes
+            }
             WRITE32(kFieldCounter, READ32(kFieldCounter) + add);
             WRITE32(kFieldsForAverage, READ32(kFieldsForAverage) + add);
             runtime->memory().write32(kT1Count, 0u);
@@ -1093,6 +1130,19 @@ namespace
                 }
                 ++g_syncVCalls;
             }
+            if (g_latchSkip && (ra == kTimer1SyncRa[0] || ra == kTimer1SyncRa[1]))
+            {
+                // vblank pendente (timer1HandlerNative): volta na hora com o resultado de um sceGsSyncV (paridade do campo), servindo
+                // o checkpoint pendente como a espera faria
+                g_latchSkip = false;
+#if !PS2X_HW_EMU   // waitVSyncHere so existe no executavel do jogo (EeSchedulerGame.cpp)
+                EeScheduler &ee = runtime->eeScheduler();
+                const int result = ee.waitVSyncHere(ee.currentVSyncTick() - 1u, -1);
+                SET_GPR_S32(ctx, 2, result);
+                ctx->pc = ra;
+                return;
+#endif
+            }
             if (ra == kDialogLoopSyncVRa && GPR_U32(ctx, 17) == 0u)
                 wotmCaptureFrame(rdram);
             else if (ra == kFadeStepSyncVRa[0] || ra == kFadeStepSyncVRa[1])
@@ -1172,6 +1222,8 @@ namespace
         for (unsigned v = 0; v < 4; ++v)
             views += (g_hierViews >> v) & 1u;
         add(" vistas=%u hier=%.2f/%.2f cap=%.2f/%.2f", views, g_hierMs[0], g_hierMs[1], g_captureMs[0], g_captureMs[1]);
+        add(" L=%d", g_latchLast ? 1 : 0);   // o sync do fim do quadro voltou na hora (trinco de vblank); em A/B: ver latchActive
+        add(" la=%d", latchActive() ? 1 : 0);
         if (g_hierViews & 0xCu)   // 3 e 4 jogadores (wotm_split4.inc): vistas 2 e 3
             add(" hier23=%.2f/%.2f cap23=%.2f/%.2f", g_hierMs[2], g_hierMs[3], g_captureMs[2], g_captureMs[3]);
         len = std::min(len, int(sizeof(line)) - 2);
