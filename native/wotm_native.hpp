@@ -224,6 +224,7 @@ struct Vtx {
     uint8_t cull = 0;                 // secao com culling (bit 15 do seletor): o VU1 descarta a face de costas (Scene::backFacing)
     int8_t nx = 0, ny = 0, nz = 0;    // normal (V3-8 @0x175, mesmo indice da posicao; modulo ~127): luz por vertice (Scene::vertexRgb)
     uint8_t fge = 0;                  // PRIM.FGE da secao: o GS aplica a neblina (Scene::draw, shader)
+    uint32_t vid = 0xFFFFFFFFu;       // entrada de strip de origem, unica na malha (MeshData::nUniq): os triangulos que a dividem tem a mesma copia
 };
 
 // OBJECT sprite (objType 2, flags +0xC bits 5-6): secao com tag GIF SPRITE em H e 6 qwords por sprite, sem indices: ST0 @H+1,
@@ -240,6 +241,7 @@ struct ObjSprite {
 struct MeshData {
     std::vector<Vtx> tris;   // lista de triangulos (3 vertices por triangulo)
     std::vector<ObjSprite> sprites;   // secoes SPRITE (ObjSprite): voltadas para a camera, montadas no desenho
+    uint32_t nUniq = 0;      // entradas de strip distintas (Vtx::vid < nUniq); 0 = malha sem vid (Scene::emitVerts calcula por canto)
     uint32_t qwc = 0;
     uint32_t bytes = 0;      // skinned: do polyPkt ao fim do ultimo sub-pacote decodificado (o pacote do Goliath passa de 128 KB)
     uint32_t sig = 0;       // assinatura barata para detectar RAM reaproveitada por outro nivel
@@ -368,6 +370,7 @@ inline uint32_t decodePacket(const Ram &ram, uint32_t pp, MeshData &md, bool fir
                 if (k < rgba.size()) { v.r = rgba[k][0]; v.g = rgba[k][1]; v.b = rgba[k][2]; v.a = rgba[k][3]; }
                 else { v.r = v.g = v.b = v.a = 128; }
                 if (k < uv.size()) { v.u = uv[k][0] / 4096.f; v.v = uv[k][1] / 4096.f; }
+                v.vid = md.nUniq++;
                 strip.push_back(v);
             }
             emit();
@@ -4859,24 +4862,44 @@ private:
         static const bool noVcol = std::getenv("WOTM_NOVCOL") != nullptr;
         static const int onlySub = std::getenv("WOTM_SUBPKT") ? std::atoi(std::getenv("WOTM_SUBPKT")) : -1;
         static const char *un = std::getenv("WOTM_UVNEG");   // diagnostico: WOTM_UVNEG=u|v|uv inverte o sinal do UV
+        // Cada entrada de strip (Vtx::vid) vale para ate 3 triangulos com a mesma copia: posicao (esqueleto ou matriz), UV do mapa de
+        // ambiente e cor (luz) saem uma vez por entrada neste pedaco e os outros cantos reaproveitam (mesma conta, mesmo resultado).
+        // WOTM_NOVERTEXCACHE=1 volta a calcular por canto.
+        struct PV { uint32_t gp = 0, ge = 0, gc = 0; float p[3]; float eu, ev; bool envOk; uint8_t col[4]; };
+        static thread_local std::vector<PV> pvs;
+        static thread_local uint32_t pvGen = 0;
+        static const bool noCache = std::getenv("WOTM_NOVERTEXCACHE") != nullptr;
+        const bool cached = !noCache && md->nUniq > 0;
+        if (cached) {
+            if (pvs.size() < md->nUniq) pvs.resize(md->nUniq);
+            if (++pvGen == 0) { for (PV &e : pvs) e.gp = e.ge = e.gc = 0; pvGen = 1; }
+        }
+        auto cachedPv = [&](const Vtx &v) -> PV * { return cached && v.vid < md->nUniq ? &pvs[v.vid] : nullptr; };
+        auto posOf = [&](const Vtx &v, float out[3]) {
+            PV *e = cachedPv(v);
+            if (e && e->gp == pvGen) { out[0] = e->p[0]; out[1] = e->p[1]; out[2] = e->p[2]; return; }
+            if (pm) skinVertexPM(pm, skinM, v, out);
+            else xform(it.m, v.x, v.y, v.z, out);
+            if (in.fudge) for (int a = 0; a < 3; ++a) out[a] = eye_[a] + (out[a] - eye_[a]) * in.fzScale;
+            if (e) { e->p[0] = out[0]; e->p[1] = out[1]; e->p[2] = out[2]; e->gp = pvGen; }
+        };
         for (size_t k = 0; k + 2 < t.size(); k += 3) {
             if (in.multi && t[k].slot != slot) continue;   // so as secoes deste slot
             if (onlySub >= 0 && md->skinned && t[k].sub != onlySub) continue;
             float p[3][3];
-            for (int c = 0; c < 3; ++c) {
-                if (pm) skinVertexPM(pm, skinM, t[k + c], p[c]);
-                else xform(it.m, t[k + c].x, t[k + c].y, t[k + c].z, p[c]);
-                if (in.fudge) for (int a = 0; a < 3; ++a) p[c][a] = eye_[a] + (p[c][a] - eye_[a]) * in.fzScale;
-            }
+            for (int c = 0; c < 3; ++c) posOf(t[k + c], p[c]);
             if (t[k].cull && !wire && !in.gpuCull && backFacing(p, eye_)) continue;
             sink.tri(t[k].cull != 0);
             float eu[3], ev[3];   // UV do mapa de ambiente por vertice
             bool envOk[3] = {false, false, false};
             if (it.env && tid) {
                 for (int c = 0; c < 3; ++c) {
+                    PV *e = cachedPv(t[k + c]);
+                    if (e && e->ge == pvGen) { eu[c] = e->eu; ev[c] = e->ev; envOk[c] = e->envOk; continue; }
                     float nw[3];
                     envNormal(t[k + c], pm ? &pm[(t[k + c].cx & 0x7F) / 4] : nullptr, pm ? skinM : it.m, nw);
                     envOk[c] = envUv(it.env, it.envK, envV, p[c], nw, eu[c], ev[c]);
+                    if (e) { e->eu = eu[c]; e->ev = ev[c]; e->envOk = envOk[c]; e->ge = pvGen; }
                 }
             }
             for (int c = 0; c < 3; ++c) {
@@ -4889,14 +4912,21 @@ private:
                     else if (v.isAdc) { gsV = false; sink.color(255, 0, 0, 255); }   // WOTM_SHOWADC
                     else if (noVcol && md->skinned) { gsV = false; sink.color(255, 255, 255, 255); }   // diagnostico
                     else {
-                        uint8_t rgb[3];
-                        vertexRgb(in.ol, it.color, pm ? &pm[(v.cx & 0x7F) / 4] : nullptr, pm ? skinM : it.m, v, rgb, in.rowLen);
-                        // cor e alfa crus no modo GS (o shader faz texel * Cv / 128 e At * Av / 16384); no quadro anterior e no filme,
-                        // o antigo (cor dobrada e limitada a 1,0, alfa 4a/255)
-                        const float va = v.a * in.fade * (gsA ? 1.f : 4.f);
-                        const int kk = gsA ? 1 : 2;
-                        sink.color(uint8_t(std::min(255, rgb[0] * kk)), uint8_t(std::min(255, rgb[1] * kk)), uint8_t(std::min(255, rgb[2] * kk)),
-                                   in.forceOpaque ? uint8_t(255) : uint8_t(std::min(255.f, va)));
+                        PV *e = cachedPv(v);
+                        uint8_t col[4];
+                        if (e && e->gc == pvGen) std::memcpy(col, e->col, 4);
+                        else {
+                            uint8_t rgb[3];
+                            vertexRgb(in.ol, it.color, pm ? &pm[(v.cx & 0x7F) / 4] : nullptr, pm ? skinM : it.m, v, rgb, in.rowLen);
+                            // cor e alfa crus no modo GS (o shader faz texel * Cv / 128 e At * Av / 16384); no quadro anterior e no filme,
+                            // o antigo (cor dobrada e limitada a 1,0, alfa 4a/255)
+                            const float va = v.a * in.fade * (gsA ? 1.f : 4.f);
+                            const int kk = gsA ? 1 : 2;
+                            col[0] = uint8_t(std::min(255, rgb[0] * kk)); col[1] = uint8_t(std::min(255, rgb[1] * kk)); col[2] = uint8_t(std::min(255, rgb[2] * kk));
+                            col[3] = in.forceOpaque ? uint8_t(255) : uint8_t(std::min(255.f, va));
+                            if (e) { std::memcpy(e->col, col, 4); e->gc = pvGen; }
+                        }
+                        sink.color(col[0], col[1], col[2], col[3]);
                     }
                     const float tu = envOk[cs[e]] ? eu[cs[e]] : v.u + it.uvOff[0], tv = envOk[cs[e]] ? ev[cs[e]] : v.v + it.uvOff[1];
                     // texels do GS na tela 640x224, que em widescreen e a faixa 4:3 central do quadro anterior (gsScreenRect)
