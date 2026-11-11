@@ -57,6 +57,7 @@ enum Key
     ArmyElim,
     ArmyEndur,
     ArmyTrain,
+    HideHud,      // esconde o HUD e o texto do jogo durante a luta (como o HIDE HUD do modo foto); na pausa e nos menus continuam
     kKeys
 };
 
@@ -66,9 +67,10 @@ inline constexpr const char *kEnv[kKeys] = {"WOTM_RES",        "WOTM_ASPECT",   
                                             "WOTM_CAMSENS",    "WOTM_CAMINVERT",   "WOTM_RENDERSCALE", "WOTM_MSAA",      "WOTM_TEXFILTER",
                                             "WOTM_ANNOUNCER",  "WOTM_SKIPINTRO",   "WOTM_VIBRATION",   "WOTM_INTERP",
                                             "WOTM_ARMY",       "WOTM_ARMY_TRIGGER", "WOTM_ARMY_EVERY", "WOTM_ARMY_CHAOS", "WOTM_ARMY_WAVE",
-                                            "WOTM_ARMY_FFA",   "WOTM_ARMY_ELIM",   "WOTM_ARMY_ENDURANCE", "WOTM_ARMY_TRAINING"};
+                                            "WOTM_ARMY_FFA",   "WOTM_ARMY_ELIM",   "WOTM_ARMY_ENDURANCE", "WOTM_ARMY_TRAINING",
+                                            "WOTM_HIDEHUD"};
 inline constexpr int kDefault[kKeys] = {720, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 5, 0, 100, 0, 0, 1, 0, 1, 1,
-                                        0, 2, 60, 50, 3, 1, 1, 1, 0};
+                                        0, 2, 60, 50, 3, 1, 1, 1, 0, 0};
 inline constexpr const char *kPromptNames[] = {"auto", "original", "keyboard", "xbox", "playstation", "nintendo"};
 inline constexpr int kPromptStyles = 6;
 enum PromptStyle { PromptAuto, PromptOriginal, PromptKeyboard, PromptXbox, PromptPs, PromptNintendo };
@@ -88,7 +90,7 @@ inline constexpr float kAspectRatio[] = {0.f, 4.f / 3.f, 16.f / 9.f, 16.f / 10.f
 inline constexpr int kAspects = 6;
 
 inline std::atomic<int> g_val[kKeys] = {720, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 5, 0, 100, 0, 0, 1, 0, 1, 1,
-                                        0, 2, 60, 50, 3, 1, 1, 1, 0};
+                                        0, 2, 60, 50, 3, 1, 1, 1, 0, 0};
 // Primeira execucao de um jogador (sem settings.ini, com o arquivo ligado): por cima do kDefault, que segue valendo para os testes
 // (lote e corpus rodam com WOTM_SETTINGS=0), tela cheia sem borda, lock-on alternado, barras dos inimigos, narrador com o grito do
 // monstro e a resolucao do monitor (Res fica pendente ate a janela existir: resolveFirstRunRes, wotm_live.inc). Decisao do dono.
