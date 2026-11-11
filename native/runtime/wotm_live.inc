@@ -1774,7 +1774,10 @@ static bool wotmDrawNative(const uint8_t *rdram)
     const wotm::GameCamera freeCam = S.snap.cam;
     // WOTM_NOHUD=1: sempre sem HUD nem texto do jogo, como o modo foto com o HUD escondido (fotos de fase com WOTM_SHOTS)
     static const bool noHud = [] { const char *e = std::getenv("WOTM_NOHUD"); return e && e[0] == '1'; }();
-    const bool photoHide = (freeView.override && freeView.photo && freeView.hideHud) || noHud;
+    // Opcao HIDE HUD (wotm_settings.hpp): o mesmo corte, so com a luta rodando; na pausa (displayDialog ha pouco) e fora da luta o texto fica
+    const bool hudSetting = wotm::settings::on(wotm::settings::HideHud) && !wotm_training::windowsHidden();
+    const bool photoHideOnly = (freeView.override && freeView.photo && freeView.hideHud) || noHud;
+    const bool photoHide = photoHideOnly || hudSetting;
     // Redesenho: so com quadro novo do jogo (ou instantaneo novo da camera livre), fade do Shell::FadeScreen mudando, camera livre
     // pausada ou janela redimensionada; parado sem quadro novo (pausa, lacos sem captura) volta a redesenhar a ~60/s. Nas outras
     // apresentacoes (monitor acima de 60 Hz, initPresentRate) a ultima imagem e so reapresentada: o custo fica o de 60 e o texId 0
@@ -2062,7 +2065,7 @@ static bool wotmDrawNative(const uint8_t *rdram)
             wotm_photo::applyToScene(S.scene, ram, gameCam, freeCam, freeView, S.snap.anchors, !S.snap.vctx.full());
         else if (freeView.override)
             wotm_freecam::applyToScene(S.scene, gameCam, freeView.pose);
-        if (noHud)
+        if (noHud || hudSetting)
         {
             S.scene.hud.clear();
             S.scene.hp.clear();
@@ -2259,7 +2262,7 @@ static bool wotmDrawNative(const uint8_t *rdram)
                     drawDamagePopups(S.scene, popCam[v], RW, RH,
                                      Rectangle{static_cast<float>((v & 1) * (RW - VW)), static_cast<float>((v >> 1) * (RH - VH)),
                                                static_cast<float>(viewW(v)), static_cast<float>(VH)});
-        if (const float rw = g_wotmMechaReticle.load(std::memory_order_relaxed); !split && !photoHide && rw > 0.f)
+        if (const float rw = g_wotmMechaReticle.load(std::memory_order_relaxed); !split && !photoHideOnly && rw > 0.f)
         {
             // retícula da camera da torre do Mecha (wotm_custom.inc, laserCam): o centro da tela e para onde o laser vai
             const float cx = RW * 0.5f, cy = RH * 0.5f, r = RH * 0.022f, g = r * 0.45f, t = std::max(2.f, RH / 540.f);
