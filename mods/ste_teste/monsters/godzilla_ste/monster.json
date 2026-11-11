@@ -1,0 +1,11 @@
+{
+  "id": "godzilla_ste",
+  "name": "GODZILLA STE",
+  "base": "togera",
+  "costume": 0,
+  "files": true,
+  "narrator": "togera",
+  "ai": true,
+  "portrait": "portrait.png",
+  "portraitTex": 3
+}

@@ -1,0 +1,5 @@
+Mod de teste: Godzilla 2000 de Godzilla: Save the Earth com as animacoes proprias do STE.
+.dae/.png: tools/ste/export_dae.py (malha do Godzilla2k.cmp). rig.glb: tools/retarget.py <LIZARD0.glb> godzilla2000_ste.dae
+tools/rigmaps/ste_godzilla2000.json rig.glb --size 0.988 --own clips.json, com clips.json de tools/ste/ste_clips.py (ID_MAP).
+O mod: modkit.py monster new ste_teste godzilla_ste --base togera --costume 0 --name "GODZILLA STE" --ai --narrator togera;
+modkit.py monster rig ... godzilla2000_ste_rig.glb; textura lizard0_t0013.png x0.62; retrato do Godzilla 2000.

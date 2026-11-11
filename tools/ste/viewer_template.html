@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Godzilla STE Models</title>
+<style>
+  :root { color-scheme: dark; --bg:#14161a; --panel:#1e2127; --line:#323741; --fg:#e6e8ec; --dim:#98a0ad; --acc:#7fd1a0; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui, Segoe UI, sans-serif; overflow:hidden; }
+  #bar { position:absolute; left:0; right:0; top:0; display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center;
+         padding:8px 16px; background:var(--panel); border-bottom:1px solid var(--line); z-index:2; }
+  #bar label { color:var(--dim); display:flex; gap:6px; align-items:center; }
+  select, button { background:#272b33; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:5px 9px; font:inherit; }
+  button { cursor:pointer; } button:hover, select:hover { border-color:var(--acc); }
+  #info { color:var(--dim); margin-left:auto; font-variant-numeric:tabular-nums; }
+  canvas { position:absolute; left:0; top:0; width:100%; height:100%; display:block; touch-action:none; cursor:grab; }
+  canvas:active { cursor:grabbing; }
+  #help { position:absolute; left:16px; bottom:10px; color:var(--dim); font-size:12px; z-index:2; pointer-events:none; }
+  #tex { position:absolute; right:12px; bottom:12px; width:160px; height:160px; image-rendering:pixelated; border:1px solid var(--line);
+         background:#000; z-index:2; }
+  #err { position:absolute; inset:60px 16px auto 16px; color:#ff8a80; z-index:3; white-space:pre-wrap; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <label>Monstro <select id="model"></select></label>
+  <label>Visualização
+    <select id="mode">
+      <option value="0">Textura</option>
+      <option value="1">Normais</option>
+      <option value="2">Ossos (cor por osso)</option>
+      <option value="3">Argila</option>
+    </select>
+  </label>
+  <label><input type="checkbox" id="wire"> Wireframe</label>
+  <label><input type="checkbox" id="nearest"> Pixelado</label>
+  <label><input type="checkbox" id="skel"> Esqueleto</label>
+  <label id="animlbl" style="display:none">Animação <select id="anim"><option value="-1">Pose de bind</option></select></label>
+  <button id="obj">Exportar OBJ</button>
+  <button id="png">Textura PNG</button>
+  <span id="info"></span>
+</div>
+<canvas id="gl"></canvas>
+<img id="tex" alt="textura">
+<div id="help">arrastar: girar · roda: zoom · botão direito / shift: mover · duplo clique: recentrar</div>
+<div id="err"></div>
+<script>
+const MODELS = /*MODELS*/[];
+
+const $ = id => document.getElementById(id);
+const canvas = $('gl');
+const gl = canvas.getContext('webgl', { antialias: true });
+if (!gl) { $('err').textContent = 'WebGL indisponível neste navegador.'; throw new Error('no webgl'); }
+
+// ---------- matrizes (column-major) ----------
+const M = {
+  persp(fov, asp, n, f) { const t = 1 / Math.tan(fov / 2), r = 1 / (n - f);
+    return [t / asp,0,0,0, 0,t,0,0, 0,0,(n + f) * r,-1, 0,0,2 * n * f * r,0]; },
+  mul(a, b) { const o = new Array(16).fill(0);
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) { let s = 0;
+      for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k]; o[c * 4 + r] = s; } return o; },
+  view(yaw, pitch, dist, tx, ty, tz) { // câmera orbitando (tx,ty,tz)
+    const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+    // rotação Ry(yaw) * Rx(pitch) aplicada ao mundo, depois translação -dist em z
+    const R = [cy,sp*sy,-cp*sy,0, 0,cp,sp,0, sy,-sp*cy,cp*cy,0, 0,0,0,1];
+    const T = [1,0,0,0, 0,1,0,0, 0,0,1,0, -tx,-ty,-tz,1];
+    const D = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,-dist,1];
+    return M.mul(D, M.mul(R, T)); }
+};
+
+// ---------- shaders ----------
+function sh(type, src) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
+const prog = gl.createProgram();
+gl.attachShader(prog, sh(gl.VERTEX_SHADER, `
+attribute vec3 aPos; attribute vec3 aNrm; attribute vec2 aUV; attribute vec3 aCol;
+uniform mat4 uMVP; uniform mat4 uView;
+varying vec3 vN; varying vec2 vUV; varying vec3 vCol; varying vec3 vObjN;
+void main(){ gl_Position = uMVP * vec4(aPos,1.0); vN = mat3(uView) * aNrm; vObjN = aNrm; vUV = aUV; vCol = aCol; }`));
+gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, `
+precision mediump float;
+uniform sampler2D uTex; uniform int uMode; uniform float uLines;
+varying vec3 vN; varying vec2 vUV; varying vec3 vCol; varying vec3 vObjN;
+void main(){
+  vec3 n = normalize(vN); if (!gl_FrontFacing) n = -n;
+  vec3 l = normalize(vec3(0.35, 0.55, 0.75));
+  float d = max(dot(n, l), 0.0) * 0.75 + 0.35;
+  vec3 base;
+  if (uMode == 0) base = texture2D(uTex, vUV).rgb;
+  else if (uMode == 1) base = normalize(vObjN) * 0.5 + 0.5;
+  else if (uMode == 2) base = vCol;
+  else base = vec3(0.78);
+  if (uLines > 0.5) { gl_FragColor = vec4(base * 0.9 + 0.1, 1.0); return; }
+  if (uMode == 1) d = 1.0;
+  gl_FragColor = vec4(base * d, 1.0);
+}`));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+const loc = n => gl.getAttribLocation(prog, n), uni = n => gl.getUniformLocation(prog, n);
+const aPos = loc('aPos'), aNrm = loc('aNrm'), aUV = loc('aUV'), aCol = loc('aCol');
+const uMVP = uni('uMVP'), uView = uni('uView'), uTex = uni('uTex'), uMode = uni('uMode'), uLines = uni('uLines');
+
+// ---------- dados ----------
+function bytes(s) { const b = atob(s), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; }
+function boneColor(i) { const h = (i * 0.61803398875) % 1, s = 0.55, v = 0.95;
+  const k = n => { const x = (n + h * 6) % 6; return v - v * s * Math.max(0, Math.min(x, 4 - x, 1)); };
+  return [k(5), k(3), k(1)]; }
+
+let cur = null;
+function buf(target, data) { const b = gl.createBuffer(); gl.bindBuffer(target, b); gl.bufferData(target, data, gl.STATIC_DRAW); return b; }
+
+function load(i) {
+  const m = MODELS[i];
+  if (cur) { for (const k of ['bPos','bNrm','bUV','bCol','bIdx','bLines','texture']) if (cur[k]) (k === 'texture' ? gl.deleteTexture(cur[k]) : gl.deleteBuffer(cur[k])); }
+  const p0 = new Float32Array(bytes(m.pos).buffer), n0 = new Int8Array(bytes(m.nrm).buffer);
+  const uv16 = new Uint16Array(bytes(m.uv).buffer), bn = bytes(m.bones), w16 = new Uint16Array(bytes(m.wts).buffer);
+  const idx = new Uint16Array(bytes(m.idx).buffer);
+  const nv = m.nv, pos = new Float32Array(nv * 3), nrm = new Float32Array(nv * 3), uv = new Float32Array(nv * 2), col = new Float32Array(nv * 3);
+  const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+  for (let v = 0; v < nv; v++) {
+    // dado z-para-cima, frente em +y  ->  y-para-cima, frente em +z (rotacao, mantem a ordem das faces)
+    const x = p0[v*3], y = p0[v*3+1], z = p0[v*3+2];
+    pos[v*3] = -x; pos[v*3+1] = z; pos[v*3+2] = y;
+    const nx = n0[v*3] / 127, ny = n0[v*3+1] / 127, nz = n0[v*3+2] / 127;
+    nrm[v*3] = -nx; nrm[v*3+1] = nz; nrm[v*3+2] = ny;
+    uv[v*2] = uv16[v*2] / 4096; uv[v*2+1] = uv16[v*2+1] / 4096;
+    const w = w16[v] / 4096, c0 = boneColor(bn[v*2]), c1 = boneColor(bn[v*2+1]);
+    for (let k = 0; k < 3; k++) col[v*3+k] = c0[k] * w + c1[k] * (1 - w);
+    for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], pos[v*3+k]); mx[k] = Math.max(mx[k], pos[v*3+k]); }
+  }
+  const lines = new Uint16Array(idx.length * 2);
+  for (let t = 0; t < idx.length; t += 3) { const a = idx[t], b = idx[t+1], c = idx[t+2], o = t * 2;
+    lines.set([a,b, b,c, c,a], o); }
+  // esqueleto: uma linha por osso (no -> pai), na pose de bind; mesma conversao de eixos da malha
+  let sk = null;
+  if (m.sk) {
+    const sp = new Float32Array(bytes(m.sk.pos).buffer), n = m.sk.parent.length, lp = [];
+    for (let k = 0; k < n; k++) { const p = m.sk.parent[k]; if (p < 0) continue;
+      for (const j of [p, k]) lp.push(-sp[j*3], sp[j*3+2], sp[j*3+1]); }
+    const lc = new Float32Array(lp.length).fill(1), zero = new Float32Array(lp.length), uz = new Float32Array(lp.length / 3 * 2);
+    for (let k = 0; k < lc.length; k += 3) { lc[k] = 1; lc[k+1] = 0.9; lc[k+2] = 0.1; }
+    sk = { n: lp.length / 3, lp: new Float32Array(lp), bPos: buf(gl.ARRAY_BUFFER, new Float32Array(lp)), bCol: buf(gl.ARRAY_BUFFER, lc), bNrm: buf(gl.ARRAY_BUFFER, zero), bUV: buf(gl.ARRAY_BUFFER, uz) };
+  }
+  const tex = gl.createTexture();
+  cancelAnimationFrame(animRaf);
+  cur = { sk, p0, n0, bn, w16, rig: setupRig(m), m, pos, nrm, uv, mn, mx, idx, count: idx.length, lcount: lines.length, texture: tex,
+          bPos: buf(gl.ARRAY_BUFFER, pos), bNrm: buf(gl.ARRAY_BUFFER, nrm), bUV: buf(gl.ARRAY_BUFFER, uv), bCol: buf(gl.ARRAY_BUFFER, col),
+          bIdx: buf(gl.ELEMENT_ARRAY_BUFFER, idx), bLines: buf(gl.ELEMENT_ARRAY_BUFFER, lines) };
+  const img = new Image();
+  img.onload = () => { gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.generateMipmap(gl.TEXTURE_2D); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    cur.img = img; applyFilter(); draw(); };
+  img.src = 'data:image/png;base64,' + m.tex;
+  $('tex').src = img.src;
+  $('info').textContent = `${nv} vértices · ${m.nt} triângulos · ${m.nbones} ossos`;
+  const as = $('anim'); as.innerHTML = '<option value="-1">Pose de bind</option>';
+  (cur.rig ? cur.rig.anims : []).forEach((a, k) => { const o = document.createElement('option'); o.value = k; o.textContent = a.name; as.appendChild(o); });
+  $('animlbl').style.display = cur.rig && cur.rig.anims.length ? '' : 'none';
+  recenter(); draw();
+}
+// ---------- pose / animação (skinning em CPU) ----------
+function worldMats(parent, lt, lq, n) {
+  const W = new Float32Array(12 * n), done = new Uint8Array(n);
+  const f = i => { if (done[i]) return; const p = parent[i]; if (p >= 0) f(p);
+    let x = lq[i*4], y = lq[i*4+1], z = lq[i*4+2], w = lq[i*4+3]; const l = Math.hypot(x, y, z, w) || 1; x /= l; y /= l; z /= l; w /= l;
+    const R = [1-2*(y*y+z*z), 2*(x*y-z*w), 2*(x*z+y*w), 2*(x*y+z*w), 1-2*(x*x+z*z), 2*(y*z-x*w), 2*(x*z-y*w), 2*(y*z+x*w), 1-2*(x*x+y*y)];
+    const t = [lt[i*3], lt[i*3+1], lt[i*3+2]], o = i * 12;
+    if (p < 0) { for (let k = 0; k < 9; k++) W[o+k] = R[k]; for (let k = 0; k < 3; k++) W[o+9+k] = t[k]; }
+    else { const q = p * 12;
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) W[o+r*3+c] = W[q+r*3]*R[c] + W[q+r*3+1]*R[3+c] + W[q+r*3+2]*R[6+c];
+      for (let r = 0; r < 3; r++) W[o+9+r] = W[q+9+r] + W[q+r*3]*t[0] + W[q+r*3+1]*t[1] + W[q+r*3+2]*t[2]; }
+    done[i] = 1; };
+  for (let i = 0; i < n; i++) f(i);
+  return W;
+}
+function setupRig(m) {
+  if (!m.sk) return null;
+  const sk = m.sk, n = sk.parent.length, lt = new Float32Array(bytes(sk.lt).buffer), lq = new Float32Array(bytes(sk.lq).buffer);
+  const rig = { n, parent: sk.parent, skin: sk.skin, lt, lq, bindW: worldMats(sk.parent, lt, lq, n), anims: [] };
+  for (const a of sk.anims || []) rig.anims.push({ name: a.name, dur: a.dur, cnt: a.cnt, mx: a.mx, z: a.z, data: null, offs: null });
+  return rig;
+}
+// descomprime uma animação (zlib, chaves de 16 bits) para floats: por nó ntr chaves (t,x,y,z) e nrot chaves (t,x,y,z,w); t em [0,1]
+async function ensureAnim(a) {
+  if (a.data) return;
+  const buf = await new Response(new Blob([bytes(a.z)]).stream().pipeThrough(new DecompressionStream('deflate'))).arrayBuffer();
+  const dv = new DataView(buf), mx = new Float32Array(bytes(a.mx).buffer);
+  let total = 0; for (const [ntr, nrot] of a.cnt) total += ntr * 4 + nrot * 5;
+  const data = new Float32Array(total), offs = []; let p = 0, o = 0;
+  const s = (i) => Math.max(-1, dv.getInt16(i, true) / 32767);
+  a.cnt.forEach(([ntr, nrot], n) => { offs.push([o, o + ntr * 4]);
+    for (let k = 0; k < ntr; k++, p += 8) { data[o++] = dv.getUint16(p, true) / 65534; for (let j = 0; j < 3; j++) data[o++] = s(p + 2 + j * 2) * mx[n*3+j]; }
+    for (let k = 0; k < nrot; k++, p += 8) { data[o++] = dv.getUint16(p, true) / 65534;
+      const x = s(p + 2), y = s(p + 4), z = s(p + 6); data[o++] = x; data[o++] = y; data[o++] = z; data[o++] = Math.sqrt(Math.max(0, 1 - x*x - y*y - z*z)); } });
+  a.data = data; a.offs = offs;
+}
+function posePose(an, t) {   // translações/quaternions locais amostrados no tempo t (s)
+  const rig = cur.rig, n = rig.n, lt = new Float32Array(rig.lt), lq = new Float32Array(rig.lq);
+  if (!an) return { lt, lq };
+  const u = (t / an.dur) % 1, d = an.data;
+  // acha o segmento [i0,i1] com t_i0 <= u < t_i1 (se u passa da ultima chave < 1, interpola de volta para a primeira)
+  const seg = (o, n, st) => { let i0 = 0; for (let k = 1; k < n; k++) if (d[o + k * st] <= u) i0 = k; else break;
+    const t0 = d[o + i0 * st]; let i1, t1;
+    if (i0 === n - 1) { if (t0 >= 0.9999) return [i0, i0, 0]; i1 = 0; t1 = 1; } else { i1 = i0 + 1; t1 = d[o + i1 * st]; }
+    return [i0, i1, t1 > t0 ? Math.min(1, Math.max(0, (u - t0) / (t1 - t0))) : 0]; };
+  for (let i = 0; i < n; i++) { const [ntr, nrot] = an.cnt[i], [ot, orr] = an.offs[i];
+    if (ntr > 1) { const [i0, i1, a] = seg(ot, ntr, 4);
+      for (let k = 0; k < 3; k++) lt[i*3+k] = d[ot+i0*4+1+k] * (1 - a) + d[ot+i1*4+1+k] * a; }
+    else if (ntr === 1) for (let k = 0; k < 3; k++) lt[i*3+k] = d[ot+1+k];
+    if (nrot > 1) { const [i0, i1, a] = seg(orr, nrot, 5); let dot = 0;
+      for (let k = 0; k < 4; k++) dot += d[orr+i0*5+1+k] * d[orr+i1*5+1+k]; const s = dot < 0 ? -1 : 1;
+      for (let k = 0; k < 4; k++) lq[i*4+k] = d[orr+i0*5+1+k] * (1 - a) + s * d[orr+i1*5+1+k] * a; }
+    else if (nrot === 1) for (let k = 0; k < 4; k++) lq[i*4+k] = d[orr+1+k]; }
+  return { lt, lq };
+}
+function applyAnim(t) {
+  const rig = cur.rig, ai = +$('anim').value;
+  if (!rig) return;
+  const an = ai >= 0 ? rig.anims[ai] : null, { lt, lq } = posePose(an, t), W = worldMats(rig.parent, lt, lq, rig.n), B = rig.bindW;
+  const S = new Float32Array(12 * rig.n);   // matriz de pele = mundo * inverso(bind)
+  for (let i = 0; i < rig.n; i++) { const o = i * 12;
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) S[o+r*3+c] = W[o+r*3]*B[o+c*3] + W[o+r*3+1]*B[o+c*3+1] + W[o+r*3+2]*B[o+c*3+2];
+    for (let r = 0; r < 3; r++) S[o+9+r] = W[o+9+r] - (S[o+r*3]*B[o+9] + S[o+r*3+1]*B[o+10] + S[o+r*3+2]*B[o+11]); }
+  const m = cur.m, bn = cur.bn, w16 = cur.w16, p0 = cur.p0, n0 = cur.n0, nv = m.nv, pos = cur.pos, nrm = cur.nrm, sk = rig.skin;
+  const ap = (s, x, y, z, out, k, w, tr) => { out[0] += w * (S[s]*x + S[s+1]*y + S[s+2]*z + (tr ? S[s+9] : 0));
+    out[1] += w * (S[s+3]*x + S[s+4]*y + S[s+5]*z + (tr ? S[s+10] : 0)); out[2] += w * (S[s+6]*x + S[s+7]*y + S[s+8]*z + (tr ? S[s+11] : 0)); };
+  const o = [0, 0, 0], q = [0, 0, 0];
+  for (let v = 0; v < nv; v++) {
+    const x = p0[v*3], y = p0[v*3+1], z = p0[v*3+2], nx = n0[v*3] / 127, ny = n0[v*3+1] / 127, nz = n0[v*3+2] / 127;
+    const w = w16[v] / 4096, b0 = sk[bn[v*2]], b1 = sk[bn[v*2+1]];
+    o[0] = o[1] = o[2] = q[0] = q[1] = q[2] = 0;
+    if (b0 >= 0 && b1 >= 0) { ap(b0*12, x, y, z, o, 0, w, true); ap(b1*12, x, y, z, o, 0, 1 - w, true);
+                              ap(b0*12, nx, ny, nz, q, 0, w, false); ap(b1*12, nx, ny, nz, q, 0, 1 - w, false); }
+    else { o[0] = x; o[1] = y; o[2] = z; q[0] = nx; q[1] = ny; q[2] = nz; }
+    pos[v*3] = -o[0]; pos[v*3+1] = o[2]; pos[v*3+2] = o[1]; nrm[v*3] = -q[0]; nrm[v*3+1] = q[2]; nrm[v*3+2] = q[1];
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, cur.bPos); gl.bufferSubData(gl.ARRAY_BUFFER, 0, pos);
+  gl.bindBuffer(gl.ARRAY_BUFFER, cur.bNrm); gl.bufferSubData(gl.ARRAY_BUFFER, 0, nrm);
+  if (cur.sk) { const lp = cur.sk.lp; let k = 0;
+    for (let i = 0; i < rig.n; i++) { const p = rig.parent[i]; if (p < 0) continue;
+      for (const j of [p, i]) { lp[k++] = -W[j*12+9]; lp[k++] = W[j*12+11]; lp[k++] = W[j*12+10]; } }
+    gl.bindBuffer(gl.ARRAY_BUFFER, cur.sk.bPos); gl.bufferSubData(gl.ARRAY_BUFFER, 0, lp); }
+}
+let animRaf = 0;
+function animLoop() { cancelAnimationFrame(animRaf); if (!cur || !cur.rig || +$('anim').value < 0) return;
+  const tick = now => { if (!cur || +$('anim').value < 0) return; applyAnim(now / 1000); draw(); animRaf = requestAnimationFrame(tick); };
+  animRaf = requestAnimationFrame(tick); }
+$('anim').addEventListener('change', async () => { cancelAnimationFrame(animRaf); const k = +$('anim').value;
+  if (k >= 0) await ensureAnim(cur.rig.anims[k]);
+  if (k < 0) applyAnim(0); draw(); animLoop(); });
+
+function applyFilter() {
+  if (!cur || !cur.img) return; gl.bindTexture(gl.TEXTURE_2D, cur.texture);
+  const nearest = $('nearest').checked;
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, nearest ? gl.NEAREST : gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, nearest ? gl.NEAREST : gl.LINEAR);
+}
+
+// ---------- câmera ----------
+let yaw = 0.3, pitch = 0.15, dist = 300, target = [0, 0, 0], radius = 100;
+function recenter() { if (!cur) return;
+  target = [0,1,2].map(k => (cur.mn[k] + cur.mx[k]) / 2);
+  radius = Math.hypot(cur.mx[0]-cur.mn[0], cur.mx[1]-cur.mn[1], cur.mx[2]-cur.mn[2]) / 2;
+  dist = radius * 2.6; yaw = 0.35; pitch = 0.12; }
+
+function resize() { const r = devicePixelRatio || 1, w = Math.round(innerWidth * r), h = Math.round(innerHeight * r);
+  if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; } }
+
+function draw() {
+  resize(); gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.clearColor(0.08, 0.09, 0.105, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  if (!cur) return;
+  gl.enable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE);
+  const V = M.view(yaw, pitch, dist, target[0], target[1], target[2]);
+  const P = M.persp(0.8, canvas.width / canvas.height, Math.max(1, radius * 0.05), radius * 40);
+  gl.uniformMatrix4fv(uMVP, false, M.mul(P, V)); gl.uniformMatrix4fv(uView, false, V);
+  gl.uniform1i(uMode, +$('mode').value);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, cur.texture); gl.uniform1i(uTex, 0);
+  const bind = (a, b, n) => { gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a, n, gl.FLOAT, false, 0, 0); };
+  bind(aPos, cur.bPos, 3); bind(aNrm, cur.bNrm, 3); bind(aUV, cur.bUV, 2); bind(aCol, cur.bCol, 3);
+  if ($('wire').checked) { gl.uniform1f(uLines, 1); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cur.bLines); gl.drawElements(gl.LINES, cur.lcount, gl.UNSIGNED_SHORT, 0); }
+  else { gl.uniform1f(uLines, 0); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, cur.bIdx); gl.drawElements(gl.TRIANGLES, cur.count, gl.UNSIGNED_SHORT, 0); }
+  if ($('skel').checked && cur.sk) {   // por cima de tudo, sem teste de profundidade
+    gl.disable(gl.DEPTH_TEST); gl.uniform1i(uMode, 2); gl.uniform1f(uLines, 1);
+    bind(aPos, cur.sk.bPos, 3); bind(aNrm, cur.sk.bNrm, 3); bind(aUV, cur.sk.bUV, 2); bind(aCol, cur.sk.bCol, 3);
+    gl.drawArrays(gl.LINES, 0, cur.sk.n);
+  }
+}
+
+// ---------- interação ----------
+let drag = null;
+canvas.addEventListener('pointerdown', e => { canvas.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, pan: e.button === 2 || e.shiftKey }; });
+canvas.addEventListener('pointerup', () => drag = null);
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+canvas.addEventListener('pointermove', e => { if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
+  if (drag.pan) { const s = dist * 0.0016, cy = Math.cos(yaw), sy = Math.sin(yaw);
+    target[0] -= (cy * dx) * s; target[2] -= (sy * dx) * s; target[1] += dy * s; }
+  else { yaw += dx * 0.008; pitch = Math.max(-1.5, Math.min(1.5, pitch + dy * 0.008)); }
+  draw(); });
+canvas.addEventListener('wheel', e => { e.preventDefault(); dist = Math.max(radius * 0.3, Math.min(radius * 12, dist * Math.exp(e.deltaY * 0.0012))); draw(); }, { passive: false });
+canvas.addEventListener('dblclick', () => { recenter(); draw(); });
+addEventListener('resize', draw);
+for (const id of ['mode', 'wire', 'skel']) $(id).addEventListener('change', draw);
+$('nearest').addEventListener('change', () => { applyFilter(); draw(); });
+
+const sel = $('model');
+MODELS.forEach((m, i) => { const o = document.createElement('option'); o.value = i; o.textContent = m.name; sel.appendChild(o); });
+sel.addEventListener('change', () => load(+sel.value));
+
+function download(name, blob) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
+const slug = () => cur.m.name.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '');
+$('png').addEventListener('click', () => { if (!cur) return; fetch('data:image/png;base64,' + cur.m.tex).then(r => r.blob()).then(b => download(slug() + '.png', b)); });
+$('obj').addEventListener('click', () => { if (!cur) return;
+  const { pos, nrm, uv, idx } = cur; const L = ['# Godzilla STE (PS2) - exportado pelo viewer', 'o ' + slug()];
+  for (let v = 0; v < pos.length / 3; v++) L.push(`v ${pos[v*3].toFixed(5)} ${pos[v*3+1].toFixed(5)} ${pos[v*3+2].toFixed(5)}`);
+  for (let v = 0; v < uv.length / 2; v++) L.push(`vt ${uv[v*2].toFixed(5)} ${(1 - uv[v*2+1]).toFixed(5)}`);
+  for (let v = 0; v < nrm.length / 3; v++) L.push(`vn ${nrm[v*3].toFixed(4)} ${nrm[v*3+1].toFixed(4)} ${nrm[v*3+2].toFixed(4)}`);
+  for (let t = 0; t < idx.length; t += 3) { const a = idx[t] + 1, b = idx[t+1] + 1, c = idx[t+2] + 1; L.push(`f ${a}/${a}/${a} ${b}/${b}/${b} ${c}/${c}/${c}`); }
+  download(slug() + '.obj', new Blob([L.join('\n')], { type: 'text/plain' })); });
+
+// #N;d=zoom;ty=altura(0..1);yaw=rad;mode=0..3  (usado para capturas automatizadas)
+const hp = {}; (location.hash || '').slice(1).split(';').forEach((s, i) => { if (i === 0) hp.n = s; else { const [k, v] = s.split('='); hp[k] = parseFloat(v); } });
+const h0 = parseInt(hp.n, 10);
+const first = (h0 >= 0 && h0 < MODELS.length) ? h0 : 0; sel.value = first;
+try { if (MODELS.length) { load(first);
+  if (hp.mode >= 0) { $('mode').value = hp.mode; }
+  if (hp.skel) $('skel').checked = true; if (hp.wire) $('wire').checked = true;
+  if (hp.anim >= 0 && cur.rig) { $('anim').value = hp.anim; ensureAnim(cur.rig.anims[hp.anim]).then(() => { applyAnim(hp.t || 0); if (hp.t === undefined) animLoop(); draw(); }); }
+  if (hp.d) dist = radius * 2.6 * hp.d; if (hp.yaw !== undefined) yaw = hp.yaw;
+  if (hp.ty !== undefined) target[1] = cur.mn[1] + (cur.mx[1] - cur.mn[1]) * hp.ty; draw(); } else $('err').textContent = 'Nenhum modelo embutido.'; } catch (e) { $('err').textContent = String(e); }
+</script>
+</body>
+</html>

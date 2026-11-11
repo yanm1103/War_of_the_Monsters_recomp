@@ -437,6 +437,13 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
 - `landOnTouch`: `true` = the jump's landing layer (animation 35) only comes in when the feet touch the ground. Without it the
   game puts it on near the ground, still in the air, held on its first frame (a pose bracing for the landing). Log:
   `[custom] cj: pouso no toque`.
+- `rootTurn`: `{"<animation id>": [degrees, ...]}`, how far the character turns during an animation of its own, one entry per frame of
+  the clip (accumulated from the first frame, positive towards +x like the game's heading). A model from another game that spins
+  its whole body in a move (Godzilla's tail spin) leaves the game turning only the pose: the clip is made without that turn
+  (`tools/ste/ste_clips.py` option `turn`, which also writes `<clips>.rootturn.json`) and the game turns the monster by this
+  curve (`Monster::update` adds to the heading the change between the clip's percent now and in the last frame), so the monster
+  ends the move turned, as in the original, and the hit locators follow the turn. A move cut short keeps what it turned until then.
+  Log: `[custom] rootTurn: monstro <addr> gira +12.0 graus`.
 - `ai`: whether a CPU can use it (default no); without it the select screen shows "PLAYERS ONLY" in the CPU's box. With `"ai": true` the CPU can
   pick it in the select screen's CUSTOM slot; the launcher only offers customs to the player. A custom with a playable base fights as a CPU
   (`WOTM_MATCH=1,moddedtogera,1`, with `"base": "togera"`: walks, attacks, breathes fire and loses the round like a Togera), and Jelly and

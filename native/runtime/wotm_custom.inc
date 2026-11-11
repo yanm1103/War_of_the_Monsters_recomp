@@ -887,9 +887,68 @@ namespace wotm_custom
         s.lastTarget = 0;
     }
 
+    // "rootTurn" (MODS.md): o giro do personagem durante uma animacao propria (a cauda do Godzilla do STE gira o corpo ate ~155 graus;
+    // o STE gira o personagem, o WotM so gira o monstro pela entrada). A animacao sai sem esse giro e aqui o heading do monstro
+    // (m_cs->rot.z, positivo para +x) soma, a cada quadro, a variacao da curva entre a porcentagem de agora e a do quadro anterior;
+    // o Monster::update de depois reconstroi a matriz (MonsterDynamics::updatePosition). O giro que sobra no fim do golpe fica no
+    // monstro (como no original: ele termina virado), e uma animacao cortada no meio deixa o que girou ate ali.
+    constexpr uint32_t kAnimRunning = wotm::fn::animationIsRunning__FG11_animHandle, kAnimPct = wotm::fn::animationGetCurrentPercent__FG11_animHandle;
+    std::map<uint32_t, std::map<int, float>> g_turnLast;   // monstro -> animacao -> porcentagem do quadro anterior (so enquanto toca)
+    float turnAt(const std::vector<float> &t, float pct)
+    {
+        const float x = std::min(1.f, std::max(0.f, pct)) * float(t.size() - 1);
+        const size_t i = std::min<size_t>(size_t(x), t.size() - 2);
+        return t[i] + (t[i + 1] - t[i]) * (x - float(i));
+    }
+    void rootTurn(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m)
+    {
+        const wotm::mods::Custom *cu = ownFilesCustom(rdram, m);
+        if (!cu || cu->rootTurn.empty())
+            return;
+        std::map<int, float> &last = g_turnLast[m];
+        float deg = 0.f;
+        for (const auto &[id, tab] : cu->rootTurn)
+        {
+            const uint32_t h = m + kAnims + uint32_t(id) * kAnimStride;
+            if (!(cRd32(rdram, h) & 0x1FFFFFFFu))   // o monstro nao tem essa animacao
+                continue;
+            uint32_t running = 0;
+            callF(rdram, ctx, runtime, kAnimRunning, {h}, 0.f, 0.f, &running);
+            if (!(running & 0xFFu))
+            {
+                last.erase(id);
+                continue;
+            }
+            const float pct = callF(rdram, ctx, runtime, kAnimPct, {h});
+            if (!std::isfinite(pct))
+                continue;
+            const auto it = last.find(id);
+            const float prev = it == last.end() || pct < it->second ? 0.f : it->second;   // recomecou: de novo do primeiro quadro
+            deg += turnAt(tab, pct) - turnAt(tab, prev);
+            last[id] = pct;
+        }
+        if (deg == 0.f)
+            return;
+        const uint32_t cs = cRd32(rdram, m + kCs) & 0x1FFFFFFFu;
+        if (!cs)
+            return;
+        float z = rdF(rdram, cs + kHeading) + deg * 0.017453292f;
+        std::memcpy(mem(rdram, cs + kHeading), &z, 4);
+        static uint32_t logged = 0;
+        if (logged < 12)   // as primeiras vezes: confirma o sentido (o heading e atan2(x, y) da frente, mat[1])
+        {
+            ++logged;
+            const float fx = rdF(rdram, cs + 0x30), fy = rdF(rdram, cs + 0x34);
+            std::fprintf(stderr, "[custom] rootTurn: monstro %08X gira %+.1f graus (heading %.1f; frente da matriz %.1f)\n", m, deg,
+                         z * 57.29578f, std::atan2(fx, fy) * 57.29578f);
+        }
+    }
+
     void monsterUpdate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t m = ctx->pc == kMonsterUpdate ? GPR_U32(ctx, 4) : 0;
+        if (m)
+            rootTurn(rdram, ctx, runtime, m);
         g_origMonsterUpdate(rdram, ctx, runtime);
         const int slot = m ? mechaSlot(rdram, ctx, runtime, m) : -1;
         if (slot < 0)

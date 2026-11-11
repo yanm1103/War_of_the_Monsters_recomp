@@ -11,6 +11,7 @@
 #include <atomic>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -169,7 +170,11 @@ struct Custom {
     int fallBlend = -1;
     // "landOnTouch": a camada do pouso do pulo (animacao 35) so entra no toque no chao, sem pose de preparo no ar (wotm_custom.inc)
     bool landOnTouch = false;
-    std::string cameraFrom;    // MonsterLongNames do .CHR da camera ("lizard"); vazio = a do proprio tipo
+    // "rootTurn": {"<animacao>": [graus...]}: quanto o personagem gira durante a animacao, acumulado e relativo ao primeiro quadro, uma
+    // entrada por quadro (positivo para +x, como o heading do jogo). O STE gira o personagem inteiro num golpe de cauda; o jogo so
+    // gira o monstro pela entrada, entao a animacao propria sai sem esse giro e o jogo gira o monstro por esta curva (wotm_custom.inc)
+    std::map<int, std::vector<float>> rootTurn;
+    std::string cameraFrom;   // MonsterLongNames do .CHR da camera ("lizard"); vazio = a do proprio tipo
     float cameraScale = 1.f;    // distancias da camera emprestada
     std::string narrator;       // narrator/<nome>.mp3 (vazio = o do tipo)
     std::string costumeName;    // nome do traje proprio na selecao (vazio = "FROM MOD <mod>")
@@ -904,6 +909,16 @@ private:
                 if (const json::Value *fb = v.get("fallBlend"); fb && fb->type == json::Value::Int && fb->i >= 0 && fb->i <= 120)
                     c.fallBlend = int(fb->i);
                 if (const json::Value *lt = v.get("landOnTouch")) c.landOnTouch = lt->asBool(false);
+                if (const json::Value *rt = v.get("rootTurn"); rt && rt->type == json::Value::Obj)
+                    for (const auto &kv : rt->obj) {
+                        const int id = std::atoi(kv.first.c_str());
+                        if (id <= 0 || id >= 300 || kv.second.type != json::Value::Arr || kv.second.arr.size() < 2) {
+                            std::fprintf(stderr, "[mods] monstro %s: \"rootTurn\" %s ignorado (animacao 1..299 e ao menos 2 quadros)\n", where.c_str(), kv.first.c_str());
+                            continue;
+                        }
+                        std::vector<float> &t = c.rootTurn[id];
+                        for (const json::Value &x : kv.second.arr) t.push_back(float(x.asNum(0.0)));
+                    }
                 if (const json::Value *sp = v.get("special"); sp && sp->type == json::Value::Str) {
                     const MonsterInfo *b = customBase(lower(sp->s));
                     const std::vector<uint32_t> parts = b ? specialParts(b->type) : std::vector<uint32_t>{};
