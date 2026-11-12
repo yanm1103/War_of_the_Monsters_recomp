@@ -383,6 +383,10 @@ bool wake(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, const Unit &u,
     }
     else
         call(rdram, ctx, runtime, fn::hierSetCsDrawMe__FP3_csUc, {cs, 1u});
+    // O grab poe o HierSwitch do modelo no filho 2 (segurado) e so o drop o volta a 0; um veiculo arremessado ou morto na mao vai
+    // direto para a regenList e o regen nao mexe no switch. A colisao (hdTraverse) so desce pelo filho ativo: sem isso o reciclado
+    // ficava imune a tiro, arremesso e pisao, mas ainda dava para agarrar (o getClosestPickup so usa a grade).
+    call(rdram, ctx, runtime, fn::setVisualState__6Pickupi, {p, 0u});
     wrF(rdram, p + kPkHealth, rdF(rdram, p + kPkMaxHealth));
     wr32(rdram, p + kPkRegenTimer, 0x7FFFFFFFu);
     wr8(rdram, cs + kCsTestCollision, 1u);
