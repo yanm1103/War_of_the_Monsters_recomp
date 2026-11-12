@@ -80,12 +80,13 @@ de fase e do monstro custom (mesmo pipeline, outro roteiro).
 - Kit: o diálogo New skin abre em 0,0 (mover com `winpos.py "New skin" 972 545 617 350`); a caixa "CPUs may pick this skin" vem
   desmarcada (o roteiro manda marcar).
 
-## Achados para o dono (fora do vídeo)
+## Achados (fora do vídeo)
 
 - **Check mods** do kit acusa erro em mod que funciona (falso positivo); o vídeo não usa o botão.
 - O diálogo **New skin** abre no canto 0,0 da tela, não centrado no kit.
 - **CPUs may pick this skin** vem desmarcada por padrão.
-- O brilho verde da barriga do Preytor vem das cores de vértice do modelo: a skin não o troca (a cena 12 explica).
+- O brilho verde perto do Preytor no começo da luta em Baytown é o pickup de vida, que nasce no lugar do jogador 1 (não é do
+  modelo; a narração não fala dele).
 
 ## Estado
 
@@ -93,6 +94,6 @@ de fase e do monstro custom (mesmo pipeline, outro roteiro).
 - [x] Pasta limpa com o v0.2.2; texturas azuis.
 - [x] Takes do kit, do Explorer e do jogo.
 - [x] `%LOCALAPPDATA%\WotM` do dono devolvido.
-- [ ] Roteiro aprovado pelo dono (`tools/tutorial/skin/script.json`, 1955 caracteres, ~144 s estimados).
+- [x] Roteiro aprovado pelo dono (`tools/tutorial/skin/script.json`, 1802 caracteres, ~133 s estimados).
 - [ ] Áudio cena por cena (MCP do ElevenLabs), só depois da aprovação.
 - [ ] Montagem (ffmpeg NVENC, cada cena com a duração da fala) e `.srt`.

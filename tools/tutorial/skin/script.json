@@ -29,7 +29,7 @@
     },
     {
       "id": "05_new_skin",
-      "narration": "Next, click New skin. Pick the monster, Preytor. Base costume zero, the classic green one. Name it Blue Preytor, and check 'CPUs may pick this skin' if you want to fight against it too. OK!",
+      "narration": "Next, click New skin. Pick the monster, Preytor. Base costume zero. Name it Blue Preytor, and check 'CPUs may pick this skin' if you want to fight against it too. OK!",
       "visual": "New skin... dialog: Monster = Preytor, Base costume 0, Name = BLUE PREYTOR, the CPUs box, OK.",
       "take": "kit_05_new_skin"
     },
@@ -71,13 +71,13 @@
     },
     {
       "id": "12_orbit",
-      "narration": "Look at that! Blue armor, and a blue portrait on the health bar too. The glowing belly stays green, because that color comes from the model itself, not from the texture.",
+      "narration": "Look at that! Blue armor, and a blue portrait on the health bar too.",
       "visual": "Fight camera orbiting a full turn around Preytor, then a close look at the health bar portrait.",
       "take": "game_orbit_2"
     },
     {
       "id": "13_outro",
-      "narration": "Want to share your skin? Just zip the blue preytor folder inside mods. Your friends drop it into their own mods folder, and that's it. Thanks for watching, and see you in the next one!",
+      "narration": "Want to share your skin? Just zip the blue preytor folder inside mods. Your friends drop it into their own mods folder, and that's it. Thanks for watching!",
       "visual": "Explorer: mods > blue_preytor folder highlighted; back to the orbit shot to close.",
       "take": "explorer_outro"
     }
