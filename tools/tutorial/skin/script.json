@@ -1,0 +1,85 @@
+{
+  "title": "How to make a skin for War of the Monsters Recompiled",
+  "voice": "Anime announcer",
+  "language": "en",
+  "scenes": [
+    {
+      "id": "01_intro",
+      "narration": "Hello everyone! Today I'm gonna show you how to make your very own skin for War of the Monsters Recompiled. We're taking Preytor, and turning his green armor... blue! Let's get into it.",
+      "visual": "Teaser: Blue Preytor in Baytown, fight camera orbiting him slowly. Hard cut to the release folder at the end of the line.",
+      "take": "game_orbit_1"
+    },
+    {
+      "id": "02_setup",
+      "narration": "First, download the latest release and unzip it anywhere you like. You'll also need your own copy of the game, a US disc image. Open wotm.exe once and point it to your ISO. That's all the setup.",
+      "visual": "Explorer on the release folder: wotm.exe, WotM_ModKit.exe and the mods folder get highlighted by the cursor.",
+      "take": "explorer_setup"
+    },
+    {
+      "id": "03_kit",
+      "narration": "Now open the Mod Kit, WotM underscore ModKit. It finds your disc on its own.",
+      "visual": "Double-click WotM_ModKit.exe; the kit opens (cropped to the kit window from here on).",
+      "take": "explorer_setup"
+    },
+    {
+      "id": "04_new_mod",
+      "narration": "Every skin lives inside a mod. Click New mod, give it a name, I'll call mine blue preytor, and hit OK.",
+      "visual": "New mod... > type blue_preytor > OK. The Mod list now shows blue_preytor.",
+      "take": "kit_04_new_mod"
+    },
+    {
+      "id": "05_new_skin",
+      "narration": "Next, click New skin. Pick the monster, Preytor. Base costume zero, the classic green one. Name it Blue Preytor, and check 'CPUs may pick this skin' if you want to fight against it too. OK!",
+      "visual": "New skin... dialog: Monster = Preytor, Base costume 0, Name = BLUE PREYTOR, the CPUs box, OK.",
+      "take": "kit_05_new_skin"
+    },
+    {
+      "id": "06_textures",
+      "narration": "The kit pulls every texture of that costume straight from the disc, as plain PNG files. Click one to preview it. This big one is the body. This little one is the glow. And this one is the portrait on the health bar.",
+      "visual": "The skin group opens; click t0008 (body), t0006 (glow) and rtx_t0009 (portrait), the preview follows.",
+      "take": "kit_06_textures"
+    },
+    {
+      "id": "07_edit",
+      "narration": "I'm gonna edit these textures in Photocraft and show you the end result. Any image editor works. Just keep the same file name and the same proportions, and save it as a PNG. Pro tip: double-click a texture and it opens in the editor you picked under Editors.",
+      "visual": "Cursor over Editors... then a cut (the blue PNGs are copied in off camera).",
+      "take": "kit_07_edit"
+    },
+    {
+      "id": "08_result",
+      "narration": "And here they are! Hit Refresh, and the kit marks them as edited.",
+      "visual": "Refresh; the three files show 'edited'; click t0008 to show the blue body in the preview.",
+      "take": "kit_08_result"
+    },
+    {
+      "id": "09_build",
+      "narration": "Now click Build mod. Done! Your mod is ready, right there in the mods folder.",
+      "visual": "Build mod; the log ends without errors.",
+      "take": "kit_09_build"
+    },
+    {
+      "id": "10_select",
+      "narration": "Time to see it in action! Open the game, go to single player, free for all. Pick Preytor, and press down to scroll through the costumes... There it is. Blue Preytor!",
+      "visual": "Game: title > single player > free-for-all > 0 CPUs > Preytor > down twice to BLUE PREYTOR (3/3).",
+      "take": "game_menu"
+    },
+    {
+      "id": "11_stage",
+      "narration": "I'm taking him to Baytown, with zero CPUs, so we can get a good look at him.",
+      "visual": "Ready > stage select to Baytown > the stage loads.",
+      "take": "game_menu"
+    },
+    {
+      "id": "12_orbit",
+      "narration": "Look at that! Blue armor, and a blue portrait on the health bar too. The glowing belly stays green, because that color comes from the model itself, not from the texture.",
+      "visual": "Fight camera orbiting a full turn around Preytor, then a close look at the health bar portrait.",
+      "take": "game_orbit_2"
+    },
+    {
+      "id": "13_outro",
+      "narration": "Want to share your skin? Just zip the blue preytor folder inside mods. Your friends drop it into their own mods folder, and that's it. Thanks for watching, and see you in the next one!",
+      "visual": "Explorer: mods > blue_preytor folder highlighted; back to the orbit shot to close.",
+      "take": "explorer_outro"
+    }
+  ]
+}
