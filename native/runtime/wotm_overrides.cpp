@@ -2062,7 +2062,8 @@ namespace
         std::fprintf(stderr, "[lockon] jogador %d: alvo a %s (0x%x)\n", slot + 1, dir < 0 ? "esquerda" : "direita", best);
     }
 
-    void lockCameraStick(uint8_t *rdram, uint32_t owner, uint8_t *b);
+    bool lockCameraStick(uint8_t *rdram, uint32_t owner, uint8_t *b);
+    constexpr uint32_t kPadAnalog = 0x14u;   // GamePad: 1 = a direcao veio do analogico (o loadPadInputs so liga sem o direcional)
 
     void interpretInputsLockToggle(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
@@ -2099,6 +2100,7 @@ namespace
         }
         uint8_t *b = rdram + gp, saved[0x10];
         std::memcpy(saved, b, sizeof saved);
+        const uint32_t savedAnalog = FAST_READ32(gp + kPadAnalog);
         t->lockHeld = saved[kPadR1] != 0;
         b[kPadL1] = saved[kPadL2];                // andar de lado: L2 e R2
         b[kPadR1] = saved[kPadR2];
@@ -2118,8 +2120,12 @@ namespace
         }
         if (t->on)
         {
-            if (!t->screenRel)
-                lockCameraStick(rdram, t->owner, b);
+            // Direcional reescrito em valores parciais: o jogo o trataria como toque novo. Com o GamePad +0x14 = 0 (direcional), o
+            // updateActions0 e o dashDoubleTap aceitam qualquer valor acima de 0 como direcao, e o "toque novo" e o contador de
+            // quadros acima de 0x80 (PadFlags +0x166C etc.) ainda no limiar; um eixo girado abaixo de 0x81 nunca conta, e todo tiro
+            // (byte 9) com o boneco andando virava o golpe direcional. Marcado como analogico, valem os limiares do analogico (0xE1).
+            if (!t->screenRel && lockCameraStick(rdram, t->owner, b))
+                FAST_WRITE32(gp + kPadAnalog, 1u);
             // travado, o jogo anda de lado pela esquerda/direita (PadEntry +0x16/+0x18 -> +0x1A/+0x1C) e ignora os bytes 0/3
             if (saved[kPadL2])
                 b[kPadLeft] = 0xFF;
@@ -2131,6 +2137,7 @@ namespace
         if (ctx->pc == ra)   // fatia de tempo acabou no meio: o resto ainda le os bytes trocados (o loadPadInputs refaz todos)
         {
             std::memcpy(b, saved, sizeof saved);
+            FAST_WRITE32(gp + kPadAnalog, savedAnalog);
             orbit::inputLeave(rdram, orbitSlot);
         }
     }
@@ -2143,15 +2150,15 @@ namespace
     // de lado). Para o analogico (e o direcional) valer em relacao a camera, como solto: a direcao que ele aponta na tela vira um vetor
     // no chao pelos eixos da camera e e reescrita nos bytes cima/baixo/esquerda/direita do GamePad no referencial do monstro (frente =
     // para o alvo; direita com o mesmo sentido da direita da camera em relacao a frente dela). O tamanho se mantem.
-    void lockCameraStick(uint8_t *rdram, uint32_t owner, uint8_t *b)
+    bool lockCameraStick(uint8_t *rdram, uint32_t owner, uint8_t *b)
     {
         const float sx = (float(b[kPadRight]) - float(b[kPadLeft])) / 255.f, sy = (float(b[kPadUp]) - float(b[kPadDown])) / 255.f;
         if (std::fabs(sx) < 0.01f && std::fabs(sy) < 0.01f)
-            return;
+            return false;
         const uint32_t target = FAST_READ32(owner + kMonsterPinTarget);
         float me[3], tp[3], cr[2], cf[2];
         if (!target || !targetPos(rdram, owner, me) || !targetPos(rdram, target, tp) || !lockCameraAxes(rdram, owner, cr, cf))
-            return;
+            return false;
         auto norm = [](float v[2]) {
             const float l = std::sqrt(v[0] * v[0] + v[1] * v[1]);
             if (l < 1e-4f) return false;
@@ -2161,7 +2168,7 @@ namespace
         };
         float mf[2] = {tp[0] - me[0], tp[1] - me[1]};
         if (!norm(cr) || !norm(cf) || !norm(mf))
-            return;
+            return false;
         // perp(v) = (v.y, -v.x); a direita da camera e +perp(frente) ou -perp(frente) conforme o sentido do mundo
         const float hand = cr[0] * cf[1] - cr[1] * cf[0] >= 0.f ? 1.f : -1.f;
         const float mr[2] = {hand * mf[1], -hand * mf[0]};
@@ -2171,6 +2178,7 @@ namespace
         b[kPadLeft] = static_cast<uint8_t>(std::lround(std::max(-lx, 0.f) * 255.f));
         b[kPadUp] = static_cast<uint8_t>(std::lround(std::max(ly, 0.f) * 255.f));
         b[kPadDown] = static_cast<uint8_t>(std::lround(std::max(-ly, 0.f) * 255.f));
+        return true;
     }
 
     void padReadLockToggle(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
