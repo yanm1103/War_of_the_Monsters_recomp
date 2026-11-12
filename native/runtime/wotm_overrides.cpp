@@ -1143,6 +1143,10 @@ namespace
                 return;
 #endif
             }
+            // cada volta do laco do dialogo (nao so a pausa, cujo overlay ja renova): o fim de luta (REMATCH/QUIT) segue com o texto
+            // sob o HIDE HUD e sem as janelas do treino, e nao so nos 200 ms depois da entrada do displayDialog
+            if (ra == kDialogLoopSyncVRa)
+                wotm_training::g_dialogMs = wotm_training::nowMs();
             if (ra == kDialogLoopSyncVRa && GPR_U32(ctx, 17) == 0u)
                 wotmCaptureFrame(rdram);
             else if (ra == kFadeStepSyncVRa[0] || ra == kFadeStepSyncVRa[1])
