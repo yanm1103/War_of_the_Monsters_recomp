@@ -88,12 +88,40 @@ de fase e do monstro custom (mesmo pipeline, outro roteiro).
 - O brilho verde perto do Preytor no começo da luta em Baytown é o pickup de vida, que nasce no lugar do jogador 1 (não é do
   modelo; a narração não fala dele).
 
+## Montagem (`tools/tutorial/montage.py` + `tools/tutorial/skin/edit.json`)
+
+- `edit.json`: recortes nomeados (`kit` com mosaico nos dois caminhos e no log; `explorer`; `hud` no retrato da barra) e, por
+  cena, os pedaços de take (`from`/`to`, `speed`, `squeeze` corta as esperas paradas de take de UI mantendo 0,35 s de cada lado,
+  `audio` traz o som do jogo a 35%). `fit` acelera a cena até esse fator para terminar junto com a fala.
+- A cena dura o maior entre os pedaços e `lead + fala + 0,6 s`; pedaço curto segura o último quadro. Cena 05 pula 2,9..4,0 s do
+  take (diálogo New skin ainda em 0,0).
+- `.srt` sai junto do mp4: frases (quebradas em vírgula acima de 84 caracteres) com o tempo proporcional aos caracteres dentro da
+  fala de cada cena. Bom o bastante para legenda soft; se ficar fora, alinhar à mão no editor do YouTube.
+- Saída com loudnorm em -16 LUFS. Rascunho com a voz do Windows (`--placeholder`): 162,9 s, 44 legendas,
+  `Desktop\WotM_tutorial\out\skin_placeholder.mp4`. Os quadros conferidos: mosaico cobre o usuário, recortes certos.
+
+Comando final, depois dos áudios:
+
+    python tools/tutorial/montage.py tools/tutorial/skin --takes %USERPROFILE%\Desktop\WotM_tutorial\takes
+        --audio %USERPROFILE%\Desktop\WotM_tutorial\audio --out %USERPROFILE%\Desktop\WotM_tutorial\out\skin.mp4
+
+(`--work` padrão é `out\skin_work`; o cache do freezedetect fica lá.)
+
+## Próximo passo: o áudio
+
+O MCP do ElevenLabs não carregou na sessão da gravação (nenhuma ferramenta, sem chave no ambiente). Numa sessão nova com o MCP
+ativo (`/mcp` para conferir/autenticar):
+1. Achar a voz "Anime announcer" da conta do dono.
+2. Gerar as 13 falas de `script.json`, uma por cena, exatamente o texto de `narration`, e salvar como
+   `Desktop\WotM_tutorial\audio\<id>.mp3` (ex.: `01_intro.mp3`). 1802 caracteres no total; não gerar duas vezes.
+3. Rodar o comando final acima e conferir; ajustar `edit.json` se alguma cena ficar com fala sobrando ou imagem parada demais.
+
 ## Estado
 
 - [x] Levantamento e decisões.
 - [x] Pasta limpa com o v0.2.2; texturas azuis.
 - [x] Takes do kit, do Explorer e do jogo.
 - [x] `%LOCALAPPDATA%\WotM` do dono devolvido.
-- [x] Roteiro aprovado pelo dono (`tools/tutorial/skin/script.json`, 1802 caracteres, ~133 s estimados).
-- [ ] Áudio cena por cena (MCP do ElevenLabs), só depois da aprovação.
-- [ ] Montagem (ffmpeg NVENC, cada cena com a duração da fala) e `.srt`.
+- [x] Roteiro aprovado pelo dono (`tools/tutorial/skin/script.json`, 1802 caracteres).
+- [x] Montagem e `.srt` prontos e validados com a voz provisória.
+- [ ] Áudio cena por cena (MCP do ElevenLabs) e montagem final.
