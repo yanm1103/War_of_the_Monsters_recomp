@@ -30,7 +30,7 @@ enum Key
     Display,      // 0 janela, 1 tela cheia sem borda, 2 tela cheia exclusiva
     Rate,         // Hz da apresentacao; 0 = a do monitor
     Vsync,        // 0/1
-    LockToggle,   // QoL: lock-on alternado no R1
+    LockToggle,   // QoL: lock-on no R1 com os botoes do mod: 0 desligado (os do jogo), 1 TAP (um toque trava, outro solta), 2 HOLD (segurar)
     EnemyBars,    // QoL: barras de vida e energia sobre os inimigos
     DamagePop,    // QoL: numeros de dano
     KbSeparate,   // teclado e um jogador a parte
@@ -58,6 +58,7 @@ enum Key
     ArmyEndur,
     ArmyTrain,
     HideHud,      // esconde o HUD e o texto do jogo durante a luta (como o HIDE HUD do modo foto); na pausa e nos menus continuam
+    DpadTarget,   // com o lock-on alternado travado, esquerda/direita do direcional trocam o alvo (1); 0 = o direcional continua andando
     kKeys
 };
 
@@ -68,9 +69,9 @@ inline constexpr const char *kEnv[kKeys] = {"WOTM_RES",        "WOTM_ASPECT",   
                                             "WOTM_ANNOUNCER",  "WOTM_SKIPINTRO",   "WOTM_VIBRATION",   "WOTM_INTERP",
                                             "WOTM_ARMY",       "WOTM_ARMY_TRIGGER", "WOTM_ARMY_EVERY", "WOTM_ARMY_CHAOS", "WOTM_ARMY_WAVE",
                                             "WOTM_ARMY_FFA",   "WOTM_ARMY_ELIM",   "WOTM_ARMY_ENDURANCE", "WOTM_ARMY_TRAINING",
-                                            "WOTM_HIDEHUD"};
+                                            "WOTM_HIDEHUD",    "WOTM_DPADTARGET"};
 inline constexpr int kDefault[kKeys] = {720, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 5, 0, 100, 0, 0, 1, 0, 1, 1,
-                                        0, 2, 60, 50, 3, 1, 1, 1, 0, 0};
+                                        0, 2, 60, 50, 3, 1, 1, 1, 0, 0, 1};
 inline constexpr const char *kPromptNames[] = {"auto", "original", "keyboard", "xbox", "playstation", "nintendo"};
 inline constexpr int kPromptStyles = 6;
 enum PromptStyle { PromptAuto, PromptOriginal, PromptKeyboard, PromptXbox, PromptPs, PromptNintendo };
@@ -90,7 +91,7 @@ inline constexpr float kAspectRatio[] = {0.f, 4.f / 3.f, 16.f / 9.f, 16.f / 10.f
 inline constexpr int kAspects = 6;
 
 inline std::atomic<int> g_val[kKeys] = {720, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 5, 0, 100, 0, 0, 1, 0, 1, 1,
-                                        0, 2, 60, 50, 3, 1, 1, 1, 0, 0};
+                                        0, 2, 60, 50, 3, 1, 1, 1, 0, 0, 1};
 // Primeira execucao de um jogador (sem settings.ini, com o arquivo ligado): por cima do kDefault, que segue valendo para os testes
 // (lote e corpus rodam com WOTM_SETTINGS=0), tela cheia sem borda, lock-on alternado, barras dos inimigos, narrador com o grito do
 // monstro e a resolucao do monitor (Res fica pendente ate a janela existir: resolveFirstRunRes, wotm_live.inc). Decisao do dono.
@@ -177,6 +178,11 @@ inline bool parse(Key k, const char *s, int &out)
     case ArmyChaos: { const int v = std::atoi(s); if (v <= 0) return false; out = std::clamp(v, 1, 1000); return true; }
     case ArmyWave: { const int v = std::atoi(s); if (v <= 0) return false; out = std::clamp(v, 1, 16); return true; }
     case Announcer: out = std::clamp(std::atoi(s), 0, 2); return true;
+    case LockToggle:
+        if (!std::strcmp(s, "tap") || !std::strcmp(s, "on")) { out = 1; return true; }
+        if (!std::strcmp(s, "hold")) { out = 2; return true; }
+        out = std::clamp(std::atoi(s), 0, 2);
+        return true;
     case Interp: out = std::atoi(s) > 0 || !std::strcmp(s, "on") ? 1 : 0; return true;   // "redraw" (diagnostico da etapa 0) nao liga
     case KbSeparate: out = *s == '1' ? 1 : 0; return true;
     case Prompts:

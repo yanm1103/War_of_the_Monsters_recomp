@@ -140,8 +140,9 @@ constexpr TabDef kTabDefs[kTabs] = {
       {st::Interp, "INTERPOLATE FRAMES", "SMOOTHER MOTION ABOVE 60 HZ OR WHEN THE GAME DROPS TO 30. MAY ADD DELAY"},
       {st::Msaa, "ANTI-ALIASING", "MSAA SMOOTHS THE JAGGED EDGES OF THE 3D MODELS"},
       {st::TexFilter, "TEXTURE FILTER", "KEEPS TEXTURES SHARP FAR AWAY AND AT STEEP ANGLES"}}},
-    {6,
-     {{st::LockToggle, "LOCK-ON TOGGLE", "TAP R1 TO LOCK ON AND AGAIN TO LET GO. THE D-PAD PICKS ANOTHER TARGET"},
+    {7,
+     {{st::LockToggle, "LOCK-ON", "LOCKS ON WITH R1 ALONE. OFF KEEPS THE GAME'S L1 + R1"},
+      {st::DpadTarget, "D-PAD TARGET SWITCH", "LEFT AND RIGHT ON THE D-PAD PICK ANOTHER TARGET WHILE LOCKED ON"},
       {st::EnemyBars, "ENEMY BARS", "SHOWS THE HEALTH AND ENERGY OF EACH ENEMY ABOVE THEIR HEAD"},
       {st::DamagePop, "DAMAGE NUMBERS", "SHOWS HOW MUCH DAMAGE EACH HIT DOES"},
       {st::HideHud, "HIDE HUD", "HIDES THE BARS, ICONS AND TEXT DURING THE FIGHT. THE PAUSE MENU STILL SHOWS"},
@@ -479,6 +480,7 @@ static int choices(st::Key k, int out[16])
     case st::Display: for (int i = 0; i < 3; ++i) out[i] = i; return 3;
     case st::CamSens: for (int i = 0; i < 10; ++i) out[i] = i + 1; return 10;
     case st::Announcer: for (int i = 0; i < 3; ++i) out[i] = i; return 3;
+    case st::LockToggle: for (int i = 0; i < 3; ++i) out[i] = i; return 3;
     case st::ArmyTrigger: for (int i = 0; i < 3; ++i) out[i] = i; return 3;
     case st::ArmyEvery: std::copy(std::begin(st::kArmyEvery), std::end(st::kArmyEvery), out); return int(std::size(st::kArmyEvery));
     case st::ArmyChaos: std::copy(std::begin(st::kArmyChaos), std::end(st::kArmyChaos), out); return int(std::size(st::kArmyChaos));
@@ -552,6 +554,7 @@ static void valueText(st::Key k, int v, char *buf, size_t sz)
     case st::ArmyEvery: std::snprintf(buf, sz, "%d SECONDS", v); break;
     case st::ArmyChaos: std::snprintf(buf, sz, "%s", v <= 25 ? "LITTLE" : v <= 50 ? "SOME" : v <= 100 ? "A LOT" : "HUGE"); break;
     case st::ArmyWave: std::snprintf(buf, sz, "%d", v); break;
+    case st::LockToggle: std::snprintf(buf, sz, "%s", v == 2 ? "HOLD" : v ? "TAP" : "OFF"); break;
     case st::Announcer:   // a voz do narrador (narrator/) ou o grito do monstro escolhido
         std::snprintf(buf, sz, "%s", v == 2 ? "MONSTER CRY" : v ? "GODZILLA SAVE THE EARTH" : "OFF");
         break;

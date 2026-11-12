@@ -1871,7 +1871,8 @@ namespace
     // (andar de lado), L1 -> byte 4 (defesa), L2 do jogo fica solto; o R1 fisico so alterna o lock-on (lido aqui, nao pelo jogo).
     // Com o lock-on ligado, esquerda/direita do direcional (lidas cruas no scePadRead, porta = jogador) trocam o alvo
     // (m_pinTarget: o updateLock mantem o alvo enquanto ele continua alvejavel) para o proximo monstro vivo a esquerda ou a
-    // direita na tela, e nao movem o boneco; o L2/R2 entra como esquerda/direita, que travado o jogo ja transforma em andar de
+    // direita na tela, e nao movem o boneco (so com a opcao DpadTarget, WOTM_DPADTARGET, ligada; desligada o direcional anda como no
+    // jogo e a troca fica so no teclado); o L2/R2 entra como esquerda/direita, que travado o jogo ja transforma em andar de
     // lado (PadEntry +0x16/+0x18 -> +0x1A/+0x1C, so sem L2/R2 do jogo, o byte 4 = defesa). Os bytes originais voltam na saida. As configuracoes 1 e 2 ficam com os botoes do jogo.
     constexpr uint32_t kUpdateHistory[3] = {wotm::fn::updateHistory0__8PadFlagsR7GamePad, wotm::fn::updateHistory1__8PadFlagsR7GamePad,
                                             wotm::fn::updateHistory2__8PadFlagsR7GamePad};
@@ -2107,10 +2108,11 @@ namespace
         b[kPadR2] = saved[kPadL1] ? 0xFF : 0;     // defesa: L1
         b[kPadL2] = 0;
         const uint8_t dirs = slot < 4 ? g_padDir[slot] : 0;
+        const bool dpadTarget = wotm::settings::on(wotm::settings::DpadTarget);   // desligado: o direcional anda como no jogo
         for (int i = 0; i < 2; ++i)
         {
             const bool held = (dirs >> i) & 1u;
-            if (t->on && held)
+            if (t->on && held && dpadTarget)
             {
                 b[kPadLeft] = b[kPadRight] = 0;   // travado, as setas trocam o alvo e nao movem
                 if (!t->dirHeld[i])
@@ -2210,9 +2212,12 @@ namespace
             t->on = false;   // segurando, o updateLock passaria para o mais proximo; alternado, solta
             std::fprintf(stderr, "[lockon] jogador %d: solto (alvo morreu)\n", slot + 1);
         }
-        if (held && !t->held)
+        // LockToggle 2 (HOLD): segura o botao para travar e solta para soltar (os botoes do mod, sem a alternancia); 1 (TAP): um toque
+        // trava, outro solta. Em HOLD o alvo que morreu solta o estado acima e, com o botao ainda segurado, trava de novo no mais proximo.
+        const bool hold = wotm::settings::get(wotm::settings::LockToggle) == 2;
+        if (hold ? held != t->on : held && !t->held)
         {
-            t->on = !t->on;
+            t->on = hold ? held : !t->on;
             if (t->on)
                 lockNearestTarget(rdram, owner);
             std::fprintf(stderr, "[lockon] jogador %d: %s (alvo 0x%x)\n", slot + 1, t->on ? "travado" : "solto", FAST_READ32(owner + kMonsterPinTarget));
