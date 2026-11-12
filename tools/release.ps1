@@ -96,8 +96,9 @@ Copy-Item (Join-Path $editorDist 'WotM_LevelEditor.exe') $stage
 # mods: os arquivos que o git rastreia em mods\ e os quatro do Mecha gerados do disco (tools/mechamon.py; no .gitignore)
 $mecha = 'mods/Mecha/monsters/mecha/files'
 $mechaFiles = 'MECHA.NGP', 'MECHA.PTR', 'MECHA.TEX', 'MECHA.RTX' | ForEach-Object { "$mecha/$_" }
-# fora do zip: as pastas mods/_<nome>_src (rigs, scripts de conversao, WAVs de origem): so o repo precisa delas
-$modFiles = @(& $git -C $repo ls-files mods | Where-Object { $_ -notlike 'mods/_*' }) + $mechaFiles
+# fora do zip: as pastas mods/_<nome>_src (rigs, scripts de conversao, WAVs de origem): so o repo precisa delas; e o mod de teste
+# ste_teste (viewer do Godzilla STE), que monta arquivos do disco e nao e para o jogador
+$modFiles = @(& $git -C $repo ls-files mods | Where-Object { $_ -notlike 'mods/_*' -and $_ -notlike 'mods/ste_teste/*' }) + $mechaFiles
 foreach ($m in $modFiles) {
     $src = Join-Path $repo $m
     if (-not (Test-Path $src)) { Fail "falta $m (o Mecha: python tools/mechamon.py mods/Mecha/monsters/mecha/files)" }

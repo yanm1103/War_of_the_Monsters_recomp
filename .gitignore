@@ -25,6 +25,7 @@ undefined_syms_auto.txt
 __pycache__/
 *.pyc
 .vscode/
+.angularjs-lsp/
 build.ninja
 .ninja_*
 /tools/cc
