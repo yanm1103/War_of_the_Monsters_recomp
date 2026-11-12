@@ -122,7 +122,8 @@ class Model:
     posicao)] percorridas como raizes, main = a instancia de personagem que a animacao escolhida move. switch_on: SWITCHes
     forcados no filho 1 (o que o jogo liga na luta, ex. hierSetSwitch das cabecas da planta)."""
 
-    def __init__(self, ngp_path, parts=None, main=None, switch_on=()):
+    def __init__(self, ngp_path, parts=None, main=None, switch_on=(), lod=None):
+        self.lod = lod   # None: o mais detalhado de cada LOD; n: o nivel n (0 = o mais grosso; limitado ao ultimo de cada LOD)
         self.img = ngp.Image.load(ngp_path)
         self.parts = parts or [(self.img.roots()[0], np.eye(4))]
         self.root = self.parts[0][0]
@@ -145,6 +146,32 @@ class Model:
         for arr, cnt in self._kids(n, op):
             for k in range(min(cnt, 4096)):
                 self._find(img.u32(arr + 4 * k), depth + 1)
+
+    def lod_top(self, n):
+        """Indice do nivel mais detalhado que o LOD `n` desenha (o ultimo com switchOutDis > 0)."""
+        img = self.img
+        nl = min(img.u32(n + 4), 16)
+        return max((i for i in range(nl) if img.f32(n + 0x24 + 16 * i) > 0.0), default=nl - 1)
+
+    def lod_levels(self):
+        """Quantos niveis de detalhe o modelo tem: o maior (lod_top + 1) entre os LODs alcancaveis da raiz (0 = sem LOD)."""
+        img, best, seen = self.img, 0, set()
+
+        def go(n, depth):
+            nonlocal best
+            if depth > 80 or not img.ok(n) or n in seen:
+                return
+            seen.add(n)
+            op = img.u32(n) & 63
+            if op == 2 and img.u32(n + 4):
+                best = max(best, self.lod_top(n) + 1)
+            for arr, cnt in self._kids(n, op):
+                for k in range(min(cnt, 4096)):
+                    go(img.u32(arr + 4 * k), depth + 1)
+
+        for n, _m in self.parts:
+            go(n, 0)
+        return best
 
     def _kids(self, n, op):
         img = self.img
@@ -284,6 +311,10 @@ class Model:
                 # o mais detalhado que o hierLod desenharia de perto: o maior indice com switchOutDis (+0x24) > 0 (o traje 3 do
                 # Togera tem um ultimo nivel com 0, nunca desenhado; como o native/wotm_model.hpp)
                 nl = min(img.u32(n + 4), 16)
+                if self.lod is not None and nl:
+                    i = min(self.lod, self.lod_top(n))
+                    visit(img.u32(n + 0x28 + 16 * i), m, si, mi, ctx, depth + 1, gs)
+                    return
                 for i in range(nl - 1, -1, -1):
                     if img.f32(n + 0x24 + 16 * i) > 0.0:
                         visit(img.u32(n + 0x28 + 16 * i), m, si, mi, ctx, depth + 1, gs)

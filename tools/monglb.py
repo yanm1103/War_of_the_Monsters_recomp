@@ -8,6 +8,7 @@
       (--anim-dir LIZARD: grava em LIZARD/ ao lado; os trajes de um monstro tem animacoes iguais e dividem a pasta)
   python tools/monglb.py disc/LVL/3-MILE.NGP saida/PLANT0.glb --boss plant --split --anim-dir PLANT   # chefes montados
       de pecas da fase: plant (3-MILE), root (3-MILE), mecha (CAPITOL); ver boss()
+  --lod N: o nivel N de cada LOD (0 = o mais grosso; padrao: o mais detalhado, o que o viewer mostra)
   opcoes: --unlit (material sem luz; padrao: com luz, como o Renderer do nativo), --fps 60, --vertex-alpha (alfa do vertice no
       COLOR_0 tambem sem mistura: o tools/ngpmesh.py o devolve ao jogo; padrao: 1, o que o viewer mostra)
 
@@ -111,13 +112,13 @@ def const(vals, eps=1e-6):
 
 
 class Exporter:
-    def __init__(self, ngp_path, unlit=False, model=None, groups=None, vertex_alpha=False):
+    def __init__(self, ngp_path, unlit=False, model=None, groups=None, vertex_alpha=False, lod=None):
         """model: um pose.Model ja montado (chefes); groups: [(nome, [instancias], id padrao)] — as animacoes de um chefe
         sao por peca: a chave k = 100 * grupo + indice toca essa animacao no grupo (nas outras instancias do grupo, a de
         mesmo id) e a animacao de id padrao nos outros grupos."""
         self.path = ngp_path
         self.vertex_alpha = vertex_alpha
-        self.mdl = model or pose.Model(ngp_path)
+        self.mdl = model or pose.Model(ngp_path, lod=lod)
         self.groups = groups
         self.img = self.mdl.img   # base 0xA00000 (o .NGP do monstro vem pre-ligado)
         tp, rp = tex.sibling(ngp_path, ".TEX"), tex.sibling(ngp_path, ".RTX")
@@ -993,7 +994,8 @@ def main(argv):
         anim_dir = argv[argv.index("--anim-dir") + 1] if "--anim-dir" in argv else None
         ex.export(argv[1], keys, 60.0, split="--split" in argv, anim_dir=anim_dir)
         return 0
-    ex = Exporter(argv[0], unlit="--unlit" in argv, vertex_alpha="--vertex-alpha" in argv)
+    lod = int(argv[argv.index("--lod") + 1]) if "--lod" in argv else None
+    ex = Exporter(argv[0], unlit="--unlit" in argv, vertex_alpha="--vertex-alpha" in argv, lod=lod)
     table = ex.mdl.anims()
     idle_k = next(a[1] for a in table if a[0] == pose.IDLE)
     keys, fps = [idle_k], 60.0
