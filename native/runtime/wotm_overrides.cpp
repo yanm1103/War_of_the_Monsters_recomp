@@ -804,6 +804,68 @@ namespace
         *ctx = saved;
     }
 
+    // "Vencer a luta" no Capitolio (fase 11): o Jelly e o Cerebulon sao IAs desligadas ate a fase deles, e o Mecha nem e monstro.
+    // Pula direto para o fim do FinalBoss::update da fase 2: deixa a fase como o retail a deixa no fim da 0 (Mecha escondido e
+    // estacionado, laser desligado) e da 1 (Jelly morto e escondido, Cerebulon com aiInit, visivel, m_playerNum 2), derruba o
+    // Cerebulon e o proprio update passa a fase 3 (escurece, cinema 0x226D do cerebro explodindo, volta ao shell). Devolve true se
+    // era o Capitolio (o pedido acaba aqui).
+    bool skipToFinalEnding(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t by)
+    {
+        constexpr uint32_t fb = wotm::sym::finalBoss, kEndingCinema = 0x006F8BF0u;   // D_006F8BF0 (s_endingCinema)
+        if (READ32(kGame + 0x1203D0) != 11u || !READ32(fb + 0x18))                     // m_levelId, finalBoss.m_active
+            return false;
+        const uint32_t phase = READ32(fb + 0x1C), jelly = READ32(fb + 0x74), fin = READ32(fb + 0x78);
+        if (phase >= 2u || !jelly || !fin)
+        {
+            if (phase == 2u && fin && !READ8(fin + 0xE8))
+                callTakeDamage(rdram, ctx, runtime, fin, 100000.0f, by);
+            std::fprintf(stderr, "[debug] vencer a luta: Capitolio na fase %u%s\n", phase, phase == 2u ? ", Cerebulon derrubado" : "");
+            return true;
+        }
+        if (!READ32(fb + 0x7C))
+            WRITE32(fb + 0x7C, READ32(kGame + 0x120380));   // m_monster7C: o Mecha so o grava no estado 1
+        // fim da fase 0 (updateMecha, estado 9)
+        wotm_save::guestCall(rdram, ctx, runtime, wotm::fn::terminateMechLaser__14FinalBossSound, {fb + 0x40});
+        WRITE32(fb + 0x34, 0u);                                                        // m_laser
+        WRITE16(fb + 0x04, uint16_t(READ16(fb + 0x04) & ~6u));                        // m_flags
+        if (const uint32_t cs = READ32(fb + 0x70))                                     // m_mechaCs
+        {
+            WRITE8(cs + 0x0C, 0);   // drawMe
+            const float park[3] = {0.0f, 497.0f, 3.0f};
+            for (int k = 0; k < 3; ++k)
+            {
+                uint32_t w;
+                std::memcpy(&w, &park[k], 4);
+                WRITE32(cs + 0x10 + 4 * k, w);
+            }
+        }
+        // fim da fase 1 (updateJelly, estado 5): o Jelly ja ligado morre antes, para a IA dele nao seguir andando escondida
+        if (phase == 1u)
+        {
+            wotm_save::guestCall(rdram, ctx, runtime, wotm::fn::terminateJellyTazer__12MonsterSound, {jelly + 0x1A7C});
+            if (!READ8(jelly + 0xE8))
+                callTakeDamage(rdram, ctx, runtime, jelly, 100000.0f, by);
+        }
+        wotm_save::guestCall(rdram, ctx, runtime, wotm::fn::setShadowOnOff__7Monsterb, {jelly, 0u});
+        if (const uint32_t cs = READ32(jelly + 0x0C))
+            WRITE8(cs + 0x0C, 0);
+        WRITE32(jelly + 0x18, 0u);   // m_playerNum
+        wotm_save::guestCall(rdram, ctx, runtime, wotm::fn::aiInit__7Monster, {fin});
+        if (const uint32_t cs = READ32(fin + 0x0C))
+        {
+            WRITE8(cs + 0x0C, 1);
+            for (int k = 0; k < 3; ++k)
+                WRITE32(cs + 0x60 + 4 * k, 0u);   // rot
+        }
+        WRITE32(fin + 0x18, 2u);
+        WRITE32(fb + 0x1C, 2u);   // m_phase
+        WRITE32(fb + 0x20, 0u);   // m_state
+        WRITE32(kEndingCinema, 0u);
+        callTakeDamage(rdram, ctx, runtime, fin, 100000.0f, by);
+        std::fprintf(stderr, "[debug] vencer a luta: Capitolio da fase %u direto ao fim (Cerebulon derrubado)\n", phase);
+        return true;
+    }
+
     // Derruba o jogador i (m_monsters[i], 0..3) vivo com um takeDamage do tamanho da vida; a fonte e a primeira IA viva (ou ele mesmo).
     // Devolve 1 se derrubou.
     int killPlayer(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, int i)
@@ -967,7 +1029,7 @@ namespace
             }
             if (slot == 0 && g_wotmCheatWin.exchange(false))
             {
-                const int32_t ais = static_cast<int32_t>(READ32(kGame + 0x1203E0));   // m_numAIs
+                int32_t ais = static_cast<int32_t>(READ32(kGame + 0x1203E0));   // m_numAIs (0 no Capitolio, que o skipToFinalEnding resolve)
                 int killed = 0;
                 uint32_t by = m;   // o golpe vem do primeiro jogador vivo: na campanha co-op o P1 pode ter saido da fase
                 for (int32_t p = 0, np = std::min<int32_t>(static_cast<int32_t>(READ32(kShell + 0x2BB4)), 4); p < np; ++p)
@@ -976,6 +1038,8 @@ namespace
                         by = pm;
                         break;
                     }
+                if (skipToFinalEnding(rdram, ctx, runtime, by))
+                    ais = 0;
                 for (int32_t i = 0; i < ais && i < 4; ++i)
                 {
                     const uint32_t ai = READ32(kGame + 0x120390 + 4 * i);   // m_monsters[4 + i]
