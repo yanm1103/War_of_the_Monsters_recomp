@@ -268,7 +268,7 @@ namespace
     // aceita o figurino como "<monstro>:<0-3>" ("3:2,1:1,1"); sem ":" ou com um figurino ja usado pelo mesmo monstro, fica com o menor
     // livre (o menu nao deixa dois iguais no mesmo figurino). A diferenca e m_killTarget 0 (o menu poe 1): sem
     // meta de vitorias, EvaluateOnePlayerChallengeStatus so reergue o monstro derrubado e a luta segue, sem o dialogo "PLAY AGAIN"
-    // que esperaria o pad. O filme de abertura (uiMain, 0x1D93D8) vira no-op. Cada fim de rodada (entrada de
+    // que esperaria o pad. O filme de abertura (uiMain(0)) vira no-op; os finais (uiMain(1), com needOutro) tocam. Cada fim de rodada (entrada de
     // Shell::EvaluateGameStatus, 0x1A7960) sai no log como [partida] com a vida e as vitorias dos dois monstros.
     constexpr uint32_t kUserintMain = wotm::fn::userintMain__Fv, kUiMain = wotm::fn::uiMain__Fi, kEvaluateGameStatus = wotm::fn::EvaluateGameStatus__5Shelli;
     PS2Runtime::RecompiledFunction g_origEvaluate = nullptr;
@@ -454,7 +454,14 @@ namespace
         g_origUserintMain(rdram, ctx, runtime);
     }
 
-    void uiMainSkipped(uint8_t *, R5900Context *ctx, PS2Runtime *) { ctx->pc = GPR_U32(ctx, 31); }
+    PS2Runtime::RecompiledFunction g_origUiMain = nullptr;
+    void uiMainSkipped(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (GPR_U32(ctx, 4) == 1u && g_origUiMain)
+            g_origUiMain(rdram, ctx, runtime);   // os filmes do fim (aventura, arcade) e os creditos
+        else
+            ctx->pc = GPR_U32(ctx, 31);
+    }
 
     // Aventura direta (WOTM_MODE=1): sem o "salvar?" da vitoria (displayDialog 2). O EvaluateOnePlayerStoryStatus ja passou a
     // historia para a fase seguinte antes dele; pular equivale a "nao salvar" e a partida seguinte segue sozinha.
@@ -3124,6 +3131,7 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
         if (g_matchLevel >= 0)
         {
             runtime.registerFunction(kUserintMain, &userintMainDirect);
+            g_origUiMain = runtime.lookupFunction(kUiMain);
             runtime.registerFunction(kUiMain, &uiMainSkipped);
             if ((g_origEvaluate = runtime.lookupFunction(kEvaluateGameStatus)))
                 runtime.registerFunction(kEvaluateGameStatus, &evaluateGameStatusLogged);

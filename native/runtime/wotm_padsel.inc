@@ -2388,19 +2388,20 @@ static void changeScreenHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runt
         }
         else if (from == 2 && to == 12 && wotm_arcade::g_armed.load())
         {
-            // ARCADE de 1 jogador (wotm_mainmenu.inc): como o TRAINING, sem as telas 12 e 15, direto a selecao (6); dela, sem a selecao
-            // de fase, a carga (abaixo). As lutas (fase, CPUs, regras) o wotm_arcade.inc escreve na entrada de cada sessao.
-            wr32(rdram, kNumAIs, 1);
+            // ARCADE de 1 jogador (wotm_mainmenu.inc): sem as telas 12 e 15 e sem escolher CPU, a selecao so do jogador (tela 3, a do
+            // adventure, com 0 IAs, como o endurance do retail: na confirmacao a 3 vai a 8); dela, sem a selecao de fase, a carga
+            // (abaixo). As lutas (fase, CPUs, regras) o wotm_arcade.inc escreve na entrada de cada sessao.
+            wr32(rdram, kNumAIs, 0);
             wr32(rdram, kShell + 0x2A44, 0);   // m_killTarget
             for (uint32_t a = kShell + 0x2948; a <= kShell + 0x2950; a += 4)
                 wr32(rdram, a, 0);             // m_monsterSel[4..6]
             if (const uint32_t sw = rd32(rdram, kShell + 0x1E0))
                 callGuest(rdram, ctx, runtime, wotm::fn::hierSetSwitch__FP11_hierswitchi, sw, 0u);
             callGuest(rdram, ctx, runtime, wotm::fn::resetSelectables__Fv, 0u);
-            ctx->r[5] = _mm_set_epi64x(0, 6);
-            std::fprintf(stderr, "[arcade] fluxo: tela 2 -> 6\n");
+            ctx->r[5] = _mm_set_epi64x(0, 3);
+            std::fprintf(stderr, "[arcade] fluxo: tela 2 -> 3\n");
         }
-        else if (from == 6 && to == 8 && dir > 0 && wotm_arcade::g_armed.load())
+        else if ((from == 3 || from == 6) && to == 8 && dir > 0 && wotm_arcade::g_armed.load())
         {   // a selecao do arcade de 1 jogador vai direto a carga (a fase e a da primeira luta)
             wotm_stages::restore(rdram);   // a custom da partida anterior sai da tabela de nomes (wotm_stages.h)
             ctx->r[5] = _mm_set_epi64x(0, 0x63);

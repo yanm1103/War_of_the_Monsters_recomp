@@ -272,6 +272,17 @@ void finish(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     std::fprintf(stderr, "[arcade] corrida vencida; tokens %u\n", rd32(rdram, kTokens));
 }
 
+// Os filmes do fim, como no fim da aventura: o Shell::GenesisMovie (com o genesisHook do co-op, o filme de cada parceiro) poe o
+// final do heroi do jogador 1 na fila (needOutro), que leva aos creditos; a volta dos menus os toca antes da tela 1. Heroi sem
+// filme proprio (custom, chefe) vai direto aos creditos.
+void ending(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    call(rdram, ctx, runtime, fn::GenesisMovie__5Shell, {uint32_t(kShell)});
+    if (!rd32(rdram, wotm::sym::nextMovie))
+        wr32(rdram, wotm::sym::nextMovie, 19u);
+    std::fprintf(stderr, "[arcade] final: filme %u e os creditos\n", rd32(rdram, wotm::sym::nextMovie));
+}
+
 // ------------------------------------------------------------------ ganchos
 
 struct Hook
@@ -521,6 +532,7 @@ void evalStoryHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             const int d = dif(rdram);
             award(rdram, ctx, runtime, d * 1500 + 3000 + d * 3000, "chefe");
             finish(rdram, ctx, runtime);
+            ending(rdram, ctx, runtime);
             ctx->pc = ra;
             return;
         }
