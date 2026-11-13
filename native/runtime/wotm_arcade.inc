@@ -473,15 +473,28 @@ void lifeDeathHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             p = monster(rdram, i);
     if (++g_winFrames > kWinTimeout || (p && rd8(rdram, p + kVictorious)))
     {
-        std::fprintf(stderr, "[arcade] luta %d vencida\n", g_run.fight + 1);
+        std::fprintf(stderr, "[arcade] luta %d vencida (%s, quadro %d)\n", g_run.fight + 1,
+                     p && rd8(rdram, p + kVictorious) ? "pose" : "sem pose", g_winFrames);
         leave(rdram, ctx, runtime, game, 0);
         return;
     }
     if (p)
     {
+        // o StateVictory::transitionOK nos m_mode 2 e 3 so libera com o m_killTarget do Shell atingido (o arcade o deixa 0): o
+        // teste roda com o m_mode 1, o da aventura
         const uint32_t st = rd32(rdram, p + kState) & 0x1FFFFFFFu;
-        if (st >= 0x1000u && rd32(rdram, st) != 0x40u && call(rdram, ctx, runtime, fn::transitionOK__12StateVictory, {p + kVictoryState}))
+        bool ok = false;
+        if (st >= 0x1000u && rd32(rdram, st) != 0x40u)
+        {
+            wr32(rdram, kGameMode, 1u);
+            ok = call(rdram, ctx, runtime, fn::transitionOK__12StateVictory, {p + kVictoryState}) != 0;
+            wr32(rdram, kGameMode, uint32_t(gm));
+        }
+        if (ok)
+        {
             call(rdram, ctx, runtime, fn::enterNewState__7MonsterP12MonsterState, {p, p + kVictoryState});
+            std::fprintf(stderr, "[arcade] pose de vitoria (quadro %d)\n", g_winFrames);
+        }
     }
 }
 

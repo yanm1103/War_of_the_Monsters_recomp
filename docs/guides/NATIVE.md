@@ -256,7 +256,8 @@ Plan and the owner's decisions: `docs/investigacoes/2026-11-13/modo_arcade_plano
 - **Fights 1 to 4:** `gameResolveLifeAndDeath` is replaced. A player who is out with a life left respawns (`wotm_coop::revive`);
   without one, the monster leaves the scene (`hierSetCsDrawMe` 0, shadow off) and that player's camera follows an ally. A CPU that is
   out leaves the scene with `m_playerNum` 0. All players out: `rtReturnToShell(1)`; all CPUs out: the victory pose of the first
-  player standing, then `rtReturnToShell(0)` (after 300 frames without the pose, it leaves anyway). The evaluators
+  player standing (its `StateVictory::transitionOK` runs with `m_mode` 1, since in modes 2 and 3 it waits for the `m_killTarget`,
+  which the arcade leaves at 0), then `rtReturnToShell(0)` (after 300 frames without the pose, it leaves anyway). The evaluators
   (`EvaluateOnePlayerChallengeStatus`, `EvaluateMultiPlayerBattleStatusAI`) take those codes: 0 adds the tokens and starts the next
   fight; 1 opens the adventure's defeat dialog (CONTINUE repeats the fight, QUIT goes to the menu and keeps the tokens won).
 - **No friendly fire:** `takeDamage` with victim and source on the same side (player and player, CPU and CPU) returns without
