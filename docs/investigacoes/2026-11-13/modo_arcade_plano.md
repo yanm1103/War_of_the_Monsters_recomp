@@ -78,7 +78,7 @@ Consequência: a luta do Goliath começa com as 3 Mutant Ants e a apresentação
   - Fica na cadeia já existente, depois das trapaças e antes do treino.
   - **[I]** Conferir se agarrar e arremessar um aliado passa por outro caminho (`takeHit`).
 - **Vida e morte:** gancho no fim de rodada (`EvaluateGameStatus`, modos 2 e 3), com o arcade ligado.
-  - Humano morto com vida sobrando: perde uma das 3 vidas da luta (`m_lives`, +0x2BBC) e volta (`playerInit`, com o aviso do HUD como no co-op).
+  - Humano morto com vida sobrando: gasta o único respawn da luta (`m_lives`, +0x2BBC) e volta (`playerInit`, com o aviso do HUD como no co-op).
   - Humano morto sem vida: fica fora.
   - CPU morta: fica fora.
   - Todas as CPUs fora: **vitória**.
@@ -136,11 +136,12 @@ Consequência: a luta do Goliath começa com as 3 Mutant Ants e a apresentação
 
 ## 10. Padrões adotados (o dono troca se quiser)
 
+Confirmados pelo dono em 2026-11-13:
 - O jogador escolhe o monstro.
-- São 3 vidas por luta para cada jogador; sem vidas, CONTINUE infinito.
+- Cada jogador tem 1 respawn por luta, ou seja, 2 vidas. Sem vidas, CONTINUE infinito.
 - A dificuldade é a das opções, fixa nas 5 lutas.
 - O chefe luta na fase dele (Rosdale Canyon com as formigas; Capitol com Mecha e Jelly).
-- Não há o bônus de 10000 do final da história.
+- No final entra um bônus de 3000, no lugar dos 10000 da história, além de `dif × 3000`.
 
 ## Achado à parte
 
