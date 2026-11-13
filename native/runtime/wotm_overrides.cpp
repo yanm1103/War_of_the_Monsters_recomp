@@ -129,6 +129,8 @@ WotmFreeCamPose g_wotmFreeCamPose;
 #include "wotm_ai.inc"
 // Modo arcade: 5 lutas seguidas contra CPUs, chefe no fim (linha ARCADE do menu, WOTM_ARCADE)
 #include "wotm_arcade.inc"
+// Last monster standing: todos contra todos com X renascimentos cada (linha LAST MONSTER STANDING do menu, WOTM_LMS)
+#include "wotm_lms.inc"
 
 namespace
 {
@@ -1022,6 +1024,7 @@ namespace
             }
             if (slot == 0 && g_wotmCheatWin.exchange(false))
             {
+                wotm_lms::cheatWin();   // last monster standing: as CPUs derrubadas nao renascem
                 int32_t ais = static_cast<int32_t>(READ32(kGame + 0x1203E0));   // m_numAIs (0 no Capitolio, que o skipToFinalEnding resolve)
                 int killed = 0;
                 uint32_t by = m;   // o golpe vem do primeiro jogador vivo: na campanha co-op o P1 pode ter saido da fase
@@ -3293,6 +3296,7 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
     wotmArmyInstall(runtime);   // antes do treino: o takeHit dele fica por fora
     wotmTrainingInstall(runtime);   // por ultimo: o gancho mais de fora do update/takeHit/takeDamage (ve o dano que as trapacas deixam)
     wotmArcadeInstall(runtime);   // depois de tudo: o userintMain dele fica por fora do da WOTM_MATCH e das fases custom
+    wotmLmsInstall(runtime);   // depois do arcade: os ganchos de fim de luta dele ficam por fora
     if (g_minRate > 0)
         std::fprintf(stderr, "[wotm] updateRate >= %d (dt <= 1/%d) para o jogo inteiro (WOTM_RATEMIN)\n", g_minRate, g_minRate);
     else

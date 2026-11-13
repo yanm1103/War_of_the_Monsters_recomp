@@ -24,6 +24,8 @@
 //     jogador 1 vezes 1,2 (2 jogadores), 1,3 (3) ou 1,4 (4).
 //   - Shell::InitPlayers (comeco da fase, retry, etapa de chefe): todos de volta a fase.
 
+#include "wotm_lms.h"   // last monster standing: a tela com quem sobrou (viewPlayers) e a da largada no PLAY AGAIN
+
 namespace wotm_arcade
 {
 bool on();   // wotm_arcade.inc: o roteiro do WOTM_COOPKILL tambem vale nas lutas do arcade
@@ -88,7 +90,7 @@ int viewPlayers(uint8_t *rdram)
     if (const int n = players(rdram))
         return n;
     const int32_t n = static_cast<int32_t>(rd32(rdram, kNumPlayers));
-    return g_views && wotm_arcade::on() && n >= 1 && n <= 4 ? n : 0;
+    return g_views && (wotm_arcade::on() || wotm_lms::on()) && n >= 1 && n <= 4 ? n : 0;
 }
 uint32_t g_viewSlotSaved[4] = {};
 
@@ -897,12 +899,15 @@ void okToUnifyHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         dbgTick(rdram);
     // Vista 0 de volta a camera 0 (fora da vista unificada). Com todos mortos o jogo junta a tela (a vista 0 empresta o _cs da 2), e
     // um viewCreate da vista 0 nesse meio tempo (a carga do retry) grava ownCs = cs emprestado: ao sair da vista unificada, o
-    // viewGrappleConfig devolvia a vista 0 a camera 2 (parada, POV 3) e o P1 sumia da metade dele
-    if (ctx->pc == g_okToUnify.addr && players(rdram) > 1 && !rd32(rdram, wotm::sym::gUseUnifiedView) &&
+    // viewGrappleConfig devolvia a vista 0 a camera 2 (parada, POV 3) e o P1 sumia da metade dele. O PLAY AGAIN do last monster
+    // standing (m_mode 2 e 3, 2 a 4 jogadores) tem o mesmo caminho; la a tela junta de verdade com os dois perto (o cs emprestado
+    // com o ownCs certo), entao so o ownCs errado conta
+    const bool lmsSplit = !players(rdram) && wotm_lms::on() && static_cast<int32_t>(rd32(rdram, kNumPlayers)) > 1;
+    if (ctx->pc == g_okToUnify.addr && (players(rdram) > 1 || lmsSplit) && !rd32(rdram, wotm::sym::gUseUnifiedView) &&
         !rd32(rdram, wotm::sym::moviePlaying))
     {
         const uint32_t vi = wotm::sym::viewInfo, cs0 = rd32(rdram, wotm_split4::camera(0) + wotm_split4::kCamCs);
-        if (cs0 && (rd32(rdram, vi + 0x10) != cs0 || rd32(rdram, vi) != cs0))
+        if (cs0 && (rd32(rdram, vi + 0x10) != cs0 || (!lmsSplit && rd32(rdram, vi) != cs0)))
         {
             std::fprintf(stderr, "[coop] vista 0: camera %x (propria %x) -> %x, a da camera 0\n", rd32(rdram, vi), rd32(rdram, vi + 0x10), cs0);
             wr32(rdram, vi + 0x10, cs0);
@@ -1633,7 +1638,9 @@ void grandTotalHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 // escalonador (o retry no Capitolio), a retomada nao passa pelo gancho: fica pendente para o primeiro SetOkToUnify (okToUnifyHook)
 void initPlayersAfter(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, const bool was[4], bool remapped)
 {
-    const int n = players(rdram);
+    int n = players(rdram);
+    if (!n && wotm_lms::on() && (remapped || was[0] || was[1] || was[2] || was[3]))
+        n = std::clamp(static_cast<int32_t>(rd32(rdram, kNumPlayers)), 1, 4);   // o PLAY AGAIN do last monster standing (m_mode 2 e 3)
     if (!n)
         return;
     for (int i = 0; i < n; ++i)
@@ -1925,8 +1932,8 @@ void dbgSchedule(const char *tag, uint32_t frames)
 // Por quadro (comeco do rtMain, okToUnify): conta os quadros de luta fora de cinema, dispara as mortes do roteiro e os dumps
 void dbgTick(uint8_t *rdram)
 {
-    // jogadores da campanha co-op ou, no arcade, os de qualquer luta (desafio e free for all, m_mode 2 e 3)
-    const int dbgN = wotm_arcade::on() ? std::clamp(static_cast<int32_t>(rd32(rdram, kNumPlayers)), 1, 4) : players(rdram);
+    // jogadores da campanha co-op ou, no arcade e no last monster standing, os de qualquer luta (desafio e free for all, m_mode 2 e 3)
+    const int dbgN = (wotm_arcade::on() || wotm_lms::on()) ? std::clamp(static_cast<int32_t>(rd32(rdram, kNumPlayers)), 1, 4) : players(rdram);
     if (!g_dbgLog || !dbgN)
         return;
     const uint32_t f = rd32(rdram, wotm::sym::g_frame);

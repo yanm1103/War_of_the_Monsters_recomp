@@ -41,6 +41,7 @@
 #include "wotm_menucpus.h"   // CPUs 4..7 da tela 12 (extraCpus)
 #include "wotm_training.h"   // TRAINING: telas 12 e 15 puladas (changeScreenHook)
 #include "wotm_arcade.h"     // ARCADE: telas 12, 15 e 8 puladas (changeScreenHook)
+#include "wotm_lms.h"        // LAST MONSTER STANDING: desarmado no menu principal
 #include <chrono>
 #include <random>
 
@@ -2444,6 +2445,7 @@ static void mainHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         g_selOn = false;
         wotm_training::menuDisarm("menu principal");   // a luta de treino acabou (ou a escolha voltou ate aqui)
         wotm_arcade::menuDisarm("menu principal");     // a corrida do arcade acabou (ou a escolha voltou ate aqui)
+        wotm_lms::menuDisarm("menu principal");        // o last monster standing acabou (ou a escolha voltou ate aqui)
         wotm_training::restoreDifficulty(rdram, wotm::sym::shellGame + wotm_training::kDifficulty);
         g_mainRa = GPR_U32(ctx, 31);
         g_mainPending = true;
