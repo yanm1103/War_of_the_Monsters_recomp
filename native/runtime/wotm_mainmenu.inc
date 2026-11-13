@@ -24,6 +24,7 @@
 // Tela 5: enquanto a escolha de controles esta no telao a lista fica escondida, e aparece junto com o fade que a escolha da aos itens.
 // WOTM_TEXTMENU=0: itens do retail (e o rotulo "multiplayer" do wotm_padsel.inc).
 #include "wotm_training.h"   // linha "training" da tela 2 (g_on)
+#include "wotm_arcade.h"     // linha "arcade" das telas 2 e 5 (g_armed)
 // tela de opcoes do jogo (wotm_optscreen.inc, incluido depois): chamadas dos ganchos daqui
 namespace wotm_optscreen
 {
@@ -42,8 +43,8 @@ namespace wotm_mainmenu
 using wotm_padsel::rd32;
 constexpr uint32_t kShell = wotm::sym::shellInfo;
 constexpr int kMaxRows = 7;
-constexpr int kOptionsRow = -1, kQuitRow = -2, kTrainingRow = -3, kAdventureRow = -4;   // itens que nao sao do jogo (item < 0)
-constexpr int kFreeForAll = 2;   // tela 2: o item do jogo que o "training" escolhe
+constexpr int kOptionsRow = -1, kQuitRow = -2, kTrainingRow = -3, kAdventureRow = -4, kArcadeRow = -5;   // itens que nao sao do jogo (item < 0)
+constexpr int kFreeForAll = 2;   // tela 2: o item do jogo que o "training" e o "arcade" escolhem
 
 struct Row { int item; const char *label; };
 struct ScreenDef
@@ -57,8 +58,9 @@ constexpr ScreenDef kScreens[] = {
     {1, wotm::sym::numSelectables_2784, 7,
      {{1, "SINGLE PLAYER"}, {2, "MULTIPLAYER"}, {3, "OPTIONS"}, {kOptionsRow, "RECOMPILED OPTIONS"}, {4, "LOAD GAME"}, {5, "UNLOCKS"},
       {kQuitRow, "QUIT GAME"}}},
-    {2, 0, 4, {{1, "ADVENTURE"}, {2, "FREE-FOR-ALL"}, {3, "ENDURANCE"}, {kTrainingRow, "TRAINING"}}},
-    {5, wotm::sym::numSelectables_2857, 4, {{kAdventureRow, "ADVENTURE"}, {1, "FREE-FOR-ALL"}, {2, "ELIMINATION"}, {3, "MINIGAMES"}}},
+    {2, 0, 5, {{1, "ADVENTURE"}, {kArcadeRow, "ARCADE"}, {2, "FREE-FOR-ALL"}, {3, "ENDURANCE"}, {kTrainingRow, "TRAINING"}}},
+    {5, wotm::sym::numSelectables_2857, 5,
+     {{kAdventureRow, "ADVENTURE"}, {kArcadeRow, "ARCADE"}, {1, "FREE-FOR-ALL"}, {2, "ELIMINATION"}, {3, "MINIGAMES"}}},
 };
 static const ScreenDef *screenDef(uint32_t s)
 {
@@ -140,14 +142,15 @@ constexpr TabDef kTabDefs[kTabs] = {
       {st::Interp, "INTERPOLATE FRAMES", "SMOOTHER MOTION ABOVE 60 HZ OR WHEN THE GAME DROPS TO 30. MAY ADD DELAY"},
       {st::Msaa, "ANTI-ALIASING", "MSAA SMOOTHS THE JAGGED EDGES OF THE 3D MODELS"},
       {st::TexFilter, "TEXTURE FILTER", "KEEPS TEXTURES SHARP FAR AWAY AND AT STEEP ANGLES"}}},
-    {7,
+    {8,
      {{st::LockToggle, "LOCK-ON", "LOCKS ON WITH R1 ALONE. OFF KEEPS THE GAME'S L1 + R1"},
       {st::DpadTarget, "D-PAD TARGET SWITCH", "LEFT AND RIGHT ON THE D-PAD PICK ANOTHER TARGET WHILE LOCKED ON"},
       {st::EnemyBars, "ENEMY BARS", "SHOWS THE HEALTH AND ENERGY OF EACH ENEMY ABOVE THEIR HEAD"},
       {st::DamagePop, "DAMAGE NUMBERS", "SHOWS HOW MUCH DAMAGE EACH HIT DOES"},
       {st::HideHud, "HIDE HUD", "HIDES THE BARS, ICONS AND TEXT DURING THE FIGHT. THE PAUSE MENU STILL SHOWS"},
       {st::Announcer, "NARRATOR", "A VOICE CALLS OUT THE MONSTER AND THE LEVEL YOU PICK, OR ONLY THE MONSTER ROARS"},
-      {st::SkipIntro, "SKIP INTRO MOVIES", "GOES STRAIGHT TO THE TITLE SCREEN. CHANGES TAKE EFFECT ON NEXT BOOT"}}},
+      {st::SkipIntro, "SKIP INTRO MOVIES", "GOES STRAIGHT TO THE TITLE SCREEN. CHANGES TAKE EFFECT ON NEXT BOOT"},
+      {st::ArcadeCpus, "ARCADE CPUS", "THE MOST CPUS IN ONE ARCADE FIGHT. NEVER MORE THAN 8 MONSTERS IN ALL"}}},
     {5,
      {{st::Camera, "CAMERA STYLE", "MODERN TURNS WITH THE RIGHT STICK. CLASSIC IS THE CAMERA OF THE ORIGINAL GAME"},
       {st::CamSens, "SENSITIVITY", "HOW FAST THE RIGHT STICK TURNS THE CAMERA"},
@@ -479,6 +482,7 @@ static int choices(st::Key k, int out[16])
     case st::Aspect: for (int i = 0; i < st::kAspects; ++i) out[i] = i; return st::kAspects;
     case st::Display: for (int i = 0; i < 3; ++i) out[i] = i; return 3;
     case st::CamSens: for (int i = 0; i < 10; ++i) out[i] = i + 1; return 10;
+    case st::ArcadeCpus: for (int i = 0; i < 7; ++i) out[i] = i + 1; return 7;
     case st::Announcer: for (int i = 0; i < 3; ++i) out[i] = i; return 3;
     case st::LockToggle: for (int i = 0; i < 3; ++i) out[i] = i; return 3;
     case st::ArmyTrigger: for (int i = 0; i < 3; ++i) out[i] = i; return 3;
@@ -553,7 +557,8 @@ static void valueText(st::Key k, int v, char *buf, size_t sz)
     case st::ArmyTrigger: std::snprintf(buf, sz, "%s", v == 0 ? "TIME" : v == 1 ? "DESTRUCTION" : "WHICHEVER FIRST"); break;
     case st::ArmyEvery: std::snprintf(buf, sz, "%d SECONDS", v); break;
     case st::ArmyChaos: std::snprintf(buf, sz, "%s", v <= 25 ? "LITTLE" : v <= 50 ? "SOME" : v <= 100 ? "A LOT" : "HUGE"); break;
-    case st::ArmyWave: std::snprintf(buf, sz, "%d", v); break;
+    case st::ArmyWave:
+    case st::ArcadeCpus: std::snprintf(buf, sz, "%d", v); break;
     case st::LockToggle: std::snprintf(buf, sz, "%s", v == 2 ? "HOLD" : v ? "TAP" : "OFF"); break;
     case st::Announcer:   // a voz do narrador (narrator/) ou o grito do monstro escolhido
         std::snprintf(buf, sz, "%s", v == 2 ? "MONSTER CRY" : v ? "GODZILLA SAVE THE EARTH" : "OFF");
@@ -1177,7 +1182,10 @@ static void frame(uint8_t *rdram)
         v.screen = d->screen;
         v.rows = buildRows(rdram, *d, v.row);
         v.sel = cursorRow(rdram, d->screen, v.row, v.rows);
-        for (int item = 1; item <= d->rows; ++item)
+        int lastItem = 0;   // os itens do jogo (> 0) da tela; as linhas nossas nao tem objeto
+        for (int r = 0; r < d->rows; ++r)
+            lastItem = std::max(lastItem, d->row[r].item);
+        for (int item = 1; item <= lastItem; ++item)
         {
             // posicao: os objetos do filho em uso (so ele esta na cena)
             int k = 0;
@@ -1280,10 +1288,11 @@ static void getInputHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     }
     const ScreenDef &d = *screenDef(cur);
     if (cur == 1)
-    {   // de volta ao menu principal: o "training" da tela 2 e o "adventure" da 5 ficaram para tras
-        if (g_extraRow == kTrainingRow || g_extraRow == kAdventureRow)
+    {   // de volta ao menu principal: o "training" e o "arcade" da tela 2 e o "adventure" e o "arcade" da 5 ficaram para tras
+        if (g_extraRow == kTrainingRow || g_extraRow == kAdventureRow || g_extraRow == kArcadeRow)
             g_extraRow = 0;
         wotm_training::menuDisarm("menu principal");
+        wotm_arcade::menuDisarm("menu principal");
     }
     Row row[kMaxRows];
     const int rows = buildRows(rdram, d, row);
@@ -1311,7 +1320,7 @@ static void getInputHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
                 g_extraRow = hasExtra(d.screen) && row[hv.row].item < 0 ? row[hv.row].item : 0;
                 if (row[hv.row].item > 0)
                     wotm_padsel::wr32(rdram, curSelAddr(d.screen), static_cast<uint32_t>(row[hv.row].item));
-                else if (row[hv.row].item == kTrainingRow)
+                else if (row[hv.row].item == kTrainingRow || (d.screen == 2 && row[hv.row].item == kArcadeRow))
                     wotm_padsel::wr32(rdram, curSelAddr(d.screen), static_cast<uint32_t>(kFreeForAll));
                 if (!click)
                     wotm_padsel::sfx(rdram, ctx, runtime, 4);
@@ -1343,20 +1352,27 @@ static void getInputHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         g_extraRow = hasExtra(d.screen) && row[r].item < 0 ? row[r].item : 0;
         if (row[r].item > 0)
             wotm_padsel::wr32(rdram, curSelAddr(d.screen), static_cast<uint32_t>(row[r].item));
-        else if (row[r].item == kTrainingRow)
+        else if (row[r].item == kTrainingRow || (d.screen == 2 && row[r].item == kArcadeRow))
             wotm_padsel::wr32(rdram, curSelAddr(d.screen), static_cast<uint32_t>(kFreeForAll));
         wotm_padsel::sfx(rdram, ctx, runtime, code == 1 ? 2 : 4);
         out = 0;
     }
-    else if (code == 6 && cur == 5 && g_extraRow == kAdventureRow)
-    {   // X no "adventure" da lista multijogador: a campanha com os jogadores escolhidos (wotm_padsel.inc)
-        wotm_padsel::adventureStart(rdram, ctx, runtime);
+    else if (code == 6 && cur == 5 && (g_extraRow == kAdventureRow || g_extraRow == kArcadeRow))
+    {   // X no "adventure" ou no "arcade" da lista multijogador: a selecao de monstros dos jogadores escolhidos (wotm_padsel.inc); o
+        // arcade segue dela direto a carga da primeira luta
+        const bool arcade = g_extraRow == kArcadeRow;
+        wotm_arcade::g_armed = arcade;
+        if (wotm_padsel::adventureStart(rdram, ctx, runtime) && arcade)
+            std::fprintf(stderr, "[arcade] armado pelo menu (multijogador)\n");
+        else if (arcade)
+            wotm_arcade::g_armed = false;
         out = 0;   // o jogo nao ve o X (com o currentSelection dele seria outro modo)
     }
     else if (code == 6 && cur == 2)
-    {   // X num modo de 1 jogador: o "training" segue como o free-for-all (o currentSelection ja e o dele) com o modo treino ligado
-        const bool training = g_extraRow == kTrainingRow;
-        if (training)
+    {   // X num modo de 1 jogador: o "training" e o "arcade" seguem como o free-for-all (o currentSelection ja e o dele) com o modo
+        // treino ou o arcade armado
+        const bool training = g_extraRow == kTrainingRow, arcade = g_extraRow == kArcadeRow;
+        if (training || arcade)
             wotm_padsel::wr32(rdram, curSelAddr(2), static_cast<uint32_t>(kFreeForAll));
         if (training)
         {
@@ -1365,7 +1381,16 @@ static void getInputHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         }
         else
             wotm_training::menuDisarm("outro modo");
+        if (arcade)
+        {
+            wotm_arcade::g_armed = true;
+            std::fprintf(stderr, "[arcade] armado pelo menu (1 jogador)\n");
+        }
+        else
+            wotm_arcade::menuDisarm("outro modo");
     }
+    else if (code == 6 && cur == 5)
+        wotm_arcade::menuDisarm("outro modo");
     else if (code == 6 && cur == 1 && g_extraRow == kQuitRow)
     {
         runtime->requestStop();   // o mesmo caminho do X da janela

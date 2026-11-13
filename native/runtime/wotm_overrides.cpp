@@ -127,6 +127,8 @@ WotmFreeCamPose g_wotmFreeCamPose;
 #include "wotm_army.inc"
 // Log das acoes da IA (WOTM_AILOG)
 #include "wotm_ai.inc"
+// Modo arcade: 5 lutas seguidas contra CPUs, chefe no fim (linha ARCADE do menu, WOTM_ARCADE)
+#include "wotm_arcade.inc"
 
 namespace
 {
@@ -3232,6 +3234,7 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
     wotmElimCostumeInstall(runtime);   // depois das skins e dos customs: o SetPlayerMonster daqui fica por fora
     wotmArmyInstall(runtime);   // antes do treino: o takeHit dele fica por fora
     wotmTrainingInstall(runtime);   // por ultimo: o gancho mais de fora do update/takeHit/takeDamage (ve o dano que as trapacas deixam)
+    wotmArcadeInstall(runtime);   // depois de tudo: o userintMain dele fica por fora do da WOTM_MATCH e das fases custom
     if (g_minRate > 0)
         std::fprintf(stderr, "[wotm] updateRate >= %d (dt <= 1/%d) para o jogo inteiro (WOTM_RATEMIN)\n", g_minRate, g_minRate);
     else

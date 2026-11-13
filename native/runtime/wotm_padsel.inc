@@ -40,6 +40,7 @@
 #include "wotm_mods.hpp"   // skins de mod na lista de trajes
 #include "wotm_menucpus.h"   // CPUs 4..7 da tela 12 (extraCpus)
 #include "wotm_training.h"   // TRAINING: telas 12 e 15 puladas (changeScreenHook)
+#include "wotm_arcade.h"     // ARCADE: telas 12, 15 e 8 puladas (changeScreenHook)
 #include <chrono>
 #include <random>
 
@@ -2385,7 +2386,27 @@ static void changeScreenHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runt
             ctx->r[5] = _mm_set_epi64x(0, 6);
             std::fprintf(stderr, "[treino] fluxo: tela 2 -> 6 (1 CPU, sem fim)\n");
         }
-        else if (from == 6 && to == 2 && dir < 0 && wotm_training::g_menuArmed.load())
+        else if (from == 2 && to == 12 && wotm_arcade::g_armed.load())
+        {
+            // ARCADE de 1 jogador (wotm_mainmenu.inc): como o TRAINING, sem as telas 12 e 15, direto a selecao (6); dela, sem a selecao
+            // de fase, a carga (abaixo). As lutas (fase, CPUs, regras) o wotm_arcade.inc escreve na entrada de cada sessao.
+            wr32(rdram, kNumAIs, 1);
+            wr32(rdram, kShell + 0x2A44, 0);   // m_killTarget
+            for (uint32_t a = kShell + 0x2948; a <= kShell + 0x2950; a += 4)
+                wr32(rdram, a, 0);             // m_monsterSel[4..6]
+            if (const uint32_t sw = rd32(rdram, kShell + 0x1E0))
+                callGuest(rdram, ctx, runtime, wotm::fn::hierSetSwitch__FP11_hierswitchi, sw, 0u);
+            callGuest(rdram, ctx, runtime, wotm::fn::resetSelectables__Fv, 0u);
+            ctx->r[5] = _mm_set_epi64x(0, 6);
+            std::fprintf(stderr, "[arcade] fluxo: tela 2 -> 6\n");
+        }
+        else if (from == 6 && to == 8 && dir > 0 && wotm_arcade::g_armed.load())
+        {   // a selecao do arcade de 1 jogador vai direto a carga (a fase e a da primeira luta)
+            wotm_stages::restore(rdram);   // a custom da partida anterior sai da tabela de nomes (wotm_stages.h)
+            ctx->r[5] = _mm_set_epi64x(0, 0x63);
+            ctx->r[7] = _mm_set_epi64x(0, 0);
+        }
+        else if (from == 6 && to == 2 && dir < 0 && (wotm_training::g_menuArmed.load() || wotm_arcade::g_armed.load()))
             ctx->r[7] = _mm_set_epi64x(0, 2);   // a volta da selecao a tela 2 (o prevScreen) com a camera, nao o corte seco da 6
         else if (from == 5 && (to == 11 || to == 13 || to == 14 || to == 15) && dir < 0)   // a volta da lista vai ao menu principal
             ctx->r[5] = _mm_set_epi64x(0, 1);
@@ -2421,6 +2442,7 @@ static void mainHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         g_coopLoad = CoopLoad{};
         g_selOn = false;
         wotm_training::menuDisarm("menu principal");   // a luta de treino acabou (ou a escolha voltou ate aqui)
+        wotm_arcade::menuDisarm("menu principal");     // a corrida do arcade acabou (ou a escolha voltou ate aqui)
         wotm_training::restoreDifficulty(rdram, wotm::sym::shellGame + wotm_training::kDifficulty);
         g_mainRa = GPR_U32(ctx, 31);
         g_mainPending = true;
