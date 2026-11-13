@@ -64,7 +64,7 @@ bool g_envDone = false;
 // estado da sessao (zerado na entrada de cada uma)
 bool g_humOut[4] = {}, g_aiOut[kMaxSlots] = {};
 int g_winFrames = 0;
-bool g_attackLogged = false;
+bool g_attackLogged = false, g_countLogged = false;
 
 // ------------------------------------------------------------------ sorteio
 
@@ -328,6 +328,7 @@ void resolveArgsHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             std::fill(std::begin(g_aiOut), std::end(g_aiOut), false);
             g_winFrames = 0;
             g_attackLogged = false;
+            g_countLogged = false;
             writeFight(rdram);
         }
     }
@@ -446,6 +447,9 @@ void lifeDeathHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         }
         ++cpus;
     }
+    if (!g_countLogged)
+        std::fprintf(stderr, "[arcade] em campo: %d jogador(es), %d CPU(s) (%d vagas)\n", humans, cpus, slots);
+    g_countLogged = true;
     if (cpus)
     {
         g_winFrames = 0;
@@ -496,6 +500,8 @@ void evalFight(const Hook &h, uint8_t *rdram, R5900Context *ctx, PS2Runtime *run
     wr32(rdram, kMode, 1u);
     wr32(rdram, kLevelId, 1u);
     std::fprintf(stderr, "[arcade] derrota na luta %d: CONTINUE ou QUIT\n", g_run.fight + 1);
+    if (wotm_coop::retryTest())
+        wotm_coop::retryCross();   // WOTM_COOPRETRY=1: CONTINUE sem teclado
     wotm_modes4::tailDialog(rdram, ctx, runtime, 1, ra);
 }
 void evalChHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { evalFight(g_evalCh, rdram, ctx, runtime); }

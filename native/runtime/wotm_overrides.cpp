@@ -469,25 +469,11 @@ namespace
             ctx->pc = GPR_U32(ctx, 31);
             return;
         }
-        // WOTM_COOPRETRY=1 (teste do retry sem teclado): no fim de jogo (dialogo 1) um X sintetico aos 4 s e aos 8 s, pelo mesmo
-        // pedido do clique do mouse nos menus (wotm_mouse.hpp, requestCross; a tela vale como tela do jogo com mouse por um instante)
-        static const bool s_retry = [] { const char *e = std::getenv("WOTM_COOPRETRY"); return e && *e == '1'; }();
-        if (s_retry && ctx->pc == wotm::fn::displayDialog__Fi && GPR_U32(ctx, 4) == 1u)
+        // WOTM_COOPRETRY=1: no fim de jogo (dialogo 1) o X sintetico do wotm_coop::retryCross
+        if (wotm_coop::retryTest() && ctx->pc == wotm::fn::displayDialog__Fi && GPR_U32(ctx, 4) == 1u)
         {
             std::fprintf(stderr, "[partida] fim de jogo: X sintetico em 4 s (WOTM_COOPRETRY)\n");
-            std::thread([] {
-                for (int k = 0; k < 2; ++k)
-                {
-                    std::this_thread::sleep_for(std::chrono::seconds(4));
-                    for (int i = 0; i < 6; ++i)
-                    {
-                        wotm::mouse::gameMenu();
-                        if (i == 0)
-                            wotm::mouse::requestCross(2);
-                        std::this_thread::sleep_for(std::chrono::milliseconds(25));
-                    }
-                }
-            }).detach();
+            wotm_coop::retryCross();
         }
         g_origDialogAdventure(rdram, ctx, runtime);
     }
@@ -1040,7 +1026,7 @@ namespace
                     }
                 if (skipToFinalEnding(rdram, ctx, runtime, by))
                     ais = 0;
-                for (int32_t i = 0; i < ais && i < 4; ++i)
+                for (int32_t i = 0; i < ais && i < 12; ++i)   // m_monsters tem 16 vagas; arcade e WOTM_MATCH vao ate 7 IAs
                 {
                     const uint32_t ai = READ32(kGame + 0x120390 + 4 * i);   // m_monsters[4 + i]
                     if (ai && !READ8(ai + 0xE8))                           // m_dead

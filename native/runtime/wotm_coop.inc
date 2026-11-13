@@ -24,6 +24,11 @@
 //     jogador 1 vezes 1,2 (2 jogadores), 1,3 (3) ou 1,4 (4).
 //   - Shell::InitPlayers (comeco da fase, retry, etapa de chefe): todos de volta a fase.
 
+namespace wotm_arcade
+{
+bool on();   // wotm_arcade.inc: o roteiro do WOTM_COOPKILL tambem vale nas lutas do arcade
+}
+
 namespace wotm_coop
 {
 using wotm_modes4::call;
@@ -1912,7 +1917,9 @@ void dbgSchedule(const char *tag, uint32_t frames)
 // Por quadro (comeco do rtMain, okToUnify): conta os quadros de luta fora de cinema, dispara as mortes do roteiro e os dumps
 void dbgTick(uint8_t *rdram)
 {
-    if (!g_dbgLog || !players(rdram))
+    // jogadores da campanha co-op ou, no arcade, os de qualquer luta (desafio e free for all, m_mode 2 e 3)
+    const int dbgN = wotm_arcade::on() ? std::clamp(static_cast<int32_t>(rd32(rdram, kNumPlayers)), 1, 4) : players(rdram);
+    if (!g_dbgLog || !dbgN)
         return;
     const uint32_t f = rd32(rdram, wotm::sym::g_frame);
     if (f == g_lastFrame)
@@ -1930,7 +1937,7 @@ void dbgTick(uint8_t *rdram)
     }
     if (!g_killOrder.empty())
     {   // roteiro: so sai quem o roteiro derruba (a vida dos outros jogadores fica cheia; o inv nao pega toda morte)
-        const int n = players(rdram);
+        const int n = dbgN;
         for (int i = 0; i < n; ++i)
         {
             const uint32_t m = monster(rdram, i);
@@ -1938,7 +1945,7 @@ void dbgTick(uint8_t *rdram)
                 wrF(rdram, m + kHealth, rdF(rdram, m + 0x448));   // vida maxima
         }
         // e a das IAs inimigas: os bots nao terminam a fase antes do fim do roteiro
-        for (int i = 0, ais = static_cast<int32_t>(rd32(rdram, kNumAIs)); i < ais && i < 4; ++i)
+        for (int i = 0, ais = static_cast<int32_t>(rd32(rdram, kNumAIs)); i < ais && i < 12; ++i)
             if (const uint32_t m = monster(rdram, 4 + i); m && rdF(rdram, m + kHealth) > 0.f)
                 wrF(rdram, m + kHealth, rdF(rdram, m + 0x448));
     }
@@ -1954,6 +1961,31 @@ void dbgTick(uint8_t *rdram)
             dbgSchedule(tag, 150);
         }
     }
+}
+
+// WOTM_COOPRETRY=1 (teste do retry sem teclado): no dialogo de fim de jogo (o da partida direta, wotm_overrides.cpp, e a derrota do
+// arcade, wotm_arcade.inc) um X sintetico aos 4 s e aos 8 s, pelo mesmo pedido do clique do mouse nos menus (wotm_mouse.hpp,
+// requestCross; a tela vale como tela do jogo com mouse por um instante)
+bool retryTest()
+{
+    static const bool s = [] { const char *e = std::getenv("WOTM_COOPRETRY"); return e && *e == '1'; }();
+    return s;
+}
+void retryCross()
+{
+    std::thread([] {
+        for (int k = 0; k < 2; ++k)
+        {
+            std::this_thread::sleep_for(std::chrono::seconds(4));
+            for (int i = 0; i < 6; ++i)
+            {
+                wotm::mouse::gameMenu();
+                if (i == 0)
+                    wotm::mouse::requestCross(2);
+                std::this_thread::sleep_for(std::chrono::milliseconds(25));
+            }
+        }
+    }).detach();
 }
 
 // Com o log: quem marca a morte de um monstro (setDead, StateDeath::transitionInto, volume de morte), com o quadro e o ra
