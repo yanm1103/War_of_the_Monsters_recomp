@@ -254,7 +254,8 @@ Plan and the owner's decisions: `docs/investigacoes/2026-11-13/modo_arcade_plano
   mode (`Shell+0x2C10`, `+0x2B54`), stage, `m_numAIs`, the CPUs' `m_monsterSel[4..]` and `m_costume[2..]`, `m_killTarget` 0.
   `InitPlayerLives` gives every player 2 lives (1 respawn per fight).
 - **Fights 1 to 4:** `gameResolveLifeAndDeath` is replaced. A player who is out with a life left respawns (`wotm_coop::revive`);
-  without one, the monster leaves the scene (`hierSetCsDrawMe` 0, shadow off) and that player's camera follows an ally. A CPU that is
+  without one, it leaves through `wotm_coop::eliminate`: monster hidden and the screen rebuilt with whoever goes on (one in full screen,
+  two in the halves, three in the 3-view layout, HUD and pick-up highlight included), until the next fight. A CPU that is
   out leaves the scene with `m_playerNum` 0. All players out: `rtReturnToShell(1)`; all CPUs out: the victory pose of the first
   player standing (its `StateVictory::transitionOK` runs with `m_mode` 1, since in modes 2 and 3 it waits for the `m_killTarget`,
   which the arcade leaves at 0), then `rtReturnToShell(0)` (after 300 frames without the pose, it leaves anyway). The evaluators

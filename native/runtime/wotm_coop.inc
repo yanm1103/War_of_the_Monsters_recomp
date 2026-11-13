@@ -82,6 +82,14 @@ int inFight(int n, int except)
 // do HUD vao junto) e o HUD v mostra a barra dele (m_viewSlot[v]). 1 jogador: tela cheia (vista 0 no viewDef[0], viewport 0);
 // 2: as metades do retail (viewDef[1] e [2], viewports 1 e 2); 3 (de 4): o layout de 3 do split4 (faixa embaixo).
 int g_views = 0, g_map[4] = {};
+// Jogadores da tela remontada: os da campanha co-op ou, com alguem fora numa luta do arcade (m_mode 2 e 3), os do arcade
+int viewPlayers(uint8_t *rdram)
+{
+    if (const int n = players(rdram))
+        return n;
+    const int32_t n = static_cast<int32_t>(rd32(rdram, kNumPlayers));
+    return g_views && wotm_arcade::on() && n >= 1 && n <= 4 ? n : 0;
+}
 uint32_t g_viewSlotSaved[4] = {};
 
 uint32_t layoutDef(int v)
@@ -257,7 +265,7 @@ void hudRestore(uint8_t *rdram)
 }
 void hudUpdateHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
-    const int n = ctx->pc == g_hudUpdate.addr && g_views ? players(rdram) : 0;
+    const int n = ctx->pc == g_hudUpdate.addr && g_views ? viewPlayers(rdram) : 0;
     if (!n)
     {
         g_hudUpdate.orig(rdram, ctx, runtime);
@@ -854,7 +862,7 @@ void baseUpdHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 Hook g_highlights{fn::enableHighlights__12LevelPickupsi};
 void highlightsHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
-    const int n = ctx->pc == g_highlights.addr && g_views ? players(rdram) : 0;
+    const int n = ctx->pc == g_highlights.addr && g_views ? viewPlayers(rdram) : 0;
     if (!n)
     {
         g_highlights.orig(rdram, ctx, runtime);
@@ -906,7 +914,7 @@ void okToUnifyHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t ra = GPR_U32(ctx, 31);
         g_okToUnify.orig(rdram, ctx, runtime);
-        if (n && ctx->pc == ra)
+        if ((n || viewPlayers(rdram)) && ctx->pc == ra)   // o arcade (m_mode 2 e 3) tambem remonta a tela ao sair alguem
             applyLayout(rdram, ctx, runtime);
         return;
     }

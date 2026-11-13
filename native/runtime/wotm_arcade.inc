@@ -7,7 +7,7 @@
 //  - A luta e escrita no Shell na entrada do ResolveCommandLineArguments (o main monta a fase dali com o m_levelNum); o
 //    InitPlayerLives da 2 vidas (1 renascimento) a cada jogador.
 //  - Nas 4 primeiras o gameResolveLifeAndDeath do retail (que encerra a rodada no primeiro monstro fora) da lugar ao daqui: jogador fora
-//    com vida renasce (wotm_coop::revive), sem vida sai de cena; CPU fora sai de cena; todos os jogadores fora = derrota
+//    com vida renasce (wotm_coop::revive), sem vida sai (wotm_coop::eliminate: tela com quem sobrou); CPU fora sai de cena; todos os jogadores fora = derrota
 //    (rtReturnToShell 1), todas as CPUs fora = a vitoria do primeiro jogador de pe (rtReturnToShell 0). O EvaluateOnePlayerChallenge
 //    e o EvaluateMultiPlayerBattleStatusAI recebem esses codigos: vitoria soma os tokens e marca a proxima luta; derrota abre o
 //    dialogo de derrota da aventura (CONTINUE repete a luta, QUIT vai ao menu com os tokens ganhos).
@@ -420,15 +420,10 @@ void lifeDeathHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
                 wotm_coop::revive(rdram, ctx, runtime, i, lives - 1);
             else
             {
+                // monstro escondido e a tela remontada com quem continua (1 em tela cheia, 2 nas metades, 3 no layout de 3), como
+                // na aventura; o Shell::InitPlayers da proxima luta volta a tela da largada
                 g_humOut[i] = true;
-                wr32(rdram, kLives + 4u * uint32_t(i), 0u);
-                hide(rdram, ctx, runtime, m);
-                for (int j = 0; j < n; ++j)
-                    if (j != i && !g_humOut[j] && monster(rdram, j))
-                    {
-                        call(rdram, ctx, runtime, fn::SetCameraToFollowMonster__7CamerasiP7Monster, {uint32_t(i), monster(rdram, j)});
-                        break;
-                    }
+                wotm_coop::eliminate(rdram, ctx, runtime, i, n);
                 std::fprintf(stderr, "[arcade] jogador %d fora da luta\n", i + 1);
                 continue;
             }
