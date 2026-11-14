@@ -133,7 +133,7 @@ enum Tab { TabVideo, TabFeatures, TabCamera, TabControls, TabArmy, TabCheats, kT
 constexpr const char *kTabNames[kTabs] = {"VIDEO", "FEATURES", "CAMERA", "CONTROLS", "ARMY", "CHEATS"};
 // Centro e meia largura de cada aba no titulo do painel (fracao da largura), medidos pelo renderPanel; o panelHit os le
 static float g_tabCx[kTabs] = {0.20f, 0.32f, 0.44f, 0.56f, 0.68f, 0.80f}, g_tabHw[kTabs] = {0.06f, 0.06f, 0.06f, 0.06f, 0.06f, 0.06f};
-constexpr int kMaxOpts = 9;
+constexpr int kMaxOpts = 10;
 struct Opt { st::Key key; const char *label; const char *hint; };
 struct TabDef { int n; Opt opt[kMaxOpts]; };
 constexpr TabDef kTabDefs[kTabs] = {
@@ -147,12 +147,13 @@ constexpr TabDef kTabDefs[kTabs] = {
       {st::Interp, "INTERPOLATE FRAMES", "SMOOTHER MOTION ABOVE 60 HZ OR WHEN THE GAME DROPS TO 30. MAY ADD DELAY"},
       {st::Msaa, "ANTI-ALIASING", "MSAA SMOOTHS THE JAGGED EDGES OF THE 3D MODELS"},
       {st::TexFilter, "TEXTURE FILTER", "KEEPS TEXTURES SHARP FAR AWAY AND AT STEEP ANGLES"}}},
-    {9,
+    {10,
      {{st::LockToggle, "LOCK-ON", "LOCKS ON WITH R1 ALONE. OFF KEEPS THE GAME'S L1 + R1"},
       {st::DpadTarget, "D-PAD TARGET SWITCH", "LEFT AND RIGHT ON THE D-PAD PICK ANOTHER TARGET WHILE LOCKED ON"},
       {st::EnemyBars, "ENEMY BARS", "SHOWS THE HEALTH AND ENERGY OF EACH ENEMY ABOVE THEIR HEAD"},
       {st::DamagePop, "DAMAGE NUMBERS", "SHOWS HOW MUCH DAMAGE EACH HIT DOES"},
       {st::HideHud, "HIDE HUD", "HIDES THE BARS, ICONS AND TEXT DURING THE FIGHT. THE PAUSE MENU STILL SHOWS"},
+      {st::VersusWins, "WINS COUNTER", "SHOWS HOW MANY FIGHTS EACH PLAYER HAS WON, AT THE BOTTOM OF THEIR SCREEN"},
       {st::Announcer, "NARRATOR", "A VOICE CALLS OUT THE MONSTER AND THE LEVEL YOU PICK, OR ONLY THE MONSTER ROARS"},
       {st::SkipIntro, "SKIP INTRO MOVIES", "GOES STRAIGHT TO THE TITLE SCREEN. CHANGES TAKE EFFECT ON NEXT BOOT"},
       {st::ArcadeCpus, "ARCADE CPUS", "THE MOST CPUS IN ONE ARCADE FIGHT. NEVER MORE THAN 8 MONSTERS IN ALL"},

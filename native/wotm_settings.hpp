@@ -61,6 +61,7 @@ enum Key
     DpadTarget,   // com o lock-on alternado travado, esquerda/direita do direcional trocam o alvo (1); 0 = o direcional continua andando
     ArcadeCpus,   // modo arcade (wotm_arcade.inc): CPUs na ultima luta normal (1..7; a corrida usa min(isto, 8 - jogadores))
     LmsRespawns,  // last monster standing (wotm_lms.inc): renascimentos de cada monstro, jogador ou CPU (0..9)
+    VersusWins,   // texto "WINS n" do HUD nas lutas versus (Hud::update e o HUD nativo dos jogadores 3 e 4); 1 = como no retail
     kKeys
 };
 
@@ -71,9 +72,9 @@ inline constexpr const char *kEnv[kKeys] = {"WOTM_RES",        "WOTM_ASPECT",   
                                             "WOTM_ANNOUNCER",  "WOTM_SKIPINTRO",   "WOTM_VIBRATION",   "WOTM_INTERP",
                                             "WOTM_ARMY",       "WOTM_ARMY_TRIGGER", "WOTM_ARMY_EVERY", "WOTM_ARMY_CHAOS", "WOTM_ARMY_WAVE",
                                             "WOTM_ARMY_FFA",   "WOTM_ARMY_ELIM",   "WOTM_ARMY_ENDURANCE", "WOTM_ARMY_TRAINING",
-                                            "WOTM_HIDEHUD",    "WOTM_DPADTARGET", "WOTM_ARCADE_CPUS", "WOTM_LMS_RESPAWNS"};
+                                            "WOTM_HIDEHUD",    "WOTM_DPADTARGET", "WOTM_ARCADE_CPUS", "WOTM_LMS_RESPAWNS", "WOTM_VERSUSWINS"};
 inline constexpr int kDefault[kKeys] = {720, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 5, 0, 100, 0, 0, 1, 0, 1, 1,
-                                        0, 2, 60, 50, 3, 1, 1, 1, 0, 0, 1, 3, 0};
+                                        0, 2, 60, 50, 3, 1, 1, 1, 0, 0, 1, 3, 0, 1};
 inline constexpr const char *kPromptNames[] = {"auto", "original", "keyboard", "xbox", "playstation", "nintendo"};
 inline constexpr int kPromptStyles = 6;
 enum PromptStyle { PromptAuto, PromptOriginal, PromptKeyboard, PromptXbox, PromptPs, PromptNintendo };
@@ -93,7 +94,7 @@ inline constexpr float kAspectRatio[] = {0.f, 4.f / 3.f, 16.f / 9.f, 16.f / 10.f
 inline constexpr int kAspects = 6;
 
 inline std::atomic<int> g_val[kKeys] = {720, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 5, 0, 100, 0, 0, 1, 0, 1, 1,
-                                        0, 2, 60, 50, 3, 1, 1, 1, 0, 0, 1, 3, 0};
+                                        0, 2, 60, 50, 3, 1, 1, 1, 0, 0, 1, 3, 0, 1};
 // Primeira execucao de um jogador (sem settings.ini, com o arquivo ligado): por cima do kDefault, que segue valendo para os testes
 // (lote e corpus rodam com WOTM_SETTINGS=0), tela cheia sem borda, lock-on alternado, barras dos inimigos, narrador com o grito do
 // monstro e a resolucao do monitor (Res fica pendente ate a janela existir: resolveFirstRunRes, wotm_live.inc). Decisao do dono.
