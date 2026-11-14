@@ -275,6 +275,13 @@ void hudUpdateHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     }
     hudRestore(rdram);
     const uint32_t ra = GPR_U32(ctx, 31);
+    // Na vista unificada com m_numMonsters 2 (a pose de vitoria do versus) o rtMain chama o update dos HUDs 0 e 1; com uma vista so,
+    // o HUD 1 e de quem saiu e escreveria o "WINS n" dele na tela cheia
+    if (g_views == 1 && (GPR_U32(ctx, 4) & 0x1FFFFFFFu) == kGame + kHudStride)
+    {
+        ctx->pc = ra;
+        return;
+    }
     g_hudSwap.on = true;
     g_hudSwap.numMonsters = rd32(rdram, kNumMonsters);
     for (uint32_t i = 0; i < 4; ++i)

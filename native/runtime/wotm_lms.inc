@@ -50,7 +50,9 @@ struct Hook
 };
 Hook g_lives{fn::InitPlayerLives__5Shell}, g_lifeDeath{fn::gameResolveLifeAndDeath__7TheGame},
     g_evalCh{fn::EvaluateOnePlayerChallengeStatus__5Shelli}, g_evalAi{fn::EvaluateMultiPlayerBattleStatusAI__5Shelli},
-    g_evalNoAi{fn::EvaluateMultiPlayerBattleStatusNoAI__5Shelli}, g_userint{fn::userintMain__Fv};
+    g_evalNoAi{fn::EvaluateMultiPlayerBattleStatusNoAI__5Shelli}, g_userint{fn::userintMain__Fv}, g_viewCs{fn::viewGetViewCs__Fi};
+uint32_t g_dialogCs = 0;   // o _cs que o dialogo do fim da luta recebe no viewGetViewCs (evalFight)
+int g_dialogCsCalls = 0;
 
 int players(uint8_t *rdram) { return std::clamp(static_cast<int32_t>(rd32(rdram, kNumPlayers)), 1, 4); }
 int slotCount(uint8_t *rdram) { return std::min(static_cast<int>(rd32(rdram, kNumSlots)), kMaxSlots); }
@@ -167,7 +169,7 @@ void lifeDeathHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             tryPose(rdram, ctx, runtime, g_winner);
         return;
     }
-    int humans = 0;
+    int humans = 0, outNow = 0, outList[4] = {};
     uint32_t lastHuman = 0;
     for (int i = 0; i < n; ++i)
     {
@@ -183,7 +185,7 @@ void lifeDeathHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             {
                 g_humOut[i] = true;
                 g_lastOut = m;
-                wotm_coop::eliminate(rdram, ctx, runtime, i, n);   // monstro escondido; a tela com quem sobrou
+                outList[outNow++] = i;
                 std::fprintf(stderr, "[lms] jogador %d fora da luta\n", i + 1);
                 continue;
             }
@@ -191,6 +193,12 @@ void lifeDeathHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         ++humans;
         lastHuman = m;
     }
+    // Monstro escondido e a tela com quem sobrou; o ultimo jogador a cair fica na tela dele ate o dialogo (como o game over do coop)
+    for (int k = 0; k < outNow; ++k)
+        if (humans)
+            wotm_coop::eliminate(rdram, ctx, runtime, outList[k], n);
+        else
+            wr32(rdram, kLives + 4u * uint32_t(outList[k]), 0u);
     int cpus = 0;
     uint32_t best = 0;
     for (int s = 0, slots = slotCount(rdram); s < slots; ++s)
@@ -254,6 +262,11 @@ void evalFight(const Hook &h, uint8_t *rdram, R5900Context *ctx, PS2Runtime *run
     const uint32_t ra = GPR_U32(ctx, 31), w = g_winner ? rd32(rdram, g_winner + kMonsterNum) : 0u;
     wr32(rdram, kWon0, w);
     std::fprintf(stderr, "[lms] dialogo: vencedor na vaga %u (m_playerNum %u)\n", w, rd32(rdram, slot(int(w)) + kPlayerNum));
+    // O displayDialog copia para a vista unificada a camera da vista m_won[0] (viewGetViewCs), que no free-for-all e o indice do
+    // jogador; aqui m_won[0] e a vaga, e a vaga de uma CPU aponta para uma vista parada ou inexistente (fundo preto). A camera e a da
+    // vista 0: a do vencedor, ou a do ultimo jogador a cair
+    g_dialogCs = rd32(rdram, wotm::sym::viewInfo);
+    g_dialogCsCalls = 2;   // translacao e rotacao
     if (wotm_coop::retryTest())
         wotm_coop::retryCross();   // WOTM_COOPRETRY=1: PLAY AGAIN sem teclado
     wotm_modes4::tailDialog(rdram, ctx, runtime, 5, ra);
@@ -261,6 +274,19 @@ void evalFight(const Hook &h, uint8_t *rdram, R5900Context *ctx, PS2Runtime *run
 void evalChHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { evalFight(g_evalCh, rdram, ctx, runtime); }
 void evalAiHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { evalFight(g_evalAi, rdram, ctx, runtime); }
 void evalNoAiHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { evalFight(g_evalNoAi, rdram, ctx, runtime); }
+
+// viewGetViewCs (folha): as duas chamadas do displayDialog depois do evalFight recebem o g_dialogCs
+void viewCsHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    if (ctx->pc != g_viewCs.addr || g_dialogCsCalls <= 0 || !g_dialogCs)
+    {
+        g_viewCs.orig(rdram, ctx, runtime);
+        return;
+    }
+    --g_dialogCsCalls;
+    ctx->r[2] = _mm_set_epi64x(0, static_cast<int64_t>(static_cast<int32_t>(g_dialogCs)));
+    ctx->pc = GPR_U32(ctx, 31);
+}
 
 // userintMain: os menus abriram (QUIT); o modo desliga (o g_armed fica ate a proxima escolha no menu)
 void userintHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -280,7 +306,8 @@ void wotmLmsInstall(PS2Runtime &runtime)
     using namespace wotm_lms;
     const std::pair<Hook *, PS2Runtime::RecompiledFunction> hooks[] = {
         {&g_lives, &livesHook},   {&g_lifeDeath, &lifeDeathHook}, {&g_evalCh, &evalChHook},
-        {&g_evalAi, &evalAiHook}, {&g_evalNoAi, &evalNoAiHook},   {&g_userint, &userintHook}};
+        {&g_evalAi, &evalAiHook}, {&g_evalNoAi, &evalNoAiHook},   {&g_userint, &userintHook},
+        {&g_viewCs, &viewCsHook}};
     for (const auto &[h, f] : hooks)
     {
         if (!(h->orig = runtime.lookupFunction(h->addr)))
