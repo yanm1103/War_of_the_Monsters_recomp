@@ -464,6 +464,16 @@ namespace wotm_custom
                 has = has && READ32(m + kAnims + id * kAnimStride) != 0;
         if (has)
         {
+            // O retail recusa calado (killPickup(it, 1), golpe comum) com a vitima invulneravel (+0x49), o dardo gasto (Pickup::health
+            // +0x48 <= 0: cada empalada tira o useDamage do tipo, e os golpes no dardo tiram o resto) ou a vitima agarrada (+0x68B0).
+            const uint32_t pu = READ32(GPR_U32(ctx, 5));
+            float hp = 0.f;
+            if (pu)
+                std::memcpy(&hp, rdram + ((pu + 0x48u) & 0x01FFFFFFu), 4);
+            const bool vuln = rdram[(m + 0x49u) & 0x01FFFFFFu] != 0, grab = READ32(m + 0x68B0u) != 0;
+            if (!vuln || !(hp > 0.f) || grab)
+                std::fprintf(stderr, "[custom] dardo: o retail nao empala (%s%s%s); golpe comum\n", vuln ? "" : "vitima invulneravel ",
+                             hp > 0.f ? "" : "dardo gasto ", grab ? "vitima agarrada" : "");
             g_origImpale(rdram, ctx, runtime);
             return;
         }

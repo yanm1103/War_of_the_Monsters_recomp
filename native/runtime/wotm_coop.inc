@@ -24,6 +24,13 @@
 //     jogador 1 vezes 1,2 (2 jogadores), 1,3 (3) ou 1,4 (4).
 //   - Shell::InitPlayers (comeco da fase, retry, etapa de chefe): todos de volta a fase.
 
+#include "wotm_lms.h"   // last monster standing: a tela com quem sobrou (viewPlayers) e a da largada no PLAY AGAIN
+
+namespace wotm_arcade
+{
+bool on();   // wotm_arcade.inc: o roteiro do WOTM_COOPKILL tambem vale nas lutas do arcade
+}
+
 namespace wotm_coop
 {
 using wotm_modes4::call;
@@ -77,6 +84,14 @@ int inFight(int n, int except)
 // do HUD vao junto) e o HUD v mostra a barra dele (m_viewSlot[v]). 1 jogador: tela cheia (vista 0 no viewDef[0], viewport 0);
 // 2: as metades do retail (viewDef[1] e [2], viewports 1 e 2); 3 (de 4): o layout de 3 do split4 (faixa embaixo).
 int g_views = 0, g_map[4] = {};
+// Jogadores da tela remontada: os da campanha co-op ou, com alguem fora numa luta do arcade (m_mode 2 e 3), os do arcade
+int viewPlayers(uint8_t *rdram)
+{
+    if (const int n = players(rdram))
+        return n;
+    const int32_t n = static_cast<int32_t>(rd32(rdram, kNumPlayers));
+    return g_views && (wotm_arcade::on() || wotm_lms::on()) && n >= 1 && n <= 4 ? n : 0;
+}
 uint32_t g_viewSlotSaved[4] = {};
 
 uint32_t layoutDef(int v)
@@ -252,7 +267,7 @@ void hudRestore(uint8_t *rdram)
 }
 void hudUpdateHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
-    const int n = ctx->pc == g_hudUpdate.addr && g_views ? players(rdram) : 0;
+    const int n = ctx->pc == g_hudUpdate.addr && g_views ? viewPlayers(rdram) : 0;
     if (!n)
     {
         g_hudUpdate.orig(rdram, ctx, runtime);
@@ -260,6 +275,13 @@ void hudUpdateHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     }
     hudRestore(rdram);
     const uint32_t ra = GPR_U32(ctx, 31);
+    // Na vista unificada com m_numMonsters 2 (a pose de vitoria do versus) o rtMain chama o update dos HUDs 0 e 1; com uma vista so,
+    // o HUD 1 e de quem saiu e escreveria o "WINS n" dele na tela cheia
+    if (g_views == 1 && (GPR_U32(ctx, 4) & 0x1FFFFFFFu) == kGame + kHudStride)
+    {
+        ctx->pc = ra;
+        return;
+    }
     g_hudSwap.on = true;
     g_hudSwap.numMonsters = rd32(rdram, kNumMonsters);
     for (uint32_t i = 0; i < 4; ++i)
@@ -849,7 +871,7 @@ void baseUpdHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 Hook g_highlights{fn::enableHighlights__12LevelPickupsi};
 void highlightsHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
-    const int n = ctx->pc == g_highlights.addr && g_views ? players(rdram) : 0;
+    const int n = ctx->pc == g_highlights.addr && g_views ? viewPlayers(rdram) : 0;
     if (!n)
     {
         g_highlights.orig(rdram, ctx, runtime);
@@ -884,12 +906,15 @@ void okToUnifyHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         dbgTick(rdram);
     // Vista 0 de volta a camera 0 (fora da vista unificada). Com todos mortos o jogo junta a tela (a vista 0 empresta o _cs da 2), e
     // um viewCreate da vista 0 nesse meio tempo (a carga do retry) grava ownCs = cs emprestado: ao sair da vista unificada, o
-    // viewGrappleConfig devolvia a vista 0 a camera 2 (parada, POV 3) e o P1 sumia da metade dele
-    if (ctx->pc == g_okToUnify.addr && players(rdram) > 1 && !rd32(rdram, wotm::sym::gUseUnifiedView) &&
+    // viewGrappleConfig devolvia a vista 0 a camera 2 (parada, POV 3) e o P1 sumia da metade dele. O PLAY AGAIN do last monster
+    // standing (m_mode 2 e 3, 2 a 4 jogadores) tem o mesmo caminho; la a tela junta de verdade com os dois perto (o cs emprestado
+    // com o ownCs certo), entao so o ownCs errado conta
+    const bool lmsSplit = !players(rdram) && wotm_lms::on() && static_cast<int32_t>(rd32(rdram, kNumPlayers)) > 1;
+    if (ctx->pc == g_okToUnify.addr && (players(rdram) > 1 || lmsSplit) && !rd32(rdram, wotm::sym::gUseUnifiedView) &&
         !rd32(rdram, wotm::sym::moviePlaying))
     {
         const uint32_t vi = wotm::sym::viewInfo, cs0 = rd32(rdram, wotm_split4::camera(0) + wotm_split4::kCamCs);
-        if (cs0 && (rd32(rdram, vi + 0x10) != cs0 || rd32(rdram, vi) != cs0))
+        if (cs0 && (rd32(rdram, vi + 0x10) != cs0 || (!lmsSplit && rd32(rdram, vi) != cs0)))
         {
             std::fprintf(stderr, "[coop] vista 0: camera %x (propria %x) -> %x, a da camera 0\n", rd32(rdram, vi), rd32(rdram, vi + 0x10), cs0);
             wr32(rdram, vi + 0x10, cs0);
@@ -901,7 +926,7 @@ void okToUnifyHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t ra = GPR_U32(ctx, 31);
         g_okToUnify.orig(rdram, ctx, runtime);
-        if (n && ctx->pc == ra)
+        if ((n || viewPlayers(rdram)) && ctx->pc == ra)   // o arcade (m_mode 2 e 3) tambem remonta a tela ao sair alguem
             applyLayout(rdram, ctx, runtime);
         return;
     }
@@ -1620,7 +1645,9 @@ void grandTotalHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 // escalonador (o retry no Capitolio), a retomada nao passa pelo gancho: fica pendente para o primeiro SetOkToUnify (okToUnifyHook)
 void initPlayersAfter(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, const bool was[4], bool remapped)
 {
-    const int n = players(rdram);
+    int n = players(rdram);
+    if (!n && wotm_lms::on() && (remapped || was[0] || was[1] || was[2] || was[3]))
+        n = std::clamp(static_cast<int32_t>(rd32(rdram, kNumPlayers)), 1, 4);   // o PLAY AGAIN do last monster standing (m_mode 2 e 3)
     if (!n)
         return;
     for (int i = 0; i < n; ++i)
@@ -1912,7 +1939,9 @@ void dbgSchedule(const char *tag, uint32_t frames)
 // Por quadro (comeco do rtMain, okToUnify): conta os quadros de luta fora de cinema, dispara as mortes do roteiro e os dumps
 void dbgTick(uint8_t *rdram)
 {
-    if (!g_dbgLog || !players(rdram))
+    // jogadores da campanha co-op ou, no arcade e no last monster standing, os de qualquer luta (desafio e free for all, m_mode 2 e 3)
+    const int dbgN = (wotm_arcade::on() || wotm_lms::on()) ? std::clamp(static_cast<int32_t>(rd32(rdram, kNumPlayers)), 1, 4) : players(rdram);
+    if (!g_dbgLog || !dbgN)
         return;
     const uint32_t f = rd32(rdram, wotm::sym::g_frame);
     if (f == g_lastFrame)
@@ -1930,7 +1959,7 @@ void dbgTick(uint8_t *rdram)
     }
     if (!g_killOrder.empty())
     {   // roteiro: so sai quem o roteiro derruba (a vida dos outros jogadores fica cheia; o inv nao pega toda morte)
-        const int n = players(rdram);
+        const int n = dbgN;
         for (int i = 0; i < n; ++i)
         {
             const uint32_t m = monster(rdram, i);
@@ -1938,7 +1967,7 @@ void dbgTick(uint8_t *rdram)
                 wrF(rdram, m + kHealth, rdF(rdram, m + 0x448));   // vida maxima
         }
         // e a das IAs inimigas: os bots nao terminam a fase antes do fim do roteiro
-        for (int i = 0, ais = static_cast<int32_t>(rd32(rdram, kNumAIs)); i < ais && i < 4; ++i)
+        for (int i = 0, ais = static_cast<int32_t>(rd32(rdram, kNumAIs)); i < ais && i < 12; ++i)
             if (const uint32_t m = monster(rdram, 4 + i); m && rdF(rdram, m + kHealth) > 0.f)
                 wrF(rdram, m + kHealth, rdF(rdram, m + 0x448));
     }
@@ -1954,6 +1983,31 @@ void dbgTick(uint8_t *rdram)
             dbgSchedule(tag, 150);
         }
     }
+}
+
+// WOTM_COOPRETRY=1 (teste do retry sem teclado): no dialogo de fim de jogo (o da partida direta, wotm_overrides.cpp, e a derrota do
+// arcade, wotm_arcade.inc) um X sintetico aos 4 s e aos 8 s, pelo mesmo pedido do clique do mouse nos menus (wotm_mouse.hpp,
+// requestCross; a tela vale como tela do jogo com mouse por um instante)
+bool retryTest()
+{
+    static const bool s = [] { const char *e = std::getenv("WOTM_COOPRETRY"); return e && *e == '1'; }();
+    return s;
+}
+void retryCross()
+{
+    std::thread([] {
+        for (int k = 0; k < 2; ++k)
+        {
+            std::this_thread::sleep_for(std::chrono::seconds(4));
+            for (int i = 0; i < 6; ++i)
+            {
+                wotm::mouse::gameMenu();
+                if (i == 0)
+                    wotm::mouse::requestCross(2);
+                std::this_thread::sleep_for(std::chrono::milliseconds(25));
+            }
+        }
+    }).detach();
 }
 
 // Com o log: quem marca a morte de um monstro (setDead, StateDeath::transitionInto, volume de morte), com o quadro e o ra

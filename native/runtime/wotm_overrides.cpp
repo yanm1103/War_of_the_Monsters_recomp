@@ -127,6 +127,10 @@ WotmFreeCamPose g_wotmFreeCamPose;
 #include "wotm_army.inc"
 // Log das acoes da IA (WOTM_AILOG)
 #include "wotm_ai.inc"
+// Modo arcade: 5 lutas seguidas contra CPUs, chefe no fim (linha ARCADE do menu, WOTM_ARCADE)
+#include "wotm_arcade.inc"
+// Last monster standing: todos contra todos com X renascimentos cada (linha LAST MONSTER STANDING do menu, WOTM_LMS)
+#include "wotm_lms.inc"
 
 namespace
 {
@@ -266,7 +270,7 @@ namespace
     // aceita o figurino como "<monstro>:<0-3>" ("3:2,1:1,1"); sem ":" ou com um figurino ja usado pelo mesmo monstro, fica com o menor
     // livre (o menu nao deixa dois iguais no mesmo figurino). A diferenca e m_killTarget 0 (o menu poe 1): sem
     // meta de vitorias, EvaluateOnePlayerChallengeStatus so reergue o monstro derrubado e a luta segue, sem o dialogo "PLAY AGAIN"
-    // que esperaria o pad. O filme de abertura (uiMain, 0x1D93D8) vira no-op. Cada fim de rodada (entrada de
+    // que esperaria o pad. O filme de abertura (uiMain(0)) vira no-op; os finais (uiMain(1), com needOutro) tocam. Cada fim de rodada (entrada de
     // Shell::EvaluateGameStatus, 0x1A7960) sai no log como [partida] com a vida e as vitorias dos dois monstros.
     constexpr uint32_t kUserintMain = wotm::fn::userintMain__Fv, kUiMain = wotm::fn::uiMain__Fi, kEvaluateGameStatus = wotm::fn::EvaluateGameStatus__5Shelli;
     PS2Runtime::RecompiledFunction g_origEvaluate = nullptr;
@@ -452,7 +456,14 @@ namespace
         g_origUserintMain(rdram, ctx, runtime);
     }
 
-    void uiMainSkipped(uint8_t *, R5900Context *ctx, PS2Runtime *) { ctx->pc = GPR_U32(ctx, 31); }
+    PS2Runtime::RecompiledFunction g_origUiMain = nullptr;
+    void uiMainSkipped(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (GPR_U32(ctx, 4) == 1u && g_origUiMain)
+            g_origUiMain(rdram, ctx, runtime);   // os filmes do fim (aventura, arcade) e os creditos
+        else
+            ctx->pc = GPR_U32(ctx, 31);
+    }
 
     // Aventura direta (WOTM_MODE=1): sem o "salvar?" da vitoria (displayDialog 2). O EvaluateOnePlayerStoryStatus ja passou a
     // historia para a fase seguinte antes dele; pular equivale a "nao salvar" e a partida seguinte segue sozinha.
@@ -467,25 +478,11 @@ namespace
             ctx->pc = GPR_U32(ctx, 31);
             return;
         }
-        // WOTM_COOPRETRY=1 (teste do retry sem teclado): no fim de jogo (dialogo 1) um X sintetico aos 4 s e aos 8 s, pelo mesmo
-        // pedido do clique do mouse nos menus (wotm_mouse.hpp, requestCross; a tela vale como tela do jogo com mouse por um instante)
-        static const bool s_retry = [] { const char *e = std::getenv("WOTM_COOPRETRY"); return e && *e == '1'; }();
-        if (s_retry && ctx->pc == wotm::fn::displayDialog__Fi && GPR_U32(ctx, 4) == 1u)
+        // WOTM_COOPRETRY=1: no fim de jogo (dialogo 1) o X sintetico do wotm_coop::retryCross
+        if (wotm_coop::retryTest() && ctx->pc == wotm::fn::displayDialog__Fi && GPR_U32(ctx, 4) == 1u)
         {
             std::fprintf(stderr, "[partida] fim de jogo: X sintetico em 4 s (WOTM_COOPRETRY)\n");
-            std::thread([] {
-                for (int k = 0; k < 2; ++k)
-                {
-                    std::this_thread::sleep_for(std::chrono::seconds(4));
-                    for (int i = 0; i < 6; ++i)
-                    {
-                        wotm::mouse::gameMenu();
-                        if (i == 0)
-                            wotm::mouse::requestCross(2);
-                        std::this_thread::sleep_for(std::chrono::milliseconds(25));
-                    }
-                }
-            }).detach();
+            wotm_coop::retryCross();
         }
         g_origDialogAdventure(rdram, ctx, runtime);
     }
@@ -620,13 +617,41 @@ namespace
     uint32_t g_ffaRa = 0, g_ffaBefore = 0;
     bool g_ffaPending = false, g_ffaFake = false;
 
+    // A tela pode terminar num salto para outra funcao (tail call): a volta ao chamador nao passa por aqui, e o cursor falso (3) ficaria
+    // valendo ate a proxima chamada (o numero piscava). Segue o salto ate a volta e o gancho termina o servico.
+    void finishTail(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, bool pending, uint32_t ra, int screen)
+    {
+        if (!pending || ctx->pc == ra || !runtime->lookupFunction(ctx->pc))
+            return;
+        static int s_logs = 0;
+        if (s_logs++ < 3)
+            std::fprintf(stderr, "[wotm] tela %d: a tela saltou para %x; seguindo ate a volta (%x)\n", screen, ctx->pc, ra);
+        wotmFinishGuestCall(rdram, ctx, runtime, ra);
+    }
+
     void ffaOptions1PWithZero(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         constexpr int kMax = wotm_menucpus::kMax;
         if (ctx->pc == kFfaOptions1P)
         {
             g_ffaRa = GPR_U32(ctx, 31);
-            g_ffaBefore = READ32(kFfaCursor);
+            const uint32_t cur = READ32(kFfaCursor);
+            if (g_ffaPending && g_ffaFake && cur == 3u)
+            {   // a chamada anterior parou no meio e nao voltou aqui: o 3 no cursor e o nosso, o numero e o de antes dela
+                static int s_logs = 0;
+                if (s_logs++ < 20)
+                    std::fprintf(stderr, "[wotm] tela 12: chamada anterior nao terminou; o cursor volta a %u\n", g_ffaBefore);
+            }
+            else
+                g_ffaBefore = cur;
+            if (wotm_lms::g_armed.load(std::memory_order_relaxed) && g_ffaBefore == 0u)
+            {   // last monster standing: sem CPU o jogador ganharia na hora; o cursor anda por 1..7
+                g_ffaBefore = 1;
+                WRITE32(kFfaCursor, 1);
+                const uint32_t sw = READ32(kShell + 0x43C);
+                if (sw && (READ8(sw) & 0x3F) == 6 && READ8(sw + 0xB) > 1)
+                    WRITE8(sw + 8, 1);
+            }
             g_ffaPending = true;
             g_ffaFake = g_ffaBefore > 3u && g_ffaBefore <= uint32_t(kMax);
             if (g_ffaFake)
@@ -636,6 +661,7 @@ namespace
             }
         }
         g_origFfaOptions1P(rdram, ctx, runtime);
+        finishTail(rdram, ctx, runtime, g_ffaPending, g_ffaRa, 12);
         if (!g_ffaPending || ctx->pc != g_ffaRa)
             return;   // parou no meio (retomada cai aqui de novo e termina o servico)
         g_ffaPending = false;
@@ -650,7 +676,10 @@ namespace
         // passo da original (cima: >= 2 desce 1, senao vai a 3; baixo: < 3 sobe 1, senao vai a 1)
         const bool dec = (eff >= 2 && after == eff - 1) || (eff <= 1 && after == 3);
         const bool inc = (eff < 3 && after == eff + 1) || (eff >= 3 && after == 1);
-        const int want = dec ? (before + kMax) % (kMax + 1) : inc ? (before + 1) % (kMax + 1) : before;
+        const int lo = wotm_lms::g_armed.load(std::memory_order_relaxed) ? 1 : 0, n = kMax + 1 - lo;
+        const int want = dec ? lo + (before - lo + n - 1) % n : inc ? lo + (before - lo + 1) % n : before;
+        if (want != before)
+            std::fprintf(stderr, "[wotm] tela 12: cursor %d -> %d (o jogo andou %d -> %d)\n", before, want, eff, after);
         if (want == after)
             return;
         WRITE32(kFfaCursor, uint32_t(want));
@@ -678,7 +707,16 @@ namespace
         if (ctx->pc == kFfaOptions2P)
         {
             g_ffa2Ra = GPR_U32(ctx, 31);
-            g_ffa2Before = std::min(READ32(kFfa2Cursor), uint32_t(kMax));   // o cursor que ficou de outro numero de jogadores
+            const uint32_t cur = READ32(kFfa2Cursor);
+            if (g_ffa2Pending && g_ffa2Fake && cur == uint32_t(g_ffa2Game))
+            {   // a chamada anterior parou no meio e nao voltou aqui (como na tela 12)
+                static int s_logs = 0;
+                if (s_logs++ < 20)
+                    std::fprintf(stderr, "[wotm] tela 13: chamada anterior nao terminou; o cursor volta a %u\n", g_ffa2Before);
+            }
+            else
+                g_ffa2Before = cur;
+            g_ffa2Before = std::min(g_ffa2Before, uint32_t(kMax));   // o cursor que ficou de outro numero de jogadores
             WRITE32(kFfa2Cursor, g_ffa2Before);
             g_ffa2Pending = true;
             // o maior numero que o jogo confirma por si; com bot de jogador (2 com bot vao a selecao do telao, como 3 e 4) nenhum
@@ -688,6 +726,7 @@ namespace
                 WRITE32(kFfa2Cursor, uint32_t(g_ffa2Game));
         }
         g_origFfaOptions2P(rdram, ctx, runtime);
+        finishTail(rdram, ctx, runtime, g_ffa2Pending, g_ffa2Ra, 13);
         if (!g_ffa2Pending || ctx->pc != g_ffa2Ra)
             return;
         g_ffa2Pending = false;
@@ -735,6 +774,7 @@ namespace
             WRITE32(kElimCursor, g_elimFake ? 0u : g_elimBefore);
         }
         g_origElimOptions(rdram, ctx, runtime);
+        finishTail(rdram, ctx, runtime, g_elimPending, g_elimRa, 11);
         if (!g_elimPending || ctx->pc != g_elimRa)
             return;   // parou no meio (retomada cai aqui de novo e termina o servico)
         g_elimPending = false;
@@ -800,6 +840,68 @@ namespace
         g_origTakeDamage(rdram, ctx, runtime);
         wotmFinishGuestCall(rdram, ctx, runtime);
         *ctx = saved;
+    }
+
+    // "Vencer a luta" no Capitolio (fase 11): o Jelly e o Cerebulon sao IAs desligadas ate a fase deles, e o Mecha nem e monstro.
+    // Pula direto para o fim do FinalBoss::update da fase 2: deixa a fase como o retail a deixa no fim da 0 (Mecha escondido e
+    // estacionado, laser desligado) e da 1 (Jelly morto e escondido, Cerebulon com aiInit, visivel, m_playerNum 2), derruba o
+    // Cerebulon e o proprio update passa a fase 3 (escurece, cinema 0x226D do cerebro explodindo, volta ao shell). Devolve true se
+    // era o Capitolio (o pedido acaba aqui).
+    bool skipToFinalEnding(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t by)
+    {
+        constexpr uint32_t fb = wotm::sym::finalBoss, kEndingCinema = 0x006F8BF0u;   // D_006F8BF0 (s_endingCinema)
+        if (READ32(kGame + 0x1203D0) != 11u || !READ32(fb + 0x18))                     // m_levelId, finalBoss.m_active
+            return false;
+        const uint32_t phase = READ32(fb + 0x1C), jelly = READ32(fb + 0x74), fin = READ32(fb + 0x78);
+        if (phase >= 2u || !jelly || !fin)
+        {
+            if (phase == 2u && fin && !READ8(fin + 0xE8))
+                callTakeDamage(rdram, ctx, runtime, fin, 100000.0f, by);
+            std::fprintf(stderr, "[debug] vencer a luta: Capitolio na fase %u%s\n", phase, phase == 2u ? ", Cerebulon derrubado" : "");
+            return true;
+        }
+        if (!READ32(fb + 0x7C))
+            WRITE32(fb + 0x7C, READ32(kGame + 0x120380));   // m_monster7C: o Mecha so o grava no estado 1
+        // fim da fase 0 (updateMecha, estado 9)
+        wotm_save::guestCall(rdram, ctx, runtime, wotm::fn::terminateMechLaser__14FinalBossSound, {fb + 0x40});
+        WRITE32(fb + 0x34, 0u);                                                        // m_laser
+        WRITE16(fb + 0x04, uint16_t(READ16(fb + 0x04) & ~6u));                        // m_flags
+        if (const uint32_t cs = READ32(fb + 0x70))                                     // m_mechaCs
+        {
+            WRITE8(cs + 0x0C, 0);   // drawMe
+            const float park[3] = {0.0f, 497.0f, 3.0f};
+            for (int k = 0; k < 3; ++k)
+            {
+                uint32_t w;
+                std::memcpy(&w, &park[k], 4);
+                WRITE32(cs + 0x10 + 4 * k, w);
+            }
+        }
+        // fim da fase 1 (updateJelly, estado 5): o Jelly ja ligado morre antes, para a IA dele nao seguir andando escondida
+        if (phase == 1u)
+        {
+            wotm_save::guestCall(rdram, ctx, runtime, wotm::fn::terminateJellyTazer__12MonsterSound, {jelly + 0x1A7C});
+            if (!READ8(jelly + 0xE8))
+                callTakeDamage(rdram, ctx, runtime, jelly, 100000.0f, by);
+        }
+        wotm_save::guestCall(rdram, ctx, runtime, wotm::fn::setShadowOnOff__7Monsterb, {jelly, 0u});
+        if (const uint32_t cs = READ32(jelly + 0x0C))
+            WRITE8(cs + 0x0C, 0);
+        WRITE32(jelly + 0x18, 0u);   // m_playerNum
+        wotm_save::guestCall(rdram, ctx, runtime, wotm::fn::aiInit__7Monster, {fin});
+        if (const uint32_t cs = READ32(fin + 0x0C))
+        {
+            WRITE8(cs + 0x0C, 1);
+            for (int k = 0; k < 3; ++k)
+                WRITE32(cs + 0x60 + 4 * k, 0u);   // rot
+        }
+        WRITE32(fin + 0x18, 2u);
+        WRITE32(fb + 0x1C, 2u);   // m_phase
+        WRITE32(fb + 0x20, 0u);   // m_state
+        WRITE32(kEndingCinema, 0u);
+        callTakeDamage(rdram, ctx, runtime, fin, 100000.0f, by);
+        std::fprintf(stderr, "[debug] vencer a luta: Capitolio da fase %u direto ao fim (Cerebulon derrubado)\n", phase);
+        return true;
     }
 
     // Derruba o jogador i (m_monsters[i], 0..3) vivo com um takeDamage do tamanho da vida; a fonte e a primeira IA viva (ou ele mesmo).
@@ -965,7 +1067,8 @@ namespace
             }
             if (slot == 0 && g_wotmCheatWin.exchange(false))
             {
-                const int32_t ais = static_cast<int32_t>(READ32(kGame + 0x1203E0));   // m_numAIs
+                wotm_lms::cheatWin();   // last monster standing: as CPUs derrubadas nao renascem
+                int32_t ais = static_cast<int32_t>(READ32(kGame + 0x1203E0));   // m_numAIs (0 no Capitolio, que o skipToFinalEnding resolve)
                 int killed = 0;
                 uint32_t by = m;   // o golpe vem do primeiro jogador vivo: na campanha co-op o P1 pode ter saido da fase
                 for (int32_t p = 0, np = std::min<int32_t>(static_cast<int32_t>(READ32(kShell + 0x2BB4)), 4); p < np; ++p)
@@ -974,7 +1077,9 @@ namespace
                         by = pm;
                         break;
                     }
-                for (int32_t i = 0; i < ais && i < 4; ++i)
+                if (skipToFinalEnding(rdram, ctx, runtime, by))
+                    ais = 0;
+                for (int32_t i = 0; i < ais && i < 12; ++i)   // m_monsters tem 16 vagas; arcade e WOTM_MATCH vao ate 7 IAs
                 {
                     const uint32_t ai = READ32(kGame + 0x120390 + 4 * i);   // m_monsters[4 + i]
                     if (ai && !READ8(ai + 0xE8))                           // m_dead
@@ -3072,6 +3177,7 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
         if (g_matchLevel >= 0)
         {
             runtime.registerFunction(kUserintMain, &userintMainDirect);
+            g_origUiMain = runtime.lookupFunction(kUiMain);
             runtime.registerFunction(kUiMain, &uiMainSkipped);
             if ((g_origEvaluate = runtime.lookupFunction(kEvaluateGameStatus)))
                 runtime.registerFunction(kEvaluateGameStatus, &evaluateGameStatusLogged);
@@ -3232,6 +3338,8 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
     wotmElimCostumeInstall(runtime);   // depois das skins e dos customs: o SetPlayerMonster daqui fica por fora
     wotmArmyInstall(runtime);   // antes do treino: o takeHit dele fica por fora
     wotmTrainingInstall(runtime);   // por ultimo: o gancho mais de fora do update/takeHit/takeDamage (ve o dano que as trapacas deixam)
+    wotmArcadeInstall(runtime);   // depois de tudo: o userintMain dele fica por fora do da WOTM_MATCH e das fases custom
+    wotmLmsInstall(runtime);   // depois do arcade: os ganchos de fim de luta dele ficam por fora
     if (g_minRate > 0)
         std::fprintf(stderr, "[wotm] updateRate >= %d (dt <= 1/%d) para o jogo inteiro (WOTM_RATEMIN)\n", g_minRate, g_minRate);
     else

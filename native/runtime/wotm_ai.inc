@@ -6,6 +6,8 @@
 //   - "[ai] <field> m<slot> pos x,y,z": a cada 2 s por IA, onde ela esta.
 //   - WOTM_CARLOG=1: "[carro] ..." e "[heli] <field> <endereco> pos x,y,z" a cada 2 s por carro e helicoptero do transito (abaixo).
 
+#include "wotm_arcade.h"   // as lutas 1 a 4 do arcade (m_mode 2 e 3) tambem tem os lados (runAsSides)
+
 namespace wotm_ai
 {
 using wotm_modes4::rd32;
@@ -119,6 +121,8 @@ void brainHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 // inteira de um monstro no quadro) e o teste do soco:
 //   - de um jogador: s_attackOtherAi ligado (as IAs da fase viram alvo); na IA, os outros jogadores (aliados) saem da lista de oponentes;
 //   - de uma IA da fase: os jogadores com m_playerNum 1.
+// O mesmo nas lutas 1 a 4 do arcade (m_mode 2 e 3, com o s_attackOtherAi desligado como na aventura): sem isso o bot ia para cima
+// dos outros jogadores (m_playerNum 1) e nao acertava as CPUs, e as CPUs nao viam os bots.
 constexpr uint32_t kPlayerNum = 0x18, kNumPlayers = wotm_split4::kShell + 0x2BB4, kMode = wotm_split4::kShell + 0x2C10,
                    kMonsters = wotm_split4::kGame + 0x120380, kAttackOtherAi = wotm::sym::x_2Ai_s_attackOtherAi;
 Hook g_updateInputs{fn::updateInputs__2Ai}, g_opponents{fn::updateOpponentList__2Ai},
@@ -132,7 +136,9 @@ bool g_sidesEnv = false;   // WOTM_AIVSAI no ambiente; sem ele, so com bots esco
 void runAsSides(Hook &h, uint32_t self, bool allies, uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
     const uint32_t n = std::min<uint32_t>(rd32(rdram, kNumPlayers), 4u);
-    if (ctx->pc != h.addr || rd32(rdram, kMode) != 1u || !n || g_inSides ||
+    const uint32_t mode = rd32(rdram, kMode);
+    const bool sides = mode == 1u || ((mode == 2u || mode == 3u) && wotm_arcade::g_on.load(std::memory_order_relaxed));
+    if (ctx->pc != h.addr || !sides || !n || g_inSides ||
         !(g_sidesEnv || wotm_menucpus::g_botMask.load(std::memory_order_relaxed)))
     {
         h.orig(rdram, ctx, runtime);

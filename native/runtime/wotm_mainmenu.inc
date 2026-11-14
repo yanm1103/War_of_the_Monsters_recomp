@@ -24,6 +24,8 @@
 // Tela 5: enquanto a escolha de controles esta no telao a lista fica escondida, e aparece junto com o fade que a escolha da aos itens.
 // WOTM_TEXTMENU=0: itens do retail (e o rotulo "multiplayer" do wotm_padsel.inc).
 #include "wotm_training.h"   // linha "training" da tela 2 (g_on)
+#include "wotm_arcade.h"     // linha "arcade" das telas 2 e 5 (g_armed)
+#include "wotm_lms.h"        // linha "last monster standing" das telas 2 e 5 (g_armed)
 // tela de opcoes do jogo (wotm_optscreen.inc, incluido depois): chamadas dos ganchos daqui
 namespace wotm_optscreen
 {
@@ -42,8 +44,9 @@ namespace wotm_mainmenu
 using wotm_padsel::rd32;
 constexpr uint32_t kShell = wotm::sym::shellInfo;
 constexpr int kMaxRows = 7;
-constexpr int kOptionsRow = -1, kQuitRow = -2, kTrainingRow = -3, kAdventureRow = -4;   // itens que nao sao do jogo (item < 0)
-constexpr int kFreeForAll = 2;   // tela 2: o item do jogo que o "training" escolhe
+constexpr int kOptionsRow = -1, kQuitRow = -2, kTrainingRow = -3, kAdventureRow = -4, kArcadeRow = -5,
+              kLmsRow = -6;   // itens que nao sao do jogo (item < 0)
+constexpr int kFreeForAll = 2;   // tela 2: o item do jogo que o "training" e o "arcade" escolhem
 
 struct Row { int item; const char *label; };
 struct ScreenDef
@@ -57,8 +60,12 @@ constexpr ScreenDef kScreens[] = {
     {1, wotm::sym::numSelectables_2784, 7,
      {{1, "SINGLE PLAYER"}, {2, "MULTIPLAYER"}, {3, "OPTIONS"}, {kOptionsRow, "RECOMPILED OPTIONS"}, {4, "LOAD GAME"}, {5, "UNLOCKS"},
       {kQuitRow, "QUIT GAME"}}},
-    {2, 0, 4, {{1, "ADVENTURE"}, {2, "FREE-FOR-ALL"}, {3, "ENDURANCE"}, {kTrainingRow, "TRAINING"}}},
-    {5, wotm::sym::numSelectables_2857, 4, {{kAdventureRow, "ADVENTURE"}, {1, "FREE-FOR-ALL"}, {2, "ELIMINATION"}, {3, "MINIGAMES"}}},
+    {2, 0, 6,
+     {{1, "ADVENTURE"}, {kArcadeRow, "ARCADE"}, {2, "FREE-FOR-ALL"}, {kLmsRow, "LAST MONSTER STANDING"}, {3, "ENDURANCE"},
+      {kTrainingRow, "TRAINING"}}},
+    {5, wotm::sym::numSelectables_2857, 6,
+     {{kAdventureRow, "ADVENTURE"}, {kArcadeRow, "ARCADE"}, {1, "FREE-FOR-ALL"}, {kLmsRow, "LAST MONSTER STANDING"}, {2, "ELIMINATION"},
+      {3, "MINIGAMES"}}},
 };
 static const ScreenDef *screenDef(uint32_t s)
 {
@@ -87,6 +94,7 @@ struct View
     bool training = false;                // pausa: o painel do modo treino (TRAINING OPTIONS) no lugar das abas
     bool moves = false;                   // pausa: a lista de golpes (MOVE LIST), tambem sem abas
     int arm = -1;                         // aba CHEATS: linha esperando o segundo X (g_cheatArm)
+    int lms = -1;                         // tela 15 do last monster standing: os renascimentos (-1: outra tela)
 };
 static std::mutex g_m;
 static View g_view;
@@ -126,7 +134,7 @@ enum Tab { TabVideo, TabFeatures, TabCamera, TabControls, TabArmy, TabCheats, kT
 constexpr const char *kTabNames[kTabs] = {"VIDEO", "FEATURES", "CAMERA", "CONTROLS", "ARMY", "CHEATS"};
 // Centro e meia largura de cada aba no titulo do painel (fracao da largura), medidos pelo renderPanel; o panelHit os le
 static float g_tabCx[kTabs] = {0.20f, 0.32f, 0.44f, 0.56f, 0.68f, 0.80f}, g_tabHw[kTabs] = {0.06f, 0.06f, 0.06f, 0.06f, 0.06f, 0.06f};
-constexpr int kMaxOpts = 9;
+constexpr int kMaxOpts = 10;
 struct Opt { st::Key key; const char *label; const char *hint; };
 struct TabDef { int n; Opt opt[kMaxOpts]; };
 constexpr TabDef kTabDefs[kTabs] = {
@@ -140,14 +148,17 @@ constexpr TabDef kTabDefs[kTabs] = {
       {st::Interp, "INTERPOLATE FRAMES", "SMOOTHER MOTION ABOVE 60 HZ OR WHEN THE GAME DROPS TO 30. MAY ADD DELAY"},
       {st::Msaa, "ANTI-ALIASING", "MSAA SMOOTHS THE JAGGED EDGES OF THE 3D MODELS"},
       {st::TexFilter, "TEXTURE FILTER", "KEEPS TEXTURES SHARP FAR AWAY AND AT STEEP ANGLES"}}},
-    {7,
+    {10,
      {{st::LockToggle, "LOCK-ON", "LOCKS ON WITH R1 ALONE. OFF KEEPS THE GAME'S L1 + R1"},
       {st::DpadTarget, "D-PAD TARGET SWITCH", "LEFT AND RIGHT ON THE D-PAD PICK ANOTHER TARGET WHILE LOCKED ON"},
       {st::EnemyBars, "ENEMY BARS", "SHOWS THE HEALTH AND ENERGY OF EACH ENEMY ABOVE THEIR HEAD"},
       {st::DamagePop, "DAMAGE NUMBERS", "SHOWS HOW MUCH DAMAGE EACH HIT DOES"},
       {st::HideHud, "HIDE HUD", "HIDES THE BARS, ICONS AND TEXT DURING THE FIGHT. THE PAUSE MENU STILL SHOWS"},
+      {st::VersusWins, "WINS COUNTER", "SHOWS HOW MANY FIGHTS EACH PLAYER HAS WON, AT THE BOTTOM OF THEIR SCREEN"},
       {st::Announcer, "NARRATOR", "A VOICE CALLS OUT THE MONSTER AND THE LEVEL YOU PICK, OR ONLY THE MONSTER ROARS"},
-      {st::SkipIntro, "SKIP INTRO MOVIES", "GOES STRAIGHT TO THE TITLE SCREEN. CHANGES TAKE EFFECT ON NEXT BOOT"}}},
+      {st::SkipIntro, "SKIP INTRO MOVIES", "GOES STRAIGHT TO THE TITLE SCREEN. CHANGES TAKE EFFECT ON NEXT BOOT"},
+      {st::ArcadeCpus, "ARCADE CPUS", "THE MOST CPUS IN ONE ARCADE FIGHT. NEVER MORE THAN 8 MONSTERS IN ALL"},
+      {st::LmsRespawns, "LMS RESPAWNS", "HOW MANY TIMES EACH MONSTER COMES BACK IN LAST MONSTER STANDING"}}},
     {5,
      {{st::Camera, "CAMERA STYLE", "MODERN TURNS WITH THE RIGHT STICK. CLASSIC IS THE CAMERA OF THE ORIGINAL GAME"},
       {st::CamSens, "SENSITIVITY", "HOW FAST THE RIGHT STICK TURNS THE CAMERA"},
@@ -479,6 +490,8 @@ static int choices(st::Key k, int out[16])
     case st::Aspect: for (int i = 0; i < st::kAspects; ++i) out[i] = i; return st::kAspects;
     case st::Display: for (int i = 0; i < 3; ++i) out[i] = i; return 3;
     case st::CamSens: for (int i = 0; i < 10; ++i) out[i] = i + 1; return 10;
+    case st::ArcadeCpus: for (int i = 0; i < 7; ++i) out[i] = i + 1; return 7;
+    case st::LmsRespawns: for (int i = 0; i < 10; ++i) out[i] = i; return 10;
     case st::Announcer: for (int i = 0; i < 3; ++i) out[i] = i; return 3;
     case st::LockToggle: for (int i = 0; i < 3; ++i) out[i] = i; return 3;
     case st::ArmyTrigger: for (int i = 0; i < 3; ++i) out[i] = i; return 3;
@@ -553,7 +566,9 @@ static void valueText(st::Key k, int v, char *buf, size_t sz)
     case st::ArmyTrigger: std::snprintf(buf, sz, "%s", v == 0 ? "TIME" : v == 1 ? "DESTRUCTION" : "WHICHEVER FIRST"); break;
     case st::ArmyEvery: std::snprintf(buf, sz, "%d SECONDS", v); break;
     case st::ArmyChaos: std::snprintf(buf, sz, "%s", v <= 25 ? "LITTLE" : v <= 50 ? "SOME" : v <= 100 ? "A LOT" : "HUGE"); break;
-    case st::ArmyWave: std::snprintf(buf, sz, "%d", v); break;
+    case st::ArmyWave:
+    case st::ArcadeCpus:
+    case st::LmsRespawns: std::snprintf(buf, sz, "%d", v); break;
     case st::LockToggle: std::snprintf(buf, sz, "%s", v == 2 ? "HOLD" : v ? "TAP" : "OFF"); break;
     case st::Announcer:   // a voz do narrador (narrator/) ou o grito do monstro escolhido
         std::snprintf(buf, sz, "%s", v == 2 ? "MONSTER CRY" : v ? "GODZILLA SAVE THE EARTH" : "OFF");
@@ -1035,10 +1050,10 @@ static void pauseDialogEnd()
     publishPause();
 }
 static PS2Runtime::RecompiledFunction g_origMain = nullptr, g_origModes1P = nullptr, g_origModes2P = nullptr, g_origTransition = nullptr,
-                                      g_origGetInput = nullptr, g_origOptions = nullptr;
-static uint32_t g_mainRa = 0, g_modes1Ra = 0, g_modes2Ra = 0, g_transRa = 0, g_inRa = 0, g_optionsRa = 0;
+                                      g_origGetInput = nullptr, g_origOptions = nullptr, g_origBestOf = nullptr;
+static uint32_t g_mainRa = 0, g_modes1Ra = 0, g_modes2Ra = 0, g_transRa = 0, g_inRa = 0, g_optionsRa = 0, g_bestOfRa = 0;
 static bool g_mainPending = false, g_modes1Pending = false, g_modes2Pending = false, g_transPending = false, g_inPending = false,
-            g_optionsPending = false;
+            g_optionsPending = false, g_bestOfPending = false;
 
 static uint32_t itemSwitch(uint8_t *rdram, int screen, int item) { return rd32(rdram, kShell + 0x25C + uint32_t(screen * 10 + item) * 4); }
 static uint32_t curSelAddr(int screen) { return wotm::sym::currentSelection + 4u * uint32_t(screen); }
@@ -1160,6 +1175,117 @@ static void logoFrame(uint8_t *rdram)
         std::memcpy(rdram + g_logoObj[i] + 0x4C, &a, 4);
 }
 
+// ------------------------------------------------------------------ tela 15 do last monster standing
+// A tela 15 (screenBestOf: "sudden death", "first to N wins", "unlimited play") nao serve ao last monster standing, que sempre luta
+// ate sobrar um (o InitPlayerLives zera o m_killTarget, wotm_lms.inc). Com o modo armado ela vira a escolha dos renascimentos (o
+// LMS RESPAWNS do "recompiled options"): os itens do jogo ficam com alfa 0 e a lista em texto mostra uma linha so, com setas;
+// esquerda/direita mudam o valor (0..9, com volta), cima/baixo nao fazem nada, X e triangulo seguem para o jogo.
+constexpr uint32_t kLmsScreen = 15;
+constexpr const char *kRespawnLabels[10] = {"NO RESPAWNS", "1 RESPAWN",  "2 RESPAWNS", "3 RESPAWNS", "4 RESPAWNS",
+                                            "5 RESPAWNS",  "6 RESPAWNS", "7 RESPAWNS", "8 RESPAWNS", "9 RESPAWNS"};
+static bool lmsScreen(uint32_t s) { return s == kLmsScreen && wotm_lms::g_armed.load(std::memory_order_relaxed); }
+static int lmsRespawns() { return std::clamp(wotm::settings::get(wotm::settings::LmsRespawns), 0, 9); }
+
+// Alfa 0 em todos os objetos abaixo de n (todos os filhos dos switches; as setas animadas sao um CHAR_INSTANCE)
+static void lmsHide(uint8_t *rdram, uint32_t n, int depth = 0)
+{
+    n &= 0x1FFFFFFFu;
+    if (n < 0x1000u || n + 0x100u > PS2_RAM_SIZE || depth > 12)
+        return;
+    auto kids = [&](uint32_t first, uint32_t count) {
+        for (uint32_t k = 0; k < count && k < 64; ++k) lmsHide(rdram, rd32(rdram, first + 4 * k), depth + 1);
+    };
+    switch (rdram[n] & 0x3F)
+    {
+    case 0: { const float z = 0.f; std::memcpy(rdram + n + 0x4C, &z, 4); break; }
+    case 1: kids(n + 0x20, uint32_t(rdram[n + 8] | rdram[n + 9] << 8)); break;
+    case 3: kids(n + 0x1C, rd32(rdram, n + 8)); break;
+    case 4: kids(n + 0x50, rd32(rdram, n + 8)); break;
+    case 30: kids(n + 0x2C, rd32(rdram, n + 8)); break;
+    case 6: kids(n + 0xC, rdram[n + 0xB]); break;
+    case 25: kids(n + 0x2C, rd32(rdram, n + 0x28)); break;
+    default: break;
+    }
+}
+// Objetos do caminho em uso (o filho ativo de cada switch), sem as setas (CHAR_INSTANCE): a posicao do item
+static void lmsCollect(const uint8_t *rdram, uint32_t n, uint32_t objs[4], int &k, int depth = 0)
+{
+    n &= 0x1FFFFFFFu;
+    if (k >= 4 || n < 0x1000u || n + 0x100u > PS2_RAM_SIZE || depth > 12)
+        return;
+    auto kids = [&](uint32_t first, uint32_t count) {
+        for (uint32_t i = 0; i < count && i < 64; ++i) lmsCollect(rdram, rd32(rdram, first + 4 * i), objs, k, depth + 1);
+    };
+    switch (rdram[n] & 0x3F)
+    {
+    case 0: objs[k++] = n; break;
+    case 1: kids(n + 0x20, uint32_t(rdram[n + 8] | rdram[n + 9] << 8)); break;
+    case 3: kids(n + 0x1C, rd32(rdram, n + 8)); break;
+    case 4: kids(n + 0x50, rd32(rdram, n + 8)); break;
+    case 30: kids(n + 0x2C, rd32(rdram, n + 8)); break;
+    case 6:
+        if (rdram[n + 8] < rdram[n + 0xB]) lmsCollect(rdram, rd32(rdram, n + 0xC + 4u * rdram[n + 8]), objs, k, depth + 1);
+        break;
+    default: break;
+    }
+}
+static void lmsFrame(uint8_t *rdram, View &v)
+{
+    v.screen = int(kLmsScreen);
+    v.rows = 1;
+    v.lms = lmsRespawns();
+    v.row[0] = Row{2, kRespawnLabels[v.lms]};
+    v.sel = 0;
+    for (int item = 1; item <= 3; ++item)
+    {
+        const uint32_t sw = itemSwitch(rdram, int(kLmsScreen), item);
+        int k = 0;
+        lmsCollect(rdram, sw, v.itemObj[v.items], k);
+        lmsHide(rdram, sw);
+        if (k) ++v.items;
+    }
+    for (uint32_t i = 0; i < 90; ++i)   // soltos (m_menuObj[15]): o brilho e as setas do jogo
+    {
+        const uint32_t o = rd32(rdram, kShell + 0x6DC + (kLmsScreen * 90u + i) * 4u) & 0x1FFFFFFFu;
+        if (o < 0x1000u || o + 0x50 >= PS2_RAM_SIZE) break;
+        lmsHide(rdram, o);
+    }
+}
+// Entrada da tela 15 com o modo armado (getInputHook): devolve o codigo que o screenBestOf vai tratar
+static uint32_t lmsInput(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t code)
+{
+    Hover hv;
+    {
+        std::lock_guard<std::mutex> lk(g_m);
+        hv = g_hover;
+    }
+    // como a tela 12 (wotm_gamescreens.inc): Q/E, L1/R1 e a rodinha andam para os lados
+    wotm::mouse::sideScreen(true);
+    if (code == 9 || code == 0xC)
+        code = code == 9 ? 3 : 4;
+    int dir = code == 3 ? -1 : code == 4 ? 1 : 0;
+    if (code >= 1 && code <= 4)
+        code = 0;
+    if (wotm::mouse::takeClick(wotm::mouse::g_clickL) && !rd32(rdram, wotm::sym::betweenScreens))
+    {   // clique: na seta muda o valor, no texto confirma (o X)
+        std::fprintf(stderr, "[lms] tela 15: clique (tela %d, parte %d)\n", hv.screen, hv.part);
+        if (hv.screen == int(kLmsScreen) && hv.row == 0)
+        {
+            if (hv.part == HRowLeft) dir = -1;
+            else if (hv.part == HRowRight) dir = 1;
+            else if (hv.part == HRow) code = 6;
+        }
+    }
+    if (dir)
+    {
+        const int n = (lmsRespawns() + dir + 10) % 10;
+        wotm::settings::set(wotm::settings::LmsRespawns, n);
+        wotm_padsel::sfx(rdram, ctx, runtime, 4);
+        std::fprintf(stderr, "[lms] tela 15: %d renascimento(s)\n", n);
+    }
+    return code;
+}
+
 // A cada quadro (saida das funcoes das telas e do screenTransition): esconde os itens do jogo e publica a lista
 static void frame(uint8_t *rdram)
 {
@@ -1177,7 +1303,10 @@ static void frame(uint8_t *rdram)
         v.screen = d->screen;
         v.rows = buildRows(rdram, *d, v.row);
         v.sel = cursorRow(rdram, d->screen, v.row, v.rows);
-        for (int item = 1; item <= d->rows; ++item)
+        int lastItem = 0;   // os itens do jogo (> 0) da tela; as linhas nossas nao tem objeto
+        for (int r = 0; r < d->rows; ++r)
+            lastItem = std::max(lastItem, d->row[r].item);
+        for (int item = 1; item <= lastItem; ++item)
         {
             // posicao: os objetos do filho em uso (so ele esta na cena)
             int k = 0;
@@ -1205,7 +1334,9 @@ static void frame(uint8_t *rdram)
             std::fprintf(stderr, "[mainmenu] tela %d: %d objetos soltos escondidos (m_menuObj)\n", d->screen, nObj);
         }
     }
-    v.on = d && alpha > 0.f;
+    else if (lmsScreen(screen))
+        lmsFrame(rdram, v);
+    v.on = (d || v.lms >= 0) && alpha > 0.f;
     if (rd32(rdram, wotm::sym::currScreen) != 1)
         g_open = false;
     g_panel = std::clamp(g_panel + (g_open ? 0.1f : -0.1f), 0.f, 1.f);
@@ -1244,6 +1375,7 @@ WOTM_MM_EXIT_HOOK(optionsHook, wotm::fn::screenOptions__Fv, g_origOptions, g_opt
 WOTM_MM_EXIT_HOOK(modes1Hook, wotm::fn::screenGameModes1P__Fv, g_origModes1P, g_modes1Ra, g_modes1Pending)
 WOTM_MM_EXIT_HOOK(modes2Hook, wotm::fn::screenGameModes2P__Fv, g_origModes2P, g_modes2Ra, g_modes2Pending)
 WOTM_MM_EXIT_HOOK(transitionHook, wotm::fn::screenTransition__Fb, g_origTransition, g_transRa, g_transPending)
+WOTM_MM_EXIT_HOOK(bestOfHook, wotm::fn::screenBestOf__Fv, g_origBestOf, g_bestOfRa, g_bestOfPending)
 #undef WOTM_MM_EXIT_HOOK
 
 // Telas da lista: cima/baixo movem o cursor (o currentSelection da tela, ou o "recompiled options" da 1); X e triangulo seguem para o
@@ -1264,6 +1396,13 @@ static void getInputHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     if (!g_inPending || ctx->pc != g_inRa)
         return;
     g_inPending = false;
+    if (lmsScreen(cur))
+    {   // last monster standing: a tela 15 escolhe os renascimentos (lmsInput)
+        const uint32_t raw = GPR_U32(ctx, 2), nc = lmsInput(rdram, ctx, runtime, raw & 0xFFFFu);
+        if (nc != (raw & 0xFFFFu))
+            ctx->r[2] = _mm_set_epi64x(0, static_cast<int64_t>(static_cast<int32_t>((raw & ~0xFFFFu) | nc)));
+        return;
+    }
     if (!screenDef(cur) && cur != wotm_optscreen::kScreen)
     {
         const uint32_t raw = GPR_U32(ctx, 2), nc = wotm_gamescreens::input(rdram, ctx, runtime, cur, raw & 0xFFFFu);
@@ -1280,11 +1419,31 @@ static void getInputHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     }
     const ScreenDef &d = *screenDef(cur);
     if (cur == 1)
-    {   // de volta ao menu principal: o "training" da tela 2 e o "adventure" da 5 ficaram para tras
-        if (g_extraRow == kTrainingRow || g_extraRow == kAdventureRow)
+    {   // de volta ao menu principal: o "training" e o "arcade" da tela 2 e o "adventure" e o "arcade" da 5 ficaram para tras
+        if (g_extraRow == kTrainingRow || g_extraRow == kAdventureRow || g_extraRow == kArcadeRow || g_extraRow == kLmsRow)
             g_extraRow = 0;
         wotm_training::menuDisarm("menu principal");
+        wotm_arcade::menuDisarm("menu principal");
+        wotm_lms::menuDisarm("menu principal");
     }
+    // a linha nossa que segue como um item do jogo: o "training" e o "arcade" da tela 2 e o "last monster standing" das duas sao o
+    // free-for-all (item 2 da tela 2, 1 da 5); 0 = nenhum
+    const auto gameItem = [&](int item) -> int {
+        if (item == kTrainingRow || (d.screen == 2 && item == kArcadeRow) || (d.screen == 2 && item == kLmsRow))
+            return kFreeForAll;
+        return d.screen == 5 && item == kLmsRow ? 1 : 0;
+    };
+    // X: o "last monster standing" segue como o free-for-all (o currentSelection ja e o dele) com o modo armado; outro modo o desarma
+    const auto lmsPick = [&](int screen) {
+        if (g_extraRow != kLmsRow)
+        {
+            wotm_lms::menuDisarm("outro modo");
+            return;
+        }
+        wotm_padsel::wr32(rdram, curSelAddr(screen), static_cast<uint32_t>(gameItem(kLmsRow)));
+        wotm_lms::g_armed = true;
+        std::fprintf(stderr, "[lms] armado pelo menu (tela %d, %d renascimento(s))\n", screen, wotm::settings::get(wotm::settings::LmsRespawns));
+    };
     Row row[kMaxRows];
     const int rows = buildRows(rdram, d, row);
     if (rows == 0)
@@ -1311,8 +1470,8 @@ static void getInputHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
                 g_extraRow = hasExtra(d.screen) && row[hv.row].item < 0 ? row[hv.row].item : 0;
                 if (row[hv.row].item > 0)
                     wotm_padsel::wr32(rdram, curSelAddr(d.screen), static_cast<uint32_t>(row[hv.row].item));
-                else if (row[hv.row].item == kTrainingRow)
-                    wotm_padsel::wr32(rdram, curSelAddr(d.screen), static_cast<uint32_t>(kFreeForAll));
+                else if (const int gi = gameItem(row[hv.row].item))
+                    wotm_padsel::wr32(rdram, curSelAddr(d.screen), static_cast<uint32_t>(gi));
                 if (!click)
                     wotm_padsel::sfx(rdram, ctx, runtime, 4);
             }
@@ -1343,20 +1502,28 @@ static void getInputHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         g_extraRow = hasExtra(d.screen) && row[r].item < 0 ? row[r].item : 0;
         if (row[r].item > 0)
             wotm_padsel::wr32(rdram, curSelAddr(d.screen), static_cast<uint32_t>(row[r].item));
-        else if (row[r].item == kTrainingRow)
-            wotm_padsel::wr32(rdram, curSelAddr(d.screen), static_cast<uint32_t>(kFreeForAll));
+        else if (const int gi = gameItem(row[r].item))
+            wotm_padsel::wr32(rdram, curSelAddr(d.screen), static_cast<uint32_t>(gi));
         wotm_padsel::sfx(rdram, ctx, runtime, code == 1 ? 2 : 4);
         out = 0;
     }
-    else if (code == 6 && cur == 5 && g_extraRow == kAdventureRow)
-    {   // X no "adventure" da lista multijogador: a campanha com os jogadores escolhidos (wotm_padsel.inc)
-        wotm_padsel::adventureStart(rdram, ctx, runtime);
+    else if (code == 6 && cur == 5 && (g_extraRow == kAdventureRow || g_extraRow == kArcadeRow))
+    {   // X no "adventure" ou no "arcade" da lista multijogador: a selecao de monstros dos jogadores escolhidos (wotm_padsel.inc); o
+        // arcade segue dela direto a carga da primeira luta
+        const bool arcade = g_extraRow == kArcadeRow;
+        wotm_lms::menuDisarm("outro modo");
+        wotm_arcade::g_armed = arcade;
+        if (wotm_padsel::adventureStart(rdram, ctx, runtime) && arcade)
+            std::fprintf(stderr, "[arcade] armado pelo menu (multijogador)\n");
+        else if (arcade)
+            wotm_arcade::g_armed = false;
         out = 0;   // o jogo nao ve o X (com o currentSelection dele seria outro modo)
     }
     else if (code == 6 && cur == 2)
-    {   // X num modo de 1 jogador: o "training" segue como o free-for-all (o currentSelection ja e o dele) com o modo treino ligado
-        const bool training = g_extraRow == kTrainingRow;
-        if (training)
+    {   // X num modo de 1 jogador: o "training" e o "arcade" seguem como o free-for-all (o currentSelection ja e o dele) com o modo
+        // treino ou o arcade armado
+        const bool training = g_extraRow == kTrainingRow, arcade = g_extraRow == kArcadeRow;
+        if (training || arcade)
             wotm_padsel::wr32(rdram, curSelAddr(2), static_cast<uint32_t>(kFreeForAll));
         if (training)
         {
@@ -1365,6 +1532,19 @@ static void getInputHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         }
         else
             wotm_training::menuDisarm("outro modo");
+        if (arcade)
+        {
+            wotm_arcade::g_armed = true;
+            std::fprintf(stderr, "[arcade] armado pelo menu (1 jogador)\n");
+        }
+        else
+            wotm_arcade::menuDisarm("outro modo");
+        lmsPick(2);
+    }
+    else if (code == 6 && cur == 5)
+    {
+        wotm_arcade::menuDisarm("outro modo");
+        lmsPick(5);
     }
     else if (code == 6 && cur == 1 && g_extraRow == kQuitRow)
     {
@@ -1890,6 +2070,95 @@ static void renderPanel(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0,
     EndTextureMode();
 }
 
+// Brilho atras do item escolhido, como o objeto solto do jogo (m_menuObj, textura 194): miolo com alfa de vertice 19 (x2: ~0,3) na cor
+// dos itens apagados, caindo a 0 na borda; miolo com ~0,55 do passo dos itens de altura, borda com 1,5 passo de altura e meio passo de
+// cada lado; miolo da largura do texto (x0..x1)
+static void itemGlow(float x0, float x1, float cy, float step, float list)
+{
+    const float y0 = cy - step * 0.27f, y1 = cy + step * 0.27f;
+    const float mx = step * 0.5f, my = step * 0.48f;
+    const Color in = gsToRgb(Color{67, 41, 28, static_cast<unsigned char>(19 * 2 * list)}), out{in.r, in.g, in.b, 0};
+    const float xs[4] = {x0 - mx, x0, x1, x1 + mx}, ys[4] = {y0 - my, y0, y1, y1 + my};
+    rlSetTexture(rlGetTextureIdDefault());
+    rlBegin(RL_QUADS);
+    for (int j = 0; j < 3; ++j)
+        for (int i = 0; i < 3; ++i)
+        {
+            // vertices na ordem do DrawRectangle (cima-esq, baixo-esq, baixo-dir, cima-dir); so os do miolo com alfa
+            const int vi[4][2] = {{i, j}, {i, j + 1}, {i + 1, j + 1}, {i + 1, j}};
+            for (const auto &p : vi)
+            {
+                const Color &k = p[0] >= 1 && p[0] <= 2 && p[1] >= 1 && p[1] <= 2 ? in : out;
+                rlColor4ub(k.r, k.g, k.b, k.a);
+                rlTexCoord2f(0.f, 0.f);
+                rlVertex2f(xs[p[0]], ys[p[1]]);
+            }
+        }
+    rlEnd();
+    rlSetTexture(0);
+}
+
+// Tela 15 do last monster standing, no jeito da tela 12 do jogo ("0 cpu monsters"): o numero, "respawns" com as letras do jogo, o
+// brilho marrom atras e uma seta cinza de cada lado. Grava as areas do mouse (g_lmsHit). So a thread da janela.
+struct LmsHit { float y0 = 0, y1 = 0, l0 = 0, l1 = 0, t0 = 0, t1 = 0, r0 = 0, r1 = 0; bool ok = false; };
+static LmsHit g_lmsHit;
+static void lmsRender(std::vector<wotm::TextQuad> &quads, const wotm::Ram &ram, uint64_t tex0, int n, float cy, float step, float rowH, float list)
+{
+    const char *word = n == 1 ? "respawn" : "respawns";
+    char num[4];
+    std::snprintf(num, sizeof num, "%d", n);
+    const float ww = wotm_menufont::width(word, true);
+    const bool own = ww > 0.f;
+    float xh, numH, wordW;
+    char up[16] = {};
+    if (own)
+    {
+        xh = step * 0.56f;
+        numH = 0.f;
+        wordW = ww * xh / wotm_menufont::kRefXh;
+    }
+    else
+    {   // sem as letras do jogo: tudo na fonte de maiusculas
+        std::snprintf(up, sizeof up, "%s", n == 1 ? "RESPAWN" : "RESPAWNS");
+        xh = numH = step * 0.5f;
+        wordW = textWidth(tex0, kW, kH, up, numH);
+    }
+    // o numero com os algarismos do jogo (os da tela de CPUs), na altura das letras
+    const float numW = own ? wotm_menufont::width(num) * xh / wotm_menufont::kRefXh : textWidth(tex0, kW, kH, num, numH), gap = xh * 0.45f;
+    const float total = numW + gap + wordW, x0 = kW * 0.5f - total * 0.5f, x1 = x0 + total, base = cy + xh * 0.5f;
+    itemGlow(x0, x1, cy, step, list);
+    const unsigned char a = static_cast<unsigned char>(0x80 * list);
+    if (own)
+    {   // o numero mais claro que a palavra, como o da tela de CPUs
+        Color c{64, 64, 64, 66};
+        c.a = static_cast<unsigned char>(std::min(0x80, c.a * 2) * list);
+        wotm_menufont::draw(num, x0 + numW * 0.5f, base, xh, gsToRgb(Color{100, 100, 98, c.a}));
+        wotm_menufont::draw(word, x1 - wordW * 0.5f, base, xh, gsToRgb(c), true);
+    }
+    else
+    {
+        label(quads, ram, tex0, num, x0 + numW * 0.5f, cy, numH, Color{121, 118, 111, a});
+        label(quads, ram, tex0, up, x1 - wordW * 0.5f, cy, numH, Color{121, 118, 111, a});
+    }
+    // setas: cinza claro com contorno escuro, indo e voltando para fora como as animadas do jogo
+    const float pad = xh * 0.9f, aw = xh * 0.8f, ah = xh * 0.6f, o = xh * 0.09f;
+    const float bob = xh * 0.14f * (0.5f + 0.5f * std::sin(float(GetTime()) * 6.f));
+    const Color fill{196, 196, 192, static_cast<unsigned char>(255 * list)}, edge{20, 20, 20, static_cast<unsigned char>(230 * list)};
+    // vertices na ordem do DrawRectangle (o raylib descarta os triangulos do outro sentido)
+    const auto arrow = [&](float tip, float back, Color k, float grow) {
+        const float sg = tip < back ? 1.f : -1.f;   // +1: aponta para a esquerda
+        const Vector2 t{tip - sg * grow * 1.8f, cy}, b0{back + sg * grow, cy + ah + grow * 1.4f}, b1{back + sg * grow, cy - ah - grow * 1.4f};
+        if (sg > 0) DrawTriangle(t, b0, b1, k);
+        else DrawTriangle(t, b1, b0, k);
+    };
+    const float lt = x0 - pad - aw - bob, lb = x0 - pad - bob, rt = x1 + pad + aw + bob, rb = x1 + pad + bob;
+    arrow(lt, lb, edge, o);
+    arrow(lt, lb, fill, 0.f);
+    arrow(rt, rb, edge, o);
+    arrow(rt, rb, fill, 0.f);
+    g_lmsHit = LmsHit{cy - rowH * 0.6f, cy + rowH * 0.6f, lt - pad * 0.5f, lb + pad * 0.5f, x0 - pad * 0.5f, x1 + pad * 0.5f, rb - pad * 0.5f, rt + pad * 0.5f, true};
+}
+
 static void renderUi(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0)
 {
     View v;
@@ -1938,32 +2207,14 @@ static void renderUi(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0)
         // brilho atras do item escolhido, como o objeto solto do jogo (m_menuObj, textura 194): miolo com alfa de vertice 19 (x2: ~0,3)
         // na cor dos itens apagados, caindo a 0 na borda; miolo com ~0,55 do passo dos itens de altura, borda com 1,5 passo de altura e
         // meio passo de cada lado; miolo da largura do texto (o do jogo tem uma so, a de uma palavra curta)
-        if (own && v.sel >= 0 && v.sel < v.rows)
+        if (v.lms >= 0)
+            lmsRender(quads, ram, tex0, v.lms, top + rowH * 0.5f, step, rowH, list);
+        else if (own && v.sel >= 0 && v.sel < v.rows)
         {
             const float cy = top + rowH * (float(v.sel) + 0.5f), w = wotm_menufont::width(low[v.sel]) * xh / wotm_menufont::kRefXh * 0.95f;
-            const float x0 = kW * 0.5f - w * 0.5f, x1 = kW * 0.5f + w * 0.5f, y0 = cy - step * 0.27f, y1 = cy + step * 0.27f;
-            const float mx = step * 0.5f, my = step * 0.48f;
-            const Color in = gsToRgb(Color{67, 41, 28, static_cast<unsigned char>(19 * 2 * list)}), out{in.r, in.g, in.b, 0};
-            const float xs[4] = {x0 - mx, x0, x1, x1 + mx}, ys[4] = {y0 - my, y0, y1, y1 + my};
-            rlSetTexture(rlGetTextureIdDefault());
-            rlBegin(RL_QUADS);
-            for (int j = 0; j < 3; ++j)
-                for (int i = 0; i < 3; ++i)
-                {
-                    // vertices na ordem do DrawRectangle (cima-esq, baixo-esq, baixo-dir, cima-dir); so os do miolo com alfa
-                    const int vi[4][2] = {{i, j}, {i, j + 1}, {i + 1, j + 1}, {i + 1, j}};
-                    for (const auto &p : vi)
-                    {
-                        const Color &k = p[0] >= 1 && p[0] <= 2 && p[1] >= 1 && p[1] <= 2 ? in : out;
-                        rlColor4ub(k.r, k.g, k.b, k.a);
-                        rlTexCoord2f(0.f, 0.f);
-                        rlVertex2f(xs[p[0]], ys[p[1]]);
-                    }
-                }
-            rlEnd();
-            rlSetTexture(0);
+            itemGlow(kW * 0.5f - w * 0.5f, kW * 0.5f + w * 0.5f, cy, step, list);
         }
-        for (int r = 0; r < v.rows; ++r)
+        for (int r = 0; r < v.rows && v.lms < 0; ++r)
         {
             const float cy = top + rowH * (float(r) + 0.5f);
             const bool on = r == v.sel;
@@ -2145,7 +2396,22 @@ static void drawListOnTelao(wotm::Scene &scene, const wotm::Ram &ram, const Came
     // mouse: a linha sob ele (as vagas do renderUi), no miolo da coluna
     wotm::mouse::claim();
     float u, w;
-    if (v.panel > 0.f || !wotm_padsel::hitOnPlane(cam, base, cx - wx * 0.5f, mid + hy * 0.5f, wx, hy, u, w) || u < 0.12f || u > 0.88f)
+    if (v.panel > 0.f || !wotm_padsel::hitOnPlane(cam, base, cx - wx * 0.5f, mid + hy * 0.5f, wx, hy, u, w))
+        return;
+    if (v.lms >= 0)
+    {   // tela 15 do last monster standing: setas e o texto (lmsRender)
+        const LmsHit &h = g_lmsHit;
+        const float X = u * float(kW), Y = w * float(kH);
+        if (!h.ok || Y < h.y0 || Y > h.y1) return;
+        hv.part = X >= h.l0 && X <= h.l1 ? HRowLeft : X >= h.r0 && X <= h.r1 ? HRowRight : X >= h.t0 && X <= h.t1 ? HRow : HNone;
+        if (hv.part != HNone)
+        {
+            hv.screen = v.screen;
+            hv.row = 0;
+        }
+        return;
+    }
+    if (u < 0.12f || u > 0.88f)
         return;
     const float step = float(kH) / kSteps, rowH = step * kSpacing, y = w * float(kH) - (kH - rowH * float(v.rows)) * 0.5f;
     const int r = int(std::floor(y / rowH));
@@ -2228,6 +2494,7 @@ void wotmMainMenuInstall(PS2Runtime &runtime)
         {wotm::fn::screenTransition__Fb, &g_origTransition, &transitionHook},
         {wotm::fn::screenGetInput__Fi, &g_origGetInput, &getInputHook},
         {wotm::fn::screenOptions__Fv, &g_origOptions, &optionsHook},
+        {wotm::fn::screenBestOf__Fv, &g_origBestOf, &bestOfHook},
     };
     for (const H &h : hooks)
         if ((*h.orig = runtime.lookupFunction(h.addr)))

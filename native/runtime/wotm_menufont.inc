@@ -35,6 +35,12 @@ constexpr Line kLines[] = {
     {2, 132, 192, 176.0f, 29.0f, "unlimited play", {{7, 23}, {29, 44}, {49, 55}, {61, 65}, {71, 96}, {102, 107}, {112, 125}, {130, 144}, {149, 164}, {182, 197}, {202, 208}, {213, 226}, {231, 250}}, true},
     {2, 195, 243, 238.0f, 29.0f, "unlocks", {{13, 36}, {42, 63}, {69, 77}, {84, 102}, {108, 125}, {131, 153}, {160, 176}}},
 };
+// Algarismos 0..9 da textura 142 (os do "first to" e do numero de CPUs), em duas fileiras: x do branco, faixa de y e linha de base
+struct Digit { int x0, x1, row; };
+constexpr Digit kDigits[10] = {{10, 27, 0}, {50, 57, 0}, {80, 97, 0}, {120, 136, 0}, {159, 180, 0},
+                               {202, 219, 0}, {13, 32, 1}, {57, 77, 1}, {102, 121, 1}, {146, 166, 1}};
+constexpr int kDigitY[2][2] = {{11, 57}, {62, 113}};
+constexpr float kDigitBase[2] = {51.f, 107.f};
 constexpr float kRefXh = 30.f;   // unidades das pecas: altura do x = kRefXh
 constexpr float kWordGap = 14.f;
 
@@ -79,6 +85,7 @@ struct Piece
     int tex;
     Rectangle src;   // na textura (largura negativa: espelhado)
     float x, top, w, h;   // em unidades de kRefXh; top relativo a linha de base
+    bool flipY = false;   // virado de cabeca para baixo (o w: o m de "minigames" girado)
 };
 
 static int letters(const Line &l) { int n = 0; for (const char *c = l.text; *c; ++c) n += *c != ' '; return n; }
@@ -92,14 +99,24 @@ static Rectangle cut(const Line &l, int a, int b)
     return Rectangle{x0, float(l.y0), x1 - x0, float(l.y1 - l.y0)};
 }
 
-// Monta `s` (minusculas, '-' e espaco); false se alguma letra nao existe
-static bool compose(const char *s, std::vector<Piece> &out, float &width)
+// Monta `s` (minusculas, algarismos, '-' e espaco); false se alguma letra nao existe. Com `rotW`, o w e o m de "minigames" girado (a tela dos
+// renascimentos do last monster standing; as listas seguem sem w)
+static bool compose(const char *s, std::vector<Piece> &out, float &width, bool rotW = false)
 {
     out.clear();
     float x = 0.f;
     for (size_t k = 0; s[k];)
     {
         if (s[k] == ' ') { x += kWordGap; ++k; continue; }
+        if (s[k] >= '0' && s[k] <= '9')
+        {   // na altura de origem: as letras das texturas tem altura do x ~30 = kRefXh
+            const Digit &d = kDigits[s[k] - '0'];
+            const Rectangle r{float(d.x0 - 4), float(kDigitY[d.row][0]), float(d.x1 - d.x0 + 9), float(kDigitY[d.row][1] - kDigitY[d.row][0])};
+            out.push_back(Piece{1, r, x, float(kDigitY[d.row][0]) - kDigitBase[d.row], r.width, r.height});
+            x += r.width;
+            ++k;
+            continue;
+        }
         int bestL = -1, bestA = 0, bestN = 0;
         // primeiro as linhas de letra normal; "sudden death" e "unlimited play" (frases que o jogo apertou: o e tem 14 px, nas outras 17)
         // so para letra que nao existe nelas
@@ -124,6 +141,17 @@ static bool compose(const char *s, std::vector<Piece> &out, float &width)
         {
             bestL = 3; bestA = 1; bestN = 1; mirror = true;
         }
+        if (bestL < 0 && s[k] == 'w' && rotW)
+        {
+            const Line &l = kLines[2];
+            const Rectangle r = cut(l, 0, 0);
+            const float sc = kRefXh / l.xh, w = r.width * sc * 0.85f;   // mais estreito que o m
+            // girado: a faixa do x (base - xh .. base) cai em y1 - base .. do topo da caixa; a caixa sobe para ela ficar na linha de base
+            out.push_back(Piece{l.tex, Rectangle{r.x, r.y, -r.width, -r.height}, x, (l.base - l.xh - float(l.y1)) * sc, w, r.height * sc, true});
+            x += w;
+            ++k;
+            continue;
+        }
         if (bestL < 0) return false;
         const Line &l = kLines[bestL];
         Rectangle r = cut(l, bestA, bestA + bestN - 1);
@@ -138,19 +166,19 @@ static bool compose(const char *s, std::vector<Piece> &out, float &width)
 }
 
 // Largura de `s` (em unidades de kRefXh); < 0 se nao da para montar
-static float width(const char *s)
+static float width(const char *s, bool rotW = false)
 {
     std::vector<Piece> p;
     float w = 0.f;
-    return load() && compose(s, p, w) ? w : -1.f;
+    return load() && compose(s, p, w, rotW) ? w : -1.f;
 }
 
 // Desenha `s` centrado em cx, linha de base em `base`, altura do x `xh` (pixels do alvo); `c` ja em RGB do raylib
-static bool draw(const char *s, float cx, float base, float xh, Color c)
+static bool draw(const char *s, float cx, float base, float xh, Color c, bool rotW = false)
 {
     std::vector<Piece> p;
     float w = 0.f;
-    if (!load() || !compose(s, p, w)) return false;
+    if (!load() || !compose(s, p, w, rotW)) return false;
     const float sc = xh / kRefXh, x0 = cx - w * sc * 0.5f;
     for (const Piece &pc : p)
         DrawTexturePro(g_tex[pc.tex], pc.src, Rectangle{x0 + pc.x * sc, base + pc.top * sc, pc.w * sc, pc.h * sc}, Vector2{0, 0}, 0.f, c);
