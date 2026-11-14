@@ -617,13 +617,41 @@ namespace
     uint32_t g_ffaRa = 0, g_ffaBefore = 0;
     bool g_ffaPending = false, g_ffaFake = false;
 
+    // A tela pode terminar num salto para outra funcao (tail call): a volta ao chamador nao passa por aqui, e o cursor falso (3) ficaria
+    // valendo ate a proxima chamada (o numero piscava). Segue o salto ate a volta e o gancho termina o servico.
+    void finishTail(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, bool pending, uint32_t ra, int screen)
+    {
+        if (!pending || ctx->pc == ra || !runtime->lookupFunction(ctx->pc))
+            return;
+        static int s_logs = 0;
+        if (s_logs++ < 3)
+            std::fprintf(stderr, "[wotm] tela %d: a tela saltou para %x; seguindo ate a volta (%x)\n", screen, ctx->pc, ra);
+        wotmFinishGuestCall(rdram, ctx, runtime, ra);
+    }
+
     void ffaOptions1PWithZero(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         constexpr int kMax = wotm_menucpus::kMax;
         if (ctx->pc == kFfaOptions1P)
         {
             g_ffaRa = GPR_U32(ctx, 31);
-            g_ffaBefore = READ32(kFfaCursor);
+            const uint32_t cur = READ32(kFfaCursor);
+            if (g_ffaPending && g_ffaFake && cur == 3u)
+            {   // a chamada anterior parou no meio e nao voltou aqui: o 3 no cursor e o nosso, o numero e o de antes dela
+                static int s_logs = 0;
+                if (s_logs++ < 20)
+                    std::fprintf(stderr, "[wotm] tela 12: chamada anterior nao terminou; o cursor volta a %u\n", g_ffaBefore);
+            }
+            else
+                g_ffaBefore = cur;
+            if (wotm_lms::g_armed.load(std::memory_order_relaxed) && g_ffaBefore == 0u)
+            {   // last monster standing: sem CPU o jogador ganharia na hora; o cursor anda por 1..7
+                g_ffaBefore = 1;
+                WRITE32(kFfaCursor, 1);
+                const uint32_t sw = READ32(kShell + 0x43C);
+                if (sw && (READ8(sw) & 0x3F) == 6 && READ8(sw + 0xB) > 1)
+                    WRITE8(sw + 8, 1);
+            }
             g_ffaPending = true;
             g_ffaFake = g_ffaBefore > 3u && g_ffaBefore <= uint32_t(kMax);
             if (g_ffaFake)
@@ -633,6 +661,7 @@ namespace
             }
         }
         g_origFfaOptions1P(rdram, ctx, runtime);
+        finishTail(rdram, ctx, runtime, g_ffaPending, g_ffaRa, 12);
         if (!g_ffaPending || ctx->pc != g_ffaRa)
             return;   // parou no meio (retomada cai aqui de novo e termina o servico)
         g_ffaPending = false;
@@ -647,7 +676,10 @@ namespace
         // passo da original (cima: >= 2 desce 1, senao vai a 3; baixo: < 3 sobe 1, senao vai a 1)
         const bool dec = (eff >= 2 && after == eff - 1) || (eff <= 1 && after == 3);
         const bool inc = (eff < 3 && after == eff + 1) || (eff >= 3 && after == 1);
-        const int want = dec ? (before + kMax) % (kMax + 1) : inc ? (before + 1) % (kMax + 1) : before;
+        const int lo = wotm_lms::g_armed.load(std::memory_order_relaxed) ? 1 : 0, n = kMax + 1 - lo;
+        const int want = dec ? lo + (before - lo + n - 1) % n : inc ? lo + (before - lo + 1) % n : before;
+        if (want != before)
+            std::fprintf(stderr, "[wotm] tela 12: cursor %d -> %d (o jogo andou %d -> %d)\n", before, want, eff, after);
         if (want == after)
             return;
         WRITE32(kFfaCursor, uint32_t(want));
@@ -675,7 +707,16 @@ namespace
         if (ctx->pc == kFfaOptions2P)
         {
             g_ffa2Ra = GPR_U32(ctx, 31);
-            g_ffa2Before = std::min(READ32(kFfa2Cursor), uint32_t(kMax));   // o cursor que ficou de outro numero de jogadores
+            const uint32_t cur = READ32(kFfa2Cursor);
+            if (g_ffa2Pending && g_ffa2Fake && cur == uint32_t(g_ffa2Game))
+            {   // a chamada anterior parou no meio e nao voltou aqui (como na tela 12)
+                static int s_logs = 0;
+                if (s_logs++ < 20)
+                    std::fprintf(stderr, "[wotm] tela 13: chamada anterior nao terminou; o cursor volta a %u\n", g_ffa2Before);
+            }
+            else
+                g_ffa2Before = cur;
+            g_ffa2Before = std::min(g_ffa2Before, uint32_t(kMax));   // o cursor que ficou de outro numero de jogadores
             WRITE32(kFfa2Cursor, g_ffa2Before);
             g_ffa2Pending = true;
             // o maior numero que o jogo confirma por si; com bot de jogador (2 com bot vao a selecao do telao, como 3 e 4) nenhum
@@ -685,6 +726,7 @@ namespace
                 WRITE32(kFfa2Cursor, uint32_t(g_ffa2Game));
         }
         g_origFfaOptions2P(rdram, ctx, runtime);
+        finishTail(rdram, ctx, runtime, g_ffa2Pending, g_ffa2Ra, 13);
         if (!g_ffa2Pending || ctx->pc != g_ffa2Ra)
             return;
         g_ffa2Pending = false;
@@ -732,6 +774,7 @@ namespace
             WRITE32(kElimCursor, g_elimFake ? 0u : g_elimBefore);
         }
         g_origElimOptions(rdram, ctx, runtime);
+        finishTail(rdram, ctx, runtime, g_elimPending, g_elimRa, 11);
         if (!g_elimPending || ctx->pc != g_elimRa)
             return;   // parou no meio (retomada cai aqui de novo e termina o servico)
         g_elimPending = false;
