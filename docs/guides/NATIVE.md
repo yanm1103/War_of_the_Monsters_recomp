@@ -287,7 +287,9 @@ it, so its hooks wrap the arcade's and call them when the mode is off), menu row
   CPUs), with monster and stage select. Picking another mode or going back to the main menu disarms it. Without the menu:
   `WOTM_LMS=<respawns>` with `WOTM_MATCH` arms the first fight.
 - **Lives:** `InitPlayerLives` (each fight, PLAY AGAIN included) gives every player X + 1 lives and every CPU X respawns, and turns
-  the mode on. `gameResolveLifeAndDeath` is replaced: a player who is out with a life left respawns (`wotm_coop::revive`; the HUD
+  the mode on. It also zeroes `m_killTarget` (shell+0x2A44, the "first to" of free-for-all screen 15): with it above 0, the retail
+  `StateDeath::transitionInto` starts the free-for-all victory (unified view, camera 2 on the victim) when the killer's wins reach it,
+  and the camera would stay on the victim. `gameResolveLifeAndDeath` is replaced: a player who is out with a life left respawns (`wotm_coop::revive`; the HUD
   shows the game's NO LIVES LEFT message on the last one); without one, it leaves through `wotm_coop::eliminate` (monster hidden,
   the screen rebuilt with whoever goes on, as in the arcade). A CPU with a respawn left comes back through `aiInit`; without one it
   leaves the scene with `m_playerNum` 0.

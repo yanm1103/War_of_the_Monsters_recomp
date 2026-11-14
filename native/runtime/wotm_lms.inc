@@ -112,6 +112,10 @@ void livesHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     const int n = players(rdram);
     for (int i = 0; i < 4; ++i)
         wr32(rdram, kLives + 4u * uint32_t(i), i < n ? uint32_t(g_respawns + 1) : 0u);
+    // m_killTarget (o "first to" da tela 15 do free-for-all): com ele > 0, o StateDeath::transitionInto do retail, quando as vitorias do
+    // matador chegam nele, abre a vitoria do FFA (gUseUnifiedView, camera 2 na vitima com o POV 7) que o LMS nunca encerra; a camera
+    // ficava parada na vitima. Aqui o fim e o do LMS.
+    wr32(rdram, kShell + 0x2A44, 0u);
     // CPUs que sairam na luta anterior (PLAY AGAIN): o aiInit ja devolveu o m_playerNum 2; o desenho e a sombra voltam aqui
     for (int s = 0; s < kMaxSlots; ++s)
         if (g_aiOut[s] && s < slotCount(rdram))
