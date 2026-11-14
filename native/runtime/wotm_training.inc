@@ -14,6 +14,7 @@
 //   agarradas. Recarga: vida cheia depois de 1,5 s sem dano, e um golpe que mataria enche a vida antes (ninguem morre no treino).
 
 #include "wotm_training.h"
+#include "wotm_lms.h"   // last monster standing: sem o "WINS n" (skipWins)
 
 namespace wotm_train
 {
@@ -1344,14 +1345,15 @@ namespace wotm_train
 
     // "WINS n" do Hud::update (m_gameMode 2..6, o versus do treino): no treino nao conta nada e o do boneco cai sob o painel. O Hud
     // escreve com sprintf em dois buffers do .rodata do Hud (sem simbolo no ELF: o da esquerda e o da direita) e os passa ao
-    // fontSpritePrint(Right)XY; com o treino ligado ou a opcao WINS COUNTER desligada esses dois nao saem
+    // fontSpritePrint(Right)XY; com o treino ligado, no last monster standing (uma luta so) ou a opcao WINS COUNTER desligada
+    // esses dois nao saem
     constexpr uint32_t kWinsLeft = 0x006EA920u, kWinsRight = 0x006EA938u;
     PS2Runtime::RecompiledFunction g_origPrint = nullptr, g_origPrintRight = nullptr;
     bool skipWins(R5900Context *ctx)
     {
         const uint32_t s = GPR_U32(ctx, 7) & 0x1FFFFFFFu;
         if ((s != kWinsLeft && s != kWinsRight) ||
-            (!g_on.load(std::memory_order_relaxed) && wotm::settings::on(wotm::settings::VersusWins)))
+            (!g_on.load(std::memory_order_relaxed) && !wotm_lms::on() && wotm::settings::on(wotm::settings::VersusWins)))
             return false;
         ctx->pc = GPR_U32(ctx, 31);
         return true;

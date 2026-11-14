@@ -41,6 +41,7 @@
 void wotmPadSetPortBase(int base);   // wotm_pad.inc: o scePadRead em curso le os dispositivos da porta + base
 
 #include "wotm_training.h"   // modo treino: HUD do boneco (trainingHud)
+#include "wotm_lms.h"        // last monster standing: sem o "WINS n"
 
 namespace wotm_split4
 {
@@ -731,7 +732,7 @@ namespace wotm_split4
 
         // "WINS n" (Hud::update, modos 2 a 6, depois de 60 fields): cinza, letra 0x140 x 0xA0, a esquerda (indice 0) ou a direita
         const uint32_t mode = FAST_READ32(kGameMode);
-        if (mode < 2u || mode > 6u || !wotm::settings::on(wotm::settings::VersusWins))
+        if (mode < 2u || mode > 6u || wotm_lms::on() || !wotm::settings::on(wotm::settings::VersusWins))
             return;
         if (static_cast<int32_t>(callGuestN(rdram, ctx, runtime, wotm::fn::timerGetFieldCount__Fv, {})) < 0x3D)
             return;
