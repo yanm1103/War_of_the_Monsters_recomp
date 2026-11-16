@@ -245,7 +245,7 @@ struct Stage {
     int slot = 0;           // vaga 18..23
     std::string narrator;   // narrator/<nome>.mp3 na confirmacao (vazio = calado)
     bool random = true;     // a RANDOM pode sortear
-    bool ownAip = false;    // traz PTS/<ID>.AIP (a base METRO nao tem: fora da lista com CPUs sem ele)
+    bool ownAip = false;    // traz PTS/<ID>.AIP (a base METRO nao tem: com WOTM_HIGHRAM=0, fora da lista com CPUs sem ele)
     std::string mod;
     std::filesystem::path dir;
     std::string upperId() const {

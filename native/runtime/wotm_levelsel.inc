@@ -6,12 +6,13 @@
 // retail na ordem dele, depois as que faltam de 1 a 16 e por ultimo a RANDOM (kRandom, a fase 17 "dylan", de teste da equipe e sem
 // arquivos: o switch da foto, Shell+0x5D0, tem 24 filhos e o levelUnlocked a deixa aberta). O nome dela na tabela do
 // screenLevelSelect (GameLevelLongNames_006EEEF8) vira "Random". O resto e o codigo do jogo: cursor, trava, sons, confirmacao.
-// Com WOTM_HIGHRAM=0 a eliminacao (10 monstros carregados de uma vez) fica so com as fases do retail e a RANDOM.
+// Com WOTM_HIGHRAM=0 a eliminacao (10 monstros carregados de uma vez) fica so com as fases do retail e a RANDOM. O retail pula a quarta
+// entrada (a METRO) com mais de dois monstros (falta de RAM no PS2); com os monstros acima de 32 MB (padrao) o gancho desfaz o pulo.
 // Fases custom (mods/<mod>/stages/, wotm_stages.h): entram antes da RANDOM nas vagas 18..23, com o "name" delas na tabela, sempre abertas
 // (o levelUnlocked do jogo devolve 1 para elas) e com a foto da base (o switch), e levelpics/<id>.png por cima quando houver. A de base METRO sem .AIP proprio fica fora
-// quando a tela abre com CPUs (a mesma regra da quarta entrada).
+// quando a tela abre com CPUs (a mesma regra da quarta entrada, so com WOTM_HIGHRAM=0).
 // No changeScreen(8, 99) (wotm_padsel.inc) a RANDOM vira uma fase sorteada da lista, entre as destravadas (e sem a quarta entrada
-// quando o jogo a pula: modo 2 com 2+ CPUs, modo 3 com CPU; sem Training e Tokyo Deathmatch, fases de teste), antes da carga e sem
+// com WOTM_HIGHRAM=0 no modo 2 com 2+ CPUs, modo 3 com CPU; sem Training e Tokyo Deathmatch, fases de teste), antes da carga e sem
 // o narrador anunciar a fase (surpresa).
 //
 // Thread da janela (prepare, antes do desenho da cena): o switch da foto mostra, para as fases sem arte no SHELL.TEX, a foto de outra
@@ -45,14 +46,23 @@ static const wotm::mods::Stage *customAt(int level)
 {
     return level >= wotm::mods::kFirstStageSlot ? wotm::mods::Registry::get().stageBySlot(level) : nullptr;
 }
-// O screenLevelSelect pula a quarta entrada da lista (a METRO, sem .AIP no disco) no modo 2 com 2+ CPUs e no modo 3 com CPU
-static bool skipNoAip(uint8_t *rdram)
+// WOTM_HIGHRAM=0: monstros embaixo de 32 MB, como no PS2
+static bool lowRam()
+{
+    const char *h = std::getenv("WOTM_HIGHRAM");
+    return h && h[0] == '0';
+}
+// O screenLevelSelect do retail pula a quarta entrada da lista (a METRO) no modo 2 com 2+ CPUs e no modo 3 com CPU: com mais de dois
+// monstros ela nao cabia nos 32 MB do PS2. Com os monstros acima de 32 MB (padrao) ela cabe com 8 e o levelSelectHook desfaz o pulo;
+// a regra so vale com WOTM_HIGHRAM=0.
+static bool retailSkipsMetro(uint8_t *rdram)
 {
     const uint32_t mode = rd32(rdram, kMode), ais = rd32(rdram, kNumAIs);
     return (mode == 2 && ais >= 2) || (mode == 3 && ais > 0);
 }
-// Custom de base METRO sem .AIP proprio: fora com CPUs, pela mesma razao
-static bool customNeedsAip(uint8_t *rdram, const wotm::mods::Stage *st) { return st->base->level == 4 && !st->ownAip && skipNoAip(rdram); }
+static bool skipMetro(uint8_t *rdram) { return lowRam() && retailSkipsMetro(rdram); }
+// Custom de base METRO sem .AIP proprio: fora com CPUs quando a METRO esta fora
+static bool customNeedsAip(uint8_t *rdram, const wotm::mods::Stage *st) { return st->base->level == 4 && !st->ownAip && skipMetro(rdram); }
 
 // levelUnlocked do jogo: 10, 11, 14 e 15 pela tabela de destrave (as 25 a 27 sao dos minigames, fora das listas); a custom esta sempre
 // aberta (o levelUnlocked do jogo ja devolve 1 para as vagas 18..23)
@@ -79,9 +89,7 @@ static void extend(uint8_t *rdram, uint32_t src)
     std::vector<int> out;
     for (uint32_t i = 0; i < count; ++i)
         out.push_back(int(rd32(rdram, levels + 4 * i)));
-    const char *h = std::getenv("WOTM_HIGHRAM");
-    const bool low = h && h[0] == '0';
-    if (!(src == wotm::sym::PO_MPElimination && low))
+    if (!(src == wotm::sym::PO_MPElimination && lowRam()))
     {
         for (int l = 1; l <= 16; ++l)
             if (std::find(out.begin(), out.end(), l) == out.end())
@@ -119,7 +127,20 @@ static void levelSelectHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runti
             std::memcpy(rdram + ((kLongNames + 18u * uint32_t(st.slot)) & 0x1FFFFFFFu), name, sizeof name);
         }
     }
+    const uint32_t selAddr = wotm::sym::currentSelection + 4u * 8u;
+    const uint32_t prev = rd32(rdram, selAddr);
     g_origLevelSelect(rdram, ctx, runtime);
+    // Pulo da METRO desfeito (retailSkipsMetro): o jogo levou o cursor de 4 para 2 (esquerda) ou de 2 para 4 (direita); ele volta para a
+    // quarta entrada, com a foto (whichChild do switch, o hierSetSwitch) e o nome dela
+    if (const uint32_t now = rd32(rdram, selAddr); !lowRam() && retailSkipsMetro(rdram) && ((prev == 4 && now == 2) || (prev == 2 && now == 4)))
+    {
+        const uint32_t ll = rd32(rdram, wotm::sym::g_levelList);
+        const uint32_t level = rd32(rdram, rd32(rdram, ll + 8) + 4u * 3u);
+        wr32(rdram, selAddr, 3);
+        if (const uint32_t sw = rd32(rdram, kLevelSw) & 0x1FFFFFFFu; sw && (rd32(rdram, sw) & 63) == 6)
+            rdram[sw + 8] = uint8_t(level);
+        wr32(rdram, wotm::sym::charSelectStringOne, kLongNames + 18u * level);
+    }
     // Foto: a vaga de uma custom mostra o filho da base no switch (o desenho poe o levelpics/<id>.png por cima, se houver)
     if (const uint32_t sw = rd32(rdram, kLevelSw) & 0x1FFFFFFFu; sw && (rd32(rdram, sw) & 63) == 6)
     {
@@ -148,8 +169,7 @@ bool resolveRandom(uint8_t *rdram)
     if (int(rd32(rdram, kLevelNum)) != kRandom)
         return false;
     const uint32_t ll = rd32(rdram, wotm::sym::g_levelList);
-    const uint32_t mode = rd32(rdram, kMode), ais = rd32(rdram, kNumAIs);
-    const bool skip3 = (mode == 2 && ais >= 2) || (mode == 3 && ais > 0);   // o screenLevelSelect pula a quarta entrada
+    const bool skip3 = skipMetro(rdram);   // quarta entrada (a METRO) fora so com WOTM_HIGHRAM=0
     std::vector<int> pool;
     if (ll == kList)
     {

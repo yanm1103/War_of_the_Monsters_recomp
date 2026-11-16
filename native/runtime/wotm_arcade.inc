@@ -95,8 +95,13 @@ bool levelUnlocked(uint8_t *rdram, int level)
     }
     return rd32(rdram, wotm::sym::monsterSelectMode + off) != 0;
 }
-// A METRO sem .AIP proprio nao aguenta mais de uma CPU (wotm_levelsel.inc, skipNoAip)
-bool metroBlocked(int mode, int cpus) { return (mode == 2 && cpus >= 2) || (mode == 3 && cpus > 0); }
+// O retail tira a METRO com mais de dois monstros (32 MB do PS2); com os monstros acima de 32 MB (padrao) ela cabe com 8
+// (wotm_levelsel.inc, retailSkipsMetro)
+bool metroBlocked(int mode, int cpus)
+{
+    const char *h = std::getenv("WOTM_HIGHRAM");
+    return h && h[0] == '0' && ((mode == 2 && cpus >= 2) || (mode == 3 && cpus > 0));
+}
 int fightMode(int players) { return players == 1 ? 2 : 3; }
 uint32_t playerCostume(uint8_t *rdram, int i)
 {

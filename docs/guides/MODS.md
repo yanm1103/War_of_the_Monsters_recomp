@@ -567,7 +567,7 @@ with its own level patch:
 - **Picture:** `levelpics/<id>.png` (see the next section); without it, the base's picture. The stage select marks the entry with a
   blue "CUSTOM" label.
 - **Slots:** up to 6 custom stages, in the stage index slots 18 to 23 (dev team test stages with no files), in mod/id order. A
-  METRO-based stage without its own `.AIP` leaves the list when the screen opens with CPUs, as METRO does.
+  METRO-based stage without its own `.AIP` leaves the list when the screen opens with CPUs and `WOTM_HIGHRAM=0`, as METRO does.
 - **Without the menu:** `WOTM_MATCH=3,1,@mycity` (`NATIVE.md`, "Runtime: direct match, AI vs AI and batch").
 - The log lists each stage and each refusal (`[mods] fase mycity ("MY CITY", meu_mod) = vaga 18, base CENTRAL (1); ...`) and the
   confirmation (`[fases] custom mycity ...: vaga 18 -> base CENTRAL (1)`). The registry is read at boot: a new stage enters after

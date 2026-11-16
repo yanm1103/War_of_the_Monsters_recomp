@@ -245,7 +245,7 @@ Plan and the owner's decisions: `docs/investigacoes/2026-11-13/modo_arcade_plano
 `wotm_padsel.inc`, shared state (`g_armed`, `g_on`) in `native/wotm_arcade.h`.
 - **Run:** 5 fights in a row without going through the menus (each one is a new session: `m_inSession` 0 with `m_inMenus` 1, the
   retail RESTART). Fights 1 to 4 are a challenge (`m_mode` 2, 1 player) or a free-for-all with CPUs (`m_mode` 3, 2 to 4 players) on a
-  drawn stage (no repeats, never stage 12, the boss's stage or a locked one; never the METRO with more than one CPU), with
+  drawn stage (no repeats, never stage 12, the boss's stage or a locked one; with `WOTM_HIGHRAM=0`, never the METRO with more than one CPU), with
   `max(1, ceil(fight x MAX / 4))` CPUs, where MAX = min(ARCADE CPUS, 8 - players). CPUs come from the open columns of the select
   screen, no repeated monster while possible, with an unlocked costume nobody else on the same monster has. Fight 5 is the boss,
   Goliath Prime (stage 3) or Cerebulon (stage 11), drawn at the start, on its adventure stage (`m_mode` 1, the co-op campaign with
@@ -787,12 +787,14 @@ helicopters from `MON/ARMY.*` (below). The adventure keeps its own army untouche
 - **Lists:** the `screenLevelSelect` hook (screen 8) swaps the `g_levelList` of the four retail lists (`PO_1PFreeForAll`,
   `PO_MPFreeForAll`, `PO_1PEndurance`, `PO_MPElimination`) for a copy at the top of RAM (`PS2_RAM_SIZE - 0x300`): the retail stages
   in its order, then the missing ones from 1 to 16 (Training 12, Lake Powell 13, Tokyo Deathmatch 16 and, where they are not present, Mini Baytown
-  14 and Volcano 15) and RANDOM last. Cursor, lock (`levelUnlocked`), sounds and confirmation are still the game's code. With
+  14 and Volcano 15) and RANDOM last. Cursor, lock (`levelUnlocked`), sounds and confirmation are still the game's code. The retail cursor skips the fourth
+  entry (METRO) with more than two monsters (mode 2 with 2 or more CPUs, mode 3 with CPU), which did not fit in the PS2's 32 MB; with the
+  monsters above 32 MB the hook moves the cursor back onto it (picture and name included), and the skip stays only with `WOTM_HIGHRAM=0`. With
   `WOTM_HIGHRAM=0` elimination (the 10 monsters loaded at once) keeps only the retail stages and RANDOM. Log `[fases]`.
 - **RANDOM:** it is stage 17 (`dylan`, a dev team test stage, with no files): the picture switch (`Shell+0x5D0`) has 24 children and
   `levelUnlocked` leaves it open. Its name in the `screenLevelSelect` table (`GameLevelLongNames_006EEEF8`) becomes "Random". At
   `changeScreen(8, 99)` it becomes a stage drawn from the list, among the unlocked ones, without Training and Tokyo Deathmatch (dev team
-  test stages) and without the fourth entry when the game skips it (mode 2 with 2 or more CPUs, mode 3 with CPU), before the load. The announcer does not
+  test stages) and, with `WOTM_HIGHRAM=0`, without the fourth entry (METRO) in mode 2 with 2 or more CPUs and mode 3 with CPU, before the load. The announcer does not
   announce the drawn stage.
 - **Pictures:** `SHELL.TEX` has no picture of Training, Lake Powell and Tokyo Deathmatch; the switch children of those stages (and of 17) use
   another stage's (Midtown Park, half of Rosdale Canyon, half of Tsunopolis). The picture object draws with its own texture
@@ -808,7 +810,7 @@ helicopters from `MON/ARMY.*` (below). The adventure keeps its own army untouche
   top of the screen); drawn after the game's text (`drawBadge`). On a custom stage the badge reads "CUSTOM", in blue.
 - **Custom stages** (`MODS.md`, "Custom stages"): the extended list takes the registry's slots (18..23) before RANDOM, with the same
   `WOTM_HIGHRAM=0` rule as stages 1 to 16, and the hook writes each `name` into `GameLevelLongNames_006EEEF8[slot]`. A METRO-based stage
-  without its own `.AIP` stays out when the screen opens with CPUs. A custom stage is always unlocked (the game's
+  without its own `.AIP` stays out when the screen opens with CPUs and `WOTM_HIGHRAM=0`. A custom stage is always unlocked (the game's
   `levelUnlocked` answers 1 for the slots 18..23, whatever the base's lock), and RANDOM can draw it unless it has `"random": false`. After the original
   `screenLevelSelect`, a switch child that is a custom slot becomes the base's child (whose shape `picObject` knows); with
   `levelpics/<id>.png` the picture goes on top of the base's object (`nodeTexture` looks from the highest index down, so the slot wins
