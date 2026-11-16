@@ -99,6 +99,21 @@ void setRet(R5900Context *ctx, uint32_t v) { ctx->r[2] = _mm_set_epi64x(0, stati
 
 // Modos: 2 e 3 free-for-all, 4 endurance, 6 eliminacao (o treino e o 2 com o wotm_training::g_on). Aventura, minigames e demo, nunca.
 bool versusMode(uint32_t mode) { return mode == 2u || mode == 3u || mode == 4u || mode == 6u; }
+// A fase da luta marcada no submenu STAGES (st::armyStage). Custom: pela vaga ou, depois do activate, pelo g_active.
+bool stageWanted(uint8_t *rdram)
+{
+    const uint32_t lvl = wotm_stages::levelNum(rdram);
+    const wotm::mods::Stage *cs = wotm_stages::g_active ? wotm_stages::g_active : wotm::mods::Registry::get().stageBySlot(int(lvl));
+    const std::string id = st::armyStageId(int(lvl), cs ? cs->id : std::string());
+    const bool on = id.empty() || st::armyStage(id);
+    static std::string s_last;   // log so quando a fase ou a escolha muda
+    if (const std::string k = id + (on ? "+" : "-"); k != s_last)
+    {
+        s_last = k;
+        if (!id.empty()) std::fprintf(stderr, "[exercito] fase %s: %s (STAGES da aba ARMY)\n", id.c_str(), on ? "marcada" : "desmarcada");
+    }
+    return on;
+}
 bool poolWanted(uint32_t mode)
 {
     if (!st::on(st::Army)) return false;
@@ -144,7 +159,7 @@ void createHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     const uint32_t ep = phys(GPR_U32(ctx, 4)), type = GPR_U32(ctx, 8);   // a0 = no, t0 (5o argumento) = tipo pedido
     const uint32_t id = type ? type + 0x1388u : rd32(rdram, ep) >> 18;
     const uint32_t mode = rd32(rdram, kGameMode);
-    if (!militaryId(id) || mode == 1u || rd32(rdram, kLoaded) || !poolWanted(mode))
+    if (!militaryId(id) || mode == 1u || rd32(rdram, kLoaded) || !poolWanted(mode) || !stageWanted(rdram))
     {
         g_create.orig(rdram, ctx, runtime);
         return;
@@ -198,7 +213,7 @@ bool armyLoadWanted(uint8_t *rdram)
     char lvl[9] = {};
     for (int c = 0; c < 8; ++c) lvl[c] = char(std::toupper(rd8(rdram, kFsNames + c)));
     const bool vegas = std::strcmp(lvl, "VEGAS") == 0 || (wotm_stages::g_active && wotm_stages::g_active->base->level == 2);   // custom de base VEGAS: o NGP e o dela
-    return poolWanted(rd32(rdram, kGameMode)) && !vegas && lvl[0];
+    return poolWanted(rd32(rdram, kGameMode)) && !vegas && lvl[0] && stageWanted(rdram);
 }
 void loadResHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 {
@@ -586,7 +601,7 @@ void updateHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         return;
     }
     const uint32_t mode = rd32(rdram, kGameMode);
-    g_on = armyOn(mode);
+    g_on = armyOn(mode) && stageWanted(rdram);
     g_live = g_on && fightLive(rdram);
     if (g_repark)
     {

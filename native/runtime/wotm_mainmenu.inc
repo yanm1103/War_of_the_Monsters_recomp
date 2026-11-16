@@ -95,6 +95,8 @@ struct View
     bool moves = false;                   // pausa: a lista de golpes (MOVE LIST), tambem sem abas
     int arm = -1;                         // aba CHEATS: linha esperando o segundo X (g_cheatArm)
     int lms = -1;                         // tela 15 do last monster standing: os renascimentos (-1: outra tela)
+    bool grid = false;                    // aba ARMY: a grade das fases (STAGES) aberta
+    int gridSel = 0, gridTop = 0;         // grade: celula escolhida e primeira fileira visivel
 };
 static std::mutex g_m;
 static View g_view;
@@ -453,10 +455,30 @@ static bool cheatStep(int r, int dir, bool wrap)
     return false;
 }
 
+// Aba ARMY, linha a mais depois das opcoes: STAGES abre a grade das fases (foto, nome e uma caixinha cada; st::armyStage, linha
+// ARMY_OFF do settings.ini). As 16 fases do jogo e depois as custom dos mods, na ordem das vagas. Thread do EE (entrada) e da janela
+// (desenho e mouse) montam a mesma lista.
+constexpr int kArmyStagesRow = kTabDefs[TabArmy].n;
+constexpr int kGridCols = 4, kGridVis = 3, kGridMax = 16 + wotm::mods::kStageSlots;
+struct GridStage { int level; const char *name; std::string id; const wotm::mods::Stage *cs; };
+static int armyGridStages(GridStage out[kGridMax])
+{
+    static constexpr const char *kNames[17] = {nullptr,          "MIDTOWN PARK",  "GAMBLERS GULCH", "ROSDALE CANYON", "METRO CITY", "CENTURY AIRFIELD",
+                                               "ATOMIC ISLAND",  "BAYTOWN",       "CLUB CALDERA",   "TSUNOPOLIS",     "UFO",        "CAPITOL",
+                                               "TRAINING",       "LAKE POWELL",   "MINI BAYTOWN",   "VOLCANO",        "TOKYO DEATHMATCH"};
+    int n = 0;
+    for (int l = 1; l <= 16; ++l) out[n++] = GridStage{l, kNames[l], st::armyStageId(l), nullptr};
+    for (const wotm::mods::Stage &s : wotm::mods::Registry::get().stages())
+        if (n < kGridMax && s.slot >= wotm::mods::kFirstStageSlot) out[n++] = GridStage{s.slot, s.name.c_str(), st::armyStageId(s.slot, s.id), &s};
+    return n;
+}
+static bool g_armyGrid = false;   // a grade aberta (no lugar das linhas da aba ARMY)
+static int g_gridSel = 0, g_gridTop = 0;   // celula escolhida e primeira fileira visivel
+
 static int tabRows(int tab)
 {
     int r[kMaxCtlRows];
-    return tab == TabControls ? ctlRows(g_bindMap < 0, r) : tab == TabCheats ? int(kCheatRows) : kTabDefs[tab].n;
+    return tab == TabControls ? ctlRows(g_bindMap < 0, r) : tab == TabCheats ? int(kCheatRows) : tab == TabArmy ? kArmyStagesRow + 1 : kTabDefs[tab].n;
 }
 static std::string bindValue(int b, int map)
 {
@@ -649,6 +671,7 @@ static void openPanel()
 {
     g_open = true;
     g_cheatArm = -1;
+    g_armyGrid = false;
     g_showPreview = true;
     readPanel(g_panelPrev);   // o X que abriu ainda esta apertado: so conta o proximo
 }
@@ -674,6 +697,7 @@ static void openPausePanel(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtim
     g_pauseTraining = training;
     g_pauseMoves = moves;
     g_cheatArm = -1;
+    g_armyGrid = false;
     if (moves)
         g_moveSel = std::clamp(g_moveSel, 0, std::max(0, moveRows() - 1));
     g_pauseSuppress = 0;
@@ -814,6 +838,58 @@ static void cheatsInput(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, 
 // existe, e quem joga no teclado perderia o monstro e a saida da pausa
 static bool lockedOpt(st::Key k, bool inPause) { return inPause && k == st::KbSeparate; }
 
+// Grade das fases (STAGES da aba ARMY): direcional anda pelas celulas, X liga ou desliga a fase, quadrado liga todas (ou desliga, com
+// todas ligadas), triangulo volta para a lista da aba. Vale na hora, tambem no meio da luta (o wotm_army.inc le a cada quadro).
+static void armyGridInput(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, const bool e[kPanelActs])
+{
+    GridStage gs[kGridMax];
+    const int n = armyGridStages(gs), rows = (n + kGridCols - 1) / kGridCols;
+    if (e[PBack])
+    {
+        g_armyGrid = false;
+        panelSfx(rdram, ctx, runtime, 6);
+        return;
+    }
+    int &sel = g_gridSel;
+    sel = std::clamp(sel, 0, n - 1);
+    const int old = sel, col = sel % kGridCols;
+    if (e[PLeft] || e[PRight])
+        sel = (sel + (e[PRight] ? 1 : n - 1)) % n;
+    else if (e[PDown])
+        sel = (sel / kGridCols + 1) * kGridCols + col < n ? sel + kGridCols : col;
+    else if (e[PUp])
+    {
+        int r = sel / kGridCols - 1;
+        if (r < 0)
+            for (r = rows - 1; r > 0 && r * kGridCols + col >= n; --r) {}
+        sel = r * kGridCols + col;
+    }
+    if (sel != old)
+    {
+        const int r = sel / kGridCols;
+        if (r < g_gridTop) g_gridTop = r;
+        if (r >= g_gridTop + kGridVis) g_gridTop = r - kGridVis + 1;
+        panelSfx(rdram, ctx, runtime, e[PRight] || e[PDown] ? 4 : 2);
+        return;
+    }
+    if (e[POk])
+    {
+        const bool on = !st::armyStage(gs[sel].id);
+        st::setArmyStage(gs[sel].id, on);
+        std::fprintf(stderr, "[settings] exercito em %s: %s\n", gs[sel].id.c_str(), on ? "sim" : "nao");
+        panelSfx(rdram, ctx, runtime, on ? 8 : 6);
+    }
+    else if (e[PClear])
+    {
+        bool all = true;
+        for (int i = 0; i < n; ++i) all = all && st::armyStage(gs[i].id);
+        for (int i = 0; i < n; ++i) st::setArmyStage(gs[i].id, !all, false);
+        st::save();
+        std::fprintf(stderr, "[settings] exercito em %s as fases\n", all ? "nenhuma das" : "todas");
+        panelSfx(rdram, ctx, runtime, all ? 6 : 8);
+    }
+}
+
 // Um quadro do painel aberto (no menu: screenGetInput da tela 1, que o jogo chama a cada quadro dela; na pausa: no lugar do
 // pauseLevelOverlay). Devolve true quando o painel fecha (quem chamou fecha o seu: g_open ou g_pauseOpen).
 static bool panelInput(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -832,8 +908,12 @@ static bool panelInput(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     const bool training = g_where == InPause && g_pauseTraining;
     const bool moves = g_where == InPause && g_pauseMoves;
     const int nMoves = moves ? moveRows() : 0;
-    int &selRef = moves ? g_moveSel : training ? g_trainSel : g_optSel[g_tab];
-    const int selRows = moves ? nMoves : training ? int(kTrainRows) : tabRows(g_tab);
+    if (g_armyGrid && (training || moves || g_tab != TabArmy))
+        g_armyGrid = false;
+    GridStage gridTmp[kGridMax];
+    const int nGrid = g_armyGrid ? armyGridStages(gridTmp) : 0;
+    int &selRef = moves ? g_moveSel : training ? g_trainSel : g_armyGrid ? g_gridSel : g_optSel[g_tab];
+    const int selRows = moves ? nMoves : training ? int(kTrainRows) : g_armyGrid ? nGrid : tabRows(g_tab);
     // mouse (etapa 9): passar por cima escolhe a linha; clique esquerdo na aba troca, em L1/R1 anda uma aba, na linha confirma (nas
     // setas do valor, diminui ou aumenta); clique direito volta. A rodinha vem como cima/baixo (readPanel).
     {
@@ -858,6 +938,7 @@ static bool panelInput(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         if (click && !training && !moves && hv.part == HTab && hv.tab >= 0 && hv.tab != g_tab)
         {
             g_tab = hv.tab;
+            g_armyGrid = false;
             panelSfx(rdram, ctx, runtime, 4);
             return false;
         }
@@ -877,6 +958,14 @@ static bool panelInput(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         g_cheatArm = -1;
         panelSfx(rdram, ctx, runtime, 6);
+        return false;
+    }
+    // grade das fases do exercito: L1/R1 saem dela trocando de aba
+    if (g_armyGrid && (e[PPrev] || e[PNext]))
+        g_armyGrid = false;
+    if (g_armyGrid)
+    {
+        armyGridInput(rdram, ctx, runtime, e);
         return false;
     }
     if (e[PBack])
@@ -956,6 +1045,15 @@ static bool panelInput(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
         controlsInput(rdram, ctx, runtime, e);
         return false;
     }
+    if (g_tab == TabArmy && sel >= kArmyStagesRow)
+    {
+        if (e[POk])
+        {
+            g_armyGrid = true;
+            panelSfx(rdram, ctx, runtime, 8);
+        }
+        return false;
+    }
     if (e[PLeft] || e[PRight] || e[POk])
     {
         const st::Key k = t.opt[sel].key;
@@ -990,6 +1088,9 @@ static void publishPause()
     v.capture = g_capture;
     v.preview = g_showPreview;
     v.arm = g_cheatArm;
+    v.grid = g_armyGrid;
+    v.gridSel = g_gridSel;
+    v.gridTop = g_gridTop;
     v.training = g_pauseTraining;
     v.moves = g_pauseMoves;
     if (v.training)
@@ -1349,7 +1450,10 @@ static void frame(uint8_t *rdram)
     v.capture = g_capture;
     v.preview = g_showPreview;
     v.arm = g_cheatArm;
-    v.screenObj = rd32(rdram, wotm_padsel::kMovieScreen) & 0x1FFFFFFFu;
+    v.grid = g_armyGrid;
+    v.gridSel = g_gridSel;
+    v.gridTop = g_gridTop;
+    v.screenObj =rd32(rdram, wotm_padsel::kMovieScreen) & 0x1FFFFFFFu;
     std::lock_guard<std::mutex> lk(g_m);
     g_view = v;
 }
@@ -1669,6 +1773,39 @@ static PanelLayout panelLayout(int tab, bool preview, bool training = false)
     return {lineH, 54.f, W * 0.10f, W * 0.97f, visRows(tab), false, {}};
 }
 
+// Grade das fases do exercito (STAGES da aba ARMY): kGridVis fileiras de kGridCols celulas abaixo do fio das abas; cada celula tem a
+// foto da fase, o nome embaixo e a caixinha embaixo do nome. Desenho e mouse (panelHit) usam as mesmas medidas.
+constexpr float kGridY0 = float(kPH) / 8.9f * 1.6f, kGridRowH = (float(kPH) - 24.f - kGridY0) / float(kGridVis);
+static Rectangle gridCell(int i, int top)
+{
+    const float cw = float(kPW) * 0.92f / float(kGridCols);
+    return Rectangle{float(kPW) * 0.04f + cw * float(i % kGridCols), kGridY0 + kGridRowH * float(i / kGridCols - top), cw, kGridRowH};
+}
+// Foto da fase na grade (thread da janela): a do SHELL.TEX (savepics) ou o PNG de levelpics/ (o mesmo da selecao de fase, de baixo para
+// cima); sem nenhuma, a da fase em que ela se baseia
+static bool drawStagePic(int level, const wotm::mods::Stage *cs, const Rectangle &dst, Color tint)
+{
+    static const PS2Runtime::IoPaths &io = PS2Runtime::getIoPaths();
+    for (int tries = 0; tries < 3 && level > 0; ++tries)   // custom -> base (13, 16) -> a emprestada
+    {
+        if (level == 12 || level == 13 || level == 16 || cs)
+            if (const Texture2D &t = wotm_levelsel::picOf(level).full; t.id)
+            {
+                DrawTexturePro(t, Rectangle{0.f, 0.f, float(t.width), -float(t.height)}, dst, Vector2{}, 0.f, tint);
+                return true;
+            }
+        if (!cs && level <= 16)
+            if (const Texture2D *t = wotm::savepics::drawer().levelTexture(io.cdRoot, io.cdImage.string(), uint32_t(level)))
+            {
+                DrawTexturePro(*t, Rectangle{0.f, 0.f, float(t->width), float(t->height)}, dst, Vector2{}, 0.f, tint);
+                return true;
+            }
+        level = cs ? (cs->base ? cs->base->level : 0) : level == 12 ? 1 : level == 13 ? 3 : level == 16 ? 9 : 0;
+        cs = nullptr;
+    }
+    return false;
+}
+
 // Previa da opcao (so na aba VIDEO): qual desenho cada opcao usa
 static wotm::preview::Renderer g_preview;
 static wotm::preview::Kind previewKind(st::Key k)
@@ -1803,8 +1940,69 @@ static void renderPanel(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0,
     }
     DrawRectangleRec(Rectangle{W * 0.04f, lineH * 1.4f, W * 0.92f, 3.f}, Color{90, 80, 66, 120});
 
+    // STAGES aberta: a grade das fases no lugar das linhas da aba ARMY
+    if (v.grid && !v.training && !v.moves && v.tab == TabArmy)
+    {
+        GridStage gs[kGridMax];
+        const int gn = armyGridStages(gs), gRows = (gn + kGridCols - 1) / kGridCols;
+        const int sel = std::clamp(v.gridSel, 0, std::max(0, gn - 1)), top = std::clamp(v.gridTop, 0, std::max(0, gRows - kGridVis));
+        bool all = true;
+        for (int i = 0; i < gn; ++i) all = all && st::armyStage(gs[i].id);
+        const Color lit = gsToRgb(kLit), dim = gsToRgb(kDim);
+        for (int i = top * kGridCols; i < std::min(gn, (top + kGridVis) * kGridCols); ++i)
+        {
+            const Rectangle c = gridCell(i, top);
+            const bool on = st::armyStage(gs[i].id), cur = i == sel;
+            if (cur)
+                DrawRectangleRounded(Rectangle{c.x + 4.f, c.y + 4.f, c.width - 8.f, c.height - 8.f}, 0.12f, 8, Color{60, 50, 40, 130});
+            // foto 2:1 com a altura que sobra do nome e da caixinha (que pedem ~120 abaixo dela)
+            const float cx = c.x + c.width * 0.5f, th = std::min(c.height - 136.f, (c.width - 32.f) * 0.5f), tw = th * 2.f;
+            const Rectangle pic{cx - tw * 0.5f, c.y + 16.f, tw, th};
+            if (!drawStagePic(gs[i].level, gs[i].cs, pic, on ? WHITE : Color{95, 95, 95, 255}))
+                DrawRectangleRec(pic, Color{20, 16, 12, 255});
+            DrawRectangleLinesEx(pic, 2.f, cur ? lit : Color{90, 80, 66, 200});
+            // nome: letras menores ate caber na celula
+            constexpr float nameH = 32.f;
+            const float nw = textWidth(tex0, kPW, kPH, gs[i].name, nameH), room = c.width - 20.f;
+            label(q, ram, tex0, gs[i].name, cx, pic.y + th + 34.f, nw > room ? nameH * room / nw : nameH, cur ? kLit : kDim, kPW, kPH);
+            // caixinha, com o visto quando o exercito vem nessa fase
+            constexpr float bs = 44.f;
+            const Rectangle box{cx - bs * 0.5f, pic.y + th + 66.f, bs, bs};
+            DrawRectangleRoundedLinesEx(box, 0.2f, 6, 4.f, cur ? lit : dim);
+            if (on)
+            {
+                const Color k = cur ? Color{255, 214, 120, 255} : Color{200, 168, 100, 255};
+                DrawLineEx(Vector2{box.x + bs * 0.2f, box.y + bs * 0.52f}, Vector2{box.x + bs * 0.42f, box.y + bs * 0.76f}, 7.f, k);
+                DrawLineEx(Vector2{box.x + bs * 0.38f, box.y + bs * 0.78f}, Vector2{box.x + bs * 0.84f, box.y + bs * 0.2f}, 7.f, k);
+            }
+        }
+        // rolagem: setinhas na borda direita quando ha fileiras acima ou abaixo
+        const float ax = W * 0.978f, s = 16.f;
+        if (top > 0)
+            DrawTriangle(Vector2{ax, kGridY0 + 30.f - s}, Vector2{ax - s, kGridY0 + 30.f + s * 0.6f}, Vector2{ax + s, kGridY0 + 30.f + s * 0.6f}, dim);
+        if (top + kGridVis < gRows)
+        {
+            const float y = kGridY0 + kGridRowH * float(kGridVis) - 30.f;
+            DrawTriangle(Vector2{ax, y + s}, Vector2{ax + s, y - s * 0.6f}, Vector2{ax - s, y - s * 0.6f}, dim);
+        }
+        using wotm_legend::Icon;
+        using wotm_legend::bind;
+        const float la = v.alpha * v.panel, bar = v.screen < 0 ? 0.55f : 1.f;
+        Icon tabs1 = bind(st::BL1), tabs2 = bind(st::BR1);
+        if (!tabs1.key) tabs1.key = "Q";
+        if (!tabs2.key) tabs2.key = "E";
+        const Icon ok = bind(st::BCross), back = bind(st::BTriangle), clear = bind(st::BSquare);
+        wotm_legend::hint("THE ARMY ONLY SHOWS UP ON THE CHECKED STAGES", la);
+        const bool selOn = gn > 0 && st::armyStage(gs[sel].id);
+        wotm_legend::post({{tabs1, tabs2, "TABS"}, {ok, {}, selOn ? "UNCHECK" : "CHECK"}, {clear, {}, all ? "UNCHECK ALL" : "CHECK ALL"}, {back, {}, "BACK"}}, la, bar);
+        scene.drawQuads(q, W, H);
+        EndBlendMode();
+        EndTextureMode();
+        return;
+    }
+
     // linhas da aba: nome, valor, dica e se o valor tem setas (escolha na lista)
-    enum { KOpt, KDevice, KReset, KBind, KCapture, KCheat };
+    enum { KOpt, KDevice, KReset, KBind, KCapture, KCheat, KStages };
     // mdir/mbtn/mtail: linha da MOVE LIST: direcao (teclado numerico) e botoes do comando saem como icones, mtail e o texto depois deles
     struct PRow { std::string label, value; const char *hint; bool arrows; int kind; int bind = -1; bool locked = false; int8_t mdir = 0; uint8_t mbtn = 0; std::string mtail; };
     PRow rows[kMaxCtlRows];
@@ -1870,7 +2068,18 @@ static void renderPanel(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0,
         }
     }
     else if (tab != TabControls)
+    {
         for (int i = 0; i < t.n; ++i) rows[n++] = optRow(t.opt[i]);
+        if (tab == TabArmy)
+        {   // STAGES: quantas fases da grade tem o exercito
+            GridStage gs[kGridMax];
+            const int gn = armyGridStages(gs);
+            int on = 0;
+            for (int i = 0; i < gn; ++i) on += st::armyStage(gs[i].id);
+            rows[n++] = PRow{"STAGES", on == gn ? "ALL" : on == 0 ? "NONE" : std::to_string(on) + " OF " + std::to_string(gn),
+                             "PICK THE STAGES WHERE THE ARMY SHOWS UP", false, KStages};
+        }
+    }
     else
     {
         int r[kMaxCtlRows];
@@ -2054,6 +2263,8 @@ static void renderPanel(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0,
         wotm_legend::post({{tabs1, tabs2, "TABS"}, {ok, {}, v.bindMap < 0 ? "NEW KEY" : "NEW BUTTON"}, {clear, {}, "CLEAR"}, {back, {}, "BACK"}}, la, bar);
     else if (kind == KReset)
         wotm_legend::post({{tabs1, tabs2, "TABS"}, {ok, {}, "RESTORE"}, {back, {}, "BACK"}}, la, bar);
+    else if (kind == KStages)
+        wotm_legend::post({{tabs1, tabs2, "TABS"}, {ok, {}, "OPEN"}, {back, {}, "BACK"}}, la, bar);
     else if (v.opt >= 0 && v.opt < n && rows[v.opt].locked)
         wotm_legend::post({{tabs1, tabs2, "TABS"}, {back, {}, "BACK"}}, la, bar);
     else if (v.tab == TabVideo)
@@ -2338,6 +2549,18 @@ static void panelHit(float u, float w, const View &v, Hover &hv)
         return;
     }
     const int tab = std::clamp(v.tab, 0, kTabs - 1);
+    if (v.grid && !v.training && !v.moves && tab == TabArmy)
+    {   // grade das fases: a celula sob o mouse (clique: X, liga ou desliga)
+        GridStage gs[kGridMax];
+        const int gn = armyGridStages(gs), top = std::clamp(v.gridTop, 0, std::max(0, (gn + kGridCols - 1) / kGridCols - kGridVis));
+        for (int i = top * kGridCols; i < std::min(gn, (top + kGridVis) * kGridCols); ++i)
+            if (CheckCollisionPointRec(Vector2{X, Y}, gridCell(i, top)))
+            {
+                hv.part = HRow;
+                hv.prow = i;
+            }
+        return;
+    }
     const PanelLayout L = panelLayout(tab, v.preview, v.training || v.moves);
     const int n = v.moves ? std::max(1, moveRows()) : v.training ? int(kTrainRows) : tabRows(tab), first = std::clamp(v.top, 0, std::max(0, n - L.vis));
     const int i = int(std::floor((Y - L.y0) / L.step + 0.5f));

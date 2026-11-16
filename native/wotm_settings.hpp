@@ -20,6 +20,7 @@
 #include <fstream>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace wotm::settings
 {
@@ -388,6 +389,35 @@ inline void resetBinds(int map)
     save();
 }
 
+// Fases sem exercito (submenu STAGES da aba ARMY): ids das fases do jogo (kArmyStageIds, os nomes do narrador) e "mod:<id>" das
+// custom. Linha ARMY_OFF= do settings.ini, so no arquivo; sem a linha, so a UFO fica de fora (decisao do dono). Lida pela thread do
+// EE (a cada quadro, wotm_army.inc) e pela da janela (o desenho do painel).
+inline constexpr const char *kArmyStageIds[17] = {
+    nullptr,      "midtownpark", "gamblersgulch", "rosdalecanyon", "metrocity", "centuryairfield", "atomicisland", "baytown", "clubcaldera",
+    "tsunopolis", "ufo",         "capitol",       "training",      "lakepowell", "minibaytown",    "volcano",      "tokyodeathmatch"};
+inline std::mutex g_armyOffM;
+inline std::vector<std::string> g_armyOff = {"ufo"};
+inline std::string armyStageId(int level, const std::string &customId = {})
+{
+    if (!customId.empty()) return "mod:" + customId;
+    return level > 0 && level < 17 ? kArmyStageIds[level] : std::string();
+}
+inline bool armyStage(const std::string &id)
+{
+    std::lock_guard<std::mutex> lk(g_armyOffM);
+    return std::find(g_armyOff.begin(), g_armyOff.end(), id) == g_armyOff.end();
+}
+inline void setArmyStage(const std::string &id, bool on, bool write = true)
+{
+    {
+        std::lock_guard<std::mutex> lk(g_armyOffM);
+        const auto it = std::find(g_armyOff.begin(), g_armyOff.end(), id);
+        if (on && it != g_armyOff.end()) g_armyOff.erase(it);
+        else if (!on && it == g_armyOff.end()) g_armyOff.push_back(id);
+    }
+    if (write) save();
+}
+
 inline void save()
 {
     std::lock_guard<std::mutex> lk(g_fileMutex);
@@ -401,6 +431,13 @@ inline void save()
     f << "# Recompiled options (menu principal); mesma chave das variaveis de ambiente\n";
     for (int k = 0; k < kKeys; ++k)
         f << kEnv[k] << '=' << format(Key(k), get(Key(k))) << '\n';
+    {
+        std::lock_guard<std::mutex> ao(g_armyOffM);
+        f << "# Fases sem exercito (aba ARMY, STAGES): ids separados por virgula; mod:<id> = fase custom\nARMY_OFF=";
+        for (size_t i = 0; i < g_armyOff.size(); ++i)
+            f << (i ? "," : "") << g_armyOff[i];
+        f << '\n';
+    }
     f << "# Teclas (KB_) e botoes de gamepad de cada botao do PS2 (PAD_ = jogador 1, PAD2_..PAD4_ = jogadores 2 a 4): aba CONTROLS\n";
     f << "KB_LAYOUT=" << kKbLayout << '\n';
     for (int b = 0; b < kBinds; ++b)
@@ -471,6 +508,22 @@ inline void load(const std::filesystem::path &dir)
                         }
                 if (key == "KB_LAYOUT")
                     kbLayout = std::atoi(val.c_str());
+                if (key == "ARMY_OFF")
+                {
+                    std::lock_guard<std::mutex> ao(g_armyOffM);
+                    g_armyOff.clear();
+                    for (size_t a = 0; a <= val.size();)
+                    {
+                        size_t b = val.find(',', a);
+                        if (b == std::string::npos) b = val.size();
+                        std::string id = val.substr(a, b - a);
+                        id.erase(0, id.find_first_not_of(' '));
+                        id.erase(id.find_last_not_of(' ') + 1);
+                        if (!id.empty()) g_armyOff.push_back(id);
+                        a = b + 1;
+                    }
+                    ++fromFile;
+                }
                 for (int b = 0; b < kBinds; ++b)
                 {
                     if (key == std::string("KB_") + kBindNames[b])
