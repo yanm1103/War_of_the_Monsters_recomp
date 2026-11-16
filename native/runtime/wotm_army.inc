@@ -85,6 +85,11 @@ int g_chaos = 0, g_waves = 0;
 constexpr int kNoNet = -1;
 int g_netType[3] = {3, 3, 1};
 bool g_gridBuilt = false;   // grade de nos do helicoptero ja acrescentada a rede nesta carga
+// Nos da rede do tanque e do caminhao sem chao embaixo (o hdHatTest erra: fora do mapa, sobre a agua de Tokyo): ficam de fora do
+// pickNode. Medidos na primeira leva de cada carga.
+bool g_groundChecked = false;
+bool g_groundless[256];
+bool g_wasParked[kMaxPool];   // o veiculo estava estacionado e escondido no quadro anterior
 double g_armyHitAt[kMaxSlots];   // instante do ultimo golpe do exercito em cada slot (-1 = o ultimo foi de outro)
 int g_aimed[kMaxSlots];          // quadros em que cada slot foi o alvo escolhido desde a ultima leva (log)
 int g_hits = 0;                  // golpes do exercito em monstros desde a ultima leva (log)
@@ -279,7 +284,8 @@ void beforeHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     if (ctx->pc == g_before.addr)
     {
         g_poolN = g_created = 0;
-        g_ready = g_repark = g_on = g_gridBuilt = false;
+        g_ready = g_repark = g_on = g_gridBuilt = g_groundChecked = false;
+        std::fill(std::begin(g_wasParked), std::end(g_wasParked), false);
         g_netType[KTank] = g_netType[KTruck] = 3;
         g_netType[KHeli] = 1;
         resetFight();
@@ -358,7 +364,7 @@ int pickNode(uint8_t *rdram, uint32_t type, const float (*used)[3], int nUsed)
     for (uint32_t i = 0, n = rd16(rdram, kFodder); i < n && i < 256; ++i)
     {
         const uint32_t nd = kFodder + 0x10 + kFodderNode * i;
-        if (rd8(rdram, nd + 0x10) != type) continue;
+        if (rd8(rdram, nd + 0x10) != type || (g_groundChecked && g_groundless[i] && int(type) == g_netType[KTank])) continue;
         const float x = rdF(rdram, nd), y = rdF(rdram, nd + 4);
         bool crowded = false;
         for (int u = 0; u < nUsed; ++u)
@@ -421,8 +427,9 @@ bool wake(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, const Unit &u,
     }
     else
     {
-        const float d = wotm_coop::hatTest(rdram, ctx, runtime, kVec, kVec + 0x10);   // assenta no chao, como o gameGetStartPoint
-        if (d >= 0.f && d < 2000.f) wrF(rdram, kVec + 8, z + 200.f - d);
+        // assenta no chao, como o gameGetStartPoint; o hdHatTest da 0 quando nao acha chao
+        const float d = wotm_coop::hatTest(rdram, ctx, runtime, kVec, kVec + 0x10);
+        if (d > 0.f && d < 2000.f) wrF(rdram, kVec + 8, z + 200.f - d);
         else wrF(rdram, kVec + 8, z);
         z = rdF(rdram, kVec + 8);
         wr32(rdram, p + kMode[u.kind], 0u);
@@ -483,7 +490,7 @@ void buildHeliGrid(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
             wrF(rdram, kVec + 8, low + kProbe);
             wrF(rdram, kVec + 12, 1.f);
             const float d = wotm_coop::hatTest(rdram, ctx, runtime, kVec, kVec + 0x10);
-            has[gy][gx] = d >= 0.f && d < 4096.f;   // sem chao: fora do mapa
+            has[gy][gx] = d > 0.f && d < 4096.f;   // sem chao (o hdHatTest da 0): fora do mapa
             ground[gy][gx] = std::max(low + kProbe - d, low);
             none += !has[gy][gx];
             high += has[gy][gx] && ground[gy][gx] > low + kHigh;
@@ -541,8 +548,32 @@ void buildHeliGrid(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
                          "a %.0f (monstro mais baixo em %.0f)\n", next - base, base, next - 1, high, none, cx, cy, zMin, zMax, low);
 }
 
+// Marca os nos do tanque e do caminhao sem chao: o hdHatTest de 200 acima do no ate 4096 abaixo nao acha nada (Tokyo tem dois, sobre
+// a agua). Acordado num deles, o veiculo caia no vazio e andava fora do alcance dos monstros.
+void checkGround(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+{
+    g_groundChecked = true;
+    std::fill(std::begin(g_groundless), std::end(g_groundless), false);
+    if (g_netType[KTank] == kNoNet) return;
+    int n = 0, bad = 0;
+    for (uint32_t i = 0, nn = rd16(rdram, kFodder); i < nn && i < 256; ++i)
+    {
+        const uint32_t nd = kFodder + 0x10 + kFodderNode * i;
+        if (rd8(rdram, nd + 0x10) != uint32_t(g_netType[KTank])) continue;
+        ++n;
+        wrF(rdram, kVec, rdF(rdram, nd));
+        wrF(rdram, kVec + 4, rdF(rdram, nd + 4));
+        wrF(rdram, kVec + 8, rdF(rdram, nd + 8) + 200.f);
+        wrF(rdram, kVec + 12, 1.f);
+        g_groundless[i] = wotm_coop::hatTest(rdram, ctx, runtime, kVec, kVec + 0x10) <= 0.f;
+        bad += g_groundless[i];
+    }
+    if (bad) std::fprintf(stderr, "[exercito] %d de %d nos do tanque sem chao embaixo: ficam de fora\n", bad, n);
+}
+
 int spawnWave(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, int want)
 {
+    if (!g_groundChecked) checkGround(rdram, ctx, runtime);
     int avail[kMaxPool], na = 0;
     for (int i = 0; i < g_poolN; ++i)
         if (parked(rdram, g_pool[i]) || inList(rdram, kRegenList, g_pool[i].node))
@@ -611,11 +642,24 @@ void updateHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     for (int i = 0; i < g_poolN; ++i)
     {
         const Unit &u = g_pool[i];
+        const bool isParked = parked(rdram, u);
+        // Um desabamento perto da casa do veiculo estacionado (as coordenadas de VEGAS, debaixo ou dentro do cenario das outras fases)
+        // o esconde com o bit 3 de +0x50 (LevelPickups::turnOffForDelayedHat, pelo hdCsCollect2D: ele segue na grade), e o hatCheck da
+        // DelayAction o mostraria de novo assentado no que houver embaixo (o fundo da baia em Tokyo, o disco voador). Mostrado mas no
+        // estado de estacionado, o ramo abaixo o soltava ali: debaixo da rua, atirando pelo chao, fora do alcance dos monstros. Ja
+        // escondido no quadro anterior, o pedido sai.
+        if (isParked && g_wasParked[i] && (rd8(rdram, u.pk + kPkBits) & 8u))
+            wr8(rdram, u.pk + kPkBits, uint8_t(rd8(rdram, u.pk + kPkBits) & ~8u));
+        g_wasParked[i] = isParked;
         if (inList(rdram, kRegenList, u.node))
             wr32(rdram, u.pk + kPkRegenTimer, 0x7FFFFFFFu);   // o jogo nunca o regenera sozinho
         else if (g_on && rd32(rdram, u.pk + kPkState) == kParked[u.kind] && phys(rd32(rdram, u.pk + kPkCs)) &&
                  rd8(rdram, phys(rd32(rdram, u.pk + kPkCs)) + kCsDrawMe) && inList(rdram, kActive, u.node))
-            call(rdram, ctx, runtime, kEnterState[u.kind], {u.pk, 0u});   // pego e solto por um monstro: o grab o deixou estacionado
+        {
+            // pego e solto por um monstro: o grab o deixou estacionado e apagou o bit 1 dos flags (a mira travada e o alvo da IA o leem)
+            call(rdram, ctx, runtime, kEnterState[u.kind], {u.pk, 0u});
+            wr16(rdram, u.pk + kPkFlags, uint16_t(rd16(rdram, u.pk + kPkFlags) | (u.kind == KHeli ? 2u : 0xAu)));
+        }
     }
     if (g_live)
     {

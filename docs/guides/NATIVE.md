@@ -732,18 +732,23 @@ helicopters from `MON/ARMY.*` (below). The adventure keeps its own army untouche
   active list gets bit 0 of `+0x50` (regenerable) and `regenTimer` (+0x4C) = 0x7FFFFFFF, and `turnOffMilitary` parks them hidden
   (state 7, helicopter 5, `drawMe` 0). With the bit, `kill` keeps the `cs` and `killPickup` moves the node to the `regenList`, where
   the counter never runs out: a destroyed vehicle waits there for the next wave. `TheGame::ResetLevel` (restart) parks them again
-  on the next frame.
+  on the next frame. Parked vehicles stay in the collision grid at VEGAS's coordinates, which in other stages lie under or inside the
+  scenery: a building collapse there (`LevelPickups::turnOffForDelayedHat`, by `hdCsCollect2D`) sets bit 3 of `+0x50`, and the
+  delayed `LevelPickups::hatCheck` would show the vehicle again on whatever lies below (Tokyo's bay floor, the flying saucer). Every
+  frame the hook clears that bit on a vehicle that was already parked and hidden the frame before.
 - **Waves (entry of `TheGame::Update`):** the clock counts `1 / timerGetUpdateRate()` only while the fight is live (no movie, no
   cinema, `m_playerMask & 7 == 7`, no `gRtReturn`, no fade, `m_inSession`). A wave wakes up to WAVE SIZE parked or destroyed
   vehicles, in random order. Each goes to a `PathNet::fodder` node of its type (3 for tank and truck, 1 for helicopter; node
   `+0x10 + 0x30·i`, type at `+0x10`): the one closest to the monsters among those at least 600 away from every live monster (the
-  farthest if none), never within 250 of a vehicle already out. With no free node the vehicle waits for the next wave; with the whole
+  farthest if none), never within 250 of a vehicle already out. Tank and truck nodes with no ground below (`hdHatTest` from 200 above
+  returns 0; Tokyo has two over the water) are measured at the first wave of each load and left out. With no free node the vehicle
+  waits for the next wave; with the whole
   pool out, the wave goes out when one comes back. Waking: off the `regenList` to the head of the active list and virtual `regen`
   (0x3C), or `hierSetCsDrawMe(cs, 1)` and full health when parked; `regenTimer` back to the maximum, `testCollision` 1,
   `flags |= 0xA` (helicopter `|= 2`); tank and truck: formation mode, formation and focus 0, ground height by `hdHatTest`,
   `Vehicle::setPos`, speed 0 and virtual `setTrans` (0x6C); helicopter: `HeliVehicle::setPos`, `hdReparentCsGrid`,
   `HeliVehicleNav::init`; then `enterState(0)`. A vehicle a monster picked up and dropped (left parked but drawn) goes back to
-  state 0.
+  state 0 with `flags |= 0xA` (helicopter `|= 2`): the grab clears bit 1, which lock-on and the AI targeting read.
 - **`MON/ARMY.*` (`wotm_army_files.hpp`):** at startup, before the mods scan, `wotm_mods.inc` builds `ARMY.NGP`, `ARMY.PTR`,
   `ARMY.TEX` and `ARMY.RTX` from `LVL/VEGAS.*` of the player's disc (`WOTM_ISO`, else `PS2X_CD_IMAGE`, else the extracted disc next to
   the ELF) into `cache/army/` next to the ELF (`ARMY.VER` holds the format version; a different one rebuilds) and registers them as a
