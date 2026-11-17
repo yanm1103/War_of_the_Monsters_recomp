@@ -159,8 +159,7 @@ constexpr TabDef kTabDefs[kTabs] = {
       {st::VersusWins, "WINS COUNTER", "SHOWS HOW MANY FIGHTS EACH PLAYER HAS WON, AT THE BOTTOM OF THEIR SCREEN"},
       {st::Announcer, "NARRATOR", "A VOICE CALLS OUT THE MONSTER AND THE LEVEL YOU PICK, OR ONLY THE MONSTER ROARS"},
       {st::SkipIntro, "SKIP INTRO MOVIES", "GOES STRAIGHT TO THE TITLE SCREEN. CHANGES TAKE EFFECT ON NEXT BOOT"},
-      {st::ArcadeCpus, "ARCADE CPUS", "THE MOST CPUS IN ONE ARCADE FIGHT. NEVER MORE THAN 8 MONSTERS IN ALL"},
-      {st::LmsRespawns, "LMS RESPAWNS", "HOW MANY TIMES EACH MONSTER COMES BACK IN LAST MONSTER STANDING"}}},
+      {st::ArcadeCpus, "ARCADE CPUS", "THE MOST CPUS IN ONE ARCADE FIGHT. NEVER MORE THAN 8 MONSTERS IN ALL"}}},
     {5,
      {{st::Camera, "CAMERA STYLE", "MODERN TURNS WITH THE RIGHT STICK. CLASSIC IS THE CAMERA OF THE ORIGINAL GAME"},
       {st::CamSens, "SENSITIVITY", "HOW FAST THE RIGHT STICK TURNS THE CAMERA"},
@@ -514,7 +513,6 @@ static int choices(st::Key k, int out[16])
     case st::Display: for (int i = 0; i < 3; ++i) out[i] = i; return 3;
     case st::CamSens: for (int i = 0; i < 10; ++i) out[i] = i + 1; return 10;
     case st::ArcadeCpus: for (int i = 0; i < 7; ++i) out[i] = i + 1; return 7;
-    case st::LmsRespawns: for (int i = 0; i < 10; ++i) out[i] = i; return 10;
     case st::Announcer: for (int i = 0; i < 3; ++i) out[i] = i; return 3;
     case st::LockToggle: for (int i = 0; i < 3; ++i) out[i] = i; return 3;
     case st::ArmyTrigger: for (int i = 0; i < 3; ++i) out[i] = i; return 3;
@@ -590,8 +588,7 @@ static void valueText(st::Key k, int v, char *buf, size_t sz)
     case st::ArmyEvery: std::snprintf(buf, sz, "%d SECONDS", v); break;
     case st::ArmyChaos: std::snprintf(buf, sz, "%s", v <= 25 ? "LITTLE" : v <= 50 ? "SOME" : v <= 100 ? "A LOT" : "HUGE"); break;
     case st::ArmyWave:
-    case st::ArcadeCpus:
-    case st::LmsRespawns: std::snprintf(buf, sz, "%d", v); break;
+    case st::ArcadeCpus: std::snprintf(buf, sz, "%d", v); break;
     case st::LockToggle: std::snprintf(buf, sz, "%s", v == 2 ? "HOLD" : v ? "TAP" : "OFF"); break;
     case st::Announcer:   // a voz do narrador (narrator/) ou o grito do monstro escolhido
         std::snprintf(buf, sz, "%s", v == 2 ? "MONSTER CRY" : v ? "GODZILLA SAVE THE EARTH" : "OFF");
@@ -1287,7 +1284,7 @@ static void logoFrame(uint8_t *rdram)
 // ------------------------------------------------------------------ tela 15 do last monster standing
 // A tela 15 (screenBestOf: "sudden death", "first to N wins", "unlimited play") nao serve ao last monster standing, que sempre luta
 // ate sobrar um (o InitPlayerLives zera o m_killTarget, wotm_lms.inc). Com o modo armado ela vira a escolha dos renascimentos (o
-// LMS RESPAWNS do "recompiled options"): os itens do jogo ficam com alfa 0 e a lista em texto mostra uma linha so, com setas;
+// LmsRespawns do settings.ini): os itens do jogo ficam com alfa 0 e a lista em texto mostra uma linha so, com setas;
 // esquerda/direita mudam o valor (0..9, com volta), cima/baixo nao fazem nada, X e triangulo seguem para o jogo.
 constexpr uint32_t kLmsScreen = 15;
 constexpr const char *kRespawnLabels[10] = {"NO RESPAWNS", "1 RESPAWN",  "2 RESPAWNS", "3 RESPAWNS", "4 RESPAWNS",

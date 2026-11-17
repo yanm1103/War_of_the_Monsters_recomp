@@ -2,7 +2,7 @@
 // wotm_arcade.inc (os ganchos daqui embrulham os do arcade).
 //  - Entrada pela linha LAST MONSTER STANDING das telas 2 e 5 (wotm_mainmenu.inc arma o g_armed); o fluxo e o do free-for-all: m_mode 2
 //    (1 jogador contra CPUs) ou 3 (2 a 4 jogadores, com ou sem CPUs). O InitPlayerLives da luta liga o modo.
-//  - Todos contra todos. Cada monstro (jogador ou CPU) tem X renascimentos (LMS RESPAWNS nas opcoes, 0 a 9): jogador fora com vida
+//  - Todos contra todos. Cada monstro (jogador ou CPU) tem X renascimentos (tela 15 antes da escolha dos monstros, 0 a 9): jogador fora com vida
 //    renasce no lugar (wotm_coop::revive), CPU fora com renascimento volta pelo aiInit; sem mais, sai de cena (jogador: wotm_coop::eliminate,
 //    a tela com quem sobrou). O gameResolveLifeAndDeath do retail (que encerra a rodada no primeiro monstro fora) da lugar ao daqui.
 //  - Fim: sobrou um jogador (a pose de vitoria dele, como no arcade) ou nao sobrou jogador nenhum (fim na hora; vence a CPU com mais

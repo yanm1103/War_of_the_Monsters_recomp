@@ -280,7 +280,7 @@ Code: hooks on the EE thread in `native/runtime/wotm_lms.inc` (included by `wotm
 it, so its hooks wrap the arcade's and call them when the mode is off), menu rows in `wotm_mainmenu.inc`, shared state (`g_armed`,
 `g_on`) in `native/wotm_lms.h`.
 - **Rules:** a single free-for-all fight, everyone against everyone (players against each other too). Each monster, player or CPU,
-  has X respawns (LMS RESPAWNS, FEATURES tab of "Recompiled options", 0 to 9, default 0). The fight goes on until one monster is
+  has X respawns (picked on the respawn screen, 0 to 9, default 0, kept in `settings.ini`). The fight goes on until one monster is
   left standing.
 - **Turning it on:** **LAST MONSTER STANDING** row on the 1-player mode screen (screen 2) and on the multiplayer list (screen 5):
   the flow is the game's free-for-all (`m_mode` 2 with 1 player against CPUs, `m_mode` 3 with 2 to 4 players, with or without
@@ -307,7 +307,7 @@ it, so its hooks wrap the arcade's and call them when the mode is off), menu row
 - **Menu screens:** with the mode armed, screen 12 (1 player) offers 1 to 7 CPUs, never 0 (a cursor at 0 becomes 1). Screen 15 (the
   free-for-all "first to") becomes the respawn picker: one row, "<n> respawn(s)", with the same look and input as screen 12 (the game's
   digits of texture 142, `wotm_menufont`; bobbing arrows; left/right, wheel, Q/E and L1/R1 change the value, 0 to 9 with wraparound;
-  a click on an arrow steps, a click on the text or X confirms). The value goes to LMS RESPAWNS (`lmsRender` and `lmsInput` in
+  a click on an arrow steps, a click on the text or X confirms). The value goes to the `LmsRespawns` setting (`lmsRender` and `lmsInput` in
   `wotm_mainmenu.inc`).
 - **Debug "win the fight":** zeroes the CPUs' respawns before knocking them down, so they stay out.
 - Log lines start with `[lms]`. `WOTM_COOPKILL`, `WOTM_COOPRETRY` (PLAY AGAIN in dialog 5) and `WOTM_COOPLOG` also work in this mode.
@@ -897,7 +897,7 @@ helicopters from `MON/ARMY.*` (below). The adventure keeps its own army untouche
 | `WOTM_ARCADE=<seed>[,<fight 1-5>]` | arcade run from the first session (section "Runtime: arcade mode"; with `WOTM_MATCH`, which gives the players and their monsters): the draw comes from the seed, and the fight number starts the run there (5 = the boss) |
 | `WOTM_ARCADE_CPUS=<1..7>` | ARCADE CPUS option (FEATURES tab of "Recompiled options", `settings.ini`): the most CPUs in one arcade fight, default 3; the run uses min(this, 8 - players) |
 | `WOTM_LMS=<0..9>` | last monster standing in the first fight (section "Runtime: last monster standing"; with `WOTM_MATCH`, which gives players, CPUs and stage): the number of respawns of each monster |
-| `WOTM_LMS_RESPAWNS=<0..9>` | LMS RESPAWNS option (FEATURES tab of "Recompiled options", `settings.ini`): respawns of each monster, player or CPU, in last monster standing, default 0 |
+| `WOTM_LMS_RESPAWNS=<0..9>` | `LmsRespawns` setting (`settings.ini`, picked on the last monster standing respawn screen): respawns of each monster, player or CPU, in last monster standing, default 0 |
 | `WOTM_VERSUSWINS=0` | WINS COUNTER option (FEATURES tab of "Recompiled options", `settings.ini`, default on): the "WINS n" text that `Hud::update` writes at the bottom of each view in the versus modes (`m_gameMode` 2 to 6), and the one of the native HUD of players 3 and 4. Off: the `fontSpritePrint(Right)XY` hook of `wotm_training.inc` drops the two `Hud` buffers (the same cut training and last monster standing always make) and `nativeHud` (`wotm_split4.inc`) skips it |
 | `WOTM_ANNOUNCER=0`, `=2` | turns the announcer off (default `1`, on; NARRATOR option of the FEATURES tab of "Recompiled options": OFF, GODZILLA SAVE THE EARTH, the voice from `narrator/`, or MONSTER CRY, `2`: on confirming a monster its cry plays in place of the name, the `MonsterSound::playSignatureSound` sound (the one from the fight entry cinematic) from the monster's bank (a custom's own `.BNK` when it has one), read from the disc only with native sound (`wotm_snd_hooks::playMonsterCry`; one bank at a time, unloaded when the game loads one of its banks, because the game checks free SRAM before the fight banks). Costumes with a different cry in the game (Preytor 1, Agamo 3) use costume 0's; Goliath Prime has none and stays silent; the stages stay mute). On confirming a stage (game screen 8, at `changeScreen(8, 99)`: `midtownpark`, `gamblersgulch`, `rosdalecanyon`, `metrocity`, `centuryairfield`, `atomicisland`, `baytown`, `clubcaldera`, `tsunopolis`, `ufo`, `capitol`, `training`, `lakepowell`, `minibaytown`, `volcano`, `tokyodeathmatch`, `dodgeball`, `bigshot`, `crushorama`) or a monster (native screens 3 and 6 and the 3 and 4 player selection) plays `<nome>.mp3` (`congar`, `robo47`, `togera`, `ultrav`, `preytor`, `kineticlops`, `magmo`, `raptros`, `agamo`, `zorgulon`, `goliathprime`/`assboss`, `cerebulon`) together with the game's confirm sound, at the effects master volume; looks in `mods/<mod>/narrator/`, `narrator/` next to the ELF and `narrator/` at the repo root (`wotm_narrator.inc`). In the monster selection with `WOTM_NATSEL=0` (the game's screen) it does not play |
 | `WOTM_ASPECT=L:A` | fixed aspect ratio of the native frame (`16:9`, `21:9`, `4:3` = original); without it, it follows the window, which opens in 16:9 (section "Camera and snapshot") |
