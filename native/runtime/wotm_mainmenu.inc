@@ -192,8 +192,8 @@ static int visRows(int tab) { return tab == TabVideo ? 9 : kVisRows; }
 
 // Aba CONTROLS: as opcoes da aba (teclado separado, icones, confirmar nos menus, vibracao), qual mapa a lista mostra (teclado ou gamepads), um
 // botao do PS2 por linha e a volta ao padrao
-constexpr int kCtlOpt = -10, kCtlDevice = -2, kCtlReset = -3;   // kCtlOpt - i: opcao i da aba
-constexpr int kMaxCtlRows = kMaxOpts + 2 + st::kBinds;
+constexpr int kCtlOpt = -10, kCtlDevice = -2, kCtlReset = -3, kCtlL3Dash = -4;   // kCtlOpt - i: opcao i da aba
+constexpr int kMaxCtlRows = kMaxOpts + 3 + st::kBinds;
 // Centro das setas da linha (fracao da largura), medidos pelo renderPanel (a da esquerda acompanha o valor); o panelHit le
 static float g_rowArrowL[kMaxCtlRows] = {}, g_rowArrowR = 0.9f;
 constexpr const char *kBindLabels[st::kBinds] = {"D-PAD UP", "D-PAD DOWN", "D-PAD LEFT", "D-PAD RIGHT", "CROSS",     "CIRCLE",     "SQUARE",
@@ -206,6 +206,7 @@ static int ctlRows(bool kb, int out[kMaxCtlRows])
     int n = 0;
     for (int i = 0; i < kTabDefs[TabControls].n; ++i) out[n++] = kCtlOpt - i;
     out[n++] = kCtlDevice;
+    if (!kb) out[n++] = kCtlL3Dash;   // por jogador, so nos mapas de gamepad
     for (int b = 0; b < st::kBinds; ++b)
         if (kb || st::bindOnPad(st::Bind(b))) out[n++] = b;
     out[n++] = kCtlReset;
@@ -770,6 +771,13 @@ static void controlsInput(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime
         if (!(e[PLeft] || e[PRight] || e[POk])) return;
         g_bindMap = (g_bindMap + 1 + (e[PLeft] ? st::kPadPlayers : 1)) % (st::kPadPlayers + 1) - 1;
         sel = std::min(sel, ctlRows(g_bindMap < 0, r) - 1);
+        panelSfx(rdram, ctx, runtime, e[POk] ? 8 : (e[PLeft] ? 2 : 4));
+    }
+    else if (row == kCtlL3Dash)
+    {
+        if (!(e[PLeft] || e[PRight] || e[POk]) || g_bindMap < 0) return;
+        st::setL3Dash(g_bindMap, !st::l3Dash(g_bindMap));
+        std::fprintf(stderr, "[settings] %sL3_DASH = %d\n", st::padPrefix(g_bindMap).c_str(), st::l3Dash(g_bindMap) ? 1 : 0);
         panelSfx(rdram, ctx, runtime, e[POk] ? 8 : (e[PLeft] ? 2 : 4));
     }
     else if (row == kCtlReset)
@@ -2090,6 +2098,8 @@ static void renderPanel(wotm::Scene &scene, const wotm::Ram &ram, uint64_t tex0,
             if (r[i] <= kCtlOpt) rows[n++] = optRow(t.opt[kCtlOpt - r[i]]);
             else if (r[i] == kCtlDevice)
                 rows[n++] = {"BUTTON MAP", kMapNames[v.bindMap + 1], "WHOSE CONTROLS TO CHANGE. EACH PLAYER HAS A GAMEPAD LAYOUT OF THEIR OWN", true, KDevice};
+            else if (r[i] == kCtlL3Dash)
+                rows[n++] = {"L3 DASH", st::l3Dash(v.bindMap) ? "ON" : "OFF", "HOLD L3 AND PUSH FORWARD TO RUN. FORWARD TWICE STILL WORKS", true, KOpt};
             else if (r[i] == kCtlReset)
                 rows[n++] = {"RESTORE DEFAULTS", "", (v.bindMap < 0) ? "PUTS EVERY KEY BACK THE WAY IT CAME" : "PUTS EVERY BUTTON BACK THE WAY IT CAME", false, KReset};
             else if (r[i] == v.capture)

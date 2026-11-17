@@ -314,6 +314,18 @@ inline std::string padPrefix(int p) { return p == 0 ? std::string("PAD_") : "PAD
 inline uint32_t kb(Bind b) { return g_kb[b].load(std::memory_order_relaxed); }
 inline int pad(Bind b, int player = 0) { return g_pad[std::clamp(player, 0, kPadPlayers - 1)][b].load(std::memory_order_relaxed); }
 
+// L3 + frente corre (o dash do frente-frente segurado; gancho em dashDoubleTap, wotm_overrides.cpp), por jogador; ligado por padrao.
+// Linha PAD_L3_DASH= (PAD2_..PAD4_) do settings.ini, so no arquivo; aba CONTROLS, nos mapas de gamepad
+inline std::atomic<int> g_l3Dash[kPadPlayers] = {1, 1, 1, 1};
+inline bool l3Dash(int player) { return player >= 0 && player < kPadPlayers && g_l3Dash[player].load(std::memory_order_relaxed) != 0; }
+inline void save();
+inline void setL3Dash(int player, bool on)
+{
+    if (player < 0 || player >= kPadPlayers) return;
+    g_l3Dash[player].store(on ? 1 : 0);
+    save();
+}
+
 inline const char *keyName(int code)
 {
     for (const KeyName &k : kKeyNames)
@@ -446,6 +458,9 @@ inline void save()
         for (int b = 0; b < kBinds; ++b)
             if (bindOnPad(Bind(b)))
                 f << padPrefix(p) << kBindNames[b] << '=' << kPadButtonNames[std::clamp(pad(Bind(b), p), 0, kPadButtons - 1)] << '\n';
+    f << "# L3 + frente corre (1) ou nao (0), por jogador\n";
+    for (int p = 0; p < kPadPlayers; ++p)
+        f << padPrefix(p) << "L3_DASH=" << (l3Dash(p) ? 1 : 0) << '\n';
 }
 
 inline void set(Key k, int v, bool write = true)
@@ -524,6 +539,9 @@ inline void load(const std::filesystem::path &dir)
                     }
                     ++fromFile;
                 }
+                for (int p = 0; p < kPadPlayers; ++p)
+                    if (key == padPrefix(p) + "L3_DASH")
+                        g_l3Dash[p].store(std::atoi(val.c_str()) != 0 ? 1 : 0), ++fromFile;
                 for (int b = 0; b < kBinds; ++b)
                 {
                     if (key == std::string("KB_") + kBindNames[b])

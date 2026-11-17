@@ -2299,6 +2299,35 @@ namespace
         }
     }
 
+    // L3 + frente corre (opcao por jogador, wotm::settings::l3Dash): o PadFlags::dashDoubleTap so e chamado com o monstro fora da
+    // corrida e responde se a frente voltou depois de solta dentro das janelas +0x16F4/+0x16F8/+0x16FC; aqui, com o L3 (byte 2 do
+    // GamePad) segurado e a frente da entrada atual acima do mesmo limiar dele (0xE1 no analogico, 0 no direcional), ja responde 1. Sem
+    // o L3, o original: o frente-frente continua. Segurando a frente, a corrida segue sem o L3 (quem a mantem nao passa por aqui).
+    constexpr uint32_t kDashDoubleTap = wotm::fn::dashDoubleTap__8PadFlagsR7GamePad;
+    constexpr uint32_t kPadL3 = 0x2u, kPadFlagsRingIndex = 0x16F0u, kPadEntrySize = 0x5Eu, kPadEntryForward = 0x12u;
+    PS2Runtime::RecompiledFunction g_origDashDoubleTap = nullptr;
+
+    void dashDoubleTapL3(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t pf = GPR_U32(ctx, 4) & 0x1FFFFFFFu, gp = GPR_U32(ctx, 5) & 0x1FFFFFFFu;
+        int slot = -1;
+        if (ramOk(pf, kPadFlagsOwner + 4u) && ramOk(gp, 0x18u) && rdram[gp + kPadL3] != 0u)
+            if (const uint32_t owner = FAST_READ32(pf + kPadFlagsOwner);
+                isPlayerMonster(rdram, owner, &slot) && slot >= 0 && slot < 4 && FAST_READ32(owner + kMonsterPlayerNum) == 1u &&
+                wotm::settings::l3Dash(slot))
+                if (const uint32_t ring = FAST_READ32(pf + kPadFlagsRingIndex); ring < 60u)
+                {
+                    const uint32_t thr = FAST_READ32(gp + kPadAnalog) ? 0xE1u : 0u;
+                    if (rd16(rdram, pf + ring * kPadEntrySize + kPadEntryForward) > thr)
+                    {
+                        ctx->r[2] = _mm_set_epi64x(0, 1);
+                        ctx->pc = GPR_U32(ctx, 31);
+                        return;
+                    }
+                }
+        g_origDashDoubleTap(rdram, ctx, runtime);
+    }
+
     void lockToggleApply(uint8_t *rdram, uint32_t pf, int config)
     {
         int slot = 0;
@@ -3294,6 +3323,12 @@ void wotmInstallOverrides(PS2Runtime &runtime, const std::string &elfPath)
         }
         else
             std::fprintf(stderr, "[wotm] lock-on alternado indisponivel: PadFlags::updateHistory{0,1,2} sem funcao no runtime\n");
+    }
+    // L3 + frente corre (opcao por jogador na aba CONTROLS)
+    if ((g_origDashDoubleTap = runtime.lookupFunction(kDashDoubleTap)))
+    {
+        runtime.registerFunction(kDashDoubleTap, &dashDoubleTapL3);
+        std::fprintf(stderr, "[wotm] L3 + frente corre (PAD_L3_DASH..PAD4_L3_DASH, aba CONTROLS)\n");
     }
     // Camera moderna (wotm_orbit.inc): o Cameras::Update e o interpretInputs ja estao embrulhados acima; aqui o shakeCamera e o
     // SetOkToUnify (depois do wotm_split4, cujo gancho este embrulha)
