@@ -150,7 +150,7 @@ constexpr TabDef kTabDefs[kTabs] = {
       {st::Interp, "INTERPOLATE FRAMES", "SMOOTHER MOTION ABOVE 60 HZ OR WHEN THE GAME DROPS TO 30. MAY ADD DELAY"},
       {st::Msaa, "ANTI-ALIASING", "MSAA SMOOTHS THE JAGGED EDGES OF THE 3D MODELS"},
       {st::TexFilter, "TEXTURE FILTER", "KEEPS TEXTURES SHARP FAR AWAY AND AT STEEP ANGLES"}}},
-    {10,
+    {9,
      {{st::LockToggle, "LOCK-ON", "LOCKS ON WITH R1 ALONE. OFF KEEPS THE GAME'S L1 + R1"},
       {st::DpadTarget, "D-PAD TARGET SWITCH", "LEFT AND RIGHT ON THE D-PAD PICK ANOTHER TARGET WHILE LOCKED ON"},
       {st::EnemyBars, "ENEMY BARS", "SHOWS THE HEALTH AND ENERGY OF EACH ENEMY ABOVE THEIR HEAD"},
@@ -183,6 +183,17 @@ constexpr TabDef kTabDefs[kTabs] = {
       {st::ArmyTrain, "TRAINING", "THE ARMY SHOWS UP IN TRAINING"}}},
     {0, {}},   // CHEATS: linhas proprias (kCheatDefs), sem chave do settings.ini
 };
+// O n de cada aba tem que bater com as linhas escritas: uma linha a mais sai zerada (label nulo) e derruba o painel ao abrir a aba
+constexpr bool tabRowsFilled()
+{
+    for (int t = 0; t < kTabs; ++t) {
+        if (kTabDefs[t].n < 0 || kTabDefs[t].n > kMaxOpts) return false;
+        for (int i = 0; i < kMaxOpts; ++i)
+            if ((kTabDefs[t].opt[i].label != nullptr) != (i < kTabDefs[t].n)) return false;
+    }
+    return true;
+}
+static_assert(tabRowsFilled(), "kTabDefs: o n de uma aba nao bate com as linhas dela");
 static int g_tab = TabVideo;
 static int g_optSel[kTabs] = {};
 constexpr int kVisRows = 7;   // linhas do painel que cabem; a aba CONTROLS rola
