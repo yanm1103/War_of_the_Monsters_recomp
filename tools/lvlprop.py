@@ -59,7 +59,7 @@ import vifpkt  # noqa: E402
 
 BASE = 0xA00000
 NAME_RE = re.compile(r"^[A-Z0-9_]{1,8}$")
-UNITS_PER_METER = 18.0
+UNITS_PER_METER = 6.0           # a monster (~110 units) is ten people of 1.75 m; the stage's cars are ~47 long
 MAX_NUMVERTS = 0x1FFF          # _hierobject.bits.numVerts, 13 bits
 ARENA = 0x3700000              # the level patch arena (PS2_RAM_SIZE - 1 MB - its 8 MB), info's default address
 ROOT_FLAGS = 0x0003            # visual + collision, no option byte (hdTraversePath stops at flags & (option << 8))

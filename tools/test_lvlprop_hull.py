@@ -83,11 +83,11 @@ def main():
         glb = os.path.join(tmp, "p.glb")
         make_glb(glb, pts, tris)
         out = os.path.join(tmp, "PYR")
-        lvlprop.build(glb, out, "CENTRAL", "blender", None, None, "PYR", None, "auto", editor.stage_root(cfg["disc"], "CENTRAL"))
+        lvlprop.build(glb, out, "CENTRAL", "blender", 18.0, None, "PYR", None, "auto", editor.stage_root(cfg["disc"], "CENTRAL"))
         meta = json.load(open(os.path.join(out, "prop.json")))
         c = meta["collision"]
         assert c["auto"] == "mesh" and c["hull"] == 1 and c["hulls"][0]["planes"] == 5, c
-        # the pyramid is 36 units (2 m) wide and 18 tall; the cube drawn is 36 x 36 x 36: the hull is smaller than the visual
+        # at 18 units a meter the pyramid is 36 units (2 m) wide and 18 tall; the cube drawn is 36 x 36 x 36: the hull is smaller than the visual
         assert abs(c["hulls"][0]["max"][2] - 18) < 1e-3 and abs(meta["bounds"]["max"][2] - 36) < 1e-3, (c, meta["bounds"])
         prop = lvlprop.load_prop(out)
         res = lvlprop.check(prop, log=lambda *_: None)
@@ -101,7 +101,7 @@ def main():
         # a flat hull is refused with a clear message
         make_glb(glb, pts[:4] + [(0, 0, 0)], tris)
         try:
-            lvlprop.build(glb, out, "CENTRAL", "blender", None, None, "PYR", None, "auto", editor.stage_root(cfg["disc"], "CENTRAL"))
+            lvlprop.build(glb, out, "CENTRAL", "blender", 18.0, None, "PYR", None, "auto", editor.stage_root(cfg["disc"], "CENTRAL"))
         except lvlprop.PropError as e:
             assert "flat" in str(e) or "volume" in str(e) or "at least 4" in str(e), e
         else:
@@ -121,7 +121,7 @@ def main():
         cidx = [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 3, 6, 2, 3, 7, 6, 0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5]
         make_glb(glb, None, None, coll=(cube, cidx))
         out = os.path.join(tmp, "WALL")
-        lvlprop.build(glb, out, "CENTRAL", "blender", None, None, "WALL", None, "auto", editor.stage_root(cfg["disc"], "CENTRAL"))
+        lvlprop.build(glb, out, "CENTRAL", "blender", 18.0, None, "WALL", None, "auto", editor.stage_root(cfg["disc"], "CENTRAL"))
         meta = json.load(open(os.path.join(out, "prop.json")))
         c = meta["collision"]
         assert c["auto"] == "mesh" and c["poly"] == 1 and c["tris"] == 12 and c["hull"] == 0, c
@@ -144,7 +144,7 @@ def main():
                 gidx += [a, a + 1, a + n + 2, a, a + n + 2, a + n + 1]
         make_glb(glb, None, None, coll=(grid, gidx))
         out = os.path.join(tmp, "TERRAIN")
-        lvlprop.build(glb, out, "CENTRAL", "blender", None, None, "TERRAIN", None, "auto", editor.stage_root(cfg["disc"], "CENTRAL"))
+        lvlprop.build(glb, out, "CENTRAL", "blender", 18.0, None, "TERRAIN", None, "auto", editor.stage_root(cfg["disc"], "CENTRAL"))
         meta = json.load(open(os.path.join(out, "prop.json")))
         assert meta["collision"]["tris"] == 3200, meta["collision"]
         res = lvlprop.check(lvlprop.load_prop(out), log=lambda *_: None)      # includes verify_poly_leaf on every triangle
@@ -180,7 +180,7 @@ def main():
         big = [(i * 0.1, 0.0, 0.0) for i in range(lvlprop.MAX_COLL_TRIS + 4)]
         make_glb(glb, None, None, coll=(big, [k for i in range(lvlprop.MAX_COLL_TRIS + 1) for k in (i, i + 1, i + 2)]))
         try:
-            lvlprop.build(glb, out, "CENTRAL", "blender", None, None, "WALL", None, "auto", editor.stage_root(cfg["disc"], "CENTRAL"))
+            lvlprop.build(glb, out, "CENTRAL", "blender", 18.0, None, "WALL", None, "auto", editor.stage_root(cfg["disc"], "CENTRAL"))
         except lvlprop.PropError as e:
             assert "at most %d" % lvlprop.MAX_COLL_TRIS in str(e), e
         else:

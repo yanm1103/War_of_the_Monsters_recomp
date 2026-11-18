@@ -87,7 +87,7 @@ def main():
                 cube = [(-1, 0, -1), (1, 0, -1), (1, 2, -1), (-1, 2, -1), (-1, 0, 1), (1, 0, 1), (1, 2, 1), (-1, 2, 1)]
                 make_glb(glb, None, None, coll=(cube, [0, 2, 1, 0, 3, 2, 4, 5, 6, 4, 6, 7, 0, 1, 5, 0, 5, 4, 3, 6, 2, 3, 7, 6, 0, 4, 7, 0, 7, 3, 1, 2, 6, 1, 6, 5]))
             out = os.path.join(tmp, name)
-            lvlprop.build(glb, out, "CENTRAL", "blender", None, None, name, None, "auto", root)
+            lvlprop.build(glb, out, "CENTRAL", "blender", 18.0, None, name, None, "auto", root)
             shutil.copytree(out, os.path.join(mod, "props", name))
         patch = {"objects": [], "props": [{"id": "p1", "model": "PYR", "pos": [800.0, 900.0, 0.5], "heading": 30},
                                           {"id": "w1", "model": "WALL", "pos": [1200.0, 900.0, 0.5], "heading": -45}]}

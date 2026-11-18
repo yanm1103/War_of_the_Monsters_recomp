@@ -31,7 +31,7 @@ def main():
         # state 0: the cube with its automatic box; state 1: a low stump with a triangle collision
         make_glb(glb, None, None, extra=[("state1_stump", STUMP, CIDX), ("state1_coll_stump", STUMP, CIDX)])
         out = os.path.join(tmp, "DEST")
-        meta = lvlprop.build(glb, out, "CENTRAL", "blender", None, None, "DEST", None, "auto", disc, log=lambda *_: None)
+        meta = lvlprop.build(glb, out, "CENTRAL", "blender", 18.0, None, "DEST", None, "auto", disc, log=lambda *_: None)
         assert meta["kind"] == "destructible" and len(meta["destructible"]["states"]) == 2, meta.get("destructible")
         prop = lvlprop.load_prop(out)
         assert prop.states[0] == prop.root and len(prop.states) == 2 and prop.strength == lvlprop.DEFAULT_STRENGTH
@@ -82,7 +82,7 @@ def main():
         small = [(x * 0.25 - 0.5, y * 0.25, z * 0.25) for x, y, z in CUBE]
         make_glb(glb, None, None, extra=[("state1_stump", STUMP, CIDX), ("state1_debris_a", small, CIDX),
                                          ("state1_debris_b", [(x + 1.0, y, z + 0.5) for x, y, z in small], CIDX)])
-        meta = lvlprop.build(glb, out, "CENTRAL", "blender", None, None, "DEST", None, "auto", disc, log=lambda *_: None)
+        meta = lvlprop.build(glb, out, "CENTRAL", "blender", 18.0, None, "DEST", None, "auto", disc, log=lambda *_: None)
         dm = meta["destructible"]
         assert dm["actions"][0] is None and dm["actions"][1] and sorted(dm["debris"]) == ["1"] and len(dm["debris"]["1"]) == 2, dm
         prop = lvlprop.load_prop(out)
@@ -111,7 +111,7 @@ def main():
         assert len(blocks) == 1 and blocks[0][2] == 0x10 + 0x30 * 2, blocks
         make_glb(glb, None, None, extra=[("debris_a", small, CIDX)])
         try:
-            lvlprop.build(glb, out, "CENTRAL", "blender", None, None, "DEST", None, "auto", disc, log=lambda *_: None)
+            lvlprop.build(glb, out, "CENTRAL", "blender", 18.0, None, "DEST", None, "auto", disc, log=lambda *_: None)
         except lvlprop.PropError as e:
             assert "broken state" in str(e), e
         else:
@@ -120,7 +120,7 @@ def main():
         make_glb(glb, None, None, extra=[("state1_stump", STUMP, CIDX),
                                          ("state1_smoke_a", None, None, {"translation": [0, 1.5, 0], "extras": {"size": 12, "lifetime": 200}}),
                                          ("state1_smoke_b", None, None, {"translation": [0.5, 1.0, 0]})])
-        meta = lvlprop.build(glb, out, "CENTRAL", "blender", None, None, "DEST", None, "auto", disc, log=lambda *_: None)
+        meta = lvlprop.build(glb, out, "CENTRAL", "blender", 18.0, None, "DEST", None, "auto", disc, log=lambda *_: None)
         sm = meta["destructible"]["smoke"]
         assert list(sm) == ["1"] and len(sm["1"]) == 2 and sm["1"][0]["pos"][2] > sm["1"][1]["pos"][2] > 0, sm
         lvlprop.check(lvlprop.load_prop(out), log=lambda *_: None)
@@ -150,19 +150,19 @@ def main():
         assert lp.stats["smoke emitters"] == 4, lp.stats
         make_glb(glb, None, None, extra=[("state1_smoke", None, None, {"extras": {"nope": 1}})])
         try:
-            lvlprop.build(glb, out, "CENTRAL", "blender", None, None, "DEST", None, "auto", disc, log=lambda *_: None)
+            lvlprop.build(glb, out, "CENTRAL", "blender", 18.0, None, "DEST", None, "auto", disc, log=lambda *_: None)
         except lvlprop.PropError as e:
             assert "custom property" in str(e), e
         else:
             raise AssertionError("an unknown smoke property was accepted")
         # a four-state prop and a missing middle state
         make_glb(glb, None, None, extra=[("state1_a", STUMP, CIDX), ("state2_a", STUMP, CIDX), ("state3_none", None, None)])
-        meta = lvlprop.build(glb, out, "CENTRAL", "blender", None, None, "DEST", None, "auto", disc, strength=3, log=lambda *_: None)
+        meta = lvlprop.build(glb, out, "CENTRAL", "blender", 18.0, None, "DEST", None, "auto", disc, strength=3, log=lambda *_: None)
         assert len(meta["destructible"]["states"]) == 4 and meta["destructible"]["class"] == 3
         lvlprop.check(lvlprop.load_prop(out), log=lambda *_: None)
         make_glb(glb, None, None, extra=[("state2_a", STUMP, CIDX)])
         try:
-            lvlprop.build(glb, out, "CENTRAL", "blender", None, None, "DEST", None, "auto", disc, log=lambda *_: None)
+            lvlprop.build(glb, out, "CENTRAL", "blender", 18.0, None, "DEST", None, "auto", disc, log=lambda *_: None)
         except lvlprop.PropError as e:
             assert "none missing" in str(e), e
         else:

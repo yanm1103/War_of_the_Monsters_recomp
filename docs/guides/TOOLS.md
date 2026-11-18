@@ -63,8 +63,8 @@
     GROUP 0x0102 -> a
     6-plane `COLL_VOL` box from the bounds (or the `hull_*` planes). The OBJECT header and GIF tags come from the stage's first OBJECT that round-trips in
     `vifpkt` with fog, one texture and the asked ABE (rule `first-object-roundtrip`); strips keep each triangle's winding (a strip
-    that would start at an odd place of its section repeats its first vertex). `blender` units: Z up, meters, 18 game units per
-    meter by default, COLOR_0 linear to sRGB x 128; `game` units: a piece of `lvlglb`'s export, raw colors. Materials `tex<texId>`
+    that would start at an odd place of its section repeats its first vertex). `blender` units: Z up, meters, 6 game units per
+    meter by default (a monster, ~110 units tall, stands as high as ten people), COLOR_0 linear to sRGB x 128; `game` units: a piece of `lvlglb`'s export, raw colors. Materials `tex<texId>`
     reuse the stage's textures; other images, `state<N>_*` meshes and skins are refused, A `coll_*` mesh is collision by triangles: its faces (at most 16384 triangles) become a `POLY_COLL` leaf of one object per block of at most 512 triangles and 256 vertices, matId `0x10A` (or the `coll_m<hex>_` name), bbox bits of each triangle's extreme vertices; a block of more than 8 triangles gets the box tree the game's query walks (leaves of up to 8 triangles, origin at the middle of the box, scale 32768 over its longest side; `poly_tree_query` and `verify_poly_leaf` read it back, and `check` runs the second on every leaf);
     one leaf per `coll_*` mesh. A `hull_*` mesh is the prop's collision: the convex hull of its vertices (at most 64 distinct, at most 40
     faces) becomes a `COLL_VOL` of its planes, one leaf per `hull_*` mesh; without one, the 6-plane box of the visual stands in, unless an empty named `nocoll` asks for no collision at all (refused with `hull_`/`coll_` meshes or states). `--light auto`
