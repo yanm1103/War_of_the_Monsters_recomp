@@ -1681,19 +1681,7 @@
     -186.1,
     139.5
    ],
-   "delete": true,
-   "copies": [
-    {
-     "pos": [
-      794.6,
-      -6.6,
-      65.7
-     ],
-     "heading": -79.1,
-     "scale": 0.292,
-     "name": "osm 748992776"
-    }
-   ]
+   "delete": true
   },
   {
    "handle": "0xBC3CB0",
@@ -4151,6 +4139,16 @@
     0
    ],
    "name": "McDonalds"
+  },
+  {
+   "id": "arraes",
+   "model": "ARRAES",
+   "pos": [
+    828.0,
+    -24.0,
+    27.5
+   ],
+   "name": "Edificio Miguel Arraes"
   },
   {
    "id": "arv1",
