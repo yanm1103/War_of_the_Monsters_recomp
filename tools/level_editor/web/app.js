@@ -3786,7 +3786,8 @@ const ipInput = Object.assign(document.createElement('input'), { type: 'file', a
 // The patch's "clear": the meshes the server tagged bare (the stage's scenery with no handle) leave the view
 function updateClearView() {
   const off = keep.top.clear === 'scenery';
-  if (stageRoot) stageRoot.traverse((o) => { if (o.isMesh && o.userData && o.userData.bare) o.visible = !off; });
+  // (not only meshes: a node with several materials loads as a Group that carries the tag, and its meshes do not)
+  if (stageRoot) stageRoot.traverse((o) => { if (o.userData && o.userData.bare) o.visible = !off; });
 }
 // Delete every original object (the dialog's button): one Undo step
 $('gdDelAll').onclick = () => {
