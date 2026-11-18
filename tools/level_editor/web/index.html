@@ -18,10 +18,14 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
 <body>
 <header id="bar">
   <span class="brand" title="WotM Level Editor"><i class="ic" style="--ic:url(vendor/mdi/city-variant-outline.svg)"></i>Level Editor</span>
+  <div id="menubar" role="menubar" aria-label="Menu">
+    <button id="mbFile" type="button" class="ghost mb-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" aria-controls="fileMenu" tabindex="0">File</button>
+    <button id="mbEdit" type="button" class="ghost mb-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" aria-controls="editMenu" tabindex="-1">Edit</button>
+    <button id="mbHelp" type="button" class="ghost mb-title" role="menuitem" aria-haspopup="menu" aria-expanded="false" aria-controls="helpMenu" tabindex="-1">Help</button>
+  </div>
   <span class="sep"></span>
   <label class="field stage" title="The stage to edit"><i class="pre ic" style="--ic:url(vendor/mdi/map-outline.svg)"></i><select id="stage" aria-label="Stage"></select></label>
   <label class="field mod" title="The mod your changes are saved into (mods/&lt;mod&gt;/levels/)"><i class="pre ic" style="--ic:url(vendor/mdi/puzzle-outline.svg)"></i><select id="mod" aria-label="Mod"></select></label>
-  <button id="fileBtn" class="ghost" aria-haspopup="true" aria-expanded="false" title="File: new or edit a stage, pack the mod, check the collision"><span class="lbl">File</span><i class="ic chev" style="--ic:url(vendor/mdi/chevron-down.svg)"></i></button>
   <span class="sep"></span>
   <button id="undo" class="icon ghost" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><i class="ic" style="--ic:url(vendor/mdi/undo.svg)"></i></button>
   <button id="redo" class="icon ghost" title="Redo (Ctrl+Y)" aria-label="Redo" disabled><i class="ic" style="--ic:url(vendor/mdi/redo.svg)"></i></button>
@@ -37,14 +41,22 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
   <button id="stop" class="icon" title="Close the game the editor opened" aria-label="Stop game" hidden><i class="ic" style="--ic:url(vendor/mdi/stop.svg)"></i></button>
   <span class="sep"></span>
   <button id="toggleRight" class="icon ghost on" aria-pressed="true" title="Show or hide the right panel (the selection and the stage)" aria-label="Show or hide the right panel"><i class="ic" style="--ic:url(vendor/mdi/page-layout-sidebar-right.svg)"></i></button>
-  <button id="help" class="icon ghost" title="Keyboard shortcuts (? or F1)" aria-label="Keyboard shortcuts"><i class="ic" style="--ic:url(vendor/mdi/help-circle-outline.svg)"></i></button>
-  <button id="settings" class="icon ghost" title="Settings" aria-label="Settings"><i class="ic" style="--ic:url(vendor/mdi/cog-outline.svg)"></i></button>
 </header>
-<div id="fileMenu" class="float menu menu-fixed" hidden role="menu" aria-label="File">
+<div id="fileMenu" class="float menu menu-fixed mb-menu" hidden role="menu" aria-label="File">
   <button id="newStage" type="button" class="ghost wide" role="menuitem" title="New stage: a copy of a game stage with its own level patch, as another entry on the stage select"><i class="ic" style="--ic:url(vendor/mdi/plus.svg)"></i><span class="lbl">New stage…</span></button>
   <button id="editStage" type="button" class="ghost wide" role="menuitem" disabled title="Edit stage: the name, base, narrator and RANDOM of this custom stage"><i class="ic" style="--ic:url(vendor/mdi/pencil-outline.svg)"></i><span class="lbl">Edit stage…</span></button>
-  <button id="packMod" type="button" class="ghost wide" role="menuitem" title="Pack mod: download the mod's folder as a .zip to share (it unpacks into mods/)"><i class="ic" style="--ic:url(vendor/mdi/package-up.svg)"></i><span class="lbl">Pack mod…</span></button>
+  <button id="menuSave" type="button" class="ghost wide" role="menuitem" title="Save mods/&lt;mod&gt;/levels/&lt;STAGE&gt;.json (Ctrl+S)"><i class="ic" style="--ic:url(vendor/mdi/content-save-outline.svg)"></i><span class="lbl">Save</span><kbd>Ctrl+S</kbd></button>
   <button id="check" type="button" class="ghost wide" role="menuitem" title="Apply your changes to the disc's stage and check the collision (nothing is saved)"><i class="ic" style="--ic:url(vendor/mdi/shield-check-outline.svg)"></i><span class="lbl">Check collision</span></button>
+  <button id="packMod" type="button" class="ghost wide" role="menuitem" title="Pack mod: download the mod's folder as a .zip to share (it unpacks into mods/)"><i class="ic" style="--ic:url(vendor/mdi/package-up.svg)"></i><span class="lbl">Pack mod…</span></button>
+  <div class="mb-sep" role="separator"></div>
+  <button id="settings" type="button" class="ghost wide" role="menuitem" title="Settings: the theme, the game disc, the mods folder and the game"><i class="ic" style="--ic:url(vendor/mdi/cog-outline.svg)"></i><span class="lbl">Settings…</span></button>
+</div>
+<div id="editMenu" class="float menu menu-fixed mb-menu" hidden role="menu" aria-label="Edit">
+  <button id="menuUndo" type="button" class="ghost wide" role="menuitem" disabled title="Nothing to undo (Ctrl+Z)"><i class="ic" style="--ic:url(vendor/mdi/undo.svg)"></i><span class="lbl">Undo</span><span class="what"></span><kbd>Ctrl+Z</kbd></button>
+  <button id="menuRedo" type="button" class="ghost wide" role="menuitem" disabled title="Nothing to redo (Ctrl+Y)"><i class="ic" style="--ic:url(vendor/mdi/redo.svg)"></i><span class="lbl">Redo</span><span class="what"></span><kbd>Ctrl+Y</kbd></button>
+</div>
+<div id="helpMenu" class="float menu menu-fixed mb-menu" hidden role="menu" aria-label="Help">
+  <button id="help" type="button" class="ghost wide" role="menuitem" title="Keyboard shortcuts (? or F1)"><i class="ic" style="--ic:url(vendor/mdi/keyboard-outline.svg)"></i><span class="lbl">Keyboard shortcuts</span><kbd>?</kbd><kbd>F1</kbd></button>
 </div>
 <div id="testMenu" class="float menu menu-fixed" hidden role="menu" aria-label="Test">
   <button id="testHere" type="button" class="ghost wide" role="menuitem" title="Test from here: the game starts you where the view aims, facing where it looks"><i class="ic" style="--ic:url(vendor/mdi/map-marker.svg)"></i><span class="lbl">Test from here</span></button>
@@ -168,7 +180,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <label class="field suf small-num" title="Move step (units)"><input id="snapMove" type="number" min="0.1" step="5" aria-label="Move step"><i class="post">u</i></label>
       <label class="field suf small-num" title="Turn step (degrees)"><input id="snapTurn" type="number" min="0.1" step="5" aria-label="Turn step"><i class="post">°</i></label>
     </div>
-    <!-- the view: Display (game look, guides, overlays); fly or orbit; focus, frame all; the shortcuts are on the top bar (?) -->
+    <!-- the view: Display (game look, guides, overlays); fly or orbit; focus, frame all; the shortcuts are in the Help menu (?) -->
     <div id="overlay" class="float" role="toolbar" aria-label="View">
       <button id="layersBtn" class="ghost" title="Display: game look, the grid, the minimap, and what to draw over the stage (collision, pedestrians, start points, power-ups, nets)" aria-label="Display" aria-haspopup="true" aria-expanded="false"><i class="ic" style="--ic:url(vendor/mdi/layers-outline.svg)"></i><span class="lbl">Display</span><i class="ic chev" style="--ic:url(vendor/mdi/chevron-down.svg)"></i></button>
       <span class="fsep"></span>

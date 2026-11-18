@@ -773,8 +773,8 @@ editor already running, that one's page opens again; by something else, a free p
 it in its own window instead (`pywebview` when installed, otherwise Edge/Chrome app mode); `--serve` only serves; `?stage=METRO` in the address opens that stage first. Except with `--serve`, the program quits 10 s
 after its page closes (a reload of the page keeps it). The release zip carries it as `WotM_LevelEditor.exe`, next to `wotm.exe`
 (`tools/build_level_editor.ps1`), whose mods folder is the one the game reads. The page is in English, with a dark, a light and a
-System theme (the one the OS uses), in the settings (the cog at the top right).
-- **Top bar:** the stage (switching with unsaved changes asks: Cancel, Discard, or Save and switch; when a marker file (start points, power-ups, nets) fails to save, the editor stays on the stage with its draft), the mod (a list of the mods
+System theme (the one the OS uses), in the settings (**File** ▸ **Settings…**).
+- **Top bar:** a menu bar (**File**: New stage…, Edit stage…, Save, Check collision, Pack mod…, Settings…; **Edit**: Undo, Redo, each with its shortcut and the name of the change; **Help**: Keyboard shortcuts, also **?** and **F1**; a click opens a menu, with one open the pointer over another title switches to it, Left and Right switch menus, Up and Down walk the items, Enter chooses, Esc closes and gives the focus back), the stage (switching with unsaved changes asks: Cancel, Discard, or Save and switch; when a marker file (start points, power-ups, nets) fails to save, the editor stays on the stage with its draft), the mod (a list of the mods
   folder's mods and **New mod…**, which asks for a name; **File** ▸ **Pack mod…** downloads the mod's whole folder
   as `<mod>.zip` (one top folder named like the mod, so it unpacks into `mods/`; hidden files and `__pycache__` stay out, and so do
   the sources kept in `mods/_<mod>_src/`; a mod over 400 MB is refused: zip its folder by hand; what you have not saved is not in
@@ -967,7 +967,7 @@ System theme (the one the OS uses), in the settings (the cog at the top right).
   wrap onto a second when the view is narrow. On the top right: **Display** (**Game look** (**L**); **Grid**, a line every 100 units,
   or every snap step when it is smaller, and a stronger one every 1000, at the base of the selection, and the **Minimap**;
   overlays: Pedestrians, Collision, Start points, Power-ups, AI net and Vehicle net; the layers are faint unless their mode is open), the cameras, Focus, Frame all, the **Ruler**
-  and the **Screenshot**; the shortcuts are on the top bar (**?**). The ruler (**M**) takes two clicks on the
+  and the **Screenshot**; the shortcuts are in the **Help** menu (**?**). The ruler (**M**) takes two clicks on the
   stage's surface and writes the distance, the flat distance, the height and the heading (0 faces +Y, 90 faces +X) over the line; a
   third click starts again, **Esc** or **M** stops it, and while it is on the clicks select nothing. The screenshot downloads the
   view as a PNG named after the stage and the time, with the gizmo left out. The minimap (**N**, or **Display ▸ Minimap**) is the

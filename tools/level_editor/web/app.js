@@ -9,7 +9,7 @@ import { createPeds } from './peds.js';
 import { openHud, hudGameChanged } from './hud.js';
 import { openTex, texGameChanged } from './tex.js';
 import { openLight, lightGameChanged, lightLookChanged, lightClose, lightDirty, lightSave, lightRequestClose } from './light.js';
-import { popover } from './menu.js';
+import { popover, menubar } from './menu.js';
 import { initArrange } from './arrange.js';
 import { openTerrain } from './terrain.js';
 import { initColl } from './coll.js';
@@ -1072,6 +1072,12 @@ function showUndoButtons() {
   $('undo').title = u ? `Undo${of}: ${u.label} (Ctrl+Z)` : `Nothing to undo${of} (Ctrl+Z)`;
   $('redo').disabled = !r;
   $('redo').title = r ? `Redo${of}: ${r.label} (Ctrl+Y)` : `Nothing to redo${of} (Ctrl+Y)`;
+  // the Edit menu's items say the same
+  for (const [id, btn, step] of [['menuUndo', 'undo', u], ['menuRedo', 'redo', r]]) {
+    $(id).disabled = !step;
+    $(id).title = $(btn).title;
+    $(id).querySelector('.what').textContent = step ? step.label : '';
+  }
 }
 function showUndo() {
   showUndoButtons();
@@ -3412,8 +3418,11 @@ $('keepClose').onclick = () => { $('keepNote').hidden = true; };
 $('winClose').onclick = () => { winHidden = true; $('winNote').hidden = true; };
 $('check').onclick = () => post('check');
 $('save').onclick = () => post('save');
-// the top bar's menus: File (stages, pack, check) and the Test button's chevron (from here, options)
-popover({ button: $('fileBtn'), menu: $('fileMenu'), place: true, closeOnItem: true });
+// the top bar's menu bar: File (stages, Save, check, pack, Settings), Edit (Undo, Redo), Help (the shortcuts); and the Test button's chevron (from here, options)
+$('menuSave').onclick = () => $('save').click();
+$('menuUndo').onclick = undo;
+$('menuRedo').onclick = redo;
+menubar({ items: [{ button: $('mbFile'), menu: $('fileMenu') }, { button: $('mbEdit'), menu: $('editMenu') }, { button: $('mbHelp'), menu: $('helpMenu') }] });
 popover({ button: $('testMenuBtn'), menu: $('testMenu'), place: true, closeOnItem: true });
 function testGame(here) {
   if (here && !aimStart(true)) {

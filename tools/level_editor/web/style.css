@@ -913,12 +913,25 @@ button.small-btn { height: 22px; padding: 0 8px; font-size: 12px; flex: none; }
            border-radius: var(--r-lg); box-shadow: var(--shadow-pop); }
 #minimap[hidden] { display: none; }
 
-/* the top bar's menus (File, Test): fixed under their button (menu.js moves them to the body) */
+/* the top bar's menus (File, Edit, Help, Test): fixed under their button (menu.js moves them to the body) */
 .menu-fixed { position: fixed; z-index: 30; flex-direction: column; align-items: stretch; gap: 2px; padding: 6px; min-width: 200px; }
 .menu-fixed button.wide { height: 32px; }
+.menu-fixed button:disabled { border-color: transparent; }
 .menu-fixed .lbl { display: inline !important; }
-#fileBtn { padding: 0 8px; }
-#fileBtn .chev, #leftHead .chev { width: 16px; height: 16px; }
+#leftHead .chev { width: 16px; height: 16px; }
+/* the menu bar (File, Edit, Help): text titles next to the name; the open one is raised, not accent-tinted */
+#menubar { display: inline-flex; align-items: center; gap: 0; margin-left: 4px; }
+#menubar .mb-title { padding: 0 9px; color: var(--fg-2); }
+#menubar .mb-title:hover { color: var(--fg); }
+#menubar .mb-title.on { background: var(--surface-3); border-color: transparent; color: var(--fg); }
+.mb-menu { min-width: 250px; }
+.mb-menu button.wide kbd { margin-left: auto; }
+.mb-menu button.wide kbd + kbd { margin-left: 4px; }
+.mb-menu button.wide .lbl + .what { margin-left: 10px; margin-right: auto; min-width: 0; max-width: 150px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 12px; font-weight: 400; }
+.mb-menu button.wide .what:empty { display: none; }
+.mb-menu button.wide .what + kbd { margin-left: 16px; }
+.mb-menu button.wide:disabled kbd { color: var(--disabled); }
+.mb-menu .mb-sep { height: 1px; margin: 4px 2px; background: var(--line); flex: none; }
 /* Test in game with a chevron for Test from here and Test options */
 .split { display: inline-flex; }
 .split > #test { border-top-right-radius: 0; border-bottom-right-radius: 0; }

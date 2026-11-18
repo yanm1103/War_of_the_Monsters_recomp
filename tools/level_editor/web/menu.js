@@ -63,3 +63,54 @@ export function popover({ button, menu, onOpen, onClose, place, closeOnItem }) {
   }, true);
   return api;
 }
+
+// A menu bar: titles in a row, each opening its menu (a popover placed under it). Click opens; with one open, passing over another
+// title switches to it; Left and Right go to the neighbor title (opening its menu when one was open), Down and Up open a menu
+// from its title, Home and End go to the first and the last title; Esc, a click elsewhere and the popovers' own arrows are
+// menu.js's. A chosen item gives the focus back to its title (so that a dialog it opens returns the focus there).
+//   menubar({ items: [{ button, menu }] }) -> [popover api, ...]
+export function menubar({ items }) {
+  const n = items.length;
+  const titles = items.map((i) => i.button);
+  const pops = items.map(({ button, menu }) => popover({ button, menu, place: true, closeOnItem: true }));
+  const openAt = () => pops.findIndex((p) => p.isOpen);
+  const walkable = (menu) => [...menu.querySelectorAll('button:not(:disabled)')].filter((e) => e.getClientRects().length > 0);
+  // one tab stop for the bar (the last title that had the focus)
+  for (const t of titles) t.addEventListener('focus', () => { for (const x of titles) x.tabIndex = x === t ? 0 : -1; });
+  const show = (j, items_) => {            // open menu j and put the focus in it (or on its title when it has nothing to choose)
+    pops[j].set(true);
+    const w = walkable(items[j].menu);
+    if (!w.length) titles[j].focus({ preventScroll: true });
+    else if (items_ === 'last') w[w.length - 1].focus({ preventScroll: true });
+  };
+  titles.forEach((t, j) => {
+    t.addEventListener('pointerenter', () => { if (openAt() >= 0 && !pops[j].isOpen) show(j); });
+  });
+  items.forEach(({ menu }, j) => {
+    // (closed here, before the item acts: an item that disables itself, like Undo on the last change, would stay open otherwise)
+    menu.addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (b && !b.disabled) { titles[j].focus({ preventScroll: true }); pops[j].set(false); }
+    }, true);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+    const at = document.activeElement, ti = titles.indexOf(at), oi = openAt();
+    const inMenu = oi >= 0 && items[oi].menu.contains(at);
+    if (ti < 0 && !inMenu) return;
+    const cur = ti >= 0 ? ti : oi;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      const j = (cur + (e.key === 'ArrowRight' ? 1 : -1) + n) % n;
+      if (oi >= 0) show(j); else titles[j].focus({ preventScroll: true });
+    } else if (ti >= 0 && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      e.preventDefault();
+      if (!pops[ti].isOpen) show(ti, e.key === 'ArrowUp' ? 'last' : 'first');
+    } else if (ti >= 0 && (e.key === 'Home' || e.key === 'End')) {
+      e.preventDefault();
+      const j = e.key === 'Home' ? 0 : n - 1;
+      if (oi >= 0) show(j); else titles[j].focus({ preventScroll: true });
+    }
+  }, true);
+  return pops;
+}

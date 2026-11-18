@@ -1217,10 +1217,10 @@ await check('net nodes in the view: every node has its number, the selected one 
   await goMode('objects');
 });
 await check('top bar: File menu holds the stage and mod commands; Test has a chevron for Test from here and Test options', async () => {
-  must(await ev(`!document.getElementById('bar').querySelector('#newStage, #editStage, #packMod, #check, #testHere, #testOpts')`), 'a command is still loose on the bar');
-  await ev(`document.getElementById('fileBtn').click()`);
+  must(await ev(`!document.getElementById('bar').querySelector('#newStage, #editStage, #packMod, #check, #testHere, #testOpts, #help, #settings, #fileBtn')`), 'a command is still loose on the bar');
+  await ev(`document.getElementById('mbFile').click()`);
   const m = await ev(`(() => { const f = document.getElementById('fileMenu'); const r = f.getBoundingClientRect(); return JSON.stringify({ open: !f.hidden, body: f.parentElement === document.body,
-    all: ['newStage','editStage','packMod','check'].every((i) => f.contains(document.getElementById(i))), under: r.top >= document.getElementById('fileBtn').getBoundingClientRect().bottom, inside: r.right <= innerWidth }); })()`);
+    all: ['newStage','editStage','menuSave','check','packMod','settings'].every((i) => f.contains(document.getElementById(i))), under: r.top >= document.getElementById('mbFile').getBoundingClientRect().bottom, inside: r.right <= innerWidth }); })()`);
   must(m === '{"open":true,"body":true,"all":true,"under":true,"inside":true}', 'File menu: ' + m);
   await shot('file_menu');
   await ev(`document.getElementById('newStage').click()`);
@@ -1234,6 +1234,110 @@ await check('top bar: File menu holds the stage and mod commands; Test has a che
   must(await ev(`document.getElementById('testTitle').textContent`) === 'Test options', 'the dialog is still titled "Test in game"');
   await esc();
   must(await ev(`document.getElementById('reload').hidden`), 'Reload in game shows with no game open');
+});
+await check('menu bar: File, Edit, Help; hover switches, Left and Right walk the titles, Down and Enter activate, Esc gives the focus back', async () => {
+  const D = (e) => ev(e);
+  await ev(`document.activeElement && document.activeElement.blur()`);
+  must(await D(`document.getElementById('menubar').getAttribute('role') === 'menubar' && [...document.querySelectorAll('#menubar > button')].every((b) => b.getAttribute('role') === 'menuitem' && b.getAttribute('aria-haspopup') === 'menu' && b.getAttribute('aria-expanded') === 'false')
+    && ['fileMenu','editMenu','helpMenu'].every((i) => document.getElementById(i).getAttribute('role') === 'menu')`), 'the menu bar roles are not as expected');
+  must(await D(`[...document.querySelectorAll('#menubar > button')].map((b) => b.textContent).join()`) === 'File,Edit,Help', 'the titles are not File, Edit, Help');
+  // the shortcuts shown next to the items
+  const kb = await D(`JSON.stringify(['menuSave','menuUndo','menuRedo','help'].map((i) => document.getElementById(i).querySelector('kbd').textContent))`);
+  must(kb === '["Ctrl+S","Ctrl+Z","Ctrl+Y","?"]', 'the shortcuts shown: ' + kb);
+  // the keyboard from a title: Down opens and focuses the first enabled item; Right opens the next menu; Esc closes and gives the title the focus
+  await D(`document.getElementById('mbFile').focus()`);
+  await key('ArrowDown', 'ArrowDown', 40);
+  must(await D(`!document.getElementById('fileMenu').hidden && document.getElementById('mbFile').getAttribute('aria-expanded') === 'true' && document.activeElement.id === 'newStage'`), 'Down on File did not open it on its first item');
+  await key('ArrowDown', 'ArrowDown', 40);
+  must(await D(`document.activeElement.id`) === 'menuSave', 'Down did not skip the disabled item: ' + await D(`document.activeElement.id`));
+  await key('ArrowRight', 'ArrowRight', 39);
+  must(await D(`document.getElementById('fileMenu').hidden && !document.getElementById('editMenu').hidden && document.getElementById('mbEdit').getAttribute('aria-expanded') === 'true' && document.getElementById('mbFile').getAttribute('aria-expanded') === 'false'`), 'Right did not switch File to Edit');
+  await key('ArrowRight', 'ArrowRight', 39);
+  must(await D(`!document.getElementById('helpMenu').hidden && document.activeElement.id === 'help'`), 'Right did not go on to Help');
+  await key('ArrowRight', 'ArrowRight', 39);
+  must(await D(`!document.getElementById('fileMenu').hidden`), 'Right from Help did not wrap to File');
+  await key('ArrowLeft', 'ArrowLeft', 37);
+  must(await D(`!document.getElementById('helpMenu').hidden`), 'Left from File did not wrap to Help');
+  await esc();
+  must(await D(`['fileMenu','editMenu','helpMenu'].every((i) => document.getElementById(i).hidden) && document.activeElement.id === 'mbHelp'`), 'Esc did not close the menu and give the title the focus: ' + await D(`document.activeElement.id`));
+  // closed: Left and Right only move the focus; they open nothing
+  await key('ArrowLeft', 'ArrowLeft', 37);
+  must(await D(`document.activeElement.id === 'mbEdit' && ['fileMenu','editMenu','helpMenu'].every((i) => document.getElementById(i).hidden)`), 'Left on a closed bar opened a menu or did not move');
+  // Edit with nothing to undo: both items are disabled and the menu still opens, the focus staying on its title
+  await key('ArrowDown', 'ArrowDown', 40);
+  must(await D(`!document.getElementById('editMenu').hidden && document.getElementById('menuUndo').disabled && document.getElementById('menuRedo').disabled && document.activeElement.id === 'mbEdit'`), 'Edit with no history: ' + await D(`document.activeElement.id`));
+  await esc();
+  // the mouse: a click opens, passing over another title switches, a click outside closes
+  await D(`document.getElementById('mbFile').click()`);
+  must(await D(`!document.getElementById('fileMenu').hidden`), 'a click on File did not open it');
+  const c = JSON.parse(await D(`(() => { const r = document.getElementById('mbHelp').getBoundingClientRect(); return JSON.stringify([Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)]); })()`));
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: c[0], y: c[1] });
+  must(await until(`!document.getElementById('helpMenu').hidden && document.getElementById('fileMenu').hidden`, 20, 100), 'passing over Help did not switch to its menu');
+  await shot('menubar_help');
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 700, y: 500, button: 'left', clickCount: 1 });
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 700, y: 500, button: 'left', clickCount: 1 });
+  must(await until(`document.getElementById('helpMenu').hidden`, 10), 'a click outside did not close the menu');
+  // with no menu open, passing over a title opens nothing
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: c[0], y: c[1] + 1 });
+  await sleep(150);
+  must(await D(`document.getElementById('helpMenu').hidden`), 'passing over a title opened a menu on a closed bar');
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 700, y: 500 });
+  // Edit follows the history: an edit enables Undo with its label, Undo from the menu takes it back and enables Redo; Enter activates the focused item
+  const first = await D(`window.wotmDebug.items().find((x) => !x.copy).rec.info.handle`);
+  await D(`window.wotmDebug.select(window.wotmDebug.items().find((x) => x.rec.info.handle === ${JSON.stringify(first)} && !x.copy)); window.wotmDebug.nudge(0, 0, 1, false)`);
+  must(await D(`!document.getElementById('menuUndo').disabled && document.getElementById('menuRedo').disabled && document.getElementById('menuUndo').querySelector('.what').textContent !== '' && document.getElementById('menuUndo').title === document.getElementById('undo').title`), 'the Edit menu does not follow the history');
+  await D(`document.getElementById('mbEdit').focus()`);
+  await key('ArrowDown', 'ArrowDown', 40);
+  must(await D(`document.activeElement.id`) === 'menuUndo', 'Down on Edit did not land on Undo');
+  // (Enter needs its text for the browser to click the focused button)
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+  must(await until(`window.wotmDebug.buildPatch().objects.length === 0 && document.getElementById('editMenu').hidden`, 20, 100), 'Enter on Undo did not undo and close the menu: ' + await D(`JSON.stringify({ n: window.wotmDebug.buildPatch().objects.length, hidden: document.getElementById('editMenu').hidden, at: document.activeElement.id })`));
+  must(await D(`document.activeElement.id`) === 'mbEdit', 'the focus did not go back to the Edit title after the item');
+  must(await D(`document.getElementById('menuUndo').disabled && !document.getElementById('menuRedo').disabled`), 'after Undo the menu has Undo on and Redo off');
+  await D(`document.getElementById('menuRedo').click()`);
+  must(await D(`window.wotmDebug.buildPatch().objects.length === 1`), 'Redo from the menu did not redo');
+  await D(`document.getElementById('menuUndo').click()`);
+  must(await D(`window.wotmDebug.buildPatch().objects.length === 0`), 'Undo from the menu did not undo');
+  await D(`window.wotmDebug.select(null)`);
+  // Settings and the shortcuts through their menus
+  await D(`document.getElementById('mbFile').click()`);
+  await D(`document.getElementById('settings').click()`);
+  must(await until(`document.getElementById('dlg').open && document.getElementById('fileMenu').hidden`, 40), 'Settings from the File menu did not open');
+  await esc();
+  must(await until(`!document.getElementById('dlg').open`, 20), 'Esc did not close Settings');
+  await D(`document.getElementById('mbHelp').click()`);
+  await D(`document.getElementById('help').click()`);
+  must(await until(`document.getElementById('keysDlg').open && document.getElementById('helpMenu').hidden`, 40), 'Keyboard shortcuts from the Help menu did not open');
+  await esc();
+  await key('F1', 'F1', 112);
+  must(await until(`document.getElementById('keysDlg').open`, 20), 'F1 does not open the shortcuts');
+  await esc();
+  must(await until(`!document.getElementById('keysDlg').open`, 20), 'Esc did not close the shortcuts');
+  await key('?', 'Slash', 191, 8);
+  must(await until(`document.getElementById('keysDlg').open`, 20), '? does not open the shortcuts');
+  await esc();
+});
+await check('menu bar: it fits the narrow windows, and Test is still on the bar', async () => {
+  const size = (w, h) => send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
+  try {
+    for (const [w, h] of [[1600, 900], [1100, 650], [900, 600]]) {
+      await size(w, h);
+      await sleep(400);
+      const r = JSON.parse(await ev(`(() => { const R = (id) => document.getElementById(id).getBoundingClientRect(); const t = [...document.querySelectorAll('#menubar > button')].map((b) => b.getBoundingClientRect());
+        const ids = ['menubar','undo','redo','save','test','testMenuBtn','toggleRight'];
+        const inside = ids.every((i) => { const q = R(i); return q.left >= 0 && q.right <= innerWidth + 0.5 && q.height > 0; });
+        const rows = new Set(t.map((q) => Math.round(q.top)));
+        const over = (a, b) => R(a).right > R(b).left + 0.5;
+        return JSON.stringify({ inside, oneRow: rows.size === 1, barH: R('bar').height, noOverlap: !over('menubar', 'stage') && !over('undo', 'save') && !over('save', 'test'), scroll: document.getElementById('bar').scrollWidth <= document.getElementById('bar').clientWidth + 1 }); })()`));
+      must(r.inside && r.oneRow && r.noOverlap && r.scroll, `${w}x${h}: the bar does not fit: ` + JSON.stringify(r));
+      await ev(`document.getElementById('mbFile').click()`);
+      const m = await ev(`(() => { const q = document.getElementById('fileMenu').getBoundingClientRect(); return q.left >= 0 && q.right <= innerWidth && q.top >= document.getElementById('mbFile').getBoundingClientRect().bottom; })()`);
+      must(m, `${w}x${h}: the File menu is not under its title, inside the window`);
+      await shot(`menubar_${w}x${h}`);
+      await esc();
+    }
+  } finally { await size(1600, 900); await sleep(300); }
 });
 await check('the status bar runs the check when there is none, and shows its result', async () => {
   must(await ev(`document.querySelector('#status .check').title.startsWith('Run the check')`), 'the status field does not offer to run it');
