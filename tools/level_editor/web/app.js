@@ -1010,7 +1010,7 @@ function applyPatch(patch) {
   applyModeView();
   showPedCounts();
   return { entries: keep.objects.length + Object.keys(keep.names).length, props: keep.props.length,
-           keys: Object.keys(keep.top).filter((k) => k !== 'grid' && k !== 'walls').concat(Object.keys(keep.peds).map((k) => 'peds.' + k)) };
+           keys: Object.keys(keep.top).filter((k) => k !== 'grid' && k !== 'walls' && !(k === 'clear' && keep.top.clear === 'scenery')).concat(Object.keys(keep.peds).map((k) => 'peds.' + k)) };
 }
 // the note over the view about what the file keeps that the editor does not show
 function showKeep(k) {
