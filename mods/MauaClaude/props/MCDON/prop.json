@@ -8,7 +8,23 @@
  "scale": 6.0,
  "kind": "static",
  "light": "auto",
- "textures": [],
+ "textures": [
+  {
+   "slot": 0,
+   "image": "mcdon",
+   "png": "MCDON_T0.png",
+   "size": [
+    1024,
+    1024
+   ],
+   "packet": "0x80",
+   "game": [
+    128,
+    128
+   ],
+   "bytes": 65536
+  }
+ ],
  "template": {
   "rule": "first-object-roundtrip",
   "abe": 1,
@@ -17,14 +33,14 @@
  },
  "bounds": {
   "min": [
-   -1120.8,
+   -1163.8624,
    -57.0,
-   40.8991
+   37.1939
   ],
   "max": [
-   -908.6662,
-   152.4,
-   148.7852
+   -944.4,
+   172.3944,
+   130.1939
   ]
  },
  "collision": {
@@ -33,42 +49,42 @@
   "polys": [
    {
     "mesh": "coll_mcdon",
-    "node": "0xA04710",
-    "triangles": 196,
+    "node": "0xA15780",
+    "triangles": 60,
     "matId": 266,
     "min": [
      -1120.8,
      -57.0,
-     40.8991
+     37.1939
     ],
     "max": [
-     -908.6662,
-     152.4,
-     148.7852
+     -944.4,
+     164.3759,
+     101.3939
     ]
    }
   ],
   "hull": 0,
   "hulls": [],
-  "tris": 196,
+  "tris": 60,
   "matId": 1
  },
  "objects": [
   {
-   "object": "0xA02860",
+   "object": "0xA15230",
    "state": 0,
    "texId": null,
-   "image": null,
-   "vertices": 411,
-   "light": "vertex",
+   "image": 0,
+   "vertices": 836,
+   "light": "dir",
    "abe": 1
   }
  ],
- "triangles": 220,
- "vertices": 411,
- "packetBytes": 10208,
- "bytes": 18304,
- "root": "0xA04750",
+ "triangles": 415,
+ "vertices": 836,
+ "packetBytes": 20784,
+ "bytes": 88048,
+ "root": "0xA157C0",
  "files": {
   "ngp": "MCDON.NGP",
   "ptr": "MCDON.PTR",

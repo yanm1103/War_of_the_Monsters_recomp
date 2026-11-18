@@ -8,7 +8,23 @@
  "scale": 6.0,
  "kind": "static",
  "light": "auto",
- "textures": [],
+ "textures": [
+  {
+   "slot": 0,
+   "image": "trem",
+   "png": "TREM_T0.png",
+   "size": [
+    1024,
+    1024
+   ],
+   "packet": "0x80",
+   "game": [
+    128,
+    128
+   ],
+   "bytes": 65536
+  }
+ ],
  "template": {
   "rule": "first-object-roundtrip",
   "abe": 1,
@@ -17,14 +33,14 @@
  },
  "bounds": {
   "min": [
-   -257.3124,
-   -255.4411,
-   31.5973
+   -260.7968,
+   -254.5685,
+   27.3906
   ],
   "max": [
-   465.3475,
-   268.2813,
-   55.6201
+   464.475,
+   269.8193,
+   58.6535
   ]
  },
  "collision": {
@@ -33,42 +49,42 @@
   "polys": [
    {
     "mesh": "coll_trem",
-    "node": "0xA04860",
-    "triangles": 110,
+    "node": "0xA18CF0",
+    "triangles": 84,
     "matId": 266,
     "min": [
-     -257.3124,
-     -255.4411,
-     31.5973
+     -256.8244,
+     -255.092,
+     28.7106
     ],
     "max": [
-     465.3475,
-     268.2813,
-     55.6201
+     464.8595,
+     267.9323,
+     56.7335
     ]
    }
   ],
   "hull": 0,
   "hulls": [],
-  "tris": 110,
+  "tris": 84,
   "matId": 1
  },
  "objects": [
   {
-   "object": "0xA03780",
+   "object": "0xA18540",
    "state": 0,
    "texId": null,
-   "image": null,
-   "vertices": 652,
-   "light": "vertex",
+   "image": 0,
+   "vertices": 1222,
+   "light": "dir",
    "abe": 1
   }
  ],
- "triangles": 334,
- "vertices": 652,
- "packetBytes": 14080,
- "bytes": 18640,
- "root": "0xA048A0",
+ "triangles": 600,
+ "vertices": 1222,
+ "packetBytes": 33856,
+ "bytes": 101728,
+ "root": "0xA18D30",
  "files": {
   "ngp": "TREM.NGP",
   "ptr": "TREM.PTR",

@@ -2652,6 +2652,42 @@
      ],
      "heading": 335.2,
      "name": "Car (parked)"
+    },
+    {
+     "pos": [
+      -982.7,
+      -145.0,
+      67.1
+     ],
+     "heading": 228.2,
+     "name": "Car (parked)"
+    },
+    {
+     "pos": [
+      -912.4,
+      -66.2,
+      68.3
+     ],
+     "heading": 228.2,
+     "name": "Car (parked)"
+    },
+    {
+     "pos": [
+      -805.9,
+      -35.5,
+      72.5
+     ],
+     "heading": 58.5,
+     "name": "Car (parked)"
+    },
+    {
+     "pos": [
+      -770.6,
+      22.1,
+      72.9
+     ],
+     "heading": 328.5,
+     "name": "Car (parked)"
     }
    ]
   },
@@ -2852,6 +2888,24 @@
      ],
      "heading": 234.2,
      "name": "Car (parked)"
+    },
+    {
+     "pos": [
+      -895.2,
+      -210.3,
+      73.6
+     ],
+     "heading": 239.1,
+     "name": "Car (parked)"
+    },
+    {
+     "pos": [
+      -876.1,
+      -156.4,
+      70.8
+     ],
+     "heading": 322.5,
+     "name": "Car (parked)"
     }
    ]
   },
@@ -2952,6 +3006,15 @@
       97.5
      ],
      "heading": 208.7,
+     "name": "Car (parked)"
+    },
+    {
+     "pos": [
+      -850.9,
+      -7.9,
+      70.0
+     ],
+     "heading": 238.5,
      "name": "Car (parked)"
     }
    ]
@@ -3784,6 +3847,33 @@
       128.8
      ],
      "heading": 38.3,
+     "name": "Car (parked)"
+    },
+    {
+     "pos": [
+      -947.6,
+      -105.6,
+      67.6
+     ],
+     "heading": 228.2,
+     "name": "Car (parked)"
+    },
+    {
+     "pos": [
+      -815.7,
+      49.7,
+      72.5
+     ],
+     "heading": 328.5,
+     "name": "Car (parked)"
+    },
+    {
+     "pos": [
+      -834.7,
+      -121.6,
+      72.3
+     ],
+     "heading": 232.5,
      "name": "Car (parked)"
     },
     {
