@@ -657,7 +657,8 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   `segments` replaces the stage's pedestrian net (`.PED`) with these sidewalks, at most 128 (`a` and `b` are the ends, `width` 1..255,
   the lane is `width · 10` to each side). A group with `handle` and `from` (`python tools/lvl.py peds <FASE>`) is one of the disc's:
   `pos` moves it, `count` (1..255) changes how many walk, `delete` takes it out. A group with no `handle` is new. `"off": true` takes out
-  every group of the disc. A stage holds at most 20 groups; one with no pedestrian net is refused. Each group walks the segment of the
+  every group, the new ones too (each new group is skipped with a line); to swap the disc's groups for new ones, delete them one by
+  one (`handle`, `from`, `delete`). A stage holds at most 20 groups; one with no pedestrian net is refused. Each group walks the segment of the
   node nearest to it, so moving a group can move it to another sidewalk: `lvl.py patch` prints the segment each group walks
   (`walks 2-3 (725 long)`) and the segments nobody walks; the game logs the same report (`[fase]   pedestres: grupo ... anda em
   2-3`; also without `peds` with `WOTM_LEVELPATCH=2`).
@@ -1248,7 +1249,8 @@ System theme (the one the OS uses), in the settings (**File** ▸ **Settings…*
   place, and new groups (`TRANSLATE` 0xBB8 with a `NULL`) hang from a new `GROUP` in the world `GROUP`'s first slot, which holds
   the old child too. Then `PathNet::fodder` and `PathNet::ped`, already
   built by `InitBeforeDbLoad` and not yet held by any vehicle or `PedGroup`, are cut in RAM against the XY convex hull of each new
-  solid box (`cutNets`): vehicle links leave both nodes, as in `PathNode::removePath`, and pedestrian nodes left with no link leave the
+  solid box (`cutNets`); a box whose leaf is a `coll_` triangle mesh (a terrain, a deck) cuts only where its triangles pass between
+  40 and 100 units over the lane (`Surface`, sampled every 16 units): vehicle links leave both nodes, as in `PathNode::removePath`, and pedestrian nodes left with no link leave the
   list with the links renumbered (`PedGroup` reads `paths[0]` of the nearest node without looking at the count). `tools/lvl.py`
   (`LevelPatch`, `cut_nets`) does the same in the same order, on the disc's `PTS` files. A reload starts from a clean image: the
   stage `.NGP` is inflated again, the arena is rebuilt and `InitBeforeDbLoad` reads the `PTS` again before each load.

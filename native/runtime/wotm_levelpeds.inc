@@ -123,7 +123,8 @@ std::vector<uint32_t> applyPeds(Stage &st, uint8_t *rdram, const json::Value &pa
             const json::Value *hv = e.get("handle");
             if (!hv || hv->type == json::Value::Null)
             {
-                if (!off) fresh.push_back({k, &e});
+                if (off) throw PatchError("\"off\" apaga todos os grupos, os novos tambem (apague os do disco um a um)");
+                fresh.push_back({k, &e});
                 continue;
             }
             uint32_t h = 0;

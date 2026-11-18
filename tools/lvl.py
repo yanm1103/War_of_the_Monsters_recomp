@@ -2651,8 +2651,9 @@ class LevelPatch:
         for k, e in enumerate(peds.get("groups") or []):
             try:
                 if e.get("handle") is None:
-                    if not off:
-                        new.append((k, e))
+                    if off:
+                        raise PatchError("\"off\" deletes every group, the new ones too (delete the disc's groups one by one)")
+                    new.append((k, e))
                     continue
                 hv = e["handle"]
                 h = int(hv, 0) if isinstance(hv, str) else int(hv)

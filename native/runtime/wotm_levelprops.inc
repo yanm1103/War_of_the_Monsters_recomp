@@ -733,7 +733,7 @@ void applyProps(Stage &st, uint8_t *rdram, const json::Value &patch, const std::
             Box bb;
             st.pathCorners(st.path(pa), w);
             aabb(w, bb);
-            st.footprints.push_back({hull2d(w), bb.mn.v[2], bb.mx.v[2]});
+            st.footprints.push_back({hull2d(w), bb.mn.v[2], bb.mx.v[2], st.pathSurface(st.path(pa))});
             for (int i = 0; i < 3; ++i) st.wf32(pa + 4 * i, bb.mn.v[i]), st.wf32(pa + 0xC + 4 * i, bb.mx.v[i]);
             const std::set<int> cs = st.cellsFor(bb);
             st.setCells(pa, cs);

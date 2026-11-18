@@ -15,11 +15,13 @@
 #include <array>
 #include <chrono>
 #include <cstdarg>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <thread>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <stdexcept>
@@ -162,7 +164,71 @@ std::string fmt(const char *f, ...)
 
 // ------------------------------------------------------------------ planta dos objetos (lvl.py hull2d, seg_in_poly)
 struct P2 { double x, y; };
-struct Footprint { std::vector<P2> poly; double zmin, zmax; };
+// Triangulos de mundo de uma malha coll_ (um terreno, um tabuleiro), em baldes do XY: heights(x, y) sao os Z em que a vertical a
+// corta (lvl.py Surface)
+struct Surface
+{
+    static constexpr double kCell = 128.0;
+    using Tri = std::array<V3, 3>;
+    std::vector<Tri> tris;
+    std::map<std::pair<int, int>, std::vector<uint32_t>> buckets;
+    explicit Surface(std::vector<Tri> t) : tris(std::move(t))
+    {
+        for (uint32_t i = 0; i < tris.size(); ++i)
+        {
+            const Tri &q = tris[i];
+            const double x0 = std::min({q[0].v[0], q[1].v[0], q[2].v[0]}), x1 = std::max({q[0].v[0], q[1].v[0], q[2].v[0]});
+            const double y0 = std::min({q[0].v[1], q[1].v[1], q[2].v[1]}), y1 = std::max({q[0].v[1], q[1].v[1], q[2].v[1]});
+            for (int bx = int(std::floor(x0 / kCell)); bx <= int(std::floor(x1 / kCell)); ++bx)
+                for (int by = int(std::floor(y0 / kCell)); by <= int(std::floor(y1 / kCell)); ++by) buckets[{bx, by}].push_back(i);
+        }
+    }
+    // Ha um Z da malha em (z + low, z + high] em (x, y) ou a `margin` dele (4 pontos em cruz)?
+    bool blocks(double x, double y, double z, double low, double high, double margin) const
+    {
+        const double pts[5][2] = {{x, y}, {x + margin, y}, {x - margin, y}, {x, y + margin}, {x, y - margin}};
+        for (int k = 0; k < (margin > 0.0 ? 5 : 1); ++k)
+        {
+            const double px = pts[k][0], py = pts[k][1];
+            const auto it = buckets.find({int(std::floor(px / kCell)), int(std::floor(py / kCell))});
+            if (it == buckets.end()) continue;
+            for (uint32_t i : it->second)
+            {
+                const V3 &a = tris[i][0], &b = tris[i][1], &c = tris[i][2];
+                const double d = (b.v[1] - c.v[1]) * (a.v[0] - c.v[0]) + (c.v[0] - b.v[0]) * (a.v[1] - c.v[1]);
+                if (std::fabs(d) < 1e-9) continue;   // triangulo vertical: face de parede, sem altura de chao
+                const double l1 = ((b.v[1] - c.v[1]) * (px - c.v[0]) + (c.v[0] - b.v[0]) * (py - c.v[1])) / d;
+                const double l2 = ((c.v[1] - a.v[1]) * (px - c.v[0]) + (a.v[0] - c.v[0]) * (py - c.v[1])) / d;
+                const double l3 = 1.0 - l1 - l2;
+                if (std::min({l1, l2, l3}) < -1e-6) continue;
+                const double h = l1 * a.v[2] + l2 * b.v[2] + l3 * c.v[2];
+                if (z + low < h && h <= z + high) return true;
+            }
+        }
+        return false;
+    }
+    // Trechos [(t0, t1)] do segmento a->b (z ao longo dele) que a malha fecha, amostrado a cada `step`
+    std::vector<std::pair<double, double>> segment(const V3 &a, const V3 &b, double low, double high, double margin,
+                                                   double step = 16.0) const
+    {
+        const int n = std::max(1, int(std::ceil(std::hypot(b.v[0] - a.v[0], b.v[1] - a.v[1]) / step)));
+        std::vector<std::pair<double, double>> out;
+        int start = -1;
+        for (int i = 0; i <= n + 1; ++i)
+        {
+            const double t = double(i) / n;
+            const bool hit = i <= n && blocks(a.v[0] + (b.v[0] - a.v[0]) * t, a.v[1] + (b.v[1] - a.v[1]) * t,
+                                              a.v[2] + (b.v[2] - a.v[2]) * t, low, high, margin);
+            if (hit && start < 0)
+                start = i;
+            else if (!hit && start >= 0)
+                out.push_back({std::max(0.0, (start - 0.5) / n), std::min(1.0, (i - 0.5) / n)}), start = -1;
+        }
+        return out;
+    }
+};
+// surf: a malha de um caminho coll_ (corta so onde os triangulos sobem para a faixa); nula nas caixas
+struct Footprint { std::vector<P2> poly; double zmin, zmax; std::shared_ptr<const Surface> surf; };
 // Casco convexo do XY, anti-horario (cadeia monotona)
 std::vector<P2> hull2d(const std::vector<V3> &pts)
 {
@@ -522,6 +588,35 @@ struct Stage
         for (const V3 &c : corners(lb)) w.push_back(xform(m, c));
         return true;
     }
+    // Malha de mundo de um caminho cuja folha e de triangulos (POLY_COLL), pela cadeia sem escala; nula fora disso (lvl.py path_surface)
+    std::shared_ptr<const Surface> pathSurface(const Path &p) const
+    {
+        if (p.nodes.empty() || op(p.nodes.back()) != POLY_COLL) return nullptr;
+        for (uint32_t n : p.nodes)
+            if (op(n) == ANIM_XFORM || op(n) == CHAR_INSTANCE) return nullptr;
+        const uint32_t leaf = p.nodes.back();
+        const M4 m = chainMatrix(p.nodes, p.nodes.size() - 1, false);
+        std::vector<Surface::Tri> tris;
+        for (uint32_t k = 0; k < std::min<uint32_t>(u32(leaf + 4), 256); ++k)
+        {
+            const uint32_t o = u32(leaf + 8 + 4 * k) & kMask;
+            if (!ok(o, 0x18)) return nullptr;
+            const uint32_t vp = u32(o) & kMask, npol = u16(o + 4), nbox = u16(o + 6), polys = o + 0x18 + 14 * nbox;
+            if (!ok(polys, 8 * npol)) return nullptr;
+            for (uint32_t i = 0; i < npol; ++i)
+            {
+                Surface::Tri t;
+                for (uint32_t j = 0; j < 3; ++j)
+                {
+                    const uint32_t v = vp + 12 * u8(polys + 8 * i + j);
+                    if (!ok(v, 12)) return nullptr;
+                    t[j] = xform(m, V3{{f32(v), f32(v + 4), f32(v + 8)}});
+                }
+                tris.push_back(t);
+            }
+        }
+        return tris.empty() ? nullptr : std::make_shared<const Surface>(std::move(tris));
+    }
     bool pathBox(const Path &p, Box &out) const
     {
         std::vector<V3> w;
@@ -591,7 +686,7 @@ struct Stage
         aabb(w, bb);
         if (!(u32(pa + 0x20) & 1))
         {
-            const Footprint fp{hull2d(w), bb.mn.v[2], bb.mx.v[2]};
+            const Footprint fp{hull2d(w), bb.mn.v[2], bb.mx.v[2], std::strcmp(how, "rule") == 0 ? pathSurface(p) : nullptr};
             if (const auto it = fpIndex.find(pa); it != fpIndex.end())
                 footprints[it->second] = fp;
             else
@@ -1919,6 +2014,7 @@ constexpr uint32_t kFodderNet = wotm::sym::x_7PathNet_fodder, kPedNet = wotm::sy
 // Pedestres: so parede corta (caixa que sobe kPedWall acima do segmento; meio-fio e base baixa se pisam), a kPedMargin dela (os
 // segmentos do disco ja passam rente as paredes); cada pedaco livre de kPedMinLen ou mais fica, o primeiro nos nos do segmento.
 constexpr double kPedMinLen = 30.0, kPedMargin = 15.0, kPedWall = 40.0;
+constexpr double kNetHead = 100.0;   // malha coll_ a essa altura sobre a faixa passa por cima (tabuleiro de ponte)
 constexpr size_t kNetNodes = 255;
 struct NetLink { uint16_t node; uint8_t width, drop; };
 struct NetNode { std::array<uint8_t, 0x30> raw; V3 pos; uint8_t type; std::vector<NetLink> links; };
@@ -1976,7 +2072,13 @@ std::vector<std::string> cutNets(uint8_t *rdram, const std::vector<Footprint> &f
             if (std::max(a.v[2], b.v[2]) < fp.zmin - 50.0 || std::min(a.v[2], b.v[2]) > fp.zmax) continue;
             if (wall >= 0.0 && fp.zmax - std::max(a.v[2], b.v[2]) < wall) continue;
             double t0, t1;
-            if (segInPoly(a, b, fp.poly, margin, t0, t1)) out.push_back({t0, t1});
+            if (!segInPoly(a, b, fp.poly, margin, t0, t1)) continue;
+            if (fp.surf)   // malha coll_: so onde os triangulos sobem para a faixa (morro, tabuleiro baixo por cima)
+            {
+                for (const auto &iv : fp.surf->segment(a, b, kPedWall, kNetHead, std::min(margin, kPedMargin))) out.push_back(iv);
+                continue;
+            }
+            out.push_back({t0, t1});
         }
         return out;
     };
