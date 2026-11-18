@@ -558,6 +558,10 @@ def check_patch(disc, name, patch, mod_dir=None, pts_root=None):
         if m:
             problems.append({"level": "warn", "kind": "ped",
                              "text": "A pedestrian group of %s people has no sidewalk near it, so nobody walks there" % m.group(1)})
+    for i, label, (x, y, _z) in lvl.covered_starts(lp.footprints, pts.get("SPT", [])):
+        problems.append({"level": "err", "kind": "spt", "index": i,
+                         "text": "%s's start point (%d, %d) is inside or against an object you placed or moved: a monster starting there gets stuck"
+                                 % (label, round(x), round(y))})
     cars = sum(1 for l in cuts if re.match(r"vehicles: link \d+-\d+ cut", l))
     walks = sum(1 for l in cuts if re.match(r"pedestrians: segment \d+-\d+ (removed|\(.*clipped)", l))
     cut = [("%d car %s" % (n, "path" if n == 1 else "paths")) if i == 0 else ("%d sidewalk %s" % (n, "segment" if n == 1 else "segments"))

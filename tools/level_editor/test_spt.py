@@ -177,6 +177,15 @@ def main():
         assert len(lvl.read_spt(os.path.join(root, "PTS", "CENTRAL.SPT"))) == 2
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+    # the Check's covered start points (lvl.covered_starts): inside or against a placed box, not on its roof nor under a high one
+    def pt(lst, x, y, z=0.0):
+        raw = bytearray(0x30)
+        raw[0x2C] = lst
+        return {"raw": bytes(raw), "pos": [x, y, z]}
+    box = ([(0, 0), (100, 0), (100, 100), (0, 100)], 0.0, 200.0)
+    pts = [pt(0, 50, 50), pt(1, 500, 500), pt(1, 120, 50), pt(1, 50, 50, 180.0), pt(3, 50, 50, -300.0), pt(1, 50, 50)]
+    got = lvl.covered_starts([box], pts)
+    assert [(i, label) for i, label, _ in got] == [(0, "Story"), (2, "Player 2"), (5, "Player 4")], got
     print("ok")
 
 

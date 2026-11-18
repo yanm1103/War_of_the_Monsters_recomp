@@ -783,7 +783,8 @@ System theme (the one the OS uses), in the settings (**File** ▸ **Settings…*
   changes to X**, and says when X already has a file for this stage; Save with no mod chosen asks **Save into which mod?**),
   **Undo** (Ctrl+Z) and **Redo** (Ctrl+Y or Ctrl+Shift+Z; their tooltips name the change), **File** ▸ **Check collision** (also a click on "Not checked" in the status bar; `lvl.py patch` on the disc's
   stage: a one-line summary, "Check passed: …" or how many problems, and a list of the problems, each naming its object, where a
-  click selects it: an entry skipped, a pedestrian group with no sidewalk, a collision box or cell that does not match; the cut
+  click selects it: an entry skipped, a pedestrian group with no sidewalk, a start point inside or against an object the patch places
+  or moves (the click selects the point and frames it), a collision box or cell that does not match; the cut
   vehicle and pedestrian paths and the full output go with it), **Save** (Ctrl+S, also from a field; an empty patch removes the
   file; a failing check still saves and an amber note says so; keys, entries and names the editor does not edit, such as entries
   for handles the stage does not have, stay in the file as they are, and a note over the view says so when the file loads) and
@@ -869,7 +870,7 @@ System theme (the one the OS uses), in the settings (**File** ▸ **Settings…*
   it can only grow. Check reports a rectangle the game would skip. For a stage with boundary walls (CENTRAL, VEGAS, CAPITOL) the dialog also has
   a checkbox that sets `"walls": "off"`. "Apply and add a floor over it" also builds a prop `FL_<stage>` in the mod (a dark gray visible plate 0.6 under
   the stage's floor and a `coll_` slab of two triangles at z 0, both 50 units inside the rectangle) and places it at the rectangle's center as
-  the entry `floor`; doing it again after a size change builds it again. The slab is at z 0, where the floor's collision is in CENTRAL, VEGAS and CAPITOL (one flat path, its top at z 0); for the other stages check the height of their floor first.
+  the entry `floor`; doing it again after a size change builds it again. A new prop, a marker or Drop to ground over it lands on the slab (z 0), not on the plate. The slab is at z 0, where the floor's collision is in CENTRAL, VEGAS and CAPITOL (one flat path, its top at z 0); for the other stages check the height of their floor first.
   The dialog also has "Take out the stage's bare scenery" (`"clear": "scenery"`; the view hides the meshes the scene file tags `extras.bare`) and
   "Delete every object" (one Undo step: every original building, pickup and prop gets `delete`; an object with no TRANSLATE/ROTATE of its own, such as CENTRAL's 0x1196C60, is its INTERACTIVE node, which cannot move but is deleted like the rest): with the size and the floor, the steps of an empty stage. An entry that deletes an object inside another one deleted before it (a sign on a roof, in a state of the building) is not a problem: it goes with its parent, and `lvl.py` logs that.
 - **Scripted parts** (Stage tab ▸ Scene; a panel docked at the right, not modal; only the view, nothing in the patch, Undo or Save): the pieces

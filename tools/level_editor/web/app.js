@@ -2173,18 +2173,26 @@ function showPed() {
   showPedCounts();
 }
 const DOWN = new THREE.Vector3(0, -1, 0);
+const FLOOR_DROP = 0.6;     // the generated floor's visible plate sits this far under its collision, where monsters walk (lvlprop.FLOOR_DROP)
+function surfaceY(hit) {    // a ray hit's scene height, the generated floor's taken at its collision
+  for (let o = hit.object; o; o = o.parent) {
+    const it = itemOf.get(o);
+    if (it) return hit.point.y + (it.rec.prop?.id === 'floor' ? FLOOR_DROP : 0);
+  }
+  return hit.point.y;
+}
 function groundAt(v) {   // the scene height of the first visible surface under v (from a little above it), or null
   if (!stageRoot) return null;
   const ray = new THREE.Raycaster(new THREE.Vector3(v.x, v.y + 400, v.z), DOWN);
   const hit = ray.intersectObject(stageRoot, true).find((h) => visibleChain(h.object));
-  return hit ? hit.point.y : null;
+  return hit ? surfaceY(hit) : null;
 }
 function viewPoint(strict = false) {   // where a new marker goes: the surface in the middle of the view, else a point ahead (strict: null)
   const ray = new THREE.Raycaster();
   ray.setFromCamera(new THREE.Vector2(0, 0), camera);
   const hit = stageRoot ? ray.intersectObject(stageRoot, true).find((h) => visibleChain(h.object)) : null;
   if (strict && !hit) return null;
-  return toGame(hit ? hit.point : camera.position.clone().addScaledVector(camera.getWorldDirection(new THREE.Vector3()), 600));
+  return toGame(hit ? hit.point.clone().setY(surfaceY(hit)) : camera.position.clone().addScaledVector(camera.getWorldDirection(new THREE.Vector3()), 600));
 }
 function pedEdit(fn, label = 'pedestrians') {   // one undo step, then the edit; a refused edit (limits) goes to the log
   const before = history.length, fut = future, wasDirty = dirty;
@@ -2395,7 +2403,7 @@ function dropToGround() {
     ray.set(new THREE.Vector3(c.x, box.max.y + 1, c.z), down);
     const hit = ray.intersectObject(stageRoot, true).find((h) => !skip.has(h.object) && visibleChain(h.object));
     if (!hit) continue;
-    const m = new THREE.Matrix4().makeTranslation(0, hit.point.y - box.min.y, 0);
+    const m = new THREE.Matrix4().makeTranslation(0, surfaceY(hit) - box.min.y, 0);
     for (const x of [it, ...att]) setWorldMatrix(x.node, m.clone().multiply(x.node.matrixWorld));
     n++;
   }
@@ -2726,6 +2734,7 @@ function showCheck(chk, lines) {
     p.appendChild(lineEl(pr.text, 'err', pr.handle ? { go: () => goTo(pr.handle), goTitle: 'Select it and look at it' }
       : pr.ped ? { go: () => { selectPed(pr.ped); focusSelection(); }, goTitle: 'Select the group and look at it' }
       : pr.prop && propRecs.includes(pr.prop.rec) ? { go: () => { enterMode('objects'); select(pr.prop); focusSelection(); }, goTitle: 'Select it and look at it' }
+      : pr.spt != null ? { go: () => { enterMode(LAYERS.SPT.mode); selectMarker(pr.spt); focusSelection(); }, goTitle: 'Select the start point and look at it' }
       : {}));
   }
   for (const w of chk.warns) p.appendChild(lineEl(w, 'warn'));
@@ -2761,8 +2770,10 @@ function checkFromServer(res, patch) {
     const text = p.kind === 'entry' && rec ? `${nameOf(rec.item)} was not applied: ${p.reason}`
       : ped && p.reason ? `${peds.label(ped)} was not applied: ${p.reason}`
       : prop && p.reason ? `${nameOf(prop)} was not applied: ${p.reason}` : p.text;
+    // a start point covered by an object: its place in the saved file (the layer as the page has it, while not edited since)
+    const spt = p.kind === 'spt' && p.index != null && !lay('SPT').dirty && lay('SPT').points?.[p.index] ? p.index : null;
     if (p.level === 'warn') warns.push(text);
-    else problems.push({ text, handle: rec ? rec.info.handle : null, ped, prop });
+    else problems.push({ text, handle: rec ? rec.info.handle : null, ped, prop, spt });
   }
   const n = problems.length;
   return { ok: !n, n, problems, warns, infos: res.infos || [],

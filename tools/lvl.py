@@ -2665,6 +2665,35 @@ def read_points(path):
 
 SPT_CAPS = (1, 2, 20, 20)       # StartPoints::s_pointTypes: a point past the list's room overwrites its last one
 SPT_LISTS = ("story, first life of the player", "first life of the players", "first life of a CPU", "respawn")
+SPT_SHORT = ("Story", "Player", "CPU", "Respawn")     # the editor's names (web/markers.js SPT_SHORT)
+SPT_WALL = 40.0                 # a box rising less than this over a start point is stood on, not stuck in
+SPT_HEAD = 150.0                # a box starting this far above a start point is over the monster's head
+SPT_MARGIN = 30.0               # how near a box's side a monster still starts inside it
+
+
+def spt_label(lists, i):
+    """'Player 2', 'Respawn 4', 'Story': point i by its place in its own list (lists: the list byte of every point, in order)."""
+    l = lists[i]
+    if l == 0:
+        return "Story"
+    name = SPT_SHORT[l] if 0 <= l < len(SPT_SHORT) else "List %d" % l
+    return "%s %d" % (name, sum(1 for k in range(i + 1) if lists[k] == l))
+
+
+def covered_starts(fps, points):
+    """The start points (read_points records of a .SPT) that a solid box placed by the patch (`fps`, LevelPatch.footprints) stands
+    on: [(index, label, (x, y, z))]. A monster that starts there is inside the box."""
+    lists = [p["raw"][0x2C] for p in points]
+    out = []
+    for i, p in enumerate(points):
+        x, y, z = p["pos"][:3]
+        for poly, zmin, zmax in fps:
+            if zmax - z < SPT_WALL or zmin > z + SPT_HEAD:
+                continue
+            if seg_in_poly((x, y), (x, y), poly, SPT_MARGIN):
+                out.append((i, spt_label(lists, i), (x, y, z)))
+                break
+    return out
 
 
 def spt_heading(b):
