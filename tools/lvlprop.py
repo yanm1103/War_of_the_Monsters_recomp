@@ -43,7 +43,7 @@ is ignored) draws with that stage texture; a material with no image is vertex co
 `<NAME>_T<slot>.png` and into the image as a `.TEX` packet of a CT32 copy (power of two, at most 128 a side and the stage's largest
 texture bin: own_packet) with its own gsTexCtx (own_ctx, TEX1 of the stage); the loader gives it a texId past the loaded ones and a
 bin, and the PC draws the PNG in its place. UVs outside 0..1 are clamped (warning). A mesh named `hull_*` is collision (its convex hull becomes a COLL_VOL), `coll_*` too (its triangles become a POLY_COLL with a box tree, up to 16384 of them);
-without either, a box of the visual stands in. `state<N>_*` (destructible states) is refused. Only the standard library: it runs inside the level editor.
+without either, a box of the visual stands in; an empty named `nocoll` leaves the prop with no collision (scenery). `state<N>_*` (destructible states) is refused. Only the standard library: it runs inside the level editor.
 """
 import json
 import math
@@ -457,9 +457,13 @@ def read_glb(path, units, scale=None, height=None, warn=print):
         if sm:
             declared.add(int(sm.group(1)))
     smoke_raw = []                 # (state, node name, world matrix, extras) of each empty named state<N>_smoke...
+    nocoll = False                 # an empty named nocoll: scenery the monsters walk through (no box of the visual)
     for i, m in sorted(world.items()):
         nd = nodes[i]
         if "mesh" not in nd:
+            if re.match(r"nocoll(\.\d+)?$", (nd.get("name") or "").lower()):
+                nocoll = True
+                continue
             sm = re.match(r"state(\d+)_smoke", (nd.get("name") or "").lower())
             if sm:
                 if int(sm.group(1)) < 1:
@@ -570,7 +574,11 @@ def read_glb(path, units, scale=None, height=None, warn=print):
     def place(q):
         x, y, z = (x * s for x in game(q))
         return (_f32(x), _f32(y), _f32(z + zlift))
-    stats = {"degenerate": 0, "triangles": 0, "hulls": [], "colls": [], "lift": zlift, "declared": sorted(declared), "more": {}}
+    if nocoll and (hull_raw or coll_raw or len(declared) > 1):
+        raise PropError("%s: an empty named nocoll is for scenery with no collision; it cannot go with hull_ or coll_ meshes or "
+                        "with destructible states" % path)
+    stats = {"degenerate": 0, "triangles": 0, "hulls": [], "colls": [], "lift": zlift, "declared": sorted(declared), "more": {},
+             "nocoll": nocoll}
     per = {si: {"by_key": {}, "hulls": [], "colls": []} for si in sorted(declared)}
     per.update({b: {"by_key": {}, "hulls": [], "colls": []} for b in raw if not isinstance(b, int)})
     for si, cname, cverts, ctris, cmat in coll_raw:
@@ -1305,7 +1313,7 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
         cvs = [int(h["node"], 16) for h in hs + ps]
         if si == 0:
             hulls, polys = hs, ps
-            cvs = cvs or [box_hull(mb, lo, hi)]
+            cvs = cvs or ([] if gstats["nocoll"] else [box_hull(mb, lo, hi)])
         shape = [tuple(h[k]) for h in hs + ps for k in ("min", "max")]       # a collision shape may leave the visual's box
         sp = spts + shape
         all_pts += sp
@@ -1350,7 +1358,7 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
             "source": src, "units": units, "scale": s, "kind": "static", "light": light, "textures": textures,
             "template": {"rule": TEMPLATE_RULE, "abe": abe, "object": "0x%X" % tmpl, "bits": "0x%08X" % st.img.u32(tmpl + 0xC)},
             "bounds": {"min": [round(x, 4) for x in lo], "max": [round(x, 4) for x in hi]},
-            "collision": {"auto": "box" if not (hulls or polys) else "mesh", "poly": len(polys), "polys": polys, "hull": len(hulls),
+            "collision": {"auto": "none" if gstats["nocoll"] else "box" if not (hulls or polys) else "mesh", "poly": len(polys), "polys": polys, "hull": len(hulls),
                       "hulls": hulls, "tris": sum(p["triangles"] for p in polys),
                       "matId": COLL_MATID},
             "objects": stats_obj, "triangles": ntris, "vertices": nverts, "packetBytes": pbytes, "bytes": len(mb.d),

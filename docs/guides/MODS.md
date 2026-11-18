@@ -712,7 +712,7 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   default 0) turns it about Z. `pitch` and `roll` (degrees, default 0) tip it first, about its own origin: pitch about its X axis (its
   +Y end goes up for a positive value), roll about its Y axis (its top, +Z, leans toward +X for a positive value); the heading then
   turns the tipped model about the vertical (the entry's `ROTATE` matrix is Rx(pitch) · Ry(roll) · Rz(heading), `lvl.prop_matrix`).
-  The box the game files the entry under is the box of the turned model's corners, so a tilted entry covers more cells. Each entry collides as the box of the model's bounds, or as the shapes the .glb names (a mesh `hull_*` is a convex hull, up to 64
+  The box the game files the entry under is the box of the turned model's corners, so a tilted entry covers more cells. Each entry collides as the box of the model's bounds, not at all when the .glb has an empty named `nocoll` (scenery the monsters walk through: trees, lamps), or as the shapes the .glb names (a mesh `hull_*` is a convex hull, up to 64
   vertices and 40 faces; a mesh `coll_*` is collision by triangles, up to 16384 of them (the arena decides what fits; blocks of 512 triangles and 256 vertices each get a box tree, as the stages' collision does); one leaf per mesh, not drawn; `hull_m20c_wall` and
   `coll_m10a_floor` set the surface word (hex): kind in the high byte, 2 a wall the monsters climb, 1 a floor; the default is
   the stages' building face, 0x10A) (monsters stand on it
