@@ -2,6 +2,7 @@
 """Terrain from a heightmap: a PNG of heights becomes a binary glTF for tools/lvlprop.py, a prop with hills and ramps.
 
   python tools/lvlterrain.py <heights.png> <out.glb> --size X Y --height H [--cells N] [--colors colors.png] [--brightness PERCENT]
+                             [--texture TEXID [--texture-size UNITS]]
 
 The mesh is a grid of N cells along the longer side (at most MAX_CELLS in all: the collision has up to 16384 triangles), centered on
 the prop's origin, Z from 0 (black) to H (white), the top of the image toward +Y. It comes twice: `terrain` (what is drawn: vertex
@@ -9,6 +10,9 @@ colors with the light baked in, DROP under the collision so that flat places do 
 (the same triangles as collision, what monsters walk on). The colors are a ramp from grass through earth to rock by height, or
 the colors PNG laid over the same rectangle; either way shaded by the slope against a fixed sun and scaled by the brightness (percent,
 default 80: the stages' own vertex colors are darker than a plain palette; a vertex color goes to twice the full brightness).
+With --texture, the drawn mesh takes the material tex<TEXID> (a texture of the stage's .TEX, free in the budget) once every UNITS
+(default 256) along X and Y, mirrored copy by copy (UVs are clamped, so the vertices stay shared), tinted by the vertex colors:
+the colors PNG when there is one, else plain white shaded by the slope.
 """
 import json
 import math
@@ -27,6 +31,8 @@ SUN = (0.35, -0.4, 0.85)                    # toward the light, game axes (X, Y,
 DEFAULT_BRIGHTNESS = 80                     # percent
 SHADE_MIN = 0.45                            # the darkest a slope faces away from the sun
 RAMP = ((0.0, (74, 122, 58)), (0.5, (132, 108, 72)), (1.0, (178, 176, 170)))     # height 0..1 -> sRGB
+DEFAULT_TEXTURE_SIZE = 256                  # game units one copy of the ground texture covers
+TEXTURE_BASE = (1.0, 1.0, 1.0)              # the vertex color under a texture with no colors PNG (sRGB)
 
 
 class TerrainError(Exception):
@@ -88,12 +94,26 @@ def _ramp(t):
     return tuple(c / 255.0 for c in RAMP[-1][1])
 
 
-def terrain_glb(data, size_x, size_y, height, cells=64, colors=None, brightness=DEFAULT_BRIGHTNESS):
+def _mirror(t):
+    """The triangle wave 0..1..0 of period 2: a texture coordinate that repeats mirrored with the vertices shared (the UVs are clamped)."""
+    t = t % 2.0
+    return t if t <= 1.0 else 2.0 - t
+
+
+def terrain_glb(data, size_x, size_y, height, cells=64, colors=None, brightness=DEFAULT_BRIGHTNESS, texture=None,
+                texture_size=DEFAULT_TEXTURE_SIZE):
     """The binary glTF (Blender's axes and meters: build it with units blender and no scale). data: the heightmap PNG's bytes;
-    colors: a PNG's bytes or None. Returns (glb bytes, info) with info = {cells: [cx, cy], triangles, size, height}."""
+    colors: a PNG's bytes or None; texture: a texId of the stage's .TEX laid over the ground every texture_size units (mirrored),
+    tinted by the vertex colors, or None. Returns (glb bytes, info) with info = {cells: [cx, cy], triangles, size, height, ...}."""
     size_x, size_y, height = float(size_x), float(size_y), float(height)
     if not 10 <= brightness <= 200:
         raise TerrainError("the brightness is %g%%: 10 to 200" % brightness)
+    if texture is not None:
+        texture, texture_size = int(texture), float(texture_size)
+        if not 0 <= texture <= 0xFFFF:
+            raise TerrainError("texture %s: a texId is 0 to 65535" % texture)
+        if not 10 <= texture_size <= 40000:
+            raise TerrainError("the texture's size is %g units: 10 to 40000" % texture_size)
     k = brightness / 100.0
     if size_x < 10 or size_y < 10 or size_x > 40000 or size_y > 40000:
         raise TerrainError("the size is %g x %g units: each side is 10 to 40000" % (size_x, size_y))
@@ -114,7 +134,7 @@ def terrain_glb(data, size_x, size_y, height, cells=64, colors=None, brightness=
 
     sun = math.sqrt(sum(c * c for c in SUN))
     sun = tuple(c / sun for c in SUN)
-    pos, vis, nrm, col = [], [], [], []
+    pos, vis, nrm, col, uv = [], [], [], [], []
     for j in range(ny):
         for i in range(nx):
             x, y, zz = at(i, j)
@@ -126,12 +146,16 @@ def terrain_glb(data, size_x, size_y, height, cells=64, colors=None, brightness=
             shade = SHADE_MIN + (1 - SHADE_MIN) * max(0.0, sum(n[k] * sun[k] for k in range(3)))
             if cmap:
                 base = tuple(c / 255.0 for c in _bilinear_rgb(cmap, i / cx, j / cy))
+            elif texture is not None:
+                base = TEXTURE_BASE                                                   # the texture's own colors, shaded
             else:
                 base = _ramp(zz / height)
             pos.append((x / U, zz / U, -y / U))                                       # glTF: X, up, -Y
             vis.append((x / U, (zz - DROP) / U, -y / U))
             nrm.append((n[0], n[2], -n[1]))
             col.append(tuple(_lin(c) * shade * k for c in base))
+            if texture is not None:
+                uv.append((_mirror((x + size_x / 2) / texture_size), _mirror((size_y / 2 - y) / texture_size)))
     idx = []
     for j in range(cy):
         for i in range(cx):
@@ -154,17 +178,27 @@ def terrain_glb(data, size_x, size_y, height, cells=64, colors=None, brightness=
     iv = add(idx, 5123, "SCALAR", 34963)
     for name, points, extra in (("terrain", vis, True), ("coll_terrain", pos, False)):
         at_ = {"POSITION": add(points, 5126, "VEC3", 34962, True)}
+        prim = {"attributes": at_, "indices": iv}
         if extra:
             at_["NORMAL"] = add(nrm, 5126, "VEC3", 34962)
             at_["COLOR_0"] = add(col, 5126, "VEC3", 34962)
-        meshes.append({"primitives": [{"attributes": at_, "indices": iv}]})
+            if texture is not None:
+                at_["TEXCOORD_0"] = add(uv, 5126, "VEC2", 34962)
+                prim["material"] = 0
+        meshes.append({"primitives": [prim]})
         nodes.append({"mesh": len(meshes) - 1, "name": name})
-    js = json.dumps({"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": list(range(len(nodes)))}], "nodes": nodes,
-                     "meshes": meshes, "accessors": accs, "bufferViews": views, "buffers": [{"byteLength": len(blob)}]}).encode()
+    gl = {"asset": {"version": "2.0"}, "scene": 0, "scenes": [{"nodes": list(range(len(nodes)))}], "nodes": nodes,
+          "meshes": meshes, "accessors": accs, "bufferViews": views, "buffers": [{"byteLength": len(blob)}]}
+    if texture is not None:
+        gl["materials"] = [{"name": "tex%d" % texture, "doubleSided": False}]
+    js = json.dumps(gl).encode()
     js += b" " * ((-len(js)) % 4)
     glb = (struct.pack("<4sII", b"glTF", 2, 12 + 8 + len(js) + 8 + len(blob)) + struct.pack("<I4s", len(js), b"JSON") + js
            + struct.pack("<I4s", len(blob), b"BIN\0") + blob)
-    return glb, {"cells": [cx, cy], "triangles": triangles(cx, cy), "size": [size_x, size_y], "height": height, "brightness": brightness}
+    info = {"cells": [cx, cy], "triangles": triangles(cx, cy), "size": [size_x, size_y], "height": height, "brightness": brightness}
+    if texture is not None:
+        info.update(texture=texture, textureSize=texture_size)
+    return glb, info
 
 
 def _bilinear_rgb(cmap, u, v):
@@ -184,7 +218,8 @@ def _bilinear_rgb(cmap, u, v):
 def main(argv):
     args = [a for a in argv if not a.startswith("--")]
     opts = {}
-    for opt, n in (("--size", 2), ("--height", 1), ("--cells", 1), ("--colors", 1), ("--brightness", 1)):
+    for opt, n in (("--size", 2), ("--height", 1), ("--cells", 1), ("--colors", 1), ("--brightness", 1), ("--texture", 1),
+                   ("--texture-size", 1)):
         if opt in argv:
             k = argv.index(opt)
             opts[opt[2:]] = argv[k + 1:k + 1 + n]
@@ -203,7 +238,9 @@ def main(argv):
             with open(opts["colors"][0], "rb") as f:
                 cm = f.read()
         glb, info = terrain_glb(hm, float(opts["size"][0]), float(opts["size"][1]), float(opts["height"][0]),
-                                int(opts.get("cells", ["64"])[0]), cm, float(opts.get("brightness", [DEFAULT_BRIGHTNESS])[0]))
+                                int(opts.get("cells", ["64"])[0]), cm, float(opts.get("brightness", [DEFAULT_BRIGHTNESS])[0]),
+                                int(opts["texture"][0]) if "texture" in opts else None,
+                                float(opts.get("texture-size", [DEFAULT_TEXTURE_SIZE])[0]))
     except (TerrainError, OSError, ValueError) as e:
         print("error:", e)
         return 1

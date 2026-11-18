@@ -786,7 +786,9 @@ System theme (the one the OS uses), in the settings (**File** ▸ **Settings…*
   **Undo** (Ctrl+Z) and **Redo** (Ctrl+Y or Ctrl+Shift+Z; their tooltips name the change), **File** ▸ **Check collision** (also a click on "Not checked" in the status bar; `lvl.py patch` on the disc's
   stage: a one-line summary, "Check passed: …" or how many problems, and a list of the problems, each naming its object, where a
   click selects it: an entry skipped, a pedestrian group with no sidewalk, a start point inside or against an object the patch places
-  or moves (the click selects the point and frames it), a collision box or cell that does not match; the cut
+  or moves (the click selects the point and frames it), a collision box or cell that does not match; a prop's `coll_` mesh counts
+  only where its triangles are, so a terrain blocks a start point or cuts a path only where its ground rises over it, not in its
+  whole box; the cut
   vehicle and pedestrian paths and the full output go with it), **Save** (Ctrl+S, also from a field; an empty patch removes the
   file; a failing check still saves and an amber note says so; keys, entries and names the editor does not edit, such as entries
   for handles the stage does not have, stay in the file as they are, and a note over the view says so when the file loads) and
@@ -1092,14 +1094,18 @@ System theme (the one the OS uses), in the settings (**File** ▸ **Settings…*
   floor level, the picture's top is +Y; a gray PNG is exact, any color counts as its brightness, 8 or 16 bits), **Detail** (cells
   along the longer side, at most 90: 16200 triangles, under the collision's 16384) and **Brightness** (percent, default 80; the
   colors are a ramp from grass through earth to rock by height, shaded by the slope against a fixed sun, baked in the vertex colors
-  because the stages' own light is). An optional colors PNG laid over the same rectangle replaces the ramp. The mesh comes twice,
+  because the stages' own light is). An optional colors PNG laid over the same rectangle replaces the ramp. **Ground texture…**
+  picks one of the stage's pictures (thumbnails, the ones this stage draws first; the x takes it off): the drawn mesh carries it,
+  one copy every **Texture size** game units (default 256), each copy mirrored against its neighbors so the seams do not jump, and the
+  picture costs nothing in the budget because the stage already has it; the vertex colors then start from white (or the colors PNG)
+  and only the slope shades them. The mesh comes twice,
   as the drawn model (0.6 units under the floor line so flat places do not fight with the stage's floor) and as a `coll_terrain`
   mesh with the same triangles, which the monsters walk on. The PNGs and the numbers stay in the prop's folder (`heightmap.png`,
   `colors.png`, `terrain.json`), and a name the mod already has asks before replacing; **Start from** at the top of the dialog (shown
   when the mod has a terrain of this stage) opens one of them again with its pictures and numbers, and Create then rebuilds it in
   place, without the question. The new prop is placed at the middle of the
   grid's rectangle, else where the view looks. `python tools/lvlterrain.py <heights.png> <out.glb> --size X Y --height H [--cells N]
-  [--colors colors.png] [--brightness P]` writes the `.glb` alone. **Sky dome** and **Cloud layer** (Stage tab ▸ Environment) take: the stage's own, or one of the mod's
+  [--colors colors.png] [--brightness P] [--texture TEXID [--texture-size UNITS]]` writes the `.glb` alone. **Sky dome** and **Cloud layer** (Stage tab ▸ Environment) take: the stage's own, or one of the mod's
   models for this stage (the `sky` entries of `props`, above; undoable, counted by Check as a replaced dome or cloud layer), or
   **Import a .glb…**, which opens the import dialog and makes the new model the dome or the layer instead of placing it. The
   two are independent: choosing or removing one never touches the other, and a model cannot be both (the other select lists it as

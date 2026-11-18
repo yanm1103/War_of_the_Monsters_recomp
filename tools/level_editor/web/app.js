@@ -5707,7 +5707,7 @@ async function openTerrainDlg() {
     moveTo(m, false);
   }
   const g = gridNow();
-  openTerrain({ stage: stageName, title: title(stageName), mod: modNow, api, ask, msg,
+  openTerrain({ stage: stageName, title: title(stageName), mod: modNow, api, ask, msg, scene: () => [...stageTex.keys()],
                 existing: () => [...propModels.values()].filter((p) => p.info.terrain && !p.info.error && p.info.stage === baseOf(stageName)).map((p) => p.info.model),
                 size: () => (g ? [g.max[0] - g.min[0] - 100, g.max[1] - g.min[1] - 100] : [2000, 2000]),
                 done: async (res, replaced) => {

@@ -5,6 +5,7 @@ Needs the game disc configured in the level editor (Settings). Writes only into 
 Run: python tools/test_lvl_terrain.py
 """
 import base64
+import json
 import math
 import os
 import shutil
@@ -88,6 +89,27 @@ def main():
         except lvlterrain.TerrainError:
             continue
         raise AssertionError(args[1:])
+    # a ground texture: material tex<id>, UVs mirrored copy by copy inside 0..1, the drawn mesh only
+    gt, it = lvlterrain.terrain_glb(hm, 1000, 1000, 100, cells=10, texture=101, texture_size=200)
+    assert it["texture"] == 101 and it["textureSize"] == 200, it
+    p = os.path.join(tempfile.gettempdir(), "terrain_tex_test.glb")
+    with open(p, "wb") as f:
+        f.write(gt)
+    try:
+        tris = lvlprop.read_glb(p, "blender", warn=lambda *a: None)[0]
+    finally:
+        os.remove(p)
+    keys = [k for k in tris if k[0] == "tex"]
+    assert keys and keys[0][1] == 101, list(tris)
+    uvs = [c[2] for t in tris[keys[0]] for c in t]
+    assert all(0 <= u <= 4096 and 0 <= v <= 4096 for u, v in uvs) and max(u for u, _ in uvs) == 4096, uvs[:6]     # 1.0 is 4096
+    assert abs(lvlterrain._mirror(1.5) - 0.5) < 1e-9 and abs(lvlterrain._mirror(2.25) - 0.25) < 1e-9
+    for bad in ({"texture": 101, "texture_size": 5}, {"texture": -1}):
+        try:
+            lvlterrain.terrain_glb(hm, 1000, 1000, 100, cells=10, **bad)
+        except lvlterrain.TerrainError:
+            continue
+        raise AssertionError(bad)
     # 90 x 90 cells are the most the collision takes
     g90, i90 = lvlterrain.terrain_glb(hm, 1000, 1000, 100, cells=90)
     assert i90["triangles"] == 16200 <= lvlprop.MAX_COLL_TRIS
@@ -114,6 +136,14 @@ def main():
         assert editor.terrain_prop(cfg, dict(body)).get("exists")
         out = editor.terrain_prop(cfg, dict(body, replace=True, colors=base64.b64encode(cm).decode(), height=100))
         assert os.path.isfile(os.path.join(folder, "colors.png")) and out["prop"]["bounds"]["max"][2] < 101
+        # with a ground texture of the stage: it is built and terrain.json keeps it for "Start from"
+        out = editor.terrain_prop(cfg, dict(body, replace=True, texture=101, textureSize=200))
+        with open(os.path.join(folder, "prop.json"), encoding="utf-8") as f:
+            built = json.load(f)
+        assert not out["prop"].get("error") and any(t.get("texId") == 101 for t in built["textures"]), built
+        with open(os.path.join(folder, "terrain.json"), encoding="utf-8") as f:
+            kept = json.load(f)
+        assert kept["texture"] == 101 and kept["textureSize"] == 200, kept
         # a bad number is a message, not a crash
         for bad in ({"size": [2000]}, {"height": "tall"}, {"heights": ""}, {"cells": 500}):
             try:
@@ -122,9 +152,15 @@ def main():
                 continue
             raise AssertionError(bad)
         # the prop loads in the stage: a patch with it passes the editor's check
-        patch = {"objects": [], "props": [{"id": "h1", "model": "HILLS", "pos": [0, 0, 0]}]}
+        # (sunk so that its top is under the start points: a coll_ mesh is solid only where its triangles are, not in its whole box)
+        patch = {"objects": [], "props": [{"id": "h1", "model": "HILLS", "pos": [0, 0, -260]}]}
         chk = editor.check_patch(cfg["disc"], "CENTRAL", patch, os.path.join(tmp, "M"))
         assert chk["ok"], chk.get("problems")
+        # at the floor, the hills bury some start points (the Check names them) and leave the rest
+        patch["props"][0]["pos"] = [0, 0, 0]
+        chk = editor.check_patch(cfg["disc"], "CENTRAL", patch, os.path.join(tmp, "M"))
+        spt = [p for p in chk.get("problems", []) if p["kind"] == "spt"]
+        assert spt and all(p["kind"] == "spt" for p in chk.get("problems", [])), chk.get("problems")
         print("ok")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

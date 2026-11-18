@@ -536,6 +536,11 @@ dialog.pal { width: min(96vw, 2400px); max-width: none; }
 #terrainDlg .tr-grid .fl { margin-top: 0; }
 #terrainDlg .tr-grid input[type=number] { width: 100%; }
 #terrainDlg .tr-info { margin: 6px 0; }
+#terrainDlg .tr-texs { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 6px; max-height: 196px; overflow-y: auto;
+  padding: 6px; margin: -2px 0 8px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); }
+#terrainDlg .tr-tex { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px; height: auto; min-height: 0; }
+#terrainDlg .tr-tex img { width: 48px; height: 48px; object-fit: cover; border-radius: var(--r-sm); image-rendering: pixelated; }
+#terrainDlg .tr-tex span { font-size: 11px; line-height: 1; }
 .ip-file { display: flex; align-items: center; gap: 10px; margin: 4px 0 10px; }
 .ip-file #ipFile { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* notes over the view's upper left (under the tool bar): the mod that wins in the game, what the file keeps */

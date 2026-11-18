@@ -161,6 +161,67 @@ def leaf_points(img, leaf):
     return []
 
 
+def leaf_triangles(img, leaf):
+    """Local triangles [(a, b, c)] of a triangle collision leaf (op 42, a coll_ mesh), else None."""
+    if img.u32(leaf) & 63 != 42:
+        return None
+    out = []
+    for k in range(min(img.u32(leaf + 4), 256)):
+        o = img.u32(leaf + 8 + 4 * k)
+        vp, npol, nbox = img.u32(o), img.u16(o + 4), img.u16(o + 6)
+        polys = o + 0x18 + 14 * nbox
+        for i in range(npol):
+            out.append(tuple(tuple(img.f32(vp + 12 * img.u8(polys + 8 * i + j) + 4 * c) for c in range(3)) for j in range(3)))
+    return out
+
+
+class Surface:
+    """World triangles of a coll_ mesh (a terrain, a deck), bucketed in XY: heights(x, y) are the Z where a vertical line meets it."""
+    CELL = 128.0
+
+    def __init__(self, tris):
+        self.tris = tris
+        self.buckets = collections.defaultdict(list)
+        for t in tris:
+            xs, ys = [p[0] for p in t], [p[1] for p in t]
+            for bx in range(int(math.floor(min(xs) / self.CELL)), int(math.floor(max(xs) / self.CELL)) + 1):
+                for by in range(int(math.floor(min(ys) / self.CELL)), int(math.floor(max(ys) / self.CELL)) + 1):
+                    self.buckets[(bx, by)].append(t)
+
+    def heights(self, x, y):
+        out = []
+        for a, b, c in self.buckets.get((int(math.floor(x / self.CELL)), int(math.floor(y / self.CELL))), ()):
+            d = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1])
+            if abs(d) < 1e-9:
+                continue                                    # a vertical triangle: a wall face, no floor height
+            l1 = ((b[1] - c[1]) * (x - c[0]) + (c[0] - b[0]) * (y - c[1])) / d
+            l2 = ((c[1] - a[1]) * (x - c[0]) + (a[0] - c[0]) * (y - c[1])) / d
+            l3 = 1.0 - l1 - l2
+            if min(l1, l2, l3) >= -1e-6:
+                out.append(l1 * a[2] + l2 * b[2] + l3 * c[2])
+        return out
+
+    def blocks(self, x, y, z, low, high, margin=0.0):
+        """True when the surface passes between z + low and z + high at (x, y) or within `margin` of it."""
+        pts = [(x, y)] if margin <= 0 else [(x, y)] + [(x + dx, y + dy) for dx, dy in
+                                                      ((margin, 0), (-margin, 0), (0, margin), (0, -margin))]
+        return any(z + low < h <= z + high for px, py in pts for h in self.heights(px, py))
+
+    def segment(self, a, b, low, high, margin=0.0, step=16.0):
+        """Parts [(t0, t1)] of segment a->b (z along it) the surface blocks, sampled every `step` units."""
+        n = max(1, int(math.ceil(math.hypot(b[0] - a[0], b[1] - a[1]) / step)))
+        hit = [self.blocks(a[0] + (b[0] - a[0]) * i / n, a[1] + (b[1] - a[1]) * i / n, a[2] + (b[2] - a[2]) * i / n, low, high, margin)
+               for i in range(n + 1)]
+        out, start = [], None
+        for i, h in enumerate(hit + [False]):
+            if h and start is None:
+                start = i
+            elif not h and start is not None:
+                out.append((max(0.0, (start - 0.5) / n), min(1.0, (i - 0.5) / n)))
+                start = None
+        return out
+
+
 def aabb(pts):
     return ([min(p[i] for p in pts) for i in range(3)], [max(p[i] for p in pts) for i in range(3)]) if pts else None
 
@@ -342,6 +403,16 @@ class Stage:
         m = chain_matrix(self.img, p.nodes[:-1], with_scale=False)
         corners = [(x, y, z) for x in (lb[0][0], lb[1][0]) for y in (lb[0][1], lb[1][1]) for z in (lb[0][2], lb[1][2])]
         return [ngp.xform(m, c) for c in corners]
+
+    def path_surface(self, p):
+        """A Surface of a path whose leaf is a triangle mesh (op 42), in the world as path_corners places it, or None."""
+        if any(self.op(n) in (17, 25) for n in p.nodes):
+            return None
+        tris = leaf_triangles(self.img, p.leaf) if p.leaf else None
+        if not tris:
+            return None
+        m = chain_matrix(self.img, p.nodes[:-1], with_scale=False)
+        return Surface([tuple(ngp.xform(m, v) for v in t) for t in tris])
 
     # --- placeable objects
     def objects(self):
@@ -575,6 +646,7 @@ GROUND_NODE_TYPES = (0, 3)      # PathNet node types that drive on the ground (c
 PED_MIN_LEN = 30.0              # a pedestrian piece shorter than this after clipping is dropped
 PED_MARGIN = 15.0               # pedestrians: distance kept from a wall (the disc's own segments run right along walls)
 PED_WALL = 40.0                 # pedestrians: a box that rises less than this above the segment is walked over (curbs, pads)
+NET_HEAD = 100.0                # a coll_ mesh this far over a vehicle or pedestrian lane passes over it (a bridge deck)
 NET_NODES = 255                 # PathNet holds 256 nodes; the tool loads at most 255
 
 
@@ -589,10 +661,14 @@ def cut_nets(fps, nets):
 
     def covered(a, b, margin, wall=None):
         out = []
-        for poly, zmin, zmax in fps:
+        for poly, zmin, zmax, surf in fps:
             if max(a[2], b[2]) < zmin - 50.0 or min(a[2], b[2]) > zmax:
                 continue
             if wall is not None and zmax - max(a[2], b[2]) < wall:
+                continue
+            if surf is not None:            # a coll_ mesh: only where its triangles rise into the lane (a hill, a deck low overhead)
+                if seg_in_poly(a, b, poly, margin):
+                    out += surf.segment(a, b, PED_WALL, NET_HEAD, min(margin, PED_MARGIN))
                 continue
             iv = seg_in_poly(a, b, poly, margin)
             if iv:
@@ -880,7 +956,7 @@ class LevelPatch:
         self.free = []
         self.log = []
         self.redone = {}            # path -> (box, cells, how)
-        self.footprints = []        # (convex XY polygon, zmin, zmax) of every solid box in its new place
+        self.footprints = []        # (convex XY polygon, zmin, zmax, Surface or None) of every solid box in its new place (a Surface: a coll_ mesh, solid only where its triangles are)
         self.fp_index = {}          # path -> its place in footprints (a path redone again, by a scale after a move, replaces its box)
         self.leaf_cache = {}        # (leaf, scale) -> the scaled clone, for the entry being applied
         self.leaf_of = {}           # scaled clone -> the leaf it was cloned from (the one the tree still holds)
@@ -987,7 +1063,7 @@ class LevelPatch:
             wc, how = [ngp.xform(carry, c) for c in corners], "carried"
         bb = aabb(wc)
         if not p.trigger:
-            fp = (hull2d(wc), bb[0][2], bb[1][2])
+            fp = (hull2d(wc), bb[0][2], bb[1][2], self.st.path_surface(p) if how == "rule" else None)
             if pa in self.fp_index:
                 self.footprints[self.fp_index[pa]] = fp
             else:
@@ -2512,7 +2588,7 @@ class LevelPatch:
                     self.w32(pa + 0x24 + 4 * i, n)
                 wc = st.path_corners(Path(img, pa))
                 bb = aabb(wc)
-                self.footprints.append((hull2d(wc), bb[0][2], bb[1][2]))
+                self.footprints.append((hull2d(wc), bb[0][2], bb[1][2], st.path_surface(Path(img, pa))))
                 for i in range(3):
                     self.wf32(pa + 4 * i, bb[0][i])
                     self.wf32(pa + 0xC + 4 * i, bb[1][i])
@@ -2699,8 +2775,13 @@ def covered_starts(fps, points):
     out = []
     for i, p in enumerate(points):
         x, y, z = p["pos"][:3]
-        for poly, zmin, zmax in fps:
+        for poly, zmin, zmax, surf in fps:
             if zmax - z < SPT_WALL or zmin > z + SPT_HEAD:
+                continue
+            if surf is not None:            # a coll_ mesh: stuck only where its triangles pass through the monster
+                if surf.blocks(x, y, z, SPT_WALL, SPT_HEAD, SPT_MARGIN):
+                    out.append((i, spt_label(lists, i), (x, y, z)))
+                    break
                 continue
             if seg_in_poly((x, y), (x, y), poly, SPT_MARGIN):
                 out.append((i, spt_label(lists, i), (x, y, z)))

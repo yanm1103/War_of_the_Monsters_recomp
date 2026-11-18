@@ -1,7 +1,8 @@
 // The New terrain dialog: a PNG of heights becomes a prop of the mod (hills and ramps: a drawn mesh with its light baked in, and the same
 // triangles as collision, tools/lvlterrain.py). Server: POST /api/props/terrain. openTerrain(ctx) opens it (it builds itself the first
 // time). ctx, from app.js: stage, title, mod, api(url, body), msg(text, opts), ask(head, text, buttons, then), size() -> [x, y] (the
-// rectangle the dialog starts with), existing() -> the mod's terrains of this stage (names; "Start from" opens one again from the
+// rectangle the dialog starts with), scene() -> the texIds the stage's objects draw with (the ground texture picker offers those
+// first; GET /api/texs and /api/hudimg give the pictures), existing() -> the mod's terrains of this stage (names; "Start from" opens one again from the
 // heightmap.png, colors.png and terrain.json its folder kept), done(res, replaced) (the prop is built: app.js loads it and places it).
 // The CSS is in style.css (#terrainDlg).
 import { el } from './hud.js';
@@ -10,6 +11,8 @@ let dlg = null;
 let ctx = null;
 let heights = null;     // {data (base64), url (data URL), name, w, h}
 let colors = null;
+let texture = null;     // the ground texture: a row of /api/texs ({tex, w, h, png}) or null
+let texList = null;     // the stage's pictures the picker offers (fetched once per opening)
 const q = (sel) => dlg.querySelector(sel);
 
 const MAX_CELLS = 90;           // lvlterrain.MAX_CELLS
@@ -32,6 +35,11 @@ function build() {
       <div class="tr-file"><button type="button" class="tr-pick-c" title="A picture laid over the same rectangle; without it the terrain is green low, brown and gray high">Choose colors…</button>
         <span class="muted tr-name-c">Optional</span><button type="button" class="icon ghost tr-clear-c" title="Back to the height colors" aria-label="Remove the colors" hidden><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button>
         <img class="tr-thumb tr-thumb-c" alt="" hidden></div>
+      <div class="tr-file"><button type="button" class="tr-pick-t" aria-expanded="false"
+        title="A picture of the stage laid over the ground again and again, tinted by the colors; it costs nothing in the budget">Ground texture…</button>
+        <span class="muted tr-name-t">None</span><button type="button" class="icon ghost tr-clear-t" title="No texture: colors only" aria-label="Remove the texture" hidden><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button>
+        <img class="tr-thumb tr-thumb-t" alt="" hidden></div>
+      <div class="tr-texs" role="listbox" aria-label="The stage's pictures" hidden></div>
       <label class="fl">Name<input class="tr-id" maxlength="8" spellcheck="false" autocomplete="off" placeholder="HILLS"
         title="The prop's folder in the mod: 1 to 8 letters, digits or _"></label>
       <div class="tr-grid">
@@ -40,6 +48,8 @@ function build() {
         <label class="fl">Height (white)<input type="number" class="tr-h" min="1" max="20000" step="10"></label>
         <label class="fl">Detail<input type="number" class="tr-cells" min="4" max="${MAX_CELLS}" step="4" title="Cells along the longer side"></label>
         <label class="fl">Brightness<input type="number" class="tr-bright" min="10" max="200" step="5" title="Percent: the stages' own colors are dark, so 100 looks bright (up to 200)"></label>
+        <label class="fl">Texture size<input type="number" class="tr-tsize" min="10" max="40000" step="16" disabled
+          title="Game units one copy of the ground texture covers; the next copy is its mirror"></label>
       </div>
       <div class="help tr-info"></div>
       <div class="help">Units are game units (a car is about 40, a small building 300). White is the highest point and black the stage's
@@ -60,6 +70,8 @@ function build() {
   input('.tr-pick-h', setHeights);
   input('.tr-pick-c', setColors);
   q('.tr-clear-c').addEventListener('click', () => setColors(null));
+  q('.tr-pick-t').addEventListener('click', () => showTexs(q('.tr-texs').hidden));
+  q('.tr-clear-t').addEventListener('click', () => setTexture(null));
   dlg.addEventListener('dragover', (e) => e.preventDefault());
   dlg.addEventListener('drop', (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) readPng(f, heights ? setColors : setHeights); });
   for (const c of ['.tr-sx', '.tr-sy', '.tr-cells']) q(c).addEventListener('input', info);
@@ -105,6 +117,39 @@ function setColors(c) {
   if (c) t.src = c.url;
 }
 
+// The ground texture: a picture of the stage's .TEX (texId), the ones the scene draws with first
+const texUrl = (r) => `/api/hudimg?src=disc&stage=${encodeURIComponent(ctx.stage)}&mod=${encodeURIComponent(ctx.mod || '')}&png=${encodeURIComponent(r.png)}`;
+async function texRows() {
+  if (!texList) {
+    const rows = ((await ctx.api(`/api/texs?stage=${encodeURIComponent(ctx.stage)}&mod=${encodeURIComponent(ctx.mod || '')}`)).rows || [])
+      .filter((r) => r.file === 'tex' && r.disc);
+    const scene = new Set(ctx.scene ? ctx.scene() : []);
+    const inScene = rows.filter((r) => scene.has(r.tex));
+    texList = inScene.length ? inScene : rows;
+  }
+  return texList;
+}
+async function showTexs(on) {
+  const box = q('.tr-texs');
+  q('.tr-pick-t').setAttribute('aria-expanded', String(on));
+  box.hidden = !on;
+  if (!on || box.childElementCount) return;
+  try {
+    box.replaceChildren(...(await texRows()).map((r) => el('button', { type: 'button', class: 'tr-tex', role: 'option', 'data-tex': String(r.tex),
+      title: `t${String(r.tex).padStart(4, '0')} · ${r.w}×${r.h}`, onclick: () => { setTexture(r); showTexs(false); } },
+      el('img', { src: texUrl(r), alt: '', loading: 'lazy', draggable: 'false' }), el('span', { class: 'num' }, String(r.tex)))));
+  } catch (e) { err(e.message || String(e)); }
+}
+function setTexture(r) {
+  texture = r;
+  q('.tr-name-t').textContent = r ? `t${String(r.tex).padStart(4, '0')} (${r.w} × ${r.h})` : 'None';
+  q('.tr-clear-t').hidden = !r;
+  q('.tr-tsize').disabled = !r;
+  const t = q('.tr-thumb-t');
+  t.hidden = !r;
+  if (r) t.src = texUrl(r);
+}
+
 // A PNG kept in the prop's folder (base64) as the dialog's picture
 function kept(b64, name) {
   return new Promise((res, rej) => {
@@ -131,12 +176,14 @@ async function loadFrom(name) {
     q('.tr-h').value = String(t.height ?? 300);
     q('.tr-cells').value = String(Array.isArray(t.cells) ? Math.max(...t.cells) : 64);
     q('.tr-bright').value = String(t.brightness ?? 80);
+    q('.tr-tsize').value = String(t.textureSize ?? 256);
+    setTexture(t.texture == null ? null : (await texRows()).find((r) => r.tex === t.texture) || { tex: t.texture, w: '?', h: '?', png: '' });
     info();
   } catch (e) { err(e.message || String(e)); }
 }
 
 const nums = () => ({ sx: +q('.tr-sx').value, sy: +q('.tr-sy').value, h: +q('.tr-h').value, cells: +q('.tr-cells').value,
-                       bright: +q('.tr-bright').value });
+                       bright: +q('.tr-bright').value, tsize: +q('.tr-tsize').value });
 function info() {
   const n = nums();
   if (!(n.sx > 0 && n.sy > 0)) { q('.tr-info').textContent = ''; return true; }
@@ -154,6 +201,7 @@ async function create(replace) {
   if (!(n.sx >= 10 && n.sy >= 10)) { err('The width and the depth are at least 10 units.'); return; }
   if (!(n.h >= 1)) { err('The height is at least 1 unit.'); return; }
   if (!(n.bright >= 10 && n.bright <= 200)) { err('The brightness is 10 to 200 percent.'); return; }
+  if (texture && !(n.tsize >= 10 && n.tsize <= 40000)) { err('The texture size is 10 to 40000 units.'); return; }
   if (!info()) { err('Too many triangles: lower the detail.'); return; }
   const ok = q('.tr-ok');
   ok.disabled = true;
@@ -161,7 +209,8 @@ async function create(replace) {
   let res;
   try {
     res = await ctx.api('/api/props/terrain', { mod: ctx.mod, stage: ctx.stage, name, size: [n.sx, n.sy], height: n.h, cells: n.cells, brightness: n.bright,
-                                                heights: heights.data, colors: colors ? colors.data : '', replace, title: 'Terrain' });
+                                                heights: heights.data, colors: colors ? colors.data : '', replace, title: 'Terrain',
+                                                texture: texture ? texture.tex : '', textureSize: n.tsize });
   } catch (e) { err(e.message || String(e)); return; }
   finally { ok.disabled = false; ok.textContent = 'Create'; }
   if (res.exists) {
@@ -177,8 +226,12 @@ export function openTerrain(c) {
   ctx = c;
   if (!dlg) build();
   const s = ctx.size ? ctx.size() : [2000, 2000];
-  heights = colors = null;
+  heights = colors = texList = null;
   setColors(null);
+  setTexture(null);
+  q('.tr-texs').replaceChildren();
+  showTexs(false);
+  q('.tr-tsize').value = '256';
   q('.tr-name-h').textContent = 'No file chosen';
   q('.tr-thumb-h').hidden = true;
   q('.tr-id').value = '';

@@ -182,10 +182,18 @@ def main():
         raw = bytearray(0x30)
         raw[0x2C] = lst
         return {"raw": bytes(raw), "pos": [x, y, z]}
-    box = ([(0, 0), (100, 0), (100, 100), (0, 100)], 0.0, 200.0)
+    box = ([(0, 0), (100, 0), (100, 100), (0, 100)], 0.0, 200.0, None)
     pts = [pt(0, 50, 50), pt(1, 500, 500), pt(1, 120, 50), pt(1, 50, 50, 180.0), pt(3, 50, 50, -300.0), pt(1, 50, 50)]
     got = lvl.covered_starts([box], pts)
     assert [(i, label) for i, label, _ in got] == [(0, "Story"), (2, "Player 2"), (5, "Player 4")], got
+    # a coll_ mesh (a terrain): only where its triangles pass through the monster, not in its whole box
+    ramp = lvl.Surface([((0, 0, 0), (1000, 0, 500), (1000, 1000, 500)), ((0, 0, 0), (1000, 1000, 500), (0, 1000, 0))])   # z = x / 2
+    fp = ([(0, 0), (1000, 0), (1000, 1000), (0, 1000)], 0.0, 500.0, ramp)
+    pts = [pt(1, 20, 500), pt(1, 200, 500), pt(1, 800, 500), pt(1, 600, 500, 280.0)]
+    got = lvl.covered_starts([fp], pts)
+    assert [i for i, _, _ in got] == [1], got          # on the low end, in the slope, under the high end, on it
+    assert ramp.heights(200, 500) == [100.0] and ramp.heights(-5, 500) == []
+    assert ramp.segment((100, 500, 0), (900, 500, 0), 40, 100) and ramp.segment((10, 500, 0), (60, 500, 0), 40, 100) == []
     print("ok")
 
 

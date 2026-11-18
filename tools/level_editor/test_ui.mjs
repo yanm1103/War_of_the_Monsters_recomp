@@ -1536,6 +1536,23 @@ await check('a mod file that changed on disk is not overwritten without asking',
   must(await until(`window.wotmDebug.unsavedCount() === 0`, 80), 'Overwrite did not finish');
   must(!fs.existsSync(levelFile) || !JSON.stringify(JSON.parse(fs.readFileSync(levelFile, 'utf8'))).includes('by hand'), 'Overwrite kept the hand-edited file');
 });
+await check('New terrain: Ground texture lists the stage\'s pictures; picking one shows it and turns on Texture size; the x takes it off', async () => {
+  await ev('window.wotmDebug.openTerrainDlg()');
+  must(await until(`document.getElementById('terrainDlg')?.open`, 80), 'New terrain did not open');
+  const d = `document.getElementById('terrainDlg')`;
+  must(await ev(`${d}.querySelector('.tr-tsize').disabled && ${d}.querySelector('.tr-name-t').textContent === 'None'`), 'a texture is set before one is picked');
+  await ev(`${d}.querySelector('.tr-pick-t').click()`);
+  must(await until(`${d}.querySelectorAll('.tr-tex').length > 0`, 120), 'the picker shows no picture');
+  const id = await ev(`${d}.querySelector('.tr-tex').dataset.tex`);
+  await ev(`${d}.querySelector('.tr-tex').click()`);
+  must(await ev(`${d}.querySelector('.tr-texs').hidden && !${d}.querySelector('.tr-tsize').disabled && !${d}.querySelector('.tr-thumb-t').hidden`),
+    'picking did not close the list, show the picture or turn on the size');
+  must(await ev(`${d}.querySelector('.tr-name-t').textContent.startsWith('t' + String(${id}).padStart(4, '0'))`), 'the label does not name the picture');
+  await shot('terrain_texture');
+  await ev(`${d}.querySelector('.tr-clear-t').click()`);
+  must(await ev(`${d}.querySelector('.tr-tsize').disabled && ${d}.querySelector('.tr-thumb-t').hidden`), 'the x did not take the texture off');
+  await esc();
+});
 await check('no script error in the page', async () => {
   // the browser asks for a favicon the editor has none of; the 403 and the 409 are refusals this test provokes on purpose
   const bad = pageErrors.filter((e) => !/favicon\.ico/.test(e) && !/403 \(Forbidden\) http:\/\/127\.0\.0\.1:\d+\/api\/config/.test(e)

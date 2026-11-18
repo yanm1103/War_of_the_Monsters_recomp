@@ -1253,12 +1253,14 @@ def floor_prop(cfg, b):
 def terrain_prop(cfg, b):
     """New terrain: a PNG of heights (b["heights"], base64) becomes the prop b["name"] of the mod (lvlterrain.terrain_glb: a drawn mesh and
     the same triangles as a coll_ mesh), b["size"] = [X, Y] units, b["height"] units for white, b["cells"] along the longer side, an
-    optional b["colors"] PNG, b["brightness"] in percent. The PNGs and the numbers stay in the prop's folder (heightmap.png, colors.png, terrain.json). Returns
+    optional b["colors"] PNG, b["brightness"] in percent, an optional b["texture"] (a texId of the stage) every b["textureSize"] units. The PNGs and the numbers stay in the prop's folder (heightmap.png, colors.png, terrain.json). Returns
     import_prop's reply and "terrain" (the numbers)."""
     try:
         size = [float(v) for v in b.get("size")]
         height, cells = float(b.get("height")), int(b.get("cells") or 64)
         bright = float(b.get("brightness") or lvlterrain.DEFAULT_BRIGHTNESS)
+        texture = None if b.get("texture") in (None, "") else int(b.get("texture"))
+        tsize = float(b.get("textureSize") or lvlterrain.DEFAULT_TEXTURE_SIZE)
         assert len(size) == 2
     except (TypeError, ValueError, AssertionError):
         raise ValueError("The terrain needs its size (two numbers), its height and its resolution")
@@ -1270,7 +1272,7 @@ def terrain_prop(cfg, b):
     if not hm:
         raise ValueError("Choose a heightmap (a PNG) first")
     try:
-        glb, info = lvlterrain.terrain_glb(hm, size[0], size[1], height, cells, cm, bright)
+        glb, info = lvlterrain.terrain_glb(hm, size[0], size[1], height, cells, cm, bright, texture, tsize)
     except lvlterrain.TerrainError as e:
         raise ValueError(str(e))
     body = {"mod": b.get("mod"), "stage": b.get("stage"), "name": b.get("name"), "replace": bool(b.get("replace")),
@@ -1290,7 +1292,8 @@ def terrain_prop(cfg, b):
             os.remove(path)
     with open(os.path.join(folder, "terrain.json"), "w", encoding="utf-8") as f:
         json.dump({"size": info["size"], "height": info["height"], "cells": info["cells"], "triangles": info["triangles"],
-                   "brightness": info["brightness"], "colors": bool(cm)}, f, indent=1)
+                   "brightness": info["brightness"], "colors": bool(cm), "texture": info.get("texture"),
+                   "textureSize": info.get("textureSize")}, f, indent=1)
     out["terrain"] = info
     return out
 
