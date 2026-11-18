@@ -31,7 +31,7 @@ def main():
         st.grid = lvl.Grid(st.img, st.grid.addr)
         left = {p.leaf: lp.op(p.leaf) for p in st.grid.paths.values()}
         covered = sum(1 for p in st.grid.paths.values()
-                      if lp.op(p.leaf) in (10, 42) and any(lp.op(n) in lp.CLEAR_COVER for n in p.nodes))
+                      if lp.op(p.leaf) in (10, 42) and any(lp.clear_keeps(n) for n in p.nodes))
         triggers = sum(1 for op in left.values() if op == 11)
         assert len(st.grid.paths) == before - len(paths), (name, len(st.grid.paths), before, len(paths))
         assert len(st.grid.paths) == covered + triggers + sum(1 for p in st.grid.paths.values() if lp.op(p.leaf) not in (10, 11, 42)), name

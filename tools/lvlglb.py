@@ -142,8 +142,10 @@ def export(st, objs, disc, out, lod=99, on=None):
         if depth > 64 or not img.ok(node, 4):
             return
         op = img.u32(node) & 63
-        # bare scenery (what the patch's "clear" takes out, lvl.py scenery_plan): no handle, no cover node above, outside the sky
-        bare = bare and not sky and isinstance(owner, str) and op not in lvl.LevelPatch.CLEAR_COVER
+        # bare scenery (what the patch's "clear" takes out, lvl.py scenery_plan): no handle, no cover node or node found by id above,
+        # outside the sky
+        bare = (bare and not sky and isinstance(owner, str) and op not in lvl.LevelPatch.CLEAR_COVER
+                and not lvl.LevelPatch.found_by_id(img.u32(node)))
         if cover is None and op in lvl.LevelPatch.CLEAR_COVER:
             cover = op      # the first node above that is no plain GROUP: what holds the pieces below it (extras.scripted)
         if not sky and op not in (0, 0x1F, 0x27) and img.u32(node) >> 18 == 2:   # 0x1F/0x27 are destructibles (dbProcInteractive)

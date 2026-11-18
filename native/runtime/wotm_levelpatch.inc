@@ -1692,14 +1692,23 @@ struct Stage
     }
     // "clear": "scenery" (lvl.py LevelPatch.apply_clear, mesma regra): o cenario nu da fase deixa de ser desenhado e de colidir. Nu = sem
     // TRANSLATE, ROTATE, SCALE, SWITCH, DESTRUCTIBLE, INTERACTIVE, CHAR_INSTANCE, ANIM_XFORM, SKEL_BONE ou ANIM_SCALE acima (o que tem
-    // alca e o que e animado fica com a entrada de "objects") e, no desenho, fora do ceu (GROUP de id 2); no com id fica (o jogo o acha
-    // pelo id). Cada OBJECT e PART_EMITTER sai do pai (o slot passa a apontar um no NULL, o no em si nao e escrito: uma copia que o
+    // alca e o que e animado fica com a entrada de "objects"), sem no que o jogo acha pelo id acima (foundById) e, no desenho, fora do ceu
+    // (GROUP de id 2); no com id fica. Cada OBJECT e PART_EMITTER sai do pai (o slot passa a apontar um no NULL, o no em si nao e escrito: uma copia que o
     // compartilha o mantem); cada caminho POLY_COLL/COLL_VOL deixa todas as celulas. As cameras (COLL_TRIG) ficam. Roda antes de "objects".
     static bool coverOp(uint32_t o)
     {
         return o == TRANSLATE || o == ROTATE || o == SCALE || o == SWITCH || o == DESTRUCTIBLE || o == INTERACTIVE || o == CHAR_INSTANCE ||
                o == ANIM_XFORM || o == SKEL_BONE || o == ANIM_SCALE;
     }
+    // No que o jogo acha pelo id (dbProcInteractive) e le por baixo: textura de particula (0x1B58..0x1C1F, o OBJECT dela da a textura dos
+    // pedestres e da poeira), elemento do HUD, arma, power-up, ponto da fase. A arvore inteira dele fica. Nao a raiz do mundo (1), o ceu (2,
+    // a parte) nem os ids que o jogo pula (0x7D0..0x897). Mesma regra de lvl.py LevelPatch.found_by_id.
+    bool foundById(uint32_t n) const
+    {
+        const uint32_t i = ident(n);
+        return i > 2 && !(i >= kExclLo && i < kExclHi);
+    }
+    bool clearKeeps(uint32_t n) const { return coverOp(op(n)) || foundById(n); }
     void applyClear(const json::Value &spec)
     {
         if (spec.type != json::Value::Str || spec.s != "scenery") throw PatchError("\"clear\" e \"scenery\"");
@@ -1715,20 +1724,20 @@ struct Stage
                 const uint32_t c = u32(s) & kMask;
                 if (!c || !ok(c)) continue;
                 const uint32_t o = op(c);
-                if (coverOp(o)) continue;
+                if (clearKeeps(c)) continue;
                 if ((o == OBJECT || o == PART_EMITTER) && !sky && !(u32(c) >> 6) && seenSlots.insert(s).second) slots.push_back(s);
                 else if (o != OBJECT && o != PART_EMITTER) walk(c, sky || (o == GROUP && ident(c) == 2));
             }
         };
         for (uint32_t r : roots)
-            if (op(r) != ANIM_MGR && !coverOp(op(r))) walk(r, op(r) == GROUP && ident(r) == 2);
+            if (op(r) != ANIM_MGR && !clearKeeps(r)) walk(r, op(r) == GROUP && ident(r) == 2);
         std::vector<uint32_t> paths;
         for (const auto &kv : cells)
         {
             const Path p = path(kv.first);
             if (p.nodes.empty() || (op(p.nodes.back()) != POLY_COLL && op(p.nodes.back()) != COLL_VOL)) continue;
             bool covered = false;
-            for (uint32_t n : p.nodes) covered = covered || coverOp(op(n));
+            for (uint32_t n : p.nodes) covered = covered || clearKeeps(n);
             if (!covered) paths.push_back(kv.first);
         }
         if (slots.empty() && paths.empty()) throw PatchError("a fase nao tem cenario nu");

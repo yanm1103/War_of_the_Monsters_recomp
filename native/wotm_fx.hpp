@@ -1677,9 +1677,11 @@ public:
             const uint32_t b = s.base, p = ram.u32(b + fxoff::pos), a = ram.u32(b + fxoff::age);
             const uint32_t ti = ram.u32(b + fxoff::texInfoIndex);
             const uint32_t tinfo = fxaddr::textureInfo + 8 * (ti & 127);
-            std::fprintf(stderr, "[fx] #%u preset %u %s n=%d alpha=%02x cores=%u@%u texInfo=%u (n=%d idx=%u) cpf=%u vida=%d | p0 %.1f %.1f %.1f tam %.2f idade %d cor %06X\n",
+            const uint32_t k = ram.u16(tinfo + 2) & 127;
+            std::fprintf(stderr, "[fx] #%u preset %u %s n=%d alpha=%02x cores=%u@%u texInfo=%u (n=%d idx=%u tex%u tex0 %08X%08X) cpf=%u vida=%d | p0 %.1f %.1f %.1f tam %.2f idade %d cor %06X\n",
                          s.index, ram.u32(b + fxoff::fxId), fxTypeName(s.type), s.n, ram.u32(b + fxoff::alphaContext),
                          ram.u32(b + fxoff::numColors), ram.u32(b + fxoff::colorIndex), ti, ram.s16(tinfo), ram.u16(tinfo + 2),
+                         ram.u16(fxaddr::texId + 2 * k), ram.u32(fxaddr::tex0 + 8 * k + 4), ram.u32(fxaddr::tex0 + 8 * k),
                          ram.u32(b + fxoff::colorsPerFrame), ram.s16(b + fxoff::lifetime),
                          ram.f32(p), ram.f32(p + 4), ram.f32(p + 8), ram.f32(p + 12), ram.s16(a), s.tint & 0xFFFFFFu);
         }

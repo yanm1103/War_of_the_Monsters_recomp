@@ -1983,11 +1983,23 @@ class LevelPatch:
     # its entry in "objects", not to the stage's bare scenery.
     CLEAR_COVER = frozenset((3, 4, 30, 6, 31, 39, 25, 17, 35, 38))
 
+    @staticmethod
+    def found_by_id(head):
+        """A node the game finds by its id (dbProcInteractive) and reads below: a particle texture (0x1B58..0x1C1F, its OBJECT gives the
+        texture), a HUD element, a weapon, a power-up, an end point. Its whole subtree stays with "clear". Not the world root (1), the sky
+        (2, kept apart) or the ids the game skips (0x7D0..0x897)."""
+        i = head >> 18
+        return i > 2 and not 0x7D0 <= i < 0x898
+
+    def clear_keeps(self, n):
+        """The node keeps what hangs below it out of "clear": a cover node or a node the game finds by id."""
+        return self.op(n) in self.CLEAR_COVER or self.found_by_id(self.img.u32(n))
+
     def scenery_plan(self):
         """What `"clear": "scenery"` takes out of the stage: ([(parent, slot)] of the OBJECTs and PART_EMITTERs of the bare scenery,
         [path] of its POLY_COLL and COLL_VOL leaves). Bare means no TRANSLATE, ROTATE, SCALE, SWITCH, DESTRUCTIBLE, INTERACTIVE,
-        CHAR_INSTANCE, ANIM_XFORM, SKEL_BONE or ANIM_SCALE above it and, for the drawing, outside the sky (a GROUP with id 2); a
-        node with an id word (the game finds it by id) stays. The camera triggers (COLL_TRIG) stay."""
+        CHAR_INSTANCE, ANIM_XFORM, SKEL_BONE or ANIM_SCALE above it, no node the game finds by id above it (`found_by_id`) and, for
+        the drawing, outside the sky (a GROUP with id 2); a node with an id word stays. The camera triggers (COLL_TRIG) stay."""
         st, img = self.st, self.img
         slots, seen_slots, seen = [], set(), set()
 
@@ -2000,7 +2012,7 @@ class LevelPatch:
                 if not c or not img.ok(c):
                     continue
                 op = img.u32(c) & 63
-                if op in self.CLEAR_COVER:
+                if op in self.CLEAR_COVER or self.found_by_id(img.u32(c)):
                     continue
                 if op in (0, 22) and not sky and not img.u32(c) >> 6 and s not in seen_slots:
                     seen_slots.add(s)
@@ -2008,12 +2020,12 @@ class LevelPatch:
                 elif op not in (0, 22):
                     walk(c, sky or (op == 1 and st.ident(c) == 2))
         for r in sorted(st.roots):
-            if st.op(r) != 7 and st.op(r) not in self.CLEAR_COVER:
+            if st.op(r) != 7 and st.op(r) not in self.CLEAR_COVER and not self.found_by_id(img.u32(r)):
                 walk(r, st.op(r) == 1 and st.ident(r) == 2)
         paths = []
         for pa in sorted(self.cells):
             p = Path(img, pa)
-            if self.op(p.leaf) in (10, 42) and not any(self.op(n) in self.CLEAR_COVER for n in p.nodes):
+            if self.op(p.leaf) in (10, 42) and not any(self.clear_keeps(n) for n in p.nodes):
                 paths.append(pa)
         return slots, paths
 
