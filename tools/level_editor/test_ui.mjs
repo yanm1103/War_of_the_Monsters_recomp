@@ -1353,26 +1353,21 @@ await check('Edit menu: Restore all deleted brings every deleted original back; 
   must(await ev(`JSON.stringify(${W}.buildPatch())`) === before, 'the stage was not put back as the test found it');
   await ev(`${W}.select(null)`);
 });
-await check('an object with no handle of its own cannot be deleted: Delete and Delete every object leave it and say so; the patch never names it', async () => {
+await check('an object with no handle of its own (its own INTERACTIVE node) can be deleted, one by one and with Delete every object', async () => {
   const W = 'window.wotmDebug';
   const before = await ev(`JSON.stringify(${W}.buildPatch())`);
   const fixed = await ev(`${W}.items().filter((x) => !x.copy && x.rec.info.movable === false).map((x) => x.rec.info.handle).join()`);
   must(fixed !== '', 'CENTRAL should have an object with no handle of its own');
-  const h0 = await ev(`${W}.history.length`);
   await ev(`(() => { const D = ${W}; D.select(D.items().find((x) => !x.copy && x.rec.info.movable === false)); D.remove(); })()`);
-  must(await ev(`${W}.history.length`) === h0, 'Delete on it made an Undo step');
-  must(await ev(`JSON.stringify(${W}.buildPatch())`) === before, 'Delete on it changed the patch');
+  must(await ev(`${W}.buildPatch().objects.some((e) => e.delete && ${JSON.stringify(fixed.split(','))}.includes(e.handle))`), 'Delete did not put it in the patch');
+  await ev(`${W}.undo()`);
+  must(await ev(`JSON.stringify(${W}.buildPatch())`) === before, 'Undo did not bring it back');
   await ev(`document.getElementById('gdDelAll').click()`);
   const total = await ev(`${W}.items().filter((x) => !x.copy).length`);
-  const del = await ev(`${W}.buildPatch().objects.filter((e) => e.delete).length`);
-  must(del === total - fixed.split(',').length, `Delete every object marked ${del} of ${total} (${fixed.split(',').length} cannot go)`);
-  must(await ev(`!${W}.buildPatch().objects.some((e) => e.delete && ${JSON.stringify(fixed.split(','))}.includes(e.handle))`), 'the patch deletes the object with no handle');
+  must(await ev(`${W}.buildPatch().objects.filter((e) => e.delete).length`) === total, 'Delete every object did not mark all ' + total);
   await ev(`${W}.undo()`);
   must(await ev(`JSON.stringify(${W}.buildPatch())`) === before, 'Undo did not bring the stage back');
-  // a file that names it (an older patch) loads with it kept, and the next save drops the entry
-  await ev(`(() => { const D = ${W}, p = D.buildPatch(); p.objects.push({ handle: ${JSON.stringify(fixed.split(',')[0])}, from: [0, 0, 0], delete: true }); D.restoreTo(JSON.stringify(p)); })()`);
-  must(await ev(`!${W}.buildPatch().objects.some((e) => e.delete && ${JSON.stringify(fixed.split(','))}.includes(e.handle))`), 'an old delete entry for it was kept');
-  await ev(`${W}.restoreTo(${JSON.stringify(before)}); ${W}.select(null)`);
+  await ev(`${W}.select(null)`);
 });
 await check('Scripted parts: hidden in the view by default, listed in a panel on the Stage tab, shown one by one or all, the camera goes to a piece', async () => {
   const W = 'window.wotmDebug';

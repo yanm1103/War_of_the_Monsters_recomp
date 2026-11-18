@@ -1790,7 +1790,23 @@ struct Stage
                 uint32_t h = 0;
                 if (hv && hv->type == json::Value::Str) h = uint32_t(std::strtoul(hv->s.c_str(), nullptr, 0));
                 else if (hv && hv->isInt()) h = uint32_t(hv->asInt());
-                if (!inTree.count(h) || (op(h) != TRANSLATE && op(h) != ROTATE))
+                const json::Value *delV = e.get("delete");
+                if (delV && delV->asBool() && inTree.count(h))
+                {
+                    // um objeto dentro de outro que uma entrada anterior apagou (placa de telhado, num estado do predio): o no de cima
+                    // e NUL agora, entao ele vai junto e a posicao dele nao bate mais com o "from"
+                    const std::vector<uint32_t> up = chain(h);
+                    uint32_t gone = 0;
+                    for (size_t i = 0; i + 1 < up.size() && !gone; ++i)
+                        if (op(up[i]) == NUL) gone = up[i];
+                    if (gone)
+                    {
+                        log.push_back(fmt("item %zu: a alca %07x esta dentro de %07x, que uma entrada anterior apagou: vai junto", k, h, gone));
+                        continue;
+                    }
+                }
+                // (um objeto sem TRANSLATE/ROTATE proprio e o no INTERACTIVE dele: nao se move, mas se apaga)
+                if (!inTree.count(h) || !(op(h) == TRANSLATE || op(h) == ROTATE || (op(h) == INTERACTIVE && delV && delV->asBool())))
                     throw PatchError(fmt("a alca %07x nao e um TRANSLATE/ROTATE da fase", h));
                 if (parents[h].size() != 1) throw PatchError(fmt("a alca %07x tem %zu pais", h, parents[h].size()));
                 const V3 pos = pos3(world(h));

@@ -2068,7 +2068,8 @@ class LevelPatch:
                     if up is not None:
                         self.log.append("entry %d: handle %07x is inside %07x, which an earlier entry deleted: it goes with it" % (k, h, up))
                         continue
-                if h not in st.root_of or self.op(h) not in (3, 4):
+                # (an object with no TRANSLATE/ROTATE of its own is its INTERACTIVE node: it cannot move, but it can be deleted)
+                if h not in st.root_of or not (self.op(h) in (3, 4) or (e.get("delete") and self.op(h) == 39)):
                     raise PatchError("handle %07x is not a TRANSLATE/ROTATE of the stage" % h)
                 if len(st.parents[h]) != 1:
                     raise PatchError("handle %07x has %d parents" % (h, len(st.parents[h])))
