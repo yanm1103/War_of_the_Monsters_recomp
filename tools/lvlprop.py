@@ -23,7 +23,12 @@ GROUP 0x0102 -> COLL_VOL (op 10, 6 planes from the visual's bounds). OBJECTs and
 Template ("first-object-roundtrip"): the first OBJECT of the stage's world root, by address, that round-trips in vifpkt and is
 rigid, one texture, strip sections with fog (PRIM.FGE), texture and the asked ABE (default 1, the stages' majority),
 fogBurnThru below 255, no alphaSort, environment map, UV scroll, color animation nor animated or sky node above it. The OBJECT
-header (shadow bits, fogBurnThru) and the GIF tags come from it; pointLight (0x80, the fire's lights) is always on.
+header (shadow bits, fogBurnThru) and the GIF tags come from it; pointLight (0x80, the fire's lights) is always on. PRIM.ABE
+is the template's, except where the stage draws with no blending: with units `game`, an OBJECT whose material says so
+(tools/lvlglb.py: extras.gs.blend null) gets ABE 0; a material tex<ID> with no extras.gs takes the ABE most of the stage's
+rigid OBJECTs with that texture use and, with ABE 1, their vertex alpha as its full alpha (stage_tex_abe: 0x42 for most). Most
+stage textures carry a raw alpha up to 0xFF, and with ABE on and a vertex alpha of 0x80 the GS draws them at As = 2
+((Cs - Cd) 2 + Cd): the surface goes dark or bright with what is behind it, or shows it.
 Light (`--light`): `auto` (default) turns on dirLight (0x100, the stage's three parallel lights) on each OBJECT whose meshes have
 no COLOR_0 and leaves it off where the colors are there (light baked in Blender); `vertex` is off everywhere, `dir` on everywhere.
 Units: `blender` (default) is a Blender scene (Z up, meters, the scene's X/Y are the game's) scaled by S game units per meter
@@ -165,6 +170,35 @@ def stage_ctx(img, tex_id, objs):
                 a = o + 0x70 + 0x30 * k - img.base
                 return o, bytes(img.d[a:a + 0x30])
     return None
+
+
+def stage_tex_abe(img, tex_id, objs):
+    """How the stage draws `tex_id`: ([OBJECTs with ABE 0, with ABE 1], vertex alpha) among its rigid OBJECTs with that
+    texture, by the PRIM.ABE of their strip sections (an OBJECT whose sections disagree counts for neither); the vertex alpha is
+    the commonest top one of the ABE 1 OBJECTs (None without them). Most stage textures carry a raw alpha up to 0xFF and the
+    stage draws them with ABE 0, or with ABE 1 and a vertex alpha around 0x42 (As = At Av / 0x80 about 1). A prop's alpha of
+    0x80 there makes As = 2 ((Cs - Cd) 2 + Cd): the surface goes dark or bright with what is behind it."""
+    votes, tops = [0, 0], {}
+    for o in objs:
+        n = img.u16(o + 0x5A)
+        if not any(img.u16(o + 0x50 + 2 * k) == tex_id for k in range(min(n, 5))):
+            continue
+        rp = _rigid_packet(img, o)
+        if rp is None:
+            continue
+        try:
+            p = vifpkt.parse(bytes(img.d[rp[0] - img.base:rp[0] - img.base + 16 * rp[1]]), False)
+        except vifpkt.FormatError:
+            continue
+        secs = [s for b in p.batches for s in b.sections if s.kind == vifpkt.STRIP and (s.gif[1] >> 19) & 1]
+        got = {(s.gif[1] >> 21) & 1 for s in secs}
+        if len(got) == 1:
+            a = got.pop()
+            votes[a] += 1
+            if a and any(s.rgba for s in secs):
+                top = max(c[3] for s in secs for c in s.rgba)
+                tops[top] = tops.get(top, 0) + 1
+    return votes, (max(tops, key=lambda t: (tops[t], t)) if tops else None)
 
 
 def stage_objects(st):
@@ -394,7 +428,9 @@ def own_ctx(tw, th, tex1):
 
 def read_glb(path, units, scale=None, height=None, warn=print):
     """Triangles of the .glb in the game's axes and units: ({key: [((x, y, z), n8, uv16, rgba) x 3]}, scale, stats).
-    key = ("tex", texId, vc) or ("color", vc); vc: the triangles came with COLOR_0. The result is state 0's (the meshes with no
+    key = ("tex", texId, op, vc), ("img", image, op, vc) or ("color", op, vc); op: 1 the stage drew the material with no
+    blending (units `game`, extras.gs.blend null: ABE 0), 0 with blending (extras.gs.blend set), -1 no extras.gs (build: a
+    tex<ID> takes the stage's ABE for it); vc: the triangles came with COLOR_0. The result is state 0's (the meshes with no
     prefix); a mesh named state<N>_... belongs to state N of a destructible prop (stats["more"][N] = {"by_key", "hulls",
     "colls"}), and stats["declared"] lists every state a node names, a node without a mesh included (an empty state)."""
     glb = ngpmesh.Glb(path)
@@ -467,7 +503,8 @@ def read_glb(path, units, scale=None, height=None, warn=print):
             # a material the stage drew with no blending (tools/lvlglb.py: extras.gs.blend null) has a vertex alpha the GS ignored,
             # and a prop draws with the template's ABE: the alpha goes to the GS's opaque (0x80) or the building shows through
             gsx = ((glb.j.get("materials") or [{}])[prim["material"]].get("extras") or {}).get("gs") if "material" in prim else None
-            opaque_a = units == "game" and isinstance(gsx, dict) and gsx.get("blend") is None
+            op = (1 if gsx.get("blend") is None else 0) if units == "game" and isinstance(gsx, dict) else -1
+            key += (op,)             # 1: ABE 0 on its OBJECTs (level_batches), the texture's raw alpha past 0x80 would double the color
             at = prim["attributes"]
             pos = glb.accessor(at["POSITION"])
             nrm = glb.accessor(at["NORMAL"]) if "NORMAL" in at else None
@@ -486,7 +523,7 @@ def read_glb(path, units, scale=None, height=None, warn=print):
                     n = tuple(nm[r][0] * q[0] + nm[r][1] * q[1] + nm[r][2] * q[2] for r in range(3))
                 t = uv[v] if uv is not None else None
                 c = tuple(col[v]) + ((1.0,) if len(col[v]) == 3 else ()) if col is not None else None
-                if c is not None and opaque_a:
+                if c is not None and op == 1:
                     c = c[:3] + (0x80 / 255,)
                 return wp, n, t, c, factor
             lst = raw.setdefault(bucket, {}).setdefault(key, [])
@@ -597,8 +634,10 @@ def read_glb(path, units, scale=None, height=None, warn=print):
 
 # ---------------------------------------------------------------- packets and OBJECTs
 
-def _gif(g, nloop, sel, textured):
+def _gif(g, nloop, sel, textured, abe=None):
     w1 = g[1] if textured else g[1] & ~(1 << 19)       # PRIM.TME
+    if abe is not None:
+        w1 = (w1 & ~(1 << 21)) | (abe << 21)            # PRIM.ABE
     return ((g[0] & ~0x7FFF) | nloop, w1, g[2], (g[3] & ~0x7FFF) | sel)
 
 
@@ -633,10 +672,11 @@ def _sections(strips):
     return secs
 
 
-def level_batches(tris, gif0, gifn, textured=True):
+def level_batches(tris, gif0, gifn, textured=True, abe=None):
     """Rigid batches (vifpkt.Batch) for triangles of corners (pos as 3 raw u32, n8, uv16, rgba), each triangle's winding
     kept. Each batch's first section loads the OBJECT's texture (GIF word 3 = 1, as the stages do), the others keep it (0);
-    untextured: PRIM.TME 0, word 3 0. Batches of up to 190 positions (ngpmesh._groups), strips by ngpmesh._strips."""
+    untextured: PRIM.TME 0, word 3 0; `abe` 0 or 1 sets PRIM.ABE (None: the template's). Batches of up to 190 positions
+    (ngpmesh._groups), strips by ngpmesh._strips."""
     out = []
     for grp in ngpmesh._groups(tris):
         b = vifpkt.Batch()
@@ -651,7 +691,7 @@ def level_batches(tris, gif0, gifn, textured=True):
         local = [tuple(svert.setdefault(k, k) for k in ((pos_index[c[:2]], c[2], c[3]) for c in tri)) for tri in grp]
         b.sections = _sections(ngpmesh._strips(local))
         for k, s in enumerate(b.sections):
-            s.gif = _gif(gif0 if k == 0 else gifn, len(s.idx), 1 if (k == 0 and textured) else 0, textured)
+            s.gif = _gif(gif0 if k == 0 else gifn, len(s.idx), 1 if (k == 0 and textured) else 0, textured, abe)
         out.append(b)
     return out
 
@@ -1126,6 +1166,7 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
     log("%s: template OBJECT 0x%X (%s, ABE %d), bits %08x" % (stage, tmpl, TEMPLATE_RULE, abe, st.img.u32(tmpl + 0xC)))
     objs = stage_objects(st)
     have = stage_tex_ids(disc, stage)
+    tex_abe, tex_alpha = {}, {}         # texId -> the ABE the stage draws it with, its vertex alpha (no extras.gs: read_glb)
     clamp = world_clamp(st)
     textures, slot_of = [], {}
     korder = {"tex": 0, "img": 1, "color": 2}
@@ -1141,6 +1182,15 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
         if found is None:
             raise PropError("tex%d: no OBJECT of %s draws with it (the loader takes its context from one)" % (tid, stage))
         o, ctx = found
+        if any(k[:2] == key[:2] and k[-2] == -1 for k in by_key):
+            votes, va = stage_tex_abe(st.img, tid, objs)
+            if votes[0] or votes[1]:
+                tex_abe[tid] = 0 if votes[0] > votes[1] else 1
+                if tex_abe[tid] and va is not None and va < 0x80:
+                    tex_alpha[tid] = va
+                if tex_abe[tid] != abe or tid in tex_alpha:
+                    log("tex%d: ABE %d%s, as the stage draws it (%d OBJECT(s) with ABE 0, %d with ABE 1)" % (
+                        tid, tex_abe[tid], ", vertex alpha x 0x%02X/0x80" % va if tid in tex_alpha else "", votes[0], votes[1]))
         slot_of[key[:2]] = len(textures)
         textures.append({"slot": len(textures), "texId": tid, "ctxFrom": "0x%X" % o,
                          "tex0": "0x%016X" % struct.unpack_from("<Q", ctx, 0)[0]})
@@ -1203,12 +1253,17 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
             tris = [tuple((tuple(_fbits(x) for x in c[0]), c[1], c[2], c[3]) for c in t) for t in bk[key]]
             textured = key[0] in ("tex", "img")
             lt = light if light != "auto" else ("vertex" if key[-1] else "dir")
-            for grp in split_objects(level_batches(tris, gif0, gifn, textured)):
+            stage_way = key[-2] == -1 and key[0] == "tex"      # no extras.gs: the ABE and alpha the stage draws the texture with
+            oabe = 0 if key[-2] == 1 else tex_abe.get(key[1], abe) if stage_way else abe
+            va = tex_alpha.get(key[1]) if stage_way and oabe else None
+            if va is not None:
+                tris = [tuple(c[:3] + (c[3][:3] + (min(255, int(round(c[3][3] * va / 0x80))),),) for c in t) for t in tris]
+            for grp in split_objects(level_batches(tris, gif0, gifn, textured, oabe)):
                 slot = slot_of[key[:2]] if textured else None
                 a, nv, nb = level_object(mb, header, grp, slot, lt, own_ctx_of.get(slot))
                 kids.append(a)
                 stats_obj.append({"object": "0x%X" % a, "state": si, "texId": key[1] if key[0] == "tex" else None,
-                                  "image": key[1] if key[0] == "img" else None, "vertices": nv, "light": lt})
+                                  "image": key[1] if key[0] == "img" else None, "vertices": nv, "light": lt, "abe": oabe})
                 nverts += nv
                 pbytes += nb
                 spts += _batch_points(grp)

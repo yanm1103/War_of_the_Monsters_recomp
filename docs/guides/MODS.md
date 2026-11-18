@@ -697,7 +697,9 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   <in.glb> mods/<mod>/props/<MODEL> --stage <FASE>` (`TOOLS.md`): `<MODEL>.NGP`, `<MODEL>.PTR`, `<MODEL>.preview.glb` (what the game
   draws, for the editor) and `prop.json` (`stage`, `textures` as `{"slot", "texId"}` or, for an image of its own, `{"slot", "png",
   "packet", "game"}`, `bounds`, `light`, counts). A prop belongs to one stage. A material `tex<texId>` in Blender draws with that
-  texture of the stage; a material with an image (PNG, or JPEG with Pillow, which the editor's exe carries) draws with that image: the PC draws the PNG
+  texture of the stage the way most of the stage's objects with it do: with no blending, or with blending and their vertex alpha
+  (about 0x42) as the full alpha (the textures' raw alpha goes up to 0xFF, and the GS takes texture alpha times vertex alpha / 0x80:
+  at a vertex alpha of 0x80 a surface goes dark or bright with what is behind it); a material with an image (PNG, or JPEG with Pillow, which the editor's exe carries) draws with that image: the PC draws the PNG
   (`<MODEL>_T<slot>.png` in the folder) at its own size, and the game keeps a copy of at most 128 x 128 (CT32) in the arena, with a
   texId past the loaded textures and the smallest texture bin of the stage it fits in (log `[fase]   props: KRAB KRAB_T0.png:
   textura propria 128x128, tex335, caixa de 65536 bytes` and `[mods] prop tex335 <- <mod>/props/KRAB/KRAB_T0.png`). The UVs are
@@ -839,8 +841,8 @@ System theme (the one the OS uses), in the settings (**File** ▸ **Settings…*
   vertex colors, textures (each as a CT32 copy of at most 128 a side; the PC draws the full PNG) and, for a building, its broken state
   (hit point class 2; four `state<N>_smoke_*` emitters near the footprint's corners, low and sized to the building, throw the dust of
   each break) and its own collision, state by state, with the original surface words (the climbable walls, the walkable rubble; an
-  object with no collision of its own collides as the box of its bounds). A part the stage drew without blending gets the GS's opaque vertex alpha,
-  since the prop draws with the template's blending, and a texture whose alpha passes 0x80 keeps the raw alpha in its PNG (the stage's
+  object with no collision of its own collides as the box of its bounds). A part the stage drew without blending draws without it
+  (`PRIM.ABE` 0) and with the GS's opaque vertex alpha, and a texture whose alpha passes 0x80 keeps the raw alpha in its PNG (the stage's
   scale; the vertex alpha around 0x42 counts on it). The source stage's other blending,
   pickups, vehicles and animated parts do not come along.
 - **Fight HUD and sky** (Stage tab ▸ Pictures): the pictures of the stage's fight HUD and of its sky (the OBJECTs under the nodes with id 2),
