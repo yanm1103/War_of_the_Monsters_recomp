@@ -1318,6 +1318,43 @@ await check('menu bar: File, Edit, Help; hover switches, Left and Right walk the
   must(await until(`document.getElementById('keysDlg').open`, 20), '? does not open the shortcuts');
   await esc();
 });
+await check('Edit menu: Restore all deleted brings every deleted original back; Restore to default asks, empties the patch, and both undo', async () => {
+  const W = 'window.wotmDebug';
+  const before = await ev(`JSON.stringify(${W}.buildPatch())`);
+  const deletedNow = () => ev(`${W}.buildPatch().objects.filter((e) => e.delete).length`);
+  must(await deletedNow() === 0, 'the stage should start with nothing deleted');
+  // the Edit menu opens first (it sets which items are on); a click on an item closes it
+  const item = async (id) => { await ev(`document.getElementById('mbEdit').click()`); await ev(`document.getElementById('${id}').click()`); };
+  const off = (id) => ev(`document.getElementById('mbEdit').click(), (() => { const d = document.getElementById('${id}').disabled; document.getElementById('mbEdit').click(); return d; })()`);
+  // nothing deleted and nothing changed: both items are off
+  must(await off('menuRestoreDeleted') && await off('menuRestoreDefault'), 'the Restore items should be off with nothing to restore');
+  // delete three originals, then restore them all with one click
+  await ev(`(() => { const D = ${W}; for (const it of D.items().filter((x) => !x.copy && x.rec.info.kind === 'destr').slice(0, 3)) { D.select(it); D.remove(); } })()`);
+  must(await deletedNow() === 3, 'three objects should be deleted, got ' + await deletedNow());
+  must(!(await off('menuRestoreDeleted')) && !(await off('menuRestoreDefault')), 'the Restore items should be on with objects deleted');
+  await item('menuRestoreDeleted');
+  must(await deletedNow() === 0, 'Restore all deleted left ' + await deletedNow() + ' deleted');
+  must(await ev(`${W}.items().filter((x) => !x.copy).every((x) => x.node.visible)`), 'a restored object is still hidden in the view');
+  must(await ev(`document.getElementById('menuUndo').querySelector('.what').textContent`) === 'restore all deleted', 'the Undo item should name the step');
+  await ev(`${W}.undo()`);
+  must(await deletedNow() === 3, 'Undo did not delete the three again');
+  // Restore to default: a question first (Cancel changes nothing), then the patch is empty
+  await item('menuRestoreDefault');
+  must(await ev(`document.getElementById('askDlg').open && /default/i.test(document.getElementById('askTitle').textContent)`), 'Restore to default did not ask');
+  await ev(`document.querySelector('#askBtns button[value=cancel]').click()`);
+  must(await deletedNow() === 3, 'Cancel changed the patch');
+  await item('menuRestoreDefault');
+  await ev(`document.querySelector('#askBtns button[value=go]').click()`);
+  must(await ev(`JSON.stringify(${W}.buildPatch())`) === '{"objects":[]}', 'Restore to default left a patch: ' + await ev(`JSON.stringify(${W}.buildPatch())`));
+  await ev(`${W}.undo()`);
+  must(await deletedNow() === 3, 'Undo did not bring the patch back after Restore to default');
+  // back to how the test found the stage
+  await ev(`(() => { const D = ${W}; while (JSON.stringify(D.buildPatch()) !== ${JSON.stringify(before)} && D.history.length) D.undo(); })()`);
+  must(await ev(`JSON.stringify(${W}.buildPatch())`) === before, 'the stage was not put back as the test found it');
+});
+await check('the open stage is remembered, so a reload opens it and not CENTRAL', async () => {
+  must(await ev(`localStorage.getItem('wotmLevelEditor.stage') === document.getElementById('stage').value`), 'the open stage was not remembered: ' + await ev(`localStorage.getItem('wotmLevelEditor.stage')`));
+});
 await check('menu bar: it fits the narrow windows, and Test is still on the bar', async () => {
   const size = (w, h) => send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
   try {

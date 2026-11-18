@@ -68,11 +68,11 @@ export function popover({ button, menu, onOpen, onClose, place, closeOnItem }) {
 // title switches to it; Left and Right go to the neighbor title (opening its menu when one was open), Down and Up open a menu
 // from its title, Home and End go to the first and the last title; Esc, a click elsewhere and the popovers' own arrows are
 // menu.js's. A chosen item gives the focus back to its title (so that a dialog it opens returns the focus there).
-//   menubar({ items: [{ button, menu }] }) -> [popover api, ...]
+//   menubar({ items: [{ button, menu, onOpen }] }) -> [popover api, ...]   (onOpen fills the menu just before it shows)
 export function menubar({ items }) {
   const n = items.length;
   const titles = items.map((i) => i.button);
-  const pops = items.map(({ button, menu }) => popover({ button, menu, place: true, closeOnItem: true }));
+  const pops = items.map(({ button, menu, onOpen }) => popover({ button, menu, onOpen, place: true, closeOnItem: true }));
   const openAt = () => pops.findIndex((p) => p.isOpen);
   const walkable = (menu) => [...menu.querySelectorAll('button:not(:disabled)')].filter((e) => e.getClientRects().length > 0);
   // one tab stop for the bar (the last title that had the focus)

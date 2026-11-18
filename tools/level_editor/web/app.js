@@ -1225,6 +1225,7 @@ async function loadStage(name) {
     resetLayers();       // the old stage's markers and drafts go; the new stage's files load after its patch
     if (ruler.on) setRuler(false);       // its points were on the old stage
     stageName = name;
+    try { localStorage.setItem('wotmLevelEditor.stage', name); } catch (e) { /* the next reload opens the default stage */ }
     $('editStage').disabled = !stageMeta[name];
     ui.budget = null; budgetKey = '';
     coll.clear(); collKey = ''; collSeq++;
@@ -2495,6 +2496,39 @@ function resetSel() {
   selectMany([...rs].map((r) => r.item));
 }
 
+// Edit ▸ Restore all deleted: every original the patch deletes comes back (one Undo step); moves, copies and new props stay as they are
+function restoreAllDeleted() {
+  const gone = recs.filter((r) => r.deleted && !r.prop);
+  if (!gone.length) { msg('No object is deleted.', { level: 'info', toast: true }); return; }
+  select(null);
+  snapshot('restore all deleted');
+  for (const r of gone) { r.deleted = false; r.node.visible = true; }
+  refreshList();
+  msg(`Restored ${gone.length} ${gone.length === 1 ? 'object' : 'objects'}. Save when the stage is as you want it`, { level: 'ok', toast: ['Undo', undo] });
+}
+// Edit ▸ Restore to default: the stage's patch emptied (objects, copies, new props, size, walls, bare scenery, pedestrians, sky models), after a question;
+// the files outside the patch (start points, nets, light, pictures) stay. Nothing is written until Save, and Undo brings it all back.
+function restoreDefault() {
+  if (JSON.stringify(buildPatch()) === '{"objects":[]}') { msg('This stage has no changes to throw away.', { level: 'info', toast: true }); return; }
+  ask('Restore this stage to default?',
+      'Every change in this stage\'s patch goes: deleted objects come back, moved ones return, copies and new props leave, and the size, the walls and the bare scenery are the disc\'s again. ' +
+      'The start points, nets, light and pictures are separate files and stay. Nothing is saved until you press Save, and Undo brings it all back.',
+      [['cancel', 'Cancel'], ['go', 'Restore to default', true]], (v) => {
+        if (v !== 'go') return;
+        select(null);
+        snapshot('restore to default');
+        restoreTo('{}');
+        msg('The stage is back to the disc\'s. Save to write it into the mod', { level: 'ok', toast: ['Undo', undo] });
+      }, { icon: 'restore' });
+}
+// the two Restore items are off when there is nothing to restore (set as the Edit menu opens)
+function syncEditMenu() {
+  $('menuRestoreDeleted').disabled = !recs.some((r) => r.deleted && !r.prop);
+  $('menuRestoreDefault').disabled = JSON.stringify(buildPatch()) === '{"objects":[]}';
+}
+$('menuRestoreDeleted').onclick = restoreAllDeleted;
+$('menuRestoreDefault').onclick = restoreDefault;
+
 // ------------------------------------------------------------------ Arrange (web/arrange.js): the selection copied or moved by rule
 const arrangeItems = () => (isDeleted(sel) ? [] : group.filter((it) => it.node.visible));
 function gameBox(it) {   // the item's box in the game's axes, and where it stands (its origin); an object without a mesh counts as its point
@@ -3422,7 +3456,7 @@ $('save').onclick = () => post('save');
 $('menuSave').onclick = () => $('save').click();
 $('menuUndo').onclick = undo;
 $('menuRedo').onclick = redo;
-menubar({ items: [{ button: $('mbFile'), menu: $('fileMenu') }, { button: $('mbEdit'), menu: $('editMenu') }, { button: $('mbHelp'), menu: $('helpMenu') }] });
+menubar({ items: [{ button: $('mbFile'), menu: $('fileMenu') }, { button: $('mbEdit'), menu: $('editMenu'), onOpen: syncEditMenu }, { button: $('mbHelp'), menu: $('helpMenu') }] });
 popover({ button: $('testMenuBtn'), menu: $('testMenu'), place: true, closeOnItem: true });
 function testGame(here) {
   if (here && !aimStart(true)) {
@@ -5967,7 +6001,10 @@ function init(r, load = true) {
   if (badModName(modNow)) modNow = '';
   fillMods();
   const s = $('stage');
-  const prev = stageName || (new URLSearchParams(location.search).get('stage') || 'CENTRAL').toUpperCase();   // ?stage=METRO
+  // the stage in use, else ?stage=METRO, else the one open when the page closed (a reload keeps it), else CENTRAL
+  let last = ''; try { last = localStorage.getItem('wotmLevelEditor.stage') || ''; } catch (e) { /* none */ }
+  const asked = new URLSearchParams(location.search).get('stage');
+  const prev = stageName || (asked ? asked.toUpperCase() : last) || 'CENTRAL';
   // "Midtown (CENTRAL)", but "UFO" once when the title is the file's name
   s.innerHTML = r.stages.map((x) => `<option value="${x.name}">${x.title}${x.custom ? ` (custom, on ${x.base})` : x.title.toUpperCase() === x.name ? '' : ` (${x.name})`}</option>`).join('');
   stageTitles = Object.fromEntries(r.stages.map((x) => [x.name, x.title]));

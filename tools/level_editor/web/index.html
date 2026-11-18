@@ -54,6 +54,9 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
 <div id="editMenu" class="float menu menu-fixed mb-menu" hidden role="menu" aria-label="Edit">
   <button id="menuUndo" type="button" class="ghost wide" role="menuitem" disabled title="Nothing to undo (Ctrl+Z)"><i class="ic" style="--ic:url(vendor/mdi/undo.svg)"></i><span class="lbl">Undo</span><span class="what"></span><kbd>Ctrl+Z</kbd></button>
   <button id="menuRedo" type="button" class="ghost wide" role="menuitem" disabled title="Nothing to redo (Ctrl+Y)"><i class="ic" style="--ic:url(vendor/mdi/redo.svg)"></i><span class="lbl">Redo</span><span class="what"></span><kbd>Ctrl+Y</kbd></button>
+  <div class="mb-sep" role="separator"></div>
+  <button id="menuRestoreDeleted" type="button" class="ghost wide" role="menuitem" title="Bring back every original object this patch deletes (one Undo step)"><i class="ic" style="--ic:url(vendor/mdi/restore.svg)"></i><span class="lbl">Restore all deleted</span></button>
+  <button id="menuRestoreDefault" type="button" class="ghost wide" role="menuitem" title="Throw away every change of this stage's patch: the stage goes back to the disc's (asks first; Undo brings it back)"><i class="ic" style="--ic:url(vendor/mdi/restore.svg)"></i><span class="lbl">Restore to default…</span></button>
 </div>
 <div id="helpMenu" class="float menu menu-fixed mb-menu" hidden role="menu" aria-label="Help">
   <button id="help" type="button" class="ghost wide" role="menuitem" title="Keyboard shortcuts (? or F1)"><i class="ic" style="--ic:url(vendor/mdi/keyboard-outline.svg)"></i><span class="lbl">Keyboard shortcuts</span><kbd>?</kbd><kbd>F1</kbd></button>
