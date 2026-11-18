@@ -33,6 +33,11 @@ C = [[1, 0, 0, 0], [0, 0, -1, 0], [0, 1, 0, 0], [0, 0, 0, 1]]
 CI = [[1, 0, 0, 0], [0, 0, 1, 0], [0, -1, 0, 0], [0, 0, 0, 1]]
 
 
+# what holds a piece with no handle (the first node above it that is not a plain GROUP; lvl.LevelPatch.CLEAR_COVER), for extras.scripted
+COVER_NAMES = {3: "translate", 4: "rotate", 30: "scale", 6: "switch", 31: "destructible", 39: "interactive",
+               25: "character instance", 17: "animation", 35: "bone", 38: "animation scale"}
+
+
 def gl_matrix(m):
     n = ngp.mul(ngp.mul(CI, m), C)
     return [float(n[r][c]) for r in range(4) for c in range(4)]
@@ -133,12 +138,14 @@ def export(st, objs, disc, out, lod=99, on=None):
 
     in_clouds = [0]     # > 0 while walking below a CHAR_INSTANCE (op 25)
 
-    def walk(node, m, owner, state, depth=0, gs=ngp.GS_DEFAULT, sky=False, bare=True):
+    def walk(node, m, owner, state, depth=0, gs=ngp.GS_DEFAULT, sky=False, bare=True, cover=None):
         if depth > 64 or not img.ok(node, 4):
             return
         op = img.u32(node) & 63
         # bare scenery (what the patch's "clear" takes out, lvl.py scenery_plan): no handle, no cover node above, outside the sky
         bare = bare and not sky and isinstance(owner, str) and op not in lvl.LevelPatch.CLEAR_COVER
+        if cover is None and op in lvl.LevelPatch.CLEAR_COVER:
+            cover = op      # the first node above that is no plain GROUP: what holds the pieces below it (extras.scripted)
         if not sky and op not in (0, 0x1F, 0x27) and img.u32(node) >> 18 == 2:   # 0x1F/0x27 are destructibles (dbProcInteractive)
             # the sky (viewSetSkyEntry): drawn on its own, around the camera; the transforms above it do not apply
             if "sky" not in handle_node:
@@ -162,7 +169,7 @@ def export(st, objs, disc, out, lod=99, on=None):
                 open_handle(child, ngp.mul(lm, mm) if lm else mm, par)     # nested: relative to the owner's node
                 walk_handle(child, gs)
             elif child not in by_handle:
-                walk(child, mm, owner, state, depth + 1, gs, sky, bare)
+                walk(child, mm, owner, state, depth + 1, gs, sky, bare, cover)
 
         if op == 0:
             mi = mesh(node, gs)
@@ -170,8 +177,11 @@ def export(st, objs, disc, out, lod=99, on=None):
             if mi is not None:
                 # a mesh under a CHAR_INSTANCE of the sky is the cloud layer (the editor shows it apart from the dome: extras.clouds);
                 # extras.obj is its OBJECT's address, which the patch's sky models name (editor.py Stages.plans)
+                # extras.scripted: a piece of the stage's own scene that has no handle and is not bare scenery either (animated parts, switches,
+                # character instances, a transform with no entry in "objects"); the game moves, shows and hides them, the file keeps them at rest
                 ex = ({"obj": "%x" % node, **({"clouds": True} if in_clouds[0] else {})} if sky
-                      else {"bare": True} if bare and not img.u32(node) >> 6 else None)
+                      else {"bare": True} if bare and not img.u32(node) >> 6
+                      else {"scripted": COVER_NAMES.get(cover, "node with an id")} if isinstance(owner, str) else None)
                 new_node({"mesh": mi, "matrix": gl_matrix(m), **({"extras": ex} if ex else {})}, owner_node(owner, state))
                 stats["instances"] += 1
         elif op == 1:
@@ -217,7 +227,7 @@ def export(st, objs, disc, out, lod=99, on=None):
         elif op == 31:      # DESTRUCTIBLE: every state, each in its owner's "stateN"
             for k in range(min(img.u16(node + 0xA), 8)):
                 walk(img.u32(node + 0xC + 12 * k) & lvl.MASK, m, owner, k if not isinstance(owner, str) else state, depth + 1,
-                     gs, sky, bare)
+                     gs, sky, bare, cover)
 
     def walk_handle(h, gs):
         op = img.u32(h) & 63

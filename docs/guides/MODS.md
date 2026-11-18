@@ -872,6 +872,12 @@ System theme (the one the OS uses), in the settings (**File** ▸ **Settings…*
   the entry `floor`; doing it again after a size change builds it again. The slab is at z 0, where the floor's collision is in CENTRAL, VEGAS and CAPITOL (one flat path, its top at z 0); for the other stages check the height of their floor first.
   The dialog also has "Take out the stage's bare scenery" (`"clear": "scenery"`; the view hides the meshes the scene file tags `extras.bare`) and
   "Delete every object" (one Undo step: every original building, pickup and prop gets `delete`): with the size and the floor, the steps of an empty stage.
+- **Scripted parts** (Stage tab ▸ Scene; a panel docked at the right, not modal; only the view, nothing in the patch, Undo or Save): the pieces
+  of the stage's own scene that have no handle and are not bare scenery (what `lvlglb.py` tags `extras.scripted`: they hang under a
+  `CHAR_INSTANCE`, a `SWITCH`, a `TRANSLATE` or `ROTATE` with no entry in `objects`, or a node with an id). The file keeps them at rest, piled near
+  the middle of the map, where the game moves, shows and hides them, so the view hides them. The panel lists them by how
+  the file holds them (a count per group; each piece with its size, triangles and place); the box on a row shows that piece, its name shows it and
+  puts the camera on it, **Show all** and **Hide all** do the rest. Deleting the stage's objects and the patch's `clear` leave them alone.
 - **Start points, Power-ups, AI net and Vehicle net** are four modes of the rail (**3** to **6**), like Pedestrians. In its mode a layer has
   its **Add** bar at the top of the left panel (a type, and Add at the view's aim: with a node selected in a net, the new node is linked to
   it both ways), its meters, its list in sections (click a row and the camera goes to it), and a foot with the file's state, **Revert**
@@ -979,10 +985,10 @@ System theme (the one the OS uses), in the settings (**File** ▸ **Settings…*
   selected; with **Changed** on, every deleted one does (a click on the box selects it), and a green box marks each changed object.
 - **Panels:** the left panel holds **Add** (props, prefabs, models from a file or from the game, terrain; the lens next to it is the
   palette) and the list of objects (arrows, Home, End and Enter work on it). The right panel has two tabs: **Selection** (what is
-  selected) and **Stage** (the stage's name, mod and file, and its tools as labeled rows: Stage size, Sky dome, Cloud layer, Light and
+  selected) and **Stage** (the stage's name, mod and file, and its tools as labeled rows: Stage size, Scripted parts, Sky dome, Cloud layer, Light and
   fog, Textures, Fight HUD and sky, Stage picture; each row says how it saves: **Patch** goes in Save and has Undo, **File** is its own file
-  of the mod that Save writes too, **Now** is written when you confirm). Both panels hide (the button at the rail's foot, and the one on the top bar), and the right one's width is the user's:
-  drag its edge, use the arrows on it, or double click to put it back. The tools that need the view (Stage size, Light and
+  of the mod that Save writes too, **Now** is written when you confirm, **View** is only what the editor draws). Both panels hide (the button at the rail's foot, and the one on the top bar), and the right one's width is the user's:
+  drag its edge, use the arrows on it, or double click to put it back. The tools that need the view (Stage size, Scripted parts, Light and
   fog) open as a panel in the right panel's place, not as a modal dialog, so the camera, the objects and the keys stay in use; the
   right panel is at least 440 px wide while one is open, one tool at a time, and Esc or Close asks before an unsaved draft is thrown
   away. A **File** or **Now** row never goes through the patch's Undo.

@@ -258,6 +258,8 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       </div>
       <div class="sec-title">Size</div>
       <button id="gridBtn" class="srow" type="button" title="Stage size: the collision grid's rectangle (what the game collides, shoots and sees across); a bigger one lets objects go farther out"><i class="ic" style="--ic:url(vendor/mdi/arrow-expand-all.svg)"></i><span class="st"><b>Stage size</b><small>The area the game collides across</small></span><small class="how">Patch</small></button>
+      <div class="sec-title">Scene</div>
+      <button id="scriptBtn" class="srow" type="button" title="Scripted parts: the pieces of the stage's own scene that have no handle (animated parts, effects, switches); the game moves and hides them, the file keeps them piled at rest, so the view hides them"><i class="ic" style="--ic:url(vendor/mdi/eye-off-outline.svg)"></i><span class="st"><b>Scripted parts</b><small id="scriptSub">Pieces the game moves or hides</small></span><small class="how">View</small></button>
       <div class="sec-title">Environment</div>
       <label class="pm-sky" for="pmSky" title="Replaces the sky dome with one of this mod's models in the game, and in the view with Game look (faces turned inward, with a texture)"><span>Sky dome</span><select id="pmSky"></select></label>
       <label class="pm-sky pm-sky2" for="pmClouds" title="Replaces the layer of clouds with one of this mod's models, in the game and in the view with Game look (faces turned inward, with a texture, around the origin)"><span>Cloud layer</span><select id="pmClouds"></select></label>
@@ -267,7 +269,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <button id="texBtn" class="srow" type="button" title="Textures: replace any picture of this stage (buildings, ground, props, particles) with a PNG in your mod"><i class="ic" style="--ic:url(vendor/mdi/image-edit-outline.svg)"></i><span class="st"><b>Textures</b><small>Any picture of the stage, as a PNG</small></span><small class="how">Now</small></button>
       <button id="hud" class="srow" type="button" title="Fight HUD and sky: replace the pictures of this stage's fight HUD and sky with PNGs in your mod"><i class="ic" style="--ic:url(vendor/mdi/monitor-dashboard.svg)"></i><span class="st"><b>Fight HUD and sky</b><small>The fight's bars, icons and sky</small></span><small class="how">Now</small></button>
       <button id="picBtn" class="srow" type="button" title="Use this view as the stage's picture on the stage select (a custom stage, Training, Lake Powell or Tokyo DM)"><i class="ic" style="--ic:url(vendor/mdi/image-frame.svg)"></i><span class="st"><b>Stage picture</b><small>This view, on the stage select</small></span><small class="how">Now</small></button>
-      <p class="help how-key"><b>Patch</b>: goes in Save, with Undo. <b>File</b>: its own file in the mod, which Save writes too. <b>Now</b>: written as soon as you confirm.</p>
+      <p class="help how-key"><b>Patch</b>: goes in Save, with Undo. <b>File</b>: its own file in the mod, which Save writes too. <b>Now</b>: written as soon as you confirm. <b>View</b>: only what the editor draws; nothing is written.</p>
     </div>
     <div id="selTab" role="tabpanel" aria-labelledby="tabSel">
     <div id="noSel">
@@ -685,6 +687,18 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
       <div class="callout err" id="gdErr" hidden><i class="ic" style="--ic:url(vendor/mdi/alert-circle-outline.svg)"></i><span></span></div>
     </div>
     <div class="dlg-foot"><button type="button" data-close>Cancel</button><button id="gdOk" type="button" class="primary">Apply</button></div>
+  </form>
+</dialog>
+<dialog id="scriptDlg" class="dlg dock" aria-labelledby="spTitle">
+  <form method="dialog">
+    <div class="dlg-head"><h2 id="spTitle">Scripted parts</h2>
+      <button type="button" data-close class="icon ghost" title="Close (Esc)" aria-label="Close"><i class="ic" style="--ic:url(vendor/mdi/close.svg)"></i></button></div>
+    <div class="dlg-body">
+      <p class="muted" id="spText"></p>
+      <div class="gd-btns"><button type="button" id="spShowAll">Show all</button><button type="button" id="spHideAll">Hide all</button></div>
+      <div id="spList"></div>
+    </div>
+    <div class="dlg-foot"><button type="button" data-close>Close</button></div>
   </form>
 </dialog>
 <dialog id="palDlg" class="dlg pal" aria-label="Find an object or add a prop">

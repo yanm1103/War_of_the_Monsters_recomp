@@ -1221,6 +1221,8 @@ async function loadStage(name) {
     select(null);
     for (const r of [stageRoot, skyRoot]) if (r) { scene.remove(r); r.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); }
     stageRoot = skyRoot = null;
+    scriptedParts = [];
+    if ($('scriptDlg').open) $('scriptDlg').close('cancel');
     lightClose();
     resetLayers();       // the old stage's markers and drafts go; the new stage's files load after its patch
     if (ruler.on) setRuler(false);       // its points were on the old stage
@@ -1270,6 +1272,7 @@ async function loadStage(name) {
     for (const rec of recs) {
       if (rec.info.on) { const b = byHandle.get(normHandle(rec.info.on)); if (b) b.item.attached.push(rec.item); }
     }
+    collectScripted();
     stageTex = new Map();
     // the sky left stageRoot (setupDrawing) but its textures are the stage's: a sky model names them too
     for (const root of [stageRoot, skyRoot]) if (root) root.traverse((o) => {
@@ -3832,6 +3835,83 @@ $('gdDelAll').onclick = () => {
   refreshList();
   msg(`Deleted ${todo.length} objects. Save when the stage is as you want it`, { level: 'ok', toast: ['Undo', undo] });
 };
+// Scripted parts (Stage tab ▸ Scene): the pieces of the stage's own scene that have no handle and are not bare scenery (animated parts and
+// effects, switches, character instances). The file keeps them piled at rest where the game moves or hides them, so the view hides them;
+// the panel lists them and shows any of them. Only the view: nothing here is in the patch, Undo or Save.
+let scriptedParts = [];      // { node, kind, tris, size [x, y, z] in game units, at [x, y, z], shown }
+const SCRIPT_KINDS = {       // how the file holds a piece (extras.scripted), in the order the panel lists them
+  'character instance': 'Character instances (animated pieces)',
+  translate: 'Placed pieces (a translate with no entry in the list)',
+  rotate: 'Placed pieces (a rotate with no entry in the list)',
+  switch: 'Switches (the game shows or hides them)',
+  'node with an id': 'Pieces with an id of their own',
+};
+function collectScripted() {
+  scriptedParts = [];
+  if (!stageRoot) return;
+  stageRoot.updateMatrixWorld(true);
+  stageRoot.traverse((o) => {
+    const kind = o.userData && o.userData.scripted;
+    if (!kind) return;
+    const box = new THREE.Box3().setFromObject(o);
+    let tris = 0;
+    o.traverse((c) => { if (c.isMesh && c.geometry) tris += Math.round((c.geometry.index ? c.geometry.index.count : c.geometry.attributes.position.count) / 3); });
+    const size = box.isEmpty() ? [0, 0, 0] : toGame(box.getSize(new THREE.Vector3())).map(Math.abs);
+    const c = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
+    scriptedParts.push({ node: o, kind, tris, size, at: toGame(c), shown: false });
+    o.visible = false;
+  });
+  scriptedParts.sort((a, b) => (Object.keys(SCRIPT_KINDS).indexOf(a.kind) - Object.keys(SCRIPT_KINDS).indexOf(b.kind)) || (b.tris - a.tris));
+  showScriptedSub();
+}
+function showScriptedSub() {
+  const n = scriptedParts.length, on = scriptedParts.filter((p) => p.shown).length;
+  $('scriptSub').textContent = !n ? 'This stage has none' : on ? `${n} parts, ${on} shown` : `${n} parts, hidden in the view`;
+}
+function scriptedView(part, on) {
+  part.shown = on;
+  part.node.visible = on;
+}
+function fillScripted() {
+  const list = $('spList');
+  list.textContent = '';
+  $('spText').textContent = scriptedParts.length
+    ? `${scriptedParts.length} pieces of the stage's own scene have no handle: the game moves, shows and hides them, and the file keeps them piled at rest ` +
+      'near the middle of the map, so the view hides them. Tick one to see it; its name opens the camera on it. Deleting the stage\'s objects or its bare scenery leaves them alone.'
+    : 'This stage has no piece like that.';
+  $('spShowAll').disabled = $('spHideAll').disabled = !scriptedParts.length;
+  let last = null, k = 0;
+  for (const p of scriptedParts) {
+    if (p.kind !== last) {
+      last = p.kind; k = 0;
+      const h = document.createElement('div');
+      h.className = 'sec-title';
+      h.textContent = `${SCRIPT_KINDS[p.kind] || p.kind} · ${scriptedParts.filter((q) => q.kind === p.kind).length}`;
+      list.appendChild(h);
+    }
+    k++;
+    const row = document.createElement('div');
+    row.className = 'sp-row';
+    const cb = Object.assign(document.createElement('input'), { type: 'checkbox', checked: p.shown });
+    cb.setAttribute('aria-label', `Show piece ${k}`);
+    cb.onchange = () => { scriptedView(p, cb.checked); showScriptedSub(); };
+    const name = Object.assign(document.createElement('button'), { type: 'button', className: 'ghost sp-name', textContent: `Piece ${k}` });
+    name.title = 'Show it and put the camera on it';
+    name.onclick = () => {
+      scriptedView(p, true); cb.checked = true; showScriptedSub();
+      const box = new THREE.Box3().setFromObject(p.node);
+      if (!box.isEmpty()) focusAt(box.getCenter(new THREE.Vector3()), Math.max(60, box.getSize(new THREE.Vector3()).length()));
+    };
+    const meta = document.createElement('span');
+    meta.className = 'sp-meta';
+    meta.textContent = `${p.size.map((v) => Math.round(v)).join(' × ')} · ${p.tris} tri · at ${p.at.map((v) => Math.round(v)).join(', ')}`;
+    row.append(cb, name, meta);
+    list.appendChild(row);
+  }
+}
+$('scriptBtn').onclick = () => openTool(() => { fillScripted(); $('scriptDlg').show(); });
+$('spShowAll').onclick = () => { for (const p of scriptedParts) scriptedView(p, true); fillScripted(); showScriptedSub(); };
+$('spHideAll').onclick = () => { for (const p of scriptedParts) scriptedView(p, false); fillScripted(); showScriptedSub(); };
 // The collision grid's rectangle on the ground: the disc's in grey, the patch's bigger one in blue
 let gridView = null;
 function updateGridView() {
@@ -5884,11 +5964,13 @@ function requestDockClose(dlg, then) {
   dlg.close('cancel');
   if (then) then();
 }
-$('gridDlg').addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape' || e.defaultPrevented) return;
-  e.preventDefault(); e.stopPropagation();
-  requestDockClose($('gridDlg'));
-});
+for (const id of ['gridDlg', 'scriptDlg']) {
+  $(id).addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.defaultPrevented) return;
+    e.preventDefault(); e.stopPropagation();
+    requestDockClose($(id));
+  });
+}
 // Enter in a field of a form dialog takes its main button (the buttons are type="button", so that Enter never closes the dialog by itself)
 for (const [dlg, btn] of [['stageDlg', 'nsOk'], ['propDlg', 'ipOk'], ['pfDlg', 'pfOk']]) {
   $(dlg).addEventListener('keydown', (e) => {
@@ -6055,7 +6137,7 @@ if (new URLSearchParams(location.search).has('debug')) {
                        get gizmoObject() { return gizmo.object || null; }, get gizmoMode() { return gizmo.getMode(); },
                        get pedSel() { return pedSel; }, get group() { return group; }, get sel() { return sel; },
                        get env() { return env; }, get skyRoot() { return skyRoot; }, get skyViews() { return skyViews; }, get stageRoot() { return stageRoot; },
-                       get skyParts() { return skyParts; }, get stageTex() { return stageTex; }, skyStock, skyTag, pickSky };
+                       get skyParts() { return skyParts; }, get scriptedParts() { return scriptedParts; }, get stageTex() { return stageTex; }, skyStock, skyTag, pickSky };
 }
 showRightTab(store.get('rtab', 'selection') === 'stage' ? 'stage' : 'selection');
 // --vt: the height of the bars over the view (they wrap onto a second row when it is narrow); the menus and the notes sit under them

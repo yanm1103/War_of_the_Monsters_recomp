@@ -969,3 +969,10 @@ main.left-off #left, main.right-off #right { visibility: hidden; padding: 0; bor
 #toggleLeft { margin-top: auto; }
 #bar #toggleRight.on { color: var(--accent-text); }
 #toggleLeft[aria-pressed="false"] { color: var(--muted); }
+/* Scripted parts panel: one row per piece (a switch to show it, its name that opens the camera on it, and what it measures) */
+#spList { margin-top: 4px; }
+#spList .sec-title { margin: 12px 0 4px; }
+.sp-row { display: grid; grid-template-columns: 22px 78px minmax(0, 1fr); gap: 6px; align-items: center; min-height: 28px; }
+.sp-row input[type=checkbox] { margin: 0; justify-self: center; }
+.sp-row .sp-name { height: 24px; padding: 0 6px; justify-self: start; }
+.sp-row .sp-meta { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

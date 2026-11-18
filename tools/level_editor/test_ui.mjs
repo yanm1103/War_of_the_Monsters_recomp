@@ -1352,6 +1352,36 @@ await check('Edit menu: Restore all deleted brings every deleted original back; 
   await ev(`(() => { const D = ${W}; while (JSON.stringify(D.buildPatch()) !== ${JSON.stringify(before)} && D.history.length) D.undo(); })()`);
   must(await ev(`JSON.stringify(${W}.buildPatch())`) === before, 'the stage was not put back as the test found it');
 });
+await check('Scripted parts: hidden in the view by default, listed in a panel on the Stage tab, shown one by one or all, the camera goes to a piece', async () => {
+  const W = 'window.wotmDebug';
+  const n = await ev(`${W}.scriptedParts.length`);
+  must(n > 0, 'CENTRAL should have scripted parts, got ' + n);
+  must(await ev(`${W}.scriptedParts.every((p) => !p.node.visible && !p.shown)`), 'the scripted parts should start hidden');
+  const tagged = await ev(`(() => { let c = 0; ${W}.stageRoot.traverse((o) => { if (o.userData && o.userData.scripted) c++; }); return c; })()`);
+  must(tagged === n, `the list holds ${n} parts but the scene tags ${tagged}`);
+  must(/hidden/.test(await ev(`document.getElementById('scriptSub').textContent`)), 'the row should say they are hidden: ' + await ev(`document.getElementById('scriptSub').textContent`));
+  await ev(`document.getElementById('scriptBtn').click()`);
+  must(await ev(`document.getElementById('scriptDlg').open`), 'the Scripted parts panel did not open');
+  must(await ev(`document.querySelectorAll('#spList .sp-row').length`) === n, 'the panel should list every part');
+  must(await ev(`document.querySelectorAll('#spList .sec-title').length`) >= 2, 'the panel should group the parts by how the file holds them');
+  await shot('scripted_parts_panel');
+  await ev(`document.getElementById('spShowAll').click()`);
+  must(await ev(`${W}.scriptedParts.every((p) => p.node.visible)`), 'Show all left a part hidden');
+  await shot('scripted_parts_all_shown');
+  await ev(`document.getElementById('spHideAll').click()`);
+  must(await ev(`${W}.scriptedParts.every((p) => !p.node.visible)`), 'Hide all left a part shown');
+  // one piece: its box shows it, its name shows it and puts the camera there
+  await ev(`(() => { const c = document.querySelector('#spList .sp-row input'); c.checked = true; c.dispatchEvent(new Event('change')); })()`);
+  must(await ev(`${W}.scriptedParts.filter((p) => p.node.visible).length`) === 1, 'ticking one piece should show exactly that one');
+  const cam0 = await ev(`JSON.stringify(${W}.camera.position.toArray())`);
+  await ev(`document.querySelectorAll('#spList .sp-name')[1].click()`);
+  must(await ev(`${W}.scriptedParts.filter((p) => p.node.visible).length`) === 2, 'the name of a piece should show it');
+  must(await ev(`JSON.stringify(${W}.camera.position.toArray())`) !== cam0, 'the camera did not go to the piece');
+  await ev(`document.getElementById('spHideAll').click()`);
+  await esc();
+  must(await ev(`!document.getElementById('scriptDlg').open`), 'Esc did not close the panel');
+  must(await ev(`${W}.scriptedParts.every((p) => !p.node.visible)`), 'closing the panel left parts shown');
+});
 await check('the open stage is remembered, so a reload opens it and not CENTRAL', async () => {
   must(await ev(`localStorage.getItem('wotmLevelEditor.stage') === document.getElementById('stage').value`), 'the open stage was not remembered: ' + await ev(`localStorage.getItem('wotmLevelEditor.stage')`));
 });
