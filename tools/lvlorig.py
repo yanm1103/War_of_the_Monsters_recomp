@@ -6,7 +6,8 @@
 The object's top node becomes the scene's only root, with its world matrix cleared (the prop stands at the origin, facing heading 0).
 The node's states come along: the broken ones (the nodes lvlglb.py marks hidden) have their meshes renamed state<N>_<name>, which
 makes lvlprop.build a destructible prop. The materials lose the name tex<id> (that id belongs to the source stage; the prop's own
-copy of each image takes its place). Only what the object uses is written.
+copy of each image takes its place), unless keep_tex: a prop for the source stage itself (or a stage built on it) keeps tex<id> and
+draws with the stage's own textures, with no copy in the arena. Only what the object uses is written.
 """
 import json
 import os
@@ -163,7 +164,7 @@ def collision(st, handle):
     return out
 
 
-def extract(scene, handle, stage=None):
+def extract(scene, handle, stage=None, keep_tex=False):
     """The bytes of a .glb with the object `handle` ("0x1051BC0") of the stage scene: a path, or an ngpmesh.Glb already read (it is
     only read, so one can serve many objects). `stage` (a lvl.Stage of the same stage) adds the object's own collision as hull_ and
     coll_ meshes (named state<N>_coll_m<matId>_<k>: the matId is the surface word, so a wall stays a wall the monsters climb)."""
@@ -235,7 +236,8 @@ def extract(scene, handle, stage=None):
                 t = m.get("pbrMetallicRoughness", {}).get(k)
                 if t is not None:
                     t["index"] = texture(t["index"])
-            m["name"] = "orig_" + (m.get("name") or "")      # tex<id> would name a texture of the open stage
+            if not keep_tex:
+                m["name"] = "orig_" + (m.get("name") or "")  # tex<id> would name a texture of the open stage
             out["materials"].append(m)
             maps["materials"][mi] = len(out["materials"]) - 1
         return maps["materials"][mi]

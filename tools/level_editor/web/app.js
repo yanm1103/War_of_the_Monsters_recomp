@@ -5349,7 +5349,8 @@ function origResults(q) {
   return all.slice(origPage * ORIG_ROWS, (origPage + 1) * ORIG_ROWS)
     .map((it) => ({ kind: 'orig', orig: it, label: it.name,
                     meta: `${isHere(it) ? 'This stage' : it.title}${it.kind === 'destr' ? ' · breakable' : ''} · ${it.dims.map((x) => Math.round(x)).join('×')}`,
-                    run: () => (isHere(it) ? addStageModel(it) : addOriginal(it)) }));
+                    tip: isHere(it) && it.kind === 'destr' ? 'Shift+click or Shift+Enter: a prop of the mod instead of a copy (one Interactives slot where a copy takes 3 to 5)' : '',
+                    run: (asProp) => (isHere(it) && !(asProp && it.kind === 'destr') ? addStageModel(it) : addOriginal(it)) }));
 }
 function setPalTab(t) {
   palTab = t;
@@ -5425,14 +5426,14 @@ function palRender(follow = false) {
   const add = (r) => {
     const i = n++, b = document.createElement('button');
     b.type = 'button'; b.className = 'ghost pal-card'; b.setAttribute('role', 'option'); b.setAttribute('aria-selected', i === palIdx);
-    b.title = `${r.label} · ${r.meta}`;
+    b.title = `${r.label} · ${r.meta}${r.tip ? '\n' + r.tip : ''}`;
     const pic = r.pm ? propThumb(r.pm) : r.orig ? origPic(r.orig) : r.key && origBy.get(r.key) ? origPic(origBy.get(r.key)) : null;
     if (pic) { const im = document.createElement('img'); im.src = pic; im.alt = ''; im.className = 'pal-pic'; b.append(im); }
     else { const ph = document.createElement('span'); ph.className = 'pal-pic pal-nopic'; ph.append(icon(r.kind === 'obj' ? 'cube-outline' : 'shape-plus-outline')); b.append(ph); }
     const l = document.createElement('span'), m = document.createElement('span');
     l.className = 'pal-name'; l.textContent = r.label; m.className = 'pal-meta'; m.textContent = r.meta;
     b.append(l, m);
-    b.onclick = () => palPick(r);
+    b.onclick = (ev) => palPick(r, ev.shiftKey);
     grid.appendChild(b);
   };
   if (props.length) {
@@ -5487,7 +5488,7 @@ function palRender(follow = false) {
   if (follow) list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
   else list.scrollTop = top;
 }
-function palPick(r) { $('palDlg').close(); r.run(); }
+function palPick(r, shift = false) { $('palDlg').close(); r.run(shift); }
 function openPalette() {
   if (!stageName || document.querySelector('dialog:modal')) return;
   $('palQ').value = '';
@@ -5530,7 +5531,7 @@ $('palQ').onkeydown = (e) => {
   } else if (e.key === 'PageDown' || e.key === 'PageUp') {
     e.preventDefault();
     origGo(e.key === 'PageDown' ? 1 : -1);
-  } else if (e.key === 'Enter') { e.preventDefault(); if (palRows[palIdx]) palPick(palRows[palIdx]); }
+  } else if (e.key === 'Enter') { e.preventDefault(); if (palRows[palIdx]) palPick(palRows[palIdx], e.shiftKey); }
 };
 
 // New stage…

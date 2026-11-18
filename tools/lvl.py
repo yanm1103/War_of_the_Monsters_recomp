@@ -1202,6 +1202,8 @@ class LevelPatch:
         return h
 
     def delete(self, h):
+        w = self.weights([h])[h]        # its slots go back: copies made after it can take them
+        self.interactives_used -= w[0] + w[1]
         for pa in self.paths_through(h):
             self.set_cells(pa, set())
             self.stats["paths removed"] += 1
@@ -2208,6 +2210,7 @@ class LevelPatch:
             a, b = self.interactives_before, self.interactives()
             self.log.append("interactives: %d of %d before the patch, %d after (%d taken at load, %d debris pickups at most, "
                             "%d spare)" % (sum(a), INTERACTIVES, sum(b), b[0], b[1], b[2]))
+            self.interactives_used = sum(b)     # the count by entry is an upper bound (a copy reached twice); the props start here
 
     def _prop_chains(self, root):
         """Node chains from a prop's root down to each collision leaf (op 10, 11, 42), pre-order in slot order."""
@@ -2375,6 +2378,7 @@ class LevelPatch:
         have = objs = None
         made, summary = [], []          # made: (T|R, model root, chains)
         reserve_group = 0x20 + 4 + 15
+        iu_start = self.interactives_used
         for name in order:
             ents = models[name]
             top = self.arena_top()
@@ -2598,6 +2602,8 @@ class LevelPatch:
                 self.stats["prop paths"] += 1
             self.stats["props"] += 1
         self.log.append("props: %s; %d bytes of the arena" % (", ".join(summary), self.arena_top() - start))
+        self.log.append("interactives: %d of %d with the props (%d destructible props, one slot each)" % (
+            self.interactives_used, INTERACTIVES, self.interactives_used - iu_start))
 
     def apply_peds(self, patch, nets):
         """The patch's "peds" (docs/guides/MODS.md, "Level patches"), after "objects" and before cut_nets: "segments" replaces the

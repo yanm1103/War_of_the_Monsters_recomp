@@ -1355,13 +1355,14 @@ def originals_index(cfg):
 SCENE_GLB = {"lock": threading.Lock(), "key": None, "glb": None}
 
 
-def original_glb(cfg, stage, handle):
-    """The .glb of one original object (lvlorig.extract from the stage's scene), kept on disk next to the scene."""
+def original_glb(cfg, stage, handle, keep_tex=False):
+    """The .glb of one original object (lvlorig.extract from the stage's scene), kept on disk next to the scene. keep_tex: the
+    materials keep tex<id> (a prop for the same stage draws with the stage's textures)."""
     base = base_of(cfg, stage)
     if not re.fullmatch(r"0[xX][0-9A-Fa-f]{1,8}", handle or ""):
         raise ValueError("Not an object handle: %r" % handle)
     scene = STAGES.glb(cfg["disc"], base)
-    path = os.path.join(CACHE, "orig", "%s-%s-%X.glb" % (base, disc_key(cfg["disc"]), int(handle, 16)))
+    path = os.path.join(CACHE, "orig", "%s-%s-%X%s.glb" % (base, disc_key(cfg["disc"]), int(handle, 16), "-tex" if keep_tex else ""))
     if not (os.path.isfile(path) and os.path.getmtime(path) >= os.path.getmtime(scene)
             and os.path.getmtime(path) >= module_stamp(lvlorig)):
         with SCENE_GLB["lock"]:            # the last scene read stays: the objects of one stage come one after another
@@ -1369,7 +1370,7 @@ def original_glb(cfg, stage, handle):
             if SCENE_GLB["key"] != key:
                 SCENE_GLB.update(key=None, glb=None)
                 SCENE_GLB.update(glb=lvlorig.ngpmesh.Glb(scene), key=key)
-            data = lvlorig.extract(SCENE_GLB["glb"], handle, STAGES.objects(cfg["disc"], base)[0])
+            data = lvlorig.extract(SCENE_GLB["glb"], handle, STAGES.objects(cfg["disc"], base)[0], keep_tex)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path + ".tmp", "wb") as f:
             f.write(data)
@@ -1413,10 +1414,12 @@ def original_prop(cfg, b):
     found = next((d for d in describe(src, objs, on, STAGES.facts(cfg["disc"], src), load_names()) if d["handle"] == handle), None)
     if not found or found["kind"] not in lvlorig.KINDS or not found["sig"]:
         raise ValueError("%s has no object %s that can be a prop" % (src, handle or "?"))
-    origin = {"stage": src, "handle": handle, "sig": found["sig"]}
+    own = src == base_of(cfg, (b.get("stage") or "").upper()).upper()     # the open stage's own model: its textures are there
+    origin = {"stage": src, "handle": handle, "sig": found["sig"], **({"stageTextures": True} if own else {})}
     for p in props_list(cfg, mod):          # made before from the same model of that stage
         o = p.get("origin") or {}
-        if o.get("stage") == src and o.get("sig") == found["sig"] and p.get("stage") == base_of(cfg, (b.get("stage") or "").upper()).upper():
+        if (o.get("stage") == src and o.get("sig") == found["sig"] and bool(o.get("stageTextures")) == own
+                and p.get("stage") == base_of(cfg, (b.get("stage") or "").upper()).upper()):
             return {"prop": p, "lines": [], "reused": True}
     d = props_dir(cfg, mod)
     name = None
@@ -1428,7 +1431,7 @@ def original_prop(cfg, b):
     if not name:
         raise ValueError("No free model name for %s in mod %s" % (src, mod))
     body = {"mod": mod, "stage": b.get("stage"), "name": name, "units": "game", "title": "%s (%s)" % (found["name"], STAGE_TITLE.get(src, src)),
-            "data": base64.b64encode(original_glb(cfg, src, handle)).decode()}
+            "data": base64.b64encode(original_glb(cfg, src, handle, own)).decode()}
     out = import_prop(cfg, body)
     folder = os.path.join(props_dir(cfg, mod), name)
     pj = os.path.join(folder, "prop.json")

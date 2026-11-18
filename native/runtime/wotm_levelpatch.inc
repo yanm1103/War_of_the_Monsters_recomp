@@ -760,6 +760,9 @@ struct Stage
     }
     void erase(uint32_t h)
     {
+        std::unordered_map<uint32_t, Weight> wm;   // as vagas dele voltam: copias depois dele podem toma-las
+        weigh(h, wm);
+        interUsed -= wm[h].load + wm[h].deb;
         for (uint32_t pa : pathsThrough(h)) setCells(pa, {}), ++stats["paths removed"];
         w32(h, (u32(h) & ~63u) | NUL);
         ++stats["deleted"];
@@ -1881,6 +1884,7 @@ struct Stage
             log.push_back(fmt("interactives: %lld de %lld antes do patch, %lld depois (%lld na carga, %lld pedacos de destroco com pickup no "
                               "pior caso, %lld de folga)", (long long)(interBefore[0] + interBefore[1] + interBefore[2]), (long long)kInteractives,
                               (long long)(b[0] + b[1] + b[2]), (long long)b[0], (long long)b[1], (long long)b[2]));
+            interUsed = b[0] + b[1] + b[2];   // a conta por item e um teto (copia alcancada duas vezes); os props partem daqui
         }
     }
 

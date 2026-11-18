@@ -635,7 +635,8 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   dominoes of its neighbours aimed at it.
 - Copies cost room: each one takes arena bytes (8 MB for the whole patch) and slots in the game's table of breakable objects (1024).
   An entry whose copies do not fit is skipped before anything is written. `lvl.py patch` and the log print the table's use:
-  `interactives: 348 of 1024 before the patch, 355 after (...)`.
+  `interactives: 348 of 1024 before the patch, 355 after (...)`, and, when the patch has props, a second line with the total that
+  counts the destructible props too (`interactives: 495 of 1024 with the props (140 destructible props, one slot each)`).
 - Objects that sit on a building (water tanks and vents on the roof, items on its sidewalk base) are pickups of their own and do not
   follow it: move or delete them in the same patch. `lvl.py objects` marks them with `on <handle>`.
 - Traffic and pedestrians follow their own paths (`PTS/<FASE>.FOP` and `.PED`, `FORMATS.md`, "Path nets") and never look at the
@@ -837,7 +838,11 @@ System theme (the one the OS uses), in the settings (**File** ▸ **Settings…*
   selects and frames the first of them). Each picture is rendered by the
   editor once and kept as a PNG in its cache folder (`origpic192`), so later searches show it at once; the palette's footer counts the
   pictures not rendered yet and **Render all** makes them in one go (a few minutes; the editor's address with `?bake=1` does it on load,
-  in a browser window of its own). A card of the open stage's own models adds a copy of that object, as Copy does. Picking one of another
+  in a browser window of its own). A card of the open stage's own models adds a copy of that object, as Copy does; Shift+click or
+  Shift+Enter on one of its breakable buildings builds it as a prop instead (below), which takes one Interactives slot for each entry
+  where a copy takes its load and its debris pickups (3 to 5 for a building), so a stage filled with hundreds of buildings stays under
+  the 1024. Such a prop keeps the stage's own textures (materials named `tex<id>`, no copies; `origin.stageTextures` in its
+  `prop.json`), a few tens of KB of the arena per model. Picking one of another
   stage builds it as a prop of the mod for the open stage (`tools/lvlorig.py` takes the object out of
   the stage's scene, `lvlprop.py` builds it with units `game`), named from the stage and the model's signature (`VEG_B533`), with
   `origin` in its `prop.json`, and adds it like any prop; picking the same model again reuses the prop. The prop keeps its triangles,
