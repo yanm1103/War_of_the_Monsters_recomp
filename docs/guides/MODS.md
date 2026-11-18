@@ -682,8 +682,10 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   invisible walls and the ceiling, scenery blocks, smoke emitters). Each `OBJECT` and `PART_EMITTER` of it leaves its parent (the slot
   points to one `NULL` node; the node is not written, so a copy of another object that shares it keeps it) and each of its `POLY_COLL`
   and `COLL_VOL` paths leaves every cell of the grid. Left alone: what has a handle (delete those with `objects`; `python tools/lvl.py
-  objects <FASE>` lists them), the animated and scripted parts (cranes, a boss's set), the sky, the lights, the camera triggers and a
-  node with an id. It runs first, so `objects`, `props` and `copies` still add what they bring. After it the stage has no floor: give
+  objects <FASE>` lists them), the animated and scripted parts (cranes, a boss's set), the sky, the lights, the camera triggers, a
+  node with an id and everything below a node the game finds by id (`dbProcInteractive`: the particle textures `0x1B58..0x1C1F`, whose
+  `OBJECT` gives the pedestrians and the dust their texture, the HUD elements, weapons, power-ups and end points; not the world root,
+  id 1). It runs first, so `objects`, `props` and `copies` still add what they bring. After it the stage has no floor: give
   it one as a `coll_*` prop over a bigger `grid` ("Stage size", `Apply and add a floor over it`). A stage with nothing bare skips it
   with a line. Log: `clear: 336 OBJECTs e emissores do cenario nu fora, 7 caminhos de colisao fora`.
 - `props` (at the top beside `objects`): new static objects made in Blender, placed in the stage.
