@@ -990,7 +990,9 @@ function applyPatch(patch) {
     if (okScale(extra.scale)) { rec.item.scale = extra.scale; delete extra.scale; }
     rec.extra = Object.keys(extra).length ? extra : null;
     for (const c of e.copies || []) makeCopy(rec, c.pos, c.heading ?? rec.h0, c.name || '', c);
-    if (e.delete) { rec.deleted = true; rec.node.visible = false; }
+    // (an object with no handle of its own, movable: false, cannot be deleted: the entry would only be refused, so it is dropped)
+    if (e.delete && rec.info.movable !== false) { rec.deleted = true; rec.node.visible = false; }
+    else if (e.delete) { /* dropped */ }
     else if (e.pos || e.heading !== undefined) setWorld(rec.node, e.pos || rec.pw, e.heading ?? rec.h0, rec);
     if (rec.item.scale != null && !e.delete && !(e.pos || e.heading !== undefined)) refreshScale(rec);
   }
@@ -2466,9 +2468,15 @@ function remove() {
     return;
   }
   if (!group.length || isDeleted(sel)) return;
+  const fixed = group.filter((it) => !it.copy && it.rec.info && it.rec.info.movable === false);   // no handle of its own: the patch cannot delete it
+  if (fixed.length === group.length) {
+    msg(`${countText(fixed)} cannot be deleted: it has no handle of its own, so the patch cannot reach it and the game keeps it`, { level: 'warn', toast: true });
+    return;
+  }
   snapshot('delete ' + whatSel());
-  const main = group.filter((it) => it.node.visible), on = new Set();
+  const main = group.filter((it) => it.node.visible && !fixed.includes(it)), on = new Set();
   for (const it of [...group]) {
+    if (fixed.includes(it)) continue;
     hideRec(it);
     if ($('carry').checked) for (const a of it.attached) { if (a.node.visible && !group.includes(a)) on.add(a); hideRec(a); }
   }
@@ -3828,12 +3836,19 @@ function updateClearView() {
 }
 // Delete every original object (the dialog's button): one Undo step
 $('gdDelAll').onclick = () => {
-  const todo = recs.filter((r) => !r.deleted);
-  if (!todo.length) { gdErr('Every object is already deleted.'); return; }
+  // an object with no handle of its own (movable: false) is out of the patch's reach: the game keeps it, so it stays here too
+  const fixed = recs.filter((r) => !r.deleted && r.info.movable === false);
+  const todo = recs.filter((r) => !r.deleted && r.info.movable !== false);
+  if (!todo.length) { gdErr(fixed.length ? 'Every object that can be deleted already is.' : 'Every object is already deleted.'); return; }
   snapshot('delete every object');
   for (const r of todo) { r.deleted = true; r.item.node.visible = false; }
   refreshList();
-  msg(`Deleted ${todo.length} objects. Save when the stage is as you want it`, { level: 'ok', toast: ['Undo', undo] });
+  let left = '';
+  if (fixed.length) {
+    const where = fixed.map((r) => { const b = new THREE.Box3().setFromObject(r.node); return b.isEmpty() ? '' : ' near ' + toGame(b.getCenter(new THREE.Vector3())).slice(0, 2).map(Math.round).join(', '); });
+    left = `. ${fixed.length === 1 ? '1 object has' : `${fixed.length} objects have`} no handle of their own, so the patch cannot delete ${fixed.length === 1 ? 'it' : 'them'} and the game keeps ${fixed.length === 1 ? 'it' : 'them'}${where.length === 1 ? where[0] : ''}`;
+  }
+  msg(`Deleted ${todo.length} objects${left}. Save when the stage is as you want it`, { level: fixed.length ? 'warn' : 'ok', toast: ['Undo', undo] });
 };
 // Scripted parts (Stage tab ▸ Scene): the pieces of the stage's own scene that have no handle and are not bare scenery (animated parts and
 // effects, switches, character instances). The file keeps them piled at rest where the game moves or hides them, so the view hides them;
@@ -6137,7 +6152,7 @@ if (new URLSearchParams(location.search).has('debug')) {
                        get gizmoObject() { return gizmo.object || null; }, get gizmoMode() { return gizmo.getMode(); },
                        get pedSel() { return pedSel; }, get group() { return group; }, get sel() { return sel; },
                        get env() { return env; }, get skyRoot() { return skyRoot; }, get skyViews() { return skyViews; }, get stageRoot() { return stageRoot; },
-                       get skyParts() { return skyParts; }, get scriptedParts() { return scriptedParts; }, get stageTex() { return stageTex; }, skyStock, skyTag, pickSky };
+                       get skyParts() { return skyParts; }, get scriptedParts() { return scriptedParts; }, restoreTo, get stageTex() { return stageTex; }, skyStock, skyTag, pickSky };
 }
 showRightTab(store.get('rtab', 'selection') === 'stage' ? 'stage' : 'selection');
 // --vt: the height of the bars over the view (they wrap onto a second row when it is narrow); the menus and the notes sit under them

@@ -2061,6 +2061,13 @@ class LevelPatch:
             try:
                 hv = e.get("handle")
                 h = int(hv, 0) if isinstance(hv, str) else int(hv or 0)
+                if e.get("delete") and h in st.root_of:
+                    # an object inside another one (a sign on a roof, in a state of the building) that an earlier entry deleted:
+                    # the node above is NULL now, so it is gone with it and its position no longer adds up to "from"
+                    up = next((a for a in st.chain(h)[:-1] if self.op(a) == 9), None)
+                    if up is not None:
+                        self.log.append("entry %d: handle %07x is inside %07x, which an earlier entry deleted: it goes with it" % (k, h, up))
+                        continue
                 if h not in st.root_of or self.op(h) not in (3, 4):
                     raise PatchError("handle %07x is not a TRANSLATE/ROTATE of the stage" % h)
                 if len(st.parents[h]) != 1:
