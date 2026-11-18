@@ -703,7 +703,10 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   (`<MODEL>_T<slot>.png` in the folder) at its own size, and the game keeps a copy of at most 128 x 128 (CT32) in the arena, with a
   texId past the loaded textures and the smallest texture bin of the stage it fits in (log `[fase]   props: KRAB KRAB_T0.png:
   textura propria 128x128, tex335, caixa de 65536 bytes` and `[mods] prop tex335 <- <mod>/props/KRAB/KRAB_T0.png`). The UVs are
-  clamped to the image (no tiling). A mesh with no vertex colors takes the stage's sun
+  clamped to the image (no tiling). Each material's OBJECT gets a `zBufferFudge` of 1 (drawn where it is); a material with the
+  custom property `zFudge` (between 0.5 and 2; Blender writes it to the material's glTF extras) gets that value, and a value a little
+  over 1 (the stage's decals and window panes use 1.003 to 1.005) pulls that material toward the camera, in front of a face it lies on.
+  A mesh with no vertex colors takes the stage's sun
   (its three parallel lights, as the cars do); a mesh with vertex colors keeps them as its light (bake the light in Blender), and
   `--light vertex|dir` forces one way for the whole prop. `pos` is where the model's origin goes; `heading` (degrees,
   default 0) turns it about Z. `pitch` and `roll` (degrees, default 0) tip it first, about its own origin: pitch about its X axis (its
@@ -843,7 +846,8 @@ System theme (the one the OS uses), in the settings (**File** ▸ **Settings…*
   each break) and its own collision, state by state, with the original surface words (the climbable walls, the walkable rubble; an
   object with no collision of its own collides as the box of its bounds). A part the stage drew without blending draws without it
   (`PRIM.ABE` 0) and with the GS's opaque vertex alpha, and a texture whose alpha passes 0x80 keeps the raw alpha in its PNG (the stage's
-  scale; the vertex alpha around 0x42 counts on it). The source stage's other blending,
+  scale; the vertex alpha around 0x42 counts on it). Each part keeps its OBJECT's `zBufferFudge` (`tools/lvlglb.py` writes a value
+  other than 1 as the material's `zFudge` extra), so a sign or a window pane stays in front of the wall it lies on. The source stage's other blending,
   pickups, vehicles and animated parts do not come along.
 - **Fight HUD and sky** (Stage tab ▸ Pictures): the pictures of the stage's fight HUD and of its sky (the OBJECTs under the nodes with id 2),
   each replaceable by a PNG in the mod (`<stage>_tNNNN.png`, "Textures as PNG"). A sky picture is the stage's own (never "apply to all").

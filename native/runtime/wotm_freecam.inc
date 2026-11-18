@@ -34,13 +34,15 @@ static View update(const wotm::GameCamera &gc)
     View v;
     bool on = g_wotmFreeCam.load(std::memory_order_relaxed);
     // Teste sem teclado (WOTM_FREECAM=<s>): liga s segundos depois da primeira fase na tela, sobe e gira sozinha por 10 s e desliga.
-    // Com pose (WOTM_FREECAM=<s>@x,y,z,rumo,inclinacao; graus, rumo 0 olha para +Y e cresce para +X): liga ali, fica parada e nao desliga
+    // Com pose (WOTM_FREECAM=<s>@x,y,z,rumo,inclinacao[,vaivem]; graus, rumo 0 olha para +Y e cresce para +X): liga ali e nao desliga;
+    // parada, ou com vaivem indo e voltando de lado esse tanto de unidades (seno, 4 s), para ver o que so falha com a camera andando
     static const double autoAt = std::getenv("WOTM_FREECAM") ? std::atof(std::getenv("WOTM_FREECAM")) : -1.0;
-    static float fixedPose[5];
+    static float fixedPose[6];
     static const bool fixed = [] {
         const char *e = std::getenv("WOTM_FREECAM");
         const char *at = e ? std::strchr(e, '@') : nullptr;
-        return at && std::sscanf(at + 1, "%f,%f,%f,%f,%f", &fixedPose[0], &fixedPose[1], &fixedPose[2], &fixedPose[3], &fixedPose[4]) == 5;
+        return at && std::sscanf(at + 1, "%f,%f,%f,%f,%f,%f", &fixedPose[0], &fixedPose[1], &fixedPose[2], &fixedPose[3], &fixedPose[4],
+                                 &fixedPose[5]) >= 5;
     }();
     static double firstT = -1.0;
     if (firstT < 0.0) firstT = GetTime();
@@ -123,6 +125,13 @@ static View update(const wotm::GameCamera &gc)
     {
         p.pos[2] += 30.f * dt;
         p.heading += 0.25f * dt;
+    }
+    if (autoStage == 1 && fixed && fixedPose[5] != 0.f)
+    {
+        float r[3], f[3], u[3];
+        wotmFreeCamAxes(p, r, f, u);
+        const float side = fixedPose[5] * std::sin(float(autoT) * 1.5707963f);
+        for (int i = 0; i < 3; ++i) p.pos[i] = fixedPose[i] + r[i] * side;
     }
     v.on = true;
     v.pose = p;

@@ -23,7 +23,10 @@ GROUP 0x0102 -> COLL_VOL (op 10, 6 planes from the visual's bounds). OBJECTs and
 Template ("first-object-roundtrip"): the first OBJECT of the stage's world root, by address, that round-trips in vifpkt and is
 rigid, one texture, strip sections with fog (PRIM.FGE), texture and the asked ABE (default 1, the stages' majority),
 fogBurnThru below 255, no alphaSort, environment map, UV scroll, color animation nor animated or sky node above it. The OBJECT
-header (shadow bits, fogBurnThru) and the GIF tags come from it; pointLight (0x80, the fire's lights) is always on. PRIM.ABE
+header (shadow bits, fogBurnThru) and the GIF tags come from it; pointLight (0x80, the fire's lights) is always on, and
+zBufferFudge (+0x28) is 1 (the template's can be a layer the stage pulls toward the eye, CENTRAL's 1.011), or a material's
+extras.zFudge (tools/lvlglb.py; a Blender material's custom property): the OBJECTs of that material get it, and the layer
+stays in front of a wall it lies on (a sign, a window), as in the stage. PRIM.ABE
 is the template's, except where the stage draws with no blending: with units `game`, an OBJECT whose material says so
 (tools/lvlglb.py: extras.gs.blend null) gets ABE 0; a material tex<ID> with no extras.gs takes the ABE most of the stage's
 rigid OBJECTs with that texture use and, with ABE 1, their vertex alpha as its full alpha (stage_tex_abe: 0x42 for most). Most
@@ -428,7 +431,8 @@ def own_ctx(tw, th, tex1):
 
 def read_glb(path, units, scale=None, height=None, warn=print):
     """Triangles of the .glb in the game's axes and units: ({key: [((x, y, z), n8, uv16, rgba) x 3]}, scale, stats).
-    key = ("tex", texId, op, vc), ("img", image, op, vc) or ("color", op, vc); op: 1 the stage drew the material with no
+    key = ("tex", texId, fz, op, vc), ("img", image, fz, op, vc) or ("color", fz, op, vc); fz: the material's extras.zFudge
+    (1 without it), the OBJECTs' zBufferFudge; op: 1 the stage drew the material with no
     blending (units `game`, extras.gs.blend null: ABE 0), 0 with blending (extras.gs.blend set), -1 no extras.gs (build: a
     tex<ID> takes the stage's ABE for it); vc: the triangles came with COLOR_0. The result is state 0's (the meshes with no
     prefix); a mesh named state<N>_... belongs to state N of a destructible prop (stats["more"][N] = {"by_key", "hulls",
@@ -504,7 +508,13 @@ def read_glb(path, units, scale=None, height=None, warn=print):
             # and a prop draws with the template's ABE: the alpha goes to the GS's opaque (0x80) or the building shows through
             gsx = ((glb.j.get("materials") or [{}])[prim["material"]].get("extras") or {}).get("gs") if "material" in prim else None
             op = (1 if gsx.get("blend") is None else 0) if units == "game" and isinstance(gsx, dict) else -1
-            key += (op,)             # 1: ABE 0 on its OBJECTs (level_batches), the texture's raw alpha past 0x80 would double the color
+            # zBufferFudge: a layer over a wall (a sign, the windows) is drawn pulled toward the eye; without it the two are coplanar
+            mx = ((glb.j.get("materials") or [{}])[prim["material"]].get("extras") or {}) if "material" in prim else {}
+            fz = mx.get("zFudge", 1.0) if isinstance(mx, dict) else 1.0
+            if not isinstance(fz, (int, float)) or not 0.5 < fz < 2.0:
+                warn("mesh %s: zFudge %r is not a number between 0.5 and 2 (1 used)" % (name, fz))
+                fz = 1.0
+            key += (float(fz), op)   # op 1: ABE 0 on its OBJECTs (level_batches), the texture's raw alpha past 0x80 would double the color
             at = prim["attributes"]
             pos = glb.accessor(at["POSITION"])
             nrm = glb.accessor(at["NORMAL"]) if "NORMAL" in at else None
@@ -756,10 +766,10 @@ def _batch_points(batches):
     return [tuple(struct.unpack("<f", struct.pack("<I", x))[0] for x in p) for b in batches for p in b.pos]
 
 
-def level_object(mb, header, batches, slot, light, ctx=None):
+def level_object(mb, header, batches, slot, light, ctx=None, fudge=1.0):
     """A rigid stage OBJECT for the batches: the template's header (0x70 bytes) with id 0, polyPkt, numVerts, sphere, one
     texture slot (texId and context hold the slot; None: untextured; `ctx`: the context of a texture of the prop's own, written
-    as it is) and dirLight per `light`. Returns its address."""
+    as it is), dirLight per `light` and zBufferFudge `fudge`. Returns its address."""
     pkt = vifpkt.Packet(False)
     pkt.batches = batches
     blob = vifpkt.encode(pkt)
@@ -780,6 +790,7 @@ def level_object(mb, header, batches, slot, light, ctx=None):
         mb.f(a + 0x10 + 4 * c, ctr[c])
     mb.f(a + 0x1C, rad)
     mb.f(a + 8, rad * rad)
+    mb.f(a + 0x28, fudge)
     for k in range(5):
         mb.u16(a + 0x50 + 2 * k, 0)
     if slot is None:
@@ -1260,10 +1271,11 @@ def build(glb_path, out_dir, stage, units="blender", scale=None, height=None, na
                 tris = [tuple(c[:3] + (c[3][:3] + (min(255, int(round(c[3][3] * va / 0x80))),),) for c in t) for t in tris]
             for grp in split_objects(level_batches(tris, gif0, gifn, textured, oabe)):
                 slot = slot_of[key[:2]] if textured else None
-                a, nv, nb = level_object(mb, header, grp, slot, lt, own_ctx_of.get(slot))
+                a, nv, nb = level_object(mb, header, grp, slot, lt, own_ctx_of.get(slot), key[-3])
                 kids.append(a)
                 stats_obj.append({"object": "0x%X" % a, "state": si, "texId": key[1] if key[0] == "tex" else None,
-                                  "image": key[1] if key[0] == "img" else None, "vertices": nv, "light": lt, "abe": oabe})
+                                  "image": key[1] if key[0] == "img" else None, "vertices": nv, "light": lt, "abe": oabe,
+                                  **({"zFudge": key[-3]} if key[-3] != 1.0 else {})})
                 nverts += nv
                 pbytes += nb
                 spts += _batch_points(grp)
@@ -1645,6 +1657,8 @@ def preview(prop, st, disc, out, textures=False):
         extras = {"fog": bool(burn < 255), "ot": bool(flags & 0x8000), "zmsk": bool(gs[2])}
         if flags & 0x100:
             extras["dirLight"] = True
+        if img.f32(n + 0x28) != 1.0:
+            extras["zFudge"] = round(img.f32(n + 0x28), 6)
         groups = {}
         for k in range(0, len(md.tris), 3):
             groups.setdefault(md.tris[k + 2].slot, []).append(md.tris[k:k + 3])

@@ -14,8 +14,9 @@ Colors are the GS's raw bytes (asset extras.gsRaw): COLOR_0 = vertex RGBA / 255 
 (0x80 = 1.0), for a viewer that does the GS's modulation (C = Ct * Cv >> 7, As = At * Av >> 7) itself. Each material carries
 the GS state inherited from the nodes' ctx (extras.gs: ALPHA_1 with ABE, alpha test ref, ZMSK with ABE; tools/gltf.py) plus
 extras.zmsk (ZMSK with or without ABE), extras.fog (the OBJECT's fogBurnThru below 255: the fog applies), extras.ot
-(alphaSort: drawn after the rest, far to near) and, on the OBJECTs with dirLight, extras.dirLight (the vertex color times the
-.MRS's three parallel lights). The .glb is derived from the user's disc: it goes to a cache, never to the repo.
+(alphaSort: drawn after the rest, far to near), on the OBJECTs with dirLight, extras.dirLight (the vertex color times the
+.MRS's three parallel lights) and, on the OBJECTs with a zBufferFudge (+0x28) other than 1, extras.zFudge (the layer the stage
+pulls toward the eye: signs and windows over a wall). The .glb is derived from the user's disc: it goes to a cache, never to the repo.
 """
 import collections
 import os
@@ -74,6 +75,9 @@ def export(st, objs, disc, out, lod=99, on=None):
         extras = {"fog": bool(burn < 255), "ot": bool(flags & 0x8000), "zmsk": bool(gs[2])}
         if flags & 0x100:
             extras["dirLight"] = True
+        fz = img.f32(node + 0x28)
+        if fz != 1.0:
+            extras["zFudge"] = round(fz, 6)
         prims = []
         for slot, tris in sorted(groups.items()):
             verts, index, idx = {}, [], []
