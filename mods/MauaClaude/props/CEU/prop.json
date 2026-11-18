@@ -1,0 +1,76 @@
+{
+ "format": 1,
+ "model": "CEU",
+ "name": "Ceu azul",
+ "stage": "CENTRAL",
+ "source": "source.glb",
+ "units": "blender",
+ "scale": 6.0,
+ "kind": "static",
+ "light": "auto",
+ "textures": [
+  {
+   "slot": 0,
+   "image": "ceu_azul",
+   "png": "CEU_T0.png",
+   "size": [
+    16,
+    128
+   ],
+   "packet": "0x80",
+   "game": [
+    16,
+    128
+   ],
+   "bytes": 8192
+  }
+ ],
+ "template": {
+  "rule": "first-object-roundtrip",
+  "abe": 1,
+  "object": "0xB08290",
+  "bits": "0x20210090"
+ },
+ "bounds": {
+  "min": [
+   -9900.0,
+   -9900.0,
+   -9900.0
+  ],
+  "max": [
+   9900.0,
+   9900.0,
+   9900.0
+  ]
+ },
+ "collision": {
+  "auto": "box",
+  "poly": 0,
+  "polys": [],
+  "hull": 0,
+  "hulls": [],
+  "tris": 0,
+  "matId": 1
+ },
+ "objects": [
+  {
+   "object": "0xA0E6F0",
+   "state": 0,
+   "texId": null,
+   "image": 0,
+   "vertices": 1930,
+   "light": "vertex",
+   "abe": 1
+  }
+ ],
+ "triangles": 832,
+ "vertices": 1930,
+ "packetBytes": 50672,
+ "bytes": 59504,
+ "root": "0xA0E840",
+ "files": {
+  "ngp": "CEU.NGP",
+  "ptr": "CEU.PTR",
+  "preview": "CEU.preview.glb"
+ }
+}

@@ -1,0 +1,301 @@
+{
+ "format": 1,
+ "model": "ONIBUS",
+ "name": "City bus",
+ "stage": "CENTRAL",
+ "source": "source.glb",
+ "units": "blender",
+ "scale": 6.0,
+ "kind": "destructible",
+ "light": "auto",
+ "textures": [
+  {
+   "slot": 0,
+   "image": "onibus",
+   "png": "ONIBUS_T0.png",
+   "size": [
+    512,
+    512
+   ],
+   "packet": "0x80",
+   "game": [
+    128,
+    128
+   ],
+   "bytes": 65536
+  }
+ ],
+ "template": {
+  "rule": "first-object-roundtrip",
+  "abe": 1,
+  "object": "0xB08290",
+  "bits": "0x20210090"
+ },
+ "bounds": {
+  "min": [
+   -45.0,
+   -12.18,
+   0.2291
+  ],
+  "max": [
+   45.0,
+   12.18,
+   27.9
+  ]
+ },
+ "collision": {
+  "auto": "mesh",
+  "poly": 0,
+  "polys": [],
+  "hull": 1,
+  "hulls": [
+   {
+    "mesh": "hull_bus",
+    "node": "0xA11FE0",
+    "planes": 6,
+    "matId": 1,
+    "min": [
+     -45.0,
+     -12.3,
+     0.0
+    ],
+    "max": [
+     45.0,
+     12.3,
+     27.9
+    ]
+   }
+  ],
+  "tris": 0,
+  "matId": 1
+ },
+ "objects": [
+  {
+   "object": "0xA11F40",
+   "state": 0,
+   "texId": null,
+   "image": 0,
+   "vertices": 293,
+   "light": "dir",
+   "abe": 1
+  },
+  {
+   "object": "0xA13F40",
+   "state": 1,
+   "texId": null,
+   "image": 0,
+   "vertices": 293,
+   "light": "dir",
+   "abe": 1
+  },
+  {
+   "object": "0xA143C0",
+   "state": 1,
+   "texId": null,
+   "image": 0,
+   "vertices": 24,
+   "light": "dir",
+   "abe": 1
+  },
+  {
+   "object": "0xA14740",
+   "state": 1,
+   "texId": null,
+   "image": 0,
+   "vertices": 24,
+   "light": "dir",
+   "abe": 1
+  },
+  {
+   "object": "0xA14AC0",
+   "state": 1,
+   "texId": null,
+   "image": 0,
+   "vertices": 24,
+   "light": "dir",
+   "abe": 1
+  },
+  {
+   "object": "0xA14E40",
+   "state": 1,
+   "texId": null,
+   "image": 0,
+   "vertices": 24,
+   "light": "dir",
+   "abe": 1
+  },
+  {
+   "object": "0xA151C0",
+   "state": 1,
+   "texId": null,
+   "image": 0,
+   "vertices": 24,
+   "light": "dir",
+   "abe": 1
+  },
+  {
+   "object": "0xA15540",
+   "state": 1,
+   "texId": null,
+   "image": 0,
+   "vertices": 24,
+   "light": "dir",
+   "abe": 1
+  },
+  {
+   "object": "0xA158C0",
+   "state": 1,
+   "texId": null,
+   "image": 0,
+   "vertices": 24,
+   "light": "dir",
+   "abe": 1
+  },
+  {
+   "object": "0xA15C40",
+   "state": 1,
+   "texId": null,
+   "image": 0,
+   "vertices": 24,
+   "light": "dir",
+   "abe": 1
+  },
+  {
+   "object": "0xA15FC0",
+   "state": 1,
+   "texId": null,
+   "image": 0,
+   "vertices": 24,
+   "light": "dir",
+   "abe": 1
+  }
+ ],
+ "triangles": 400,
+ "vertices": 802,
+ "packetBytes": 21824,
+ "bytes": 90656,
+ "root": "0xA12090",
+ "files": {
+  "ngp": "ONIBUS.NGP",
+  "ptr": "ONIBUS.PTR",
+  "preview": "ONIBUS.preview.glb"
+ },
+ "destructible": {
+  "class": 2,
+  "states": [
+   "0xA12090",
+   "0xA14090"
+  ],
+  "actions": [
+   null,
+   "0xA16060"
+  ],
+  "debris": {
+   "1": [
+    {
+     "mesh": "state1_debris_g0",
+     "node": "0xA143C0",
+     "origin": [
+      -3.4287,
+      12.0,
+      11.7554
+     ]
+    },
+    {
+     "mesh": "state1_debris_g1",
+     "node": "0xA14740",
+     "origin": [
+      -22.3271,
+      12.0,
+      11.7102
+     ]
+    },
+    {
+     "mesh": "state1_debris_g2",
+     "node": "0xA14AC0",
+     "origin": [
+      -29.2231,
+      12.0,
+      11.682
+     ]
+    },
+    {
+     "mesh": "state1_debris_g3",
+     "node": "0xA14E40",
+     "origin": [
+      28.1074,
+      -12.0,
+      11.665
+     ]
+    },
+    {
+     "mesh": "state1_debris_g4",
+     "node": "0xA151C0",
+     "origin": [
+      -3.3844,
+      -12.0,
+      11.7367
+     ]
+    },
+    {
+     "mesh": "state1_debris_p0",
+     "node": "0xA15540",
+     "origin": [
+      -31.4521,
+      -11.4,
+      6.5499
+     ]
+    },
+    {
+     "mesh": "state1_debris_p1",
+     "node": "0xA158C0",
+     "origin": [
+      20.0238,
+      11.4,
+      6.5838
+     ]
+    },
+    {
+     "mesh": "state1_debris_p2",
+     "node": "0xA15C40",
+     "origin": [
+      -19.1775,
+      11.4,
+      6.6778
+     ]
+    },
+    {
+     "mesh": "state1_debris_w0",
+     "node": "0xA15FC0",
+     "origin": [
+      29.4,
+      -13.2,
+      0.0574
+     ]
+    }
+   ]
+  },
+  "smoke": {
+   "1": [
+    {
+     "name": "state1_smoke_0",
+     "pos": [
+      12.0,
+      -0.0,
+      15.6
+     ],
+     "node": "1600000001000000000090410000803f00004041000000809a99794100000000000000000000000000000000000000401e00000000000000000000002c010000000020416f12833a0f0000000000000000000000000000000000000000000000"
+    },
+    {
+     "name": "state1_smoke_1",
+     "pos": [
+      -24.0,
+      -0.0,
+      14.4
+     ],
+     "node": "1600000001000000000090410000803f0000c0c1000000806666664100000000000000000000000000000000000000401e00000000000000000000002c010000000020416f12833a0f0000000000000000000000000000000000000000000000"
+    }
+   ]
+  }
+ }
+}
