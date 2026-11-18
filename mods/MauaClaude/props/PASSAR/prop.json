@@ -1,0 +1,102 @@
+{
+ "format": 1,
+ "model": "PASSAR",
+ "name": "Footbridge",
+ "stage": "CENTRAL",
+ "source": "source.glb",
+ "units": "blender",
+ "scale": 6.0,
+ "kind": "static",
+ "light": "auto",
+ "textures": [
+  {
+   "slot": 0,
+   "texId": 122,
+   "ctxFrom": "0x1083E60",
+   "tex0": "0x20002AE599404000"
+  }
+ ],
+ "template": {
+  "rule": "first-object-roundtrip",
+  "abe": 1,
+  "object": "0xB08290",
+  "bits": "0x20210090"
+ },
+ "bounds": {
+  "min": [
+   -852.1991,
+   52.8709,
+   26.3018
+  ],
+  "max": [
+   -305.4946,
+   648.326,
+   86.0667
+  ]
+ },
+ "collision": {
+  "auto": "mesh",
+  "poly": 1,
+  "polys": [
+   {
+    "mesh": "coll_passar",
+    "node": "0xA82060",
+    "triangles": 3030,
+    "matId": 266,
+    "min": [
+     -852.1991,
+     52.8709,
+     26.3018
+    ],
+    "max": [
+     -305.4946,
+     648.326,
+     86.0667
+    ]
+   }
+  ],
+  "hull": 0,
+  "hulls": [],
+  "tris": 3030,
+  "matId": 1
+ },
+ "objects": [
+  {
+   "object": "0xA08A80",
+   "state": 0,
+   "texId": 122,
+   "image": null,
+   "vertices": 2024,
+   "light": "vertex",
+   "abe": 0
+  },
+  {
+   "object": "0xA3D260",
+   "state": 0,
+   "texId": null,
+   "image": null,
+   "vertices": 8181,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA62870",
+   "state": 0,
+   "texId": null,
+   "image": null,
+   "vertices": 6422,
+   "light": "vertex",
+   "abe": 1
+  }
+ ],
+ "triangles": 9876,
+ "vertices": 16627,
+ "packetBytes": 403024,
+ "bytes": 532816,
+ "root": "0xA82120",
+ "files": {
+  "ngp": "PASSAR.NGP",
+  "ptr": "PASSAR.PTR",
+  "preview": "PASSAR.preview.glb"
+ }
+}

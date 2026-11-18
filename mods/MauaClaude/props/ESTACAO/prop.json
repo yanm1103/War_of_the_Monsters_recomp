@@ -1,0 +1,183 @@
+{
+ "format": 1,
+ "model": "ESTACAO",
+ "name": "Station",
+ "stage": "CENTRAL",
+ "source": "source.glb",
+ "units": "blender",
+ "scale": 6.0,
+ "kind": "static",
+ "light": "auto",
+ "textures": [
+  {
+   "slot": 0,
+   "texId": 122,
+   "ctxFrom": "0x1083E60",
+   "tex0": "0x20002AE599404000"
+  },
+  {
+   "slot": 1,
+   "texId": 136,
+   "ctxFrom": "0xDDBDD0",
+   "tex0": "0x20002C2599404000"
+  },
+  {
+   "slot": 2,
+   "texId": 143,
+   "ctxFrom": "0xB04B70",
+   "tex0": "0x20002CC599404000"
+  },
+  {
+   "slot": 3,
+   "texId": 152,
+   "ctxFrom": "0xFE5800",
+   "tex0": "0x20002DA599404000"
+  },
+  {
+   "slot": 4,
+   "texId": 162,
+   "ctxFrom": "0xDFE9C0",
+   "tex0": "0x20002EE599404000"
+  },
+  {
+   "slot": 5,
+   "texId": 230,
+   "ctxFrom": "0xC28890",
+   "tex0": "0x200035A599404000"
+  },
+  {
+   "slot": 6,
+   "texId": 275,
+   "ctxFrom": "0xBFE380",
+   "tex0": "0x20003BE599404000"
+  }
+ ],
+ "template": {
+  "rule": "first-object-roundtrip",
+  "abe": 1,
+  "object": "0xB08290",
+  "bits": "0x20210090"
+ },
+ "bounds": {
+  "min": [
+   -408.7307,
+   -593.45,
+   22.6613
+  ],
+  "max": [
+   890.1212,
+   369.1981,
+   87.8266
+  ]
+ },
+ "collision": {
+  "auto": "mesh",
+  "poly": 1,
+  "polys": [
+   {
+    "mesh": "coll_estacao",
+    "node": "0xA64CF0",
+    "triangles": 2134,
+    "matId": 266,
+    "min": [
+     -408.7307,
+     -593.45,
+     22.6613
+    ],
+    "max": [
+     890.1212,
+     369.1981,
+     87.8266
+    ]
+   }
+  ],
+  "hull": 0,
+  "hulls": [],
+  "tris": 2134,
+  "matId": 1
+ },
+ "objects": [
+  {
+   "object": "0xA09BE0",
+   "state": 0,
+   "texId": 122,
+   "image": null,
+   "vertices": 2156,
+   "light": "vertex",
+   "abe": 0
+  },
+  {
+   "object": "0xA24130",
+   "state": 0,
+   "texId": 136,
+   "image": null,
+   "vertices": 5068,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA301B0",
+   "state": 0,
+   "texId": 143,
+   "image": null,
+   "vertices": 2638,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA37DA0",
+   "state": 0,
+   "texId": 152,
+   "image": null,
+   "vertices": 1670,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA39BC0",
+   "state": 0,
+   "texId": 162,
+   "image": null,
+   "vertices": 372,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA3C4B0",
+   "state": 0,
+   "texId": 230,
+   "image": null,
+   "vertices": 536,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA44000",
+   "state": 0,
+   "texId": 275,
+   "image": null,
+   "vertices": 1908,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA4F680",
+   "state": 0,
+   "texId": null,
+   "image": null,
+   "vertices": 1709,
+   "light": "vertex",
+   "abe": 1
+  }
+ ],
+ "triangles": 7049,
+ "vertices": 16057,
+ "packetBytes": 323664,
+ "bytes": 413184,
+ "root": "0xA64DB0",
+ "files": {
+  "ngp": "ESTACAO.NGP",
+  "ptr": "ESTACAO.PTR",
+  "preview": "ESTACAO.preview.glb"
+ }
+}

@@ -1,0 +1,453 @@
+{
+ "format": 1,
+ "model": "CEN_3AD6",
+ "name": "Building (Midtown)",
+ "stage": "CENTRAL",
+ "source": "source.glb",
+ "units": "game",
+ "scale": 0.33333159347972463,
+ "kind": "destructible",
+ "light": "auto",
+ "textures": [
+  {
+   "slot": 0,
+   "texId": 159,
+   "ctxFrom": "0xB13920",
+   "tex0": "0x20002E8599404000"
+  },
+  {
+   "slot": 1,
+   "texId": 160,
+   "ctxFrom": "0xEF6F00",
+   "tex0": "0x20002EA5DD408000"
+  },
+  {
+   "slot": 2,
+   "texId": 161,
+   "ctxFrom": "0xB8B180",
+   "tex0": "0x20002EC59D408000"
+  },
+  {
+   "slot": 3,
+   "texId": 162,
+   "ctxFrom": "0xDFE9C0",
+   "tex0": "0x20002EE599404000"
+  },
+  {
+   "slot": 4,
+   "texId": 164,
+   "ctxFrom": "0xE01E00",
+   "tex0": "0x20002F05DD408000"
+  },
+  {
+   "slot": 5,
+   "texId": 239,
+   "ctxFrom": "0xB08B10",
+   "tex0": "0x200036859D408000"
+  },
+  {
+   "slot": 6,
+   "texId": 243,
+   "ctxFrom": "0xD57700",
+   "tex0": "0x20003765DD408000"
+  },
+  {
+   "slot": 7,
+   "texId": 248,
+   "ctxFrom": "0xB08B10",
+   "tex0": "0x20003805DD408000"
+  },
+  {
+   "slot": 8,
+   "texId": 249,
+   "ctxFrom": "0xB08B10",
+   "tex0": "0x20003825DD308000"
+  },
+  {
+   "slot": 9,
+   "texId": 250,
+   "ctxFrom": "0xB0A780",
+   "tex0": "0x200038A599404000"
+  },
+  {
+   "slot": 10,
+   "texId": 251,
+   "ctxFrom": "0xB123B0",
+   "tex0": "0x200038C599404000"
+  },
+  {
+   "slot": 11,
+   "texId": 268,
+   "ctxFrom": "0xB04800",
+   "tex0": "0x20003AE599404000"
+  },
+  {
+   "slot": 12,
+   "texId": 270,
+   "ctxFrom": "0xB08290",
+   "tex0": "0x20003B25DD408000"
+  },
+  {
+   "slot": 13,
+   "texId": 293,
+   "ctxFrom": "0xC02600",
+   "tex0": "0x20003F25DD308000"
+  },
+  {
+   "slot": 14,
+   "texId": 308,
+   "ctxFrom": "0xB064A0",
+   "tex0": "0x20004345DD408000"
+  }
+ ],
+ "template": {
+  "rule": "first-object-roundtrip",
+  "abe": 1,
+  "object": "0xB08290",
+  "bits": "0x20210090"
+ },
+ "bounds": {
+  "min": [
+   -0.6099,
+   -58.1659,
+   3.0865
+  ],
+  "max": [
+   72.5636,
+   10.1478,
+   98.8795
+  ]
+ },
+ "collision": {
+  "auto": "mesh",
+  "poly": 1,
+  "polys": [
+   {
+    "mesh": "coll_m206_0",
+    "node": "0xA05DF0",
+    "triangles": 10,
+    "matId": 518,
+    "min": [
+     0.3284,
+     -57.7699,
+     3.0865
+    ],
+    "max": [
+     72.5254,
+     9.4322,
+     98.8871
+    ]
+   }
+  ],
+  "hull": 0,
+  "hulls": [],
+  "tris": 10,
+  "matId": 1
+ },
+ "objects": [
+  {
+   "object": "0xA01140",
+   "state": 0,
+   "texId": 160,
+   "image": null,
+   "vertices": 162,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA01340",
+   "state": 0,
+   "texId": 161,
+   "image": null,
+   "vertices": 8,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA01670",
+   "state": 0,
+   "texId": 162,
+   "image": null,
+   "vertices": 16,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA019F0",
+   "state": 0,
+   "texId": 164,
+   "image": null,
+   "vertices": 16,
+   "light": "vertex",
+   "abe": 1,
+   "zFudge": 1.000305
+  },
+  {
+   "object": "0xA04E20",
+   "state": 0,
+   "texId": 243,
+   "image": null,
+   "vertices": 540,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA053F0",
+   "state": 0,
+   "texId": 268,
+   "image": null,
+   "vertices": 51,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA059B0",
+   "state": 0,
+   "texId": 293,
+   "image": null,
+   "vertices": 42,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA05C50",
+   "state": 0,
+   "texId": 308,
+   "image": null,
+   "vertices": 12,
+   "light": "vertex",
+   "abe": 1,
+   "zFudge": 1.000305
+  },
+  {
+   "object": "0xA07010",
+   "state": 1,
+   "texId": 160,
+   "image": null,
+   "vertices": 172,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA07240",
+   "state": 1,
+   "texId": 161,
+   "image": null,
+   "vertices": 8,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA076E0",
+   "state": 1,
+   "texId": 162,
+   "image": null,
+   "vertices": 24,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA07E80",
+   "state": 1,
+   "texId": 239,
+   "image": null,
+   "vertices": 85,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA08CE0",
+   "state": 1,
+   "texId": 248,
+   "image": null,
+   "vertices": 137,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA08EF0",
+   "state": 1,
+   "texId": 249,
+   "image": null,
+   "vertices": 16,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA09590",
+   "state": 1,
+   "texId": 250,
+   "image": null,
+   "vertices": 68,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA09B80",
+   "state": 1,
+   "texId": 268,
+   "image": null,
+   "vertices": 52,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA09F70",
+   "state": 1,
+   "texId": 270,
+   "image": null,
+   "vertices": 39,
+   "light": "vertex",
+   "abe": 1,
+   "zFudge": 1.010986
+  },
+  {
+   "object": "0xA0ABF0",
+   "state": 2,
+   "texId": 159,
+   "image": null,
+   "vertices": 76,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA0B770",
+   "state": 2,
+   "texId": 160,
+   "image": null,
+   "vertices": 98,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA0C580",
+   "state": 2,
+   "texId": 250,
+   "image": null,
+   "vertices": 139,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA0D860",
+   "state": 2,
+   "texId": 251,
+   "image": null,
+   "vertices": 204,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA0DBF0",
+   "state": 2,
+   "texId": 270,
+   "image": null,
+   "vertices": 39,
+   "light": "vertex",
+   "abe": 1,
+   "zFudge": 1.010986
+  }
+ ],
+ "triangles": 1229,
+ "vertices": 2004,
+ "packetBytes": 50336,
+ "bytes": 56864,
+ "root": "0xA05E30",
+ "files": {
+  "ngp": "CEN_3AD6.NGP",
+  "ptr": "CEN_3AD6.PTR",
+  "preview": "CEN_3AD6.preview.glb"
+ },
+ "destructible": {
+  "class": 3,
+  "states": [
+   "0xA05E30",
+   "0xA0A2B0",
+   "0xA0DDE0"
+  ],
+  "smoke": {
+   "1": [
+    {
+     "name": "state1_smoke_a",
+     "pos": [
+      10.3661,
+      -0.0993,
+      23.0864
+     ],
+     "node": "16000000010000009a992f420000803fa3db25417645cbbdecb0b84100000000000000000000000000000000000000402d00000000000000000000002c010000000020416f12833a0f0000000000000000000000000000000000000000000000"
+    },
+    {
+     "name": "state1_smoke_b",
+     "pos": [
+      61.5876,
+      -0.0993,
+      23.0864
+     ],
+     "node": "16000000010000009a992f420000803faa5976427645cbbdecb0b84100000000000000000000000000000000000000402d00000000000000000000002c010000000020416f12833a0f0000000000000000000000000000000000000000000000"
+    },
+    {
+     "name": "state1_smoke_c",
+     "pos": [
+      10.3661,
+      -47.9188,
+      23.0864
+     ],
+     "node": "16000000010000009a992f420000803fa3db2541ddac3fc2ecb0b84100000000000000000000000000000000000000402d00000000000000000000002c010000000020416f12833a0f0000000000000000000000000000000000000000000000"
+    },
+    {
+     "name": "state1_smoke_d",
+     "pos": [
+      61.5876,
+      -47.9188,
+      23.0864
+     ],
+     "node": "16000000010000009a992f420000803faa597642ddac3fc2ecb0b84100000000000000000000000000000000000000402d00000000000000000000002c010000000020416f12833a0f0000000000000000000000000000000000000000000000"
+    }
+   ],
+   "2": [
+    {
+     "name": "state2_smoke_a",
+     "pos": [
+      10.3661,
+      -0.0993,
+      23.0864
+     ],
+     "node": "16000000010000009a992f420000803fa3db25417645cbbdecb0b84100000000000000000000000000000000000000402d00000000000000000000002c010000000020416f12833a0f0000000000000000000000000000000000000000000000"
+    },
+    {
+     "name": "state2_smoke_b",
+     "pos": [
+      61.5876,
+      -0.0993,
+      23.0864
+     ],
+     "node": "16000000010000009a992f420000803faa5976427645cbbdecb0b84100000000000000000000000000000000000000402d00000000000000000000002c010000000020416f12833a0f0000000000000000000000000000000000000000000000"
+    },
+    {
+     "name": "state2_smoke_c",
+     "pos": [
+      10.3661,
+      -47.9188,
+      23.0864
+     ],
+     "node": "16000000010000009a992f420000803fa3db2541ddac3fc2ecb0b84100000000000000000000000000000000000000402d00000000000000000000002c010000000020416f12833a0f0000000000000000000000000000000000000000000000"
+    },
+    {
+     "name": "state2_smoke_d",
+     "pos": [
+      61.5876,
+      -47.9188,
+      23.0864
+     ],
+     "node": "16000000010000009a992f420000803faa597642ddac3fc2ecb0b84100000000000000000000000000000000000000402d00000000000000000000002c010000000020416f12833a0f0000000000000000000000000000000000000000000000"
+    }
+   ]
+  }
+ },
+ "origin": {
+  "stage": "CENTRAL",
+  "handle": "0xF16540",
+  "sig": "3ad6d52551e610f0f5dc",
+  "stageTextures": true
+ }
+}

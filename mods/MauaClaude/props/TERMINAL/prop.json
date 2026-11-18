@@ -1,0 +1,192 @@
+{
+ "format": 1,
+ "model": "TERMINAL",
+ "name": "Bus terminal",
+ "stage": "CENTRAL",
+ "source": "source.glb",
+ "units": "blender",
+ "scale": 6.0,
+ "kind": "static",
+ "light": "auto",
+ "textures": [
+  {
+   "slot": 0,
+   "texId": 122,
+   "ctxFrom": "0x1083E60",
+   "tex0": "0x20002AE599404000"
+  },
+  {
+   "slot": 1,
+   "texId": 143,
+   "ctxFrom": "0xB04B70",
+   "tex0": "0x20002CC599404000"
+  },
+  {
+   "slot": 2,
+   "texId": 152,
+   "ctxFrom": "0xFE5800",
+   "tex0": "0x20002DA599404000"
+  },
+  {
+   "slot": 3,
+   "texId": 160,
+   "ctxFrom": "0xEF6F00",
+   "tex0": "0x20002EA5DD408000"
+  },
+  {
+   "slot": 4,
+   "texId": 162,
+   "ctxFrom": "0xDFE9C0",
+   "tex0": "0x20002EE599404000"
+  },
+  {
+   "slot": 5,
+   "texId": 230,
+   "ctxFrom": "0xC28890",
+   "tex0": "0x200035A599404000"
+  },
+  {
+   "slot": 6,
+   "texId": 234,
+   "ctxFrom": "0xB8B180",
+   "tex0": "0x200036059D408000"
+  }
+ ],
+ "template": {
+  "rule": "first-object-roundtrip",
+  "abe": 1,
+  "object": "0xB08290",
+  "bits": "0x20210090"
+ },
+ "bounds": {
+  "min": [
+   272.3024,
+   -631.155,
+   14.1787
+  ],
+  "max": [
+   1158.0,
+   747.6,
+   142.6667
+  ]
+ },
+ "collision": {
+  "auto": "mesh",
+  "poly": 1,
+  "polys": [
+   {
+    "mesh": "coll_terminal",
+    "node": "0xA97DA0",
+    "triangles": 3415,
+    "matId": 266,
+    "min": [
+     272.3024,
+     -631.155,
+     14.1787
+    ],
+    "max": [
+     1158.0,
+     747.6,
+     142.6667
+    ]
+   }
+  ],
+  "hull": 0,
+  "hulls": [],
+  "tris": 3415,
+  "matId": 1
+ },
+ "objects": [
+  {
+   "object": "0xA24770",
+   "state": 0,
+   "texId": 122,
+   "image": null,
+   "vertices": 7732,
+   "light": "vertex",
+   "abe": 0
+  },
+  {
+   "object": "0xA34220",
+   "state": 0,
+   "texId": 122,
+   "image": null,
+   "vertices": 3911,
+   "light": "vertex",
+   "abe": 0
+  },
+  {
+   "object": "0xA3EB70",
+   "state": 0,
+   "texId": 143,
+   "image": null,
+   "vertices": 2116,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA4A890",
+   "state": 0,
+   "texId": 152,
+   "image": null,
+   "vertices": 2055,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA56400",
+   "state": 0,
+   "texId": 160,
+   "image": null,
+   "vertices": 2216,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA57FE0",
+   "state": 0,
+   "texId": 162,
+   "image": null,
+   "vertices": 332,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA5EAC0",
+   "state": 0,
+   "texId": 230,
+   "image": null,
+   "vertices": 1464,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA6F800",
+   "state": 0,
+   "texId": 234,
+   "image": null,
+   "vertices": 3215,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA75C20",
+   "state": 0,
+   "texId": null,
+   "image": null,
+   "vertices": 876,
+   "light": "vertex",
+   "abe": 1
+  }
+ ],
+ "triangles": 10569,
+ "vertices": 23917,
+ "packetBytes": 480336,
+ "bytes": 622288,
+ "root": "0xA97E80",
+ "files": {
+  "ngp": "TERMINAL.NGP",
+  "ptr": "TERMINAL.PTR",
+  "preview": "TERMINAL.preview.glb"
+ }
+}

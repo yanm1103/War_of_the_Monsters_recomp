@@ -1,0 +1,178 @@
+{
+ "format": 1,
+ "model": "ARV1",
+ "name": "Tree (Central)",
+ "stage": "CENTRAL",
+ "source": "source.glb",
+ "units": "game",
+ "scale": 1.0,
+ "kind": "destructible",
+ "light": "auto",
+ "textures": [
+  {
+   "slot": 0,
+   "image": "tex276",
+   "png": "ARV1_T0.png",
+   "size": [
+    64,
+    64
+   ],
+   "packet": "0x80",
+   "game": [
+    64,
+    64
+   ],
+   "bytes": 16384
+  },
+  {
+   "slot": 1,
+   "image": "tex99",
+   "png": "ARV1_T1.png",
+   "size": [
+    64,
+    64
+   ],
+   "packet": "0x4100",
+   "game": [
+    64,
+    64
+   ],
+   "bytes": 16384
+  },
+  {
+   "slot": 2,
+   "image": "tex247",
+   "png": "ARV1_T2.png",
+   "size": [
+    64,
+    64
+   ],
+   "packet": "0x8180",
+   "game": [
+    64,
+    64
+   ],
+   "bytes": 16384
+  },
+  {
+   "slot": 3,
+   "image": "tex258",
+   "png": "ARV1_T3.png",
+   "size": [
+    64,
+    64
+   ],
+   "packet": "0xC200",
+   "game": [
+    64,
+    64
+   ],
+   "bytes": 16384
+  }
+ ],
+ "template": {
+  "rule": "first-object-roundtrip",
+  "abe": 1,
+  "object": "0xB08290",
+  "bits": "0x20210090"
+ },
+ "bounds": {
+  "min": [
+   -49.8924,
+   -23.1866,
+   0.0
+  ],
+  "max": [
+   21.0993,
+   42.8153,
+   47.4835
+  ]
+ },
+ "collision": {
+  "auto": "box",
+  "poly": 0,
+  "polys": [],
+  "hull": 0,
+  "hulls": [],
+  "tris": 0,
+  "matId": 1
+ },
+ "objects": [
+  {
+   "object": "0xA104F0",
+   "state": 0,
+   "texId": null,
+   "image": 0,
+   "vertices": 16,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA108C0",
+   "state": 0,
+   "texId": null,
+   "image": 1,
+   "vertices": 35,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA10A20",
+   "state": 0,
+   "texId": null,
+   "image": 2,
+   "vertices": 4,
+   "light": "vertex",
+   "abe": 1,
+   "zFudge": 1.002441
+  },
+  {
+   "object": "0xA10D20",
+   "state": 0,
+   "texId": null,
+   "image": 3,
+   "vertices": 20,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA11120",
+   "state": 1,
+   "texId": null,
+   "image": 3,
+   "vertices": 20,
+   "light": "vertex",
+   "abe": 1
+  }
+ ],
+ "triangles": 63,
+ "vertices": 95,
+ "packetBytes": 2576,
+ "bytes": 70128,
+ "root": "0xA10E70",
+ "files": {
+  "ngp": "ARV1.NGP",
+  "ptr": "ARV1.PTR",
+  "preview": "ARV1.preview.glb"
+ },
+ "destructible": {
+  "class": 1,
+  "states": [
+   "0xA10E70",
+   "0xA111C0"
+  ],
+  "smoke": {
+   "1": [
+    {
+     "name": "state1_smoke_a",
+     "pos": [
+      0.0,
+      -0.0,
+      11.8508
+     ],
+     "node": "1600000001000000000020420000803f0000000000000080c09c3d4100000000000000000000000000000000000000402d00000000000000000000002c010000000020416f12833a0f0000000000000000000000000000000000000000000000"
+    }
+   ]
+  }
+ }
+}

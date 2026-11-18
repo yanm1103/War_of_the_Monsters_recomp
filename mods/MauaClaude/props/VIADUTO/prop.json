@@ -1,0 +1,114 @@
+{
+ "format": 1,
+ "model": "VIADUTO",
+ "name": "Viaduct",
+ "stage": "CENTRAL",
+ "source": "source.glb",
+ "units": "blender",
+ "scale": 6.0,
+ "kind": "static",
+ "light": "auto",
+ "textures": [
+  {
+   "slot": 0,
+   "texId": 143,
+   "ctxFrom": "0xB04B70",
+   "tex0": "0x20002CC599404000"
+  },
+  {
+   "slot": 1,
+   "texId": 152,
+   "ctxFrom": "0xFE5800",
+   "tex0": "0x20002DA599404000"
+  },
+  {
+   "slot": 2,
+   "texId": 229,
+   "ctxFrom": "0xBFE380",
+   "tex0": "0x2000358599404000"
+  }
+ ],
+ "template": {
+  "rule": "first-object-roundtrip",
+  "abe": 1,
+  "object": "0xB08290",
+  "bits": "0x20210090"
+ },
+ "bounds": {
+  "min": [
+   740.2041,
+   -888.2834,
+   10.3295
+  ],
+  "max": [
+   1229.7988,
+   471.8964,
+   83.2932
+  ]
+ },
+ "collision": {
+  "auto": "mesh",
+  "poly": 1,
+  "polys": [
+   {
+    "mesh": "coll_viaduto",
+    "node": "0xA75B70",
+    "triangles": 4240,
+    "matId": 266,
+    "min": [
+     740.2041,
+     -888.2834,
+     10.3295
+    ],
+    "max": [
+     1229.7988,
+     471.8964,
+     83.2932
+    ]
+   }
+  ],
+  "hull": 0,
+  "hulls": [],
+  "tris": 4240,
+  "matId": 1
+ },
+ "objects": [
+  {
+   "object": "0xA1E990",
+   "state": 0,
+   "texId": 143,
+   "image": null,
+   "vertices": 6706,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA39CE0",
+   "state": 0,
+   "texId": 152,
+   "image": null,
+   "vertices": 6124,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA4A160",
+   "state": 0,
+   "texId": 229,
+   "image": null,
+   "vertices": 3941,
+   "light": "vertex",
+   "abe": 1
+  }
+ ],
+ "triangles": 8356,
+ "vertices": 16771,
+ "packetBytes": 302928,
+ "bytes": 482528,
+ "root": "0xA75CB0",
+ "files": {
+  "ngp": "VIADUTO.NGP",
+  "ptr": "VIADUTO.PTR",
+  "preview": "VIADUTO.preview.glb"
+ }
+}

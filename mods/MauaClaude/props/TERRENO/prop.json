@@ -1,0 +1,102 @@
+{
+ "format": 1,
+ "model": "TERRENO",
+ "name": "Terrain",
+ "stage": "CENTRAL",
+ "source": "source.glb",
+ "units": "blender",
+ "scale": 6.0,
+ "kind": "static",
+ "light": "auto",
+ "textures": [
+  {
+   "slot": 0,
+   "texId": 122,
+   "ctxFrom": "0x1083E60",
+   "tex0": "0x20002AE599404000"
+  }
+ ],
+ "template": {
+  "rule": "first-object-roundtrip",
+  "abe": 1,
+  "object": "0xB08290",
+  "bits": "0x20210090"
+ },
+ "bounds": {
+  "min": [
+   -1890.0,
+   -1764.0,
+   -0.6
+  ],
+  "max": [
+   1890.0,
+   1764.0,
+   233.1008
+  ]
+ },
+ "collision": {
+  "auto": "mesh",
+  "poly": 1,
+  "polys": [
+   {
+    "mesh": "coll_terrain",
+    "node": "0xA998E0",
+    "triangles": 15120,
+    "matId": 266,
+    "min": [
+     -1890.0,
+     -1764.0,
+     0.0
+    ],
+    "max": [
+     1890.0,
+     1764.0,
+     233.7009
+    ]
+   }
+  ],
+  "hull": 0,
+  "hulls": [],
+  "tris": 15120,
+  "matId": 1
+ },
+ "objects": [
+  {
+   "object": "0xA22790",
+   "state": 0,
+   "texId": 122,
+   "image": null,
+   "vertices": 7855,
+   "light": "vertex",
+   "abe": 0
+  },
+  {
+   "object": "0xA45200",
+   "state": 0,
+   "texId": 122,
+   "image": null,
+   "vertices": 7877,
+   "light": "vertex",
+   "abe": 0
+  },
+  {
+   "object": "0xA51C40",
+   "state": 0,
+   "texId": 122,
+   "image": null,
+   "vertices": 2824,
+   "light": "vertex",
+   "abe": 0
+  }
+ ],
+ "triangles": 15120,
+ "vertices": 18556,
+ "packetBytes": 334288,
+ "bytes": 629328,
+ "root": "0xA99A20",
+ "files": {
+  "ngp": "TERRENO.NGP",
+  "ptr": "TERRENO.PTR",
+  "preview": "TERRENO.preview.glb"
+ }
+}

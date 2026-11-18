@@ -1,0 +1,77 @@
+{
+ "format": 1,
+ "model": "MCDON",
+ "name": "McDonalds",
+ "stage": "CENTRAL",
+ "source": "source.glb",
+ "units": "blender",
+ "scale": 6.0,
+ "kind": "static",
+ "light": "auto",
+ "textures": [],
+ "template": {
+  "rule": "first-object-roundtrip",
+  "abe": 1,
+  "object": "0xB08290",
+  "bits": "0x20210090"
+ },
+ "bounds": {
+  "min": [
+   -1120.8,
+   -57.0,
+   40.8991
+  ],
+  "max": [
+   -908.6662,
+   152.4,
+   148.7852
+  ]
+ },
+ "collision": {
+  "auto": "mesh",
+  "poly": 1,
+  "polys": [
+   {
+    "mesh": "coll_mcdon",
+    "node": "0xA04710",
+    "triangles": 196,
+    "matId": 266,
+    "min": [
+     -1120.8,
+     -57.0,
+     40.8991
+    ],
+    "max": [
+     -908.6662,
+     152.4,
+     148.7852
+    ]
+   }
+  ],
+  "hull": 0,
+  "hulls": [],
+  "tris": 196,
+  "matId": 1
+ },
+ "objects": [
+  {
+   "object": "0xA02860",
+   "state": 0,
+   "texId": null,
+   "image": null,
+   "vertices": 411,
+   "light": "vertex",
+   "abe": 1
+  }
+ ],
+ "triangles": 220,
+ "vertices": 411,
+ "packetBytes": 10208,
+ "bytes": 18304,
+ "root": "0xA04750",
+ "files": {
+  "ngp": "MCDON.NGP",
+  "ptr": "MCDON.PTR",
+  "preview": "MCDON.preview.glb"
+ }
+}

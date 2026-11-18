@@ -1,0 +1,587 @@
+{
+ "format": 1,
+ "model": "CEN_E4E1",
+ "name": "Building (Midtown)",
+ "stage": "CENTRAL",
+ "source": "source.glb",
+ "units": "game",
+ "scale": 0.3333340657471107,
+ "kind": "destructible",
+ "light": "auto",
+ "textures": [
+  {
+   "slot": 0,
+   "texId": 117,
+   "ctxFrom": "0xC974B0",
+   "tex0": "0x20002A8599404000"
+  },
+  {
+   "slot": 1,
+   "texId": 119,
+   "ctxFrom": "0xC968C0",
+   "tex0": "0x20002AA599404000"
+  },
+  {
+   "slot": 2,
+   "texId": 121,
+   "ctxFrom": "0xC974B0",
+   "tex0": "0x20002AC5DD408000"
+  },
+  {
+   "slot": 3,
+   "texId": 123,
+   "ctxFrom": "0xB33690",
+   "tex0": "0x20002B05DD408000"
+  },
+  {
+   "slot": 4,
+   "texId": 127,
+   "ctxFrom": "0xBA8640",
+   "tex0": "0x20002B6599404000"
+  },
+  {
+   "slot": 5,
+   "texId": 129,
+   "ctxFrom": "0xBAB3F0",
+   "tex0": "0x20002B85DD408000"
+  },
+  {
+   "slot": 6,
+   "texId": 130,
+   "ctxFrom": "0xBA8640",
+   "tex0": "0x20002BA599404000"
+  },
+  {
+   "slot": 7,
+   "texId": 132,
+   "ctxFrom": "0xBAB3F0",
+   "tex0": "0x20002BC5DD408000"
+  },
+  {
+   "slot": 8,
+   "texId": 133,
+   "ctxFrom": "0xC96300",
+   "tex0": "0x20002BE599404000"
+  },
+  {
+   "slot": 9,
+   "texId": 135,
+   "ctxFrom": "0xC9A950",
+   "tex0": "0x20002C05DD408000"
+  },
+  {
+   "slot": 10,
+   "texId": 150,
+   "ctxFrom": "0xB04B70",
+   "tex0": "0x20002D6599404000"
+  },
+  {
+   "slot": 11,
+   "texId": 159,
+   "ctxFrom": "0xB13920",
+   "tex0": "0x20002E8599404000"
+  },
+  {
+   "slot": 12,
+   "texId": 239,
+   "ctxFrom": "0xB08B10",
+   "tex0": "0x200036859D408000"
+  },
+  {
+   "slot": 13,
+   "texId": 248,
+   "ctxFrom": "0xB08B10",
+   "tex0": "0x20003805DD408000"
+  },
+  {
+   "slot": 14,
+   "texId": 249,
+   "ctxFrom": "0xB08B10",
+   "tex0": "0x20003825DD308000"
+  },
+  {
+   "slot": 15,
+   "texId": 250,
+   "ctxFrom": "0xB0A780",
+   "tex0": "0x200038A599404000"
+  },
+  {
+   "slot": 16,
+   "texId": 251,
+   "ctxFrom": "0xB123B0",
+   "tex0": "0x200038C599404000"
+  },
+  {
+   "slot": 17,
+   "texId": 270,
+   "ctxFrom": "0xB08290",
+   "tex0": "0x20003B25DD408000"
+  },
+  {
+   "slot": 18,
+   "texId": 291,
+   "ctxFrom": "0xB05F10",
+   "tex0": "0x20003E25DD308000"
+  },
+  {
+   "slot": 19,
+   "texId": 292,
+   "ctxFrom": "0xBC54C0",
+   "tex0": "0x20003EA5DD308000"
+  },
+  {
+   "slot": 20,
+   "texId": 293,
+   "ctxFrom": "0xC02600",
+   "tex0": "0x20003F25DD308000"
+  },
+  {
+   "slot": 21,
+   "texId": 308,
+   "ctxFrom": "0xB064A0",
+   "tex0": "0x20004345DD408000"
+  }
+ ],
+ "template": {
+  "rule": "first-object-roundtrip",
+  "abe": 1,
+  "object": "0xB08290",
+  "bits": "0x20210090"
+ },
+ "bounds": {
+  "min": [
+   -31.9035,
+   -47.3353,
+   4.1527
+  ],
+  "max": [
+   31.9035,
+   47.3352,
+   110.3467
+  ]
+ },
+ "collision": {
+  "auto": "mesh",
+  "poly": 1,
+  "polys": [
+   {
+    "mesh": "coll_m206_0",
+    "node": "0xA04D20",
+    "triangles": 10,
+    "matId": 518,
+    "min": [
+     -34.0167,
+     -49.2147,
+     4.1527
+    ],
+    "max": [
+     29.2575,
+     47.3352,
+     110.3467
+    ]
+   }
+  ],
+  "hull": 0,
+  "hulls": [],
+  "tris": 10,
+  "matId": 1
+ },
+ "objects": [
+  {
+   "object": "0xA001C0",
+   "state": 0,
+   "texId": 117,
+   "image": null,
+   "vertices": 8,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA004B0",
+   "state": 0,
+   "texId": 119,
+   "image": null,
+   "vertices": 18,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA007B0",
+   "state": 0,
+   "texId": 121,
+   "image": null,
+   "vertices": 24,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA00BB0",
+   "state": 0,
+   "texId": 123,
+   "image": null,
+   "vertices": 26,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA00E30",
+   "state": 0,
+   "texId": 127,
+   "image": null,
+   "vertices": 14,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA010B0",
+   "state": 0,
+   "texId": 129,
+   "image": null,
+   "vertices": 12,
+   "light": "vertex",
+   "abe": 1,
+   "zFudge": 1.000305
+  },
+  {
+   "object": "0xA01630",
+   "state": 0,
+   "texId": 130,
+   "image": null,
+   "vertices": 54,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA01AB0",
+   "state": 0,
+   "texId": 132,
+   "image": null,
+   "vertices": 32,
+   "light": "vertex",
+   "abe": 1,
+   "zFudge": 1.000305
+  },
+  {
+   "object": "0xA01D00",
+   "state": 0,
+   "texId": 133,
+   "image": null,
+   "vertices": 12,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA01EA0",
+   "state": 0,
+   "texId": 135,
+   "image": null,
+   "vertices": 4,
+   "light": "vertex",
+   "abe": 1,
+   "zFudge": 1.000305
+  },
+  {
+   "object": "0xA03D50",
+   "state": 0,
+   "texId": 150,
+   "image": null,
+   "vertices": 284,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA04110",
+   "state": 0,
+   "texId": 291,
+   "image": null,
+   "vertices": 28,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA04510",
+   "state": 0,
+   "texId": 292,
+   "image": null,
+   "vertices": 28,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA04790",
+   "state": 0,
+   "texId": 293,
+   "image": null,
+   "vertices": 14,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA04B80",
+   "state": 0,
+   "texId": 308,
+   "image": null,
+   "vertices": 20,
+   "light": "vertex",
+   "abe": 1,
+   "zFudge": 1.000305
+  },
+  {
+   "object": "0xA04EA0",
+   "state": 1,
+   "texId": 117,
+   "image": null,
+   "vertices": 4,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA05210",
+   "state": 1,
+   "texId": 119,
+   "image": null,
+   "vertices": 22,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA05640",
+   "state": 1,
+   "texId": 121,
+   "image": null,
+   "vertices": 32,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA05AC0",
+   "state": 1,
+   "texId": 123,
+   "image": null,
+   "vertices": 33,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA05D60",
+   "state": 1,
+   "texId": 127,
+   "image": null,
+   "vertices": 14,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA06420",
+   "state": 1,
+   "texId": 130,
+   "image": null,
+   "vertices": 63,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA06950",
+   "state": 1,
+   "texId": 150,
+   "image": null,
+   "vertices": 40,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA07260",
+   "state": 1,
+   "texId": 239,
+   "image": null,
+   "vertices": 108,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA09810",
+   "state": 1,
+   "texId": 248,
+   "image": null,
+   "vertices": 346,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA09A70",
+   "state": 1,
+   "texId": 249,
+   "image": null,
+   "vertices": 16,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA0A4A0",
+   "state": 1,
+   "texId": 250,
+   "image": null,
+   "vertices": 96,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA0AA00",
+   "state": 1,
+   "texId": 270,
+   "image": null,
+   "vertices": 61,
+   "light": "vertex",
+   "abe": 1,
+   "zFudge": 1.010986
+  },
+  {
+   "object": "0xA0B590",
+   "state": 2,
+   "texId": 159,
+   "image": null,
+   "vertices": 53,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA0CA80",
+   "state": 2,
+   "texId": 239,
+   "image": null,
+   "vertices": 212,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA0D050",
+   "state": 2,
+   "texId": 250,
+   "image": null,
+   "vertices": 32,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA0DEC0",
+   "state": 2,
+   "texId": 251,
+   "image": null,
+   "vertices": 156,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA0E400",
+   "state": 2,
+   "texId": 270,
+   "image": null,
+   "vertices": 61,
+   "light": "vertex",
+   "abe": 1,
+   "zFudge": 1.010986
+  }
+ ],
+ "triangles": 1099,
+ "vertices": 1927,
+ "packetBytes": 50000,
+ "bytes": 59248,
+ "root": "0xA04D60",
+ "files": {
+  "ngp": "CEN_E4E1.NGP",
+  "ptr": "CEN_E4E1.PTR",
+  "preview": "CEN_E4E1.preview.glb"
+ },
+ "destructible": {
+  "class": 3,
+  "states": [
+   "0xA04D60",
+   "0xA0AEB0",
+   "0xA0E730"
+  ],
+  "smoke": {
+   "1": [
+    {
+     "name": "state1_smoke_a",
+     "pos": [
+      -22.3324,
+      33.1347,
+      24.1528
+     ],
+     "node": "1600000001000000333363420000803fd5a8b2c1e3890442d638c14100000000000000000000000000000000000000402d00000000000000000000002c010000000020416f12833a0f0000000000000000000000000000000000000000000000"
+    },
+    {
+     "name": "state1_smoke_b",
+     "pos": [
+      22.3324,
+      33.1347,
+      24.1528
+     ],
+     "node": "1600000001000000333363420000803fd5a8b241e3890442d638c14100000000000000000000000000000000000000402d00000000000000000000002c010000000020416f12833a0f0000000000000000000000000000000000000000000000"
+    },
+    {
+     "name": "state1_smoke_c",
+     "pos": [
+      -22.3324,
+      -33.1347,
+      24.1528
+     ],
+     "node": "1600000001000000333363420000803fd5a8b2c1ed8904c2d638c14100000000000000000000000000000000000000402d00000000000000000000002c010000000020416f12833a0f0000000000000000000000000000000000000000000000"
+    },
+    {
+     "name": "state1_smoke_d",
+     "pos": [
+      22.3324,
+      -33.1347,
+      24.1528
+     ],
+     "node": "1600000001000000333363420000803fd5a8b241ed8904c2d638c14100000000000000000000000000000000000000402d00000000000000000000002c010000000020416f12833a0f0000000000000000000000000000000000000000000000"
+    }
+   ],
+   "2": [
+    {
+     "name": "state2_smoke_a",
+     "pos": [
+      -22.3324,
+      33.1347,
+      24.1528
+     ],
+     "node": "1600000001000000333363420000803fd5a8b2c1e3890442d638c14100000000000000000000000000000000000000402d00000000000000000000002c010000000020416f12833a0f0000000000000000000000000000000000000000000000"
+    },
+    {
+     "name": "state2_smoke_b",
+     "pos": [
+      22.3324,
+      33.1347,
+      24.1528
+     ],
+     "node": "1600000001000000333363420000803fd5a8b241e3890442d638c14100000000000000000000000000000000000000402d00000000000000000000002c010000000020416f12833a0f0000000000000000000000000000000000000000000000"
+    },
+    {
+     "name": "state2_smoke_c",
+     "pos": [
+      -22.3324,
+      -33.1347,
+      24.1528
+     ],
+     "node": "1600000001000000333363420000803fd5a8b2c1ed8904c2d638c14100000000000000000000000000000000000000402d00000000000000000000002c010000000020416f12833a0f0000000000000000000000000000000000000000000000"
+    },
+    {
+     "name": "state2_smoke_d",
+     "pos": [
+      22.3324,
+      -33.1347,
+      24.1528
+     ],
+     "node": "1600000001000000333363420000803fd5a8b241ed8904c2d638c14100000000000000000000000000000000000000402d00000000000000000000002c010000000020416f12833a0f0000000000000000000000000000000000000000000000"
+    }
+   ]
+  }
+ },
+ "origin": {
+  "stage": "CENTRAL",
+  "handle": "0xD27DE0",
+  "sig": "e4e1640521dd779f6e0b",
+  "stageTextures": true
+ }
+}

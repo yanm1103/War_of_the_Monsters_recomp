@@ -1,0 +1,243 @@
+{
+ "format": 1,
+ "model": "CHAO",
+ "name": "Ground",
+ "stage": "CENTRAL",
+ "source": "source.glb",
+ "units": "blender",
+ "scale": 6.0,
+ "kind": "static",
+ "light": "auto",
+ "textures": [
+  {
+   "slot": 0,
+   "texId": 160,
+   "ctxFrom": "0xEF6F00",
+   "tex0": "0x20002EA5DD408000"
+  },
+  {
+   "slot": 1,
+   "texId": 182,
+   "ctxFrom": "0xBFF1B0",
+   "tex0": "0x200030E599404000"
+  },
+  {
+   "slot": 2,
+   "texId": 229,
+   "ctxFrom": "0xBFE380",
+   "tex0": "0x2000358599404000"
+  },
+  {
+   "slot": 3,
+   "texId": 255,
+   "ctxFrom": "0xFDDBF0",
+   "tex0": "0x2000394599404000"
+  },
+  {
+   "slot": 4,
+   "texId": 270,
+   "ctxFrom": "0xB08290",
+   "tex0": "0x20003B25DD408000"
+  }
+ ],
+ "template": {
+  "rule": "first-object-roundtrip",
+  "abe": 1,
+  "object": "0xB08290",
+  "bits": "0x20210090"
+ },
+ "bounds": {
+  "min": [
+   -1890.0,
+   -1764.0,
+   7.4153
+  ],
+  "max": [
+   1890.0,
+   1764.0,
+   234.7008
+  ]
+ },
+ "collision": {
+  "auto": "mesh",
+  "poly": 1,
+  "polys": [
+   {
+    "mesh": "coll_none",
+    "node": "0xC2E2A0",
+    "triangles": 1,
+    "matId": 266,
+    "min": [
+     0.0,
+     -0.0,
+     -133.3333
+    ],
+    "max": [
+     0.3333,
+     0.3333,
+     -133.3333
+    ]
+   }
+  ],
+  "hull": 0,
+  "hulls": [],
+  "tris": 1,
+  "matId": 1
+ },
+ "objects": [
+  {
+   "object": "0xA2B620",
+   "state": 0,
+   "texId": 160,
+   "image": null,
+   "vertices": 7931,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA56F80",
+   "state": 0,
+   "texId": 160,
+   "image": null,
+   "vertices": 7973,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xA83FA0",
+   "state": 0,
+   "texId": 160,
+   "image": null,
+   "vertices": 8042,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xAB1ED0",
+   "state": 0,
+   "texId": 160,
+   "image": null,
+   "vertices": 8166,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xADF490",
+   "state": 0,
+   "texId": 160,
+   "image": null,
+   "vertices": 7960,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xAEFFA0",
+   "state": 0,
+   "texId": 160,
+   "image": null,
+   "vertices": 2911,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xAF65E0",
+   "state": 0,
+   "texId": 182,
+   "image": null,
+   "vertices": 1194,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xB218E0",
+   "state": 0,
+   "texId": 229,
+   "image": null,
+   "vertices": 8130,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xB4C580",
+   "state": 0,
+   "texId": 229,
+   "image": null,
+   "vertices": 8019,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xB78520",
+   "state": 0,
+   "texId": 229,
+   "image": null,
+   "vertices": 8150,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xBA3D30",
+   "state": 0,
+   "texId": 229,
+   "image": null,
+   "vertices": 7999,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xBABEF0",
+   "state": 0,
+   "texId": 229,
+   "image": null,
+   "vertices": 1452,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xBD0620",
+   "state": 0,
+   "texId": 255,
+   "image": null,
+   "vertices": 6815,
+   "light": "vertex",
+   "abe": 0
+  },
+  {
+   "object": "0xBFA460",
+   "state": 0,
+   "texId": 270,
+   "image": null,
+   "vertices": 8067,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xC262F0",
+   "state": 0,
+   "texId": null,
+   "image": null,
+   "vertices": 8025,
+   "light": "vertex",
+   "abe": 1
+  },
+  {
+   "object": "0xC2E1B0",
+   "state": 0,
+   "texId": null,
+   "image": null,
+   "vertices": 1461,
+   "light": "vertex",
+   "abe": 1
+  }
+ ],
+ "triangles": 46538,
+ "vertices": 102295,
+ "packetBytes": 2282592,
+ "bytes": 2286416,
+ "root": "0xC2E2E0",
+ "files": {
+  "ngp": "CHAO.NGP",
+  "ptr": "CHAO.PTR",
+  "preview": "CHAO.preview.glb"
+ }
+}
