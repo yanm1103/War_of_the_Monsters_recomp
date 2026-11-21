@@ -1518,6 +1518,50 @@ await check('an unsaved draft survives a reload and is offered back (Restore, th
   await sleep(1000);
   must(await ev(`!document.getElementById('askDlg').open`), 'a discarded draft was offered again');
 });
+await check('a marker layer draft (start point added) survives a reload next to the patch and Restore brings it back', async () => {
+  await goMode('spt');
+  const n0 = await layerN('SPT');
+  await ev(`document.getElementById('mkAdd').click()`);
+  must(await layerN('SPT') === n0 + 1, 'the point was not added');
+  must(await until(`JSON.parse(localStorage.getItem(${JSON.stringify(draftKey)}) || '{}').layers?.SPT?.length === ${n0 + 1}`, 20, 250), 'the browser draft holds no start points');
+  await reloadPage();
+  must(await until(`document.getElementById('askDlg').open && document.getElementById('askTitle').textContent.startsWith('Restore')`, 40), 'the layer draft was not offered');
+  must(await until(`${D}.lay('SPT').points.length === ${n0} && !${D}.layersDirty()`, 40), 'the page started with the draft point in before the answer');
+  await answer('restore');
+  must(await until(`${D}.lay('SPT').points.length === ${n0 + 1} && ${D}.layersDirty()`, 40), 'Restore did not bring the start point back');
+  await goMode('spt');
+  await ev(`document.getElementById('mkRevert').click()`);
+  must(await until(`${D}.lay('SPT').points.length === ${n0} && ${D}.unsavedCount() === 0`, 40), 'Revert did not drop the restored point');
+  must(await until(`localStorage.getItem(${JSON.stringify(draftKey)}) === null`, 20, 250), 'a layer with no changes left its draft behind');
+  await goMode('objects');
+});
+await check('marker list and right panel with the keyboard: Enter selects and keeps the row, Tab reaches the panel, Shift+Tab comes back to the list', async () => {
+  await goMode('spt');
+  const n0 = await layerN('SPT');
+  await ev(`document.getElementById('mkAdd').click()`);
+  must(await layerN('SPT') === n0 + 1, 'the point was not added');
+  await ev(`${D}.lay('SPT').sel = -1; document.querySelector('#mkList li.it').focus()`);
+  await key('Enter', 'Enter', 13);
+  must(await ev(`!document.getElementById('mkProps').hidden`), 'Enter on a row did not select it');
+  must(await ev(`document.activeElement.matches('#mkList li.it')`), 'the list redraw took the focus from the row: ' + await ev('document.activeElement.id || document.activeElement.tagName'));
+  let inPanel = false;
+  const trail = [];
+  for (let i = 0; i < 12 && !inPanel; i++) {
+    await key('Tab', 'Tab', 9);
+    trail.push(await ev(`(() => { const a = document.activeElement; return (a.id || a.tagName) + (a.className ? '.' + String(a.className).split(' ')[0] : ''); })()`));
+    inPanel = await ev(`document.getElementById('mkProps').contains(document.activeElement)`);
+  }
+  must(inPanel, 'Tab never reached the right panel from the list: ' + trail.join(' > '));
+  let inList = false;
+  for (let i = 0; i < 12 && !inList; i++) {
+    await key('Tab', 'Tab', 9, 8);
+    inList = await ev(`document.getElementById('mkList').contains(document.activeElement)`);
+  }
+  must(inList, 'Shift+Tab never came back to the list from the panel');
+  await ev(`document.getElementById('mkRevert').click()`);
+  must(await until(`${D}.lay('SPT').points.length === ${n0} && ${D}.unsavedCount() === 0`, 40), 'Revert did not drop the point');
+  await goMode('objects');
+});
 await check('a mod file that changed on disk is not overwritten without asking', async () => {
   await ev('window.wotmDebug.select(window.wotmDebug.items().find((x) => x.rec.info.handle === ' + JSON.stringify(first) + ' && !x.copy)); window.wotmDebug.nudge(0, 0, 1, false)');
   await ev(`window.wotmDebug.post('save')`);

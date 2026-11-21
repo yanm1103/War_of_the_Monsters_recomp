@@ -68,7 +68,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
 <main>
   <div id="rightGrip" role="separator" aria-orientation="vertical" aria-label="Resize the right panel" tabindex="0" title="Drag to resize the right panel (double click: back to the usual width)"></div>
   <nav id="rail" aria-label="Modes">
-    <button id="modeObjects" class="mode on" title="Objects: move, turn, copy and delete the stage's buildings, pickups and props (1)" aria-label="Objects" aria-pressed="true"><i class="ic" style="--ic:url(vendor/mdi/cube-outline.svg)"></i></button>
+    <button id="modeObjects" class="mode on" title="Objects: move, turn, copy and delete the stage's buildings, throwables and props (1)" aria-label="Objects" aria-pressed="true"><i class="ic" style="--ic:url(vendor/mdi/cube-outline.svg)"></i></button>
     <button id="modePeds" class="mode" title="Pedestrians: the groups of people and the sidewalks they walk (2)" aria-label="Pedestrians" aria-pressed="false"><i class="ic" style="--ic:url(vendor/mdi/walk.svg)"></i></button>
     <span class="rsep" role="separator"></span>
     <button id="modeSpt" class="mode" aria-pressed="false" title="Start points: where the monsters appear (3)" aria-label="Start points"><i class="ic" style="--ic:url(vendor/mdi/flag-outline.svg)"></i></button>
@@ -101,7 +101,7 @@ try { const t = localStorage.getItem('wotmLevelEditor.theme');
     </div>
     <div class="kinds obj">
       <label class="chip" title="Show in the list (also limits box select and Ctrl+A)"><input type="checkbox" data-kind="destr" checked>Buildings<span class="n" data-n="destr"></span></label>
-      <label class="chip" title="Show in the list (also limits box select and Ctrl+A)"><input type="checkbox" data-kind="pickup" checked>Pickups<span class="n" data-n="pickup"></span></label>
+      <label class="chip" title="Cars, trees and rooftop objects: what a monster picks up and throws. Show in the list (also limits box select and Ctrl+A)"><input type="checkbox" data-kind="pickup" checked>Throwables<span class="n" data-n="pickup"></span></label>
       <label class="chip" title="Show in the list (also limits box select and Ctrl+A)"><input type="checkbox" data-kind="prop" checked>Props<span class="n" data-n="prop"></span></label>
       <span class="vsep"></span>
       <label class="chip changed" title="Only the objects your mod changes (moved, turned, copied or deleted)"><input type="checkbox" id="changedOnly"><span class="dot"></span>Changed<span class="n" data-n="changed"></span></label>

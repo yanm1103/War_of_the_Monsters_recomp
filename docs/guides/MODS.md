@@ -617,7 +617,7 @@ position (`from`, the `pos` column), so a patch made for another `.NGP` does not
   leaf), and for one with a camera trigger. Scaling the same handle twice multiplies. What rests on the object (a roof tank) is a
   pickup of its own and keeps its size and place.
 - `traffic` (`true` or `false`; on an entry and on each copy): for a car pickup (types 2, 3, 15 and 26, the parked and the driving cars
-  of the disc; the editor lists them under Pickups), `true` makes it a car that drives the stage's `.FOP` streets and `false` leaves
+  of the disc; the editor lists them under Throwables), `true` makes it a car that drives the stage's `.FOP` streets and `false` leaves
   it parked until a monster picks it up. It is bit 0 of the `id2` of the pickup's id group, which `LevelPickups::createPickup` reads
   to build a `CarPickup` instead of a plain pickup. A copy takes its entry's value unless it names its own.
 - `names` (`{"<handle>": "Hotel"}`, at the top beside `objects`) and `name` in a copy: labels for the level editor; the game and

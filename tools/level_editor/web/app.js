@@ -80,18 +80,25 @@ function readDraft() {
   if (!modNow || !stageName) return null;
   try { const d = JSON.parse(store.get(draftKey(), 'null')); return d && typeof d.patch === 'string' ? d : null; } catch (e) { return null; }
 }
+// the points of each marker layer that is not saved (start points, power-ups, the nets) go next to the patch: {SPT: [points], ...}
+function draftLayers() {
+  const out = {};
+  for (const k of dirtyLayers()) out[k] = lay(k).points;
+  return out;
+}
 function writeDraft() {
   if (draftHold || !stageName || !modNow || openFailed || !stageRoot) return;
   const key = draftKey();
-  if (!dirty) { removeDraft(key); draftTooBig = false; return; }
+  const layers = draftLayers();
+  if (!dirty && !Object.keys(layers).length) { removeDraft(key); draftTooBig = false; return; }
   const patch = JSON.stringify(buildPatch());
-  if (patch.length > DRAFT_MAX) {
+  if (patch.length + JSON.stringify(layers).length > DRAFT_MAX) {
     removeDraft(key);
     if (!draftTooBig) { draftTooBig = true; msg('This stage has too many changes for the automatic backup in the browser: save often', { level: 'warn', toast: true }); }
     return;
   }
   draftTooBig = false;
-  store.set(key, JSON.stringify({ patch, saved: savedJson, at: Date.now() }));
+  store.set(key, JSON.stringify({ patch, layers, saved: savedJson, at: Date.now() }));
   const keep = [key, ...draftIndex().filter((k) => k !== key)];
   for (const old of keep.slice(DRAFT_KEEP)) { try { localStorage.removeItem('wotmLevelEditor.' + old); } catch (e) { /* no storage */ } }
   store.set('draftIndex', JSON.stringify(keep.slice(0, DRAFT_KEEP)));
@@ -100,15 +107,22 @@ const queueDraft = () => { clearTimeout(draftTimer); draftTimer = setTimeout(wri
 // the stage has just opened: a draft of it that is not the saved state is offered back
 function offerDraft() {
   const d = readDraft();
-  if (!d || d.patch === savedJson) { if (d) removeDraft(); return; }
+  const lk = d && d.layers && typeof d.layers === 'object' ? Object.keys(d.layers).filter((k) => KINDS.includes(k) && Array.isArray(d.layers[k])) : [];
+  if (!d || (d.patch === savedJson && !lk.length)) { if (d) removeDraft(); return; }
   draftHold = true;
   const when = new Date(d.at).toLocaleString([], { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' });
   const moved = d.saved !== savedJson;
   ask('Restore your unsaved changes?', `${title(stageName)} had changes that were not saved (${when}) when the editor closed or stopped.` +
       (moved ? ' The mod\'s file is not the one they were made on: they go on top of the file as it is now.' : ''),
-      [['discard', 'Discard them'], ['restore', 'Restore', true]], (v) => {
+      [['discard', 'Discard them'], ['restore', 'Restore', true]], async (v) => {
         draftHold = false;
-        if (v === 'restore') { restoreTo(d.patch); msg('Restored the changes that were not saved', { level: 'ok', toast: true }); }
+        if (v === 'restore') {
+          restoreTo(d.patch);
+          // the marker files may still be loading: the draft goes over what they hold
+          if (lk.length) await Promise.all(lk.map((k) => layLoading[k]));
+          for (const k of lk) { lay(k).points = d.layers[k]; lay(k).sel = -1; layerChanged(k); }
+          msg('Restored the changes that were not saved', { level: 'ok', toast: true });
+        }
         else if (v === 'discard') removeDraft();
         else queueDraft();
       }, { icon: 'restore' });
@@ -480,8 +494,9 @@ function setupDrawing(gltf) {
 
 // A sky is drawn first, with no depth test and no fog, around the camera, in the order of the game's traversal: renderOrder base + 0, 1,
 // 2... both: draw the inside and the outside of its faces (a model of the mod's, whose faces the game wants turned inward). step: the
-// distance between two meshes' orders (a model's fits in the slot of the part it replaces)
-function skyDrawing(sky, both, base = -1e6, step = 1) {
+// distance between two meshes' orders (a model's fits in the slot of the part it replaces). gs: the GS state (blend, alpha test) the game
+// forces on the model, the one of the stock part it replaces (sky_swap); without it the model keeps its own
+function skyDrawing(sky, both, base = -1e6, step = 1, gs = null) {
   let n = 0;
   sky.traverse((o) => {
     if (!o.isMesh) return;
@@ -489,6 +504,7 @@ function skyDrawing(sky, both, base = -1e6, step = 1) {
       const c = m.clone();   // clone() leaves out onBeforeCompile and customProgramCacheKey
       c.onBeforeCompile = m.onBeforeCompile;
       c.customProgramCacheKey = m.customProgramCacheKey;
+      if (gs) { c.userData = { ...c.userData, gs: { ...gs } }; gsMaterial(c); }
       c.depthTest = false; c.depthWrite = false; c.fog = false; c.transparent = false;
       if (both) c.side = THREE.DoubleSide;
       return c;
@@ -533,7 +549,9 @@ function updateSkyView() {
       const view = want.clone(true);
       let meshes = 0;
       view.traverse((o) => { if (o.isMesh) meshes++; });
-      skyDrawing(view, true, base, 0.9 / Math.max(1, meshes));
+      // the game gives the model the stock part's blend and alpha (sky_swap): the first original mesh of the kind says which
+      const first = stock[0], gs = first ? [].concat(first.material)[0]?.userData?.gs : null;
+      skyDrawing(view, true, base, 0.9 / Math.max(1, meshes), gs || null);
       scene.add(view);
       skyViews[kind] = { from: want, view, base };
     }
@@ -1150,7 +1168,7 @@ function showBudget() {
   const level = r.full || ps >= 1 || pa >= 1 ? 'err' : ps >= 0.8 || pa >= 0.8 ? 'warn' : 'idle';
   stField('budget', `${sl.used}/${sl.total} slots · arena ${ar.used ? kb(ar.used) : '0'}` + (level === 'idle' ? '' : ' · nearly full'), level,
           `Room this stage's patch uses.\nBreakable slots: ${sl.used} of ${sl.total} (${sl.disc} on the disc), as the patch counts them: ` +
-          `a copy of a building, a pickup or a breakable prop takes some, a delete does not give them back.\n` +
+          `a copy of a building, a throwable or a breakable prop takes some, a delete does not give them back.\n` +
           `Arena: ${ar.used.toLocaleString('en-US')} of ${ar.total.toLocaleString('en-US')} bytes (copies, props, a bigger grid).` +
           (r.full ? `\nIt ran out: ${r.full}` : ''));
 }
@@ -1380,7 +1398,7 @@ function listed() {   // the items the list shows: kind boxes, "Changed" and the
 // The list's sections, in this order; a prop over 500 units (the rule's "Terrain piece") has its own, closed at first
 const SECTIONS = [
   { id: 'buildings', title: 'Buildings', icon: 'office-building-outline', word: 'Building', many: 'buildings' },
-  { id: 'pickups', title: 'Pickups', icon: 'package-variant-closed', word: 'Pickup', many: 'pickups' },
+  { id: 'pickups', title: 'Throwables', icon: 'package-variant-closed', word: 'Throwable', many: 'throwables' },
   { id: 'props', title: 'Props', icon: 'cube-outline', word: 'Prop', many: 'props' },
   { id: 'terrain', title: 'Terrain', icon: 'terrain', word: 'Terrain piece', many: 'terrain pieces' },
   { id: 'newprops', title: 'New props', icon: 'shape-plus-outline', word: 'New prop', many: 'new props' },
@@ -1420,7 +1438,7 @@ function onTop(list = group) {
   for (const it of list) for (const a of it.attached) if (a.node.visible && !list.includes(a)) on.add(a);
   return on;
 }
-// "3 buildings, 2 pickups"
+// "3 buildings, 2 throwables"
 function kindCounts(list) {
   const n = new Map();
   for (const it of list) { const s = secOf(it.rec.info); n.set(s, (n.get(s) || 0) + 1); }
@@ -2452,7 +2470,7 @@ function copyGroup(placers) {
   return { made, on };
 }
 // "Hotel", "3 buildings" or "5 objects"
-const KIND_WORDS = { destr: ['building', 'buildings'], pickup: ['pickup', 'pickups'], prop: ['prop', 'props'], newprop: ['new prop', 'new props'] };
+const KIND_WORDS = { destr: ['building', 'buildings'], pickup: ['throwable', 'throwables'], prop: ['prop', 'props'], newprop: ['new prop', 'new props'] };
 function countText(list) {
   if (list.length === 1) return nameOf(list[0]);
   const kinds = new Set(list.map((it) => it.rec.info.kind)), w = kinds.size === 1 ? KIND_WORDS[[...kinds][0]] : null;
@@ -2863,7 +2881,7 @@ async function postNow(kind, save, extra) {
       savedJson = JSON.stringify(body.patch);
       if (res.stamp !== undefined) fileStamp = res.stamp;
       dirty = JSON.stringify(buildPatch()) !== savedJson;   // an edit made while saving stays unsaved
-      if (!dirty) removeDraft(); else queueDraft();
+      if (!dirty && !layersDirty()) removeDraft(); else queueDraft();
       ui.savedAt = Date.now();
       const removed = /^removed /.test(res.saved);
       const text = removed ? `Removed ${rel}: your mod no longer changes ${title(stageName)}` : `Saved to ${rel}`;
@@ -2876,7 +2894,7 @@ async function postNow(kind, save, extra) {
       savedJson = JSON.stringify(body.patch);
       if (res.stamp !== undefined) fileStamp = res.stamp;
       dirty = JSON.stringify(buildPatch()) !== savedJson;
-      if (!dirty) removeDraft(); else queueDraft();
+      if (!dirty && !layersDirty()) removeDraft(); else queueDraft();
       if (!layersWrote) msg(`Nothing to save: your mod has no changes for ${title(stageName)}`, { toast: true });
     }
     if (res.launched) {
@@ -3665,7 +3683,7 @@ function renderPrefabs() {
     const props = p.entries.filter((e) => e.kind === 'prop').length;
     const away = p.stage !== baseOf(stageName);
     b.querySelector('.pm-meta').textContent = (away ? `${title(p.stage)} · ` : '') + `${p.entries.length} ${p.entries.length === 1 ? 'object' : 'objects'}` + (props ? `, ${props} new` : '');
-    b.title = away ? `Put ${p.name} where the view looks: its objects are built as props of this stage from ${title(p.stage)}'s (pickups and vehicles stay out)`
+    b.title = away ? `Put ${p.name} where the view looks: its objects are built as props of this stage from ${title(p.stage)}'s (throwables and vehicles stay out)`
       : `Put ${p.name} where the view looks`;
     b.onclick = () => pastePrefab(p);
     x.type = 'button';
@@ -4439,6 +4457,7 @@ function layerChanged(kind) {
   $('save').classList.toggle('dirty', isDirty());
   showStatus();
   showUndoButtons();
+  queueDraft();
   if (layerOf() === kind) refreshMk();
 }
 function syncRailDots() {
