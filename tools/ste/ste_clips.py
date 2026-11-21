@@ -31,6 +31,8 @@ LAID_DOWN = {'turn': [-90, 0, 0], 'shift': [0, -63.3, 17.5]}    # de bruços (81
 # sai do clipe e vai para o rootTurn do jogo), 'knots' (a deformacao do tempo dada a mao; vence a que o 'strike' acharia).
 ID_MAP = {
     90: ('NORMAL_IDLE', True, None),
+    95: ('NORMAL_IDLE', True, None),   # idle com pouca vida: o STE nao tem; o do Togera retargetado deixa os pes no ar
+    96: ('NORMAL_IDLE', True, None),   # idle com o especial cheio (o do treino): o do Togera solta poeira do pe esquerdo
     1: ('WALK', True, None),
     2: ('RUN', True, None),
     92: ('TAUNT', False, None),
