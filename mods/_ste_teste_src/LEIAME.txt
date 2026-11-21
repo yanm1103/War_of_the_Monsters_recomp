@@ -3,3 +3,5 @@ Mod de teste: Godzilla 2000 de Godzilla: Save the Earth com as animacoes propria
 tools/rigmaps/ste_godzilla2000.json rig.glb --size 0.988 --own clips.json, com clips.json de tools/ste/ste_clips.py (ID_MAP).
 O mod: modkit.py monster new ste_teste godzilla_ste --base togera --costume 0 --name "GODZILLA STE" --ai --narrator togera;
 modkit.py monster rig ... godzilla2000_ste_rig.glb; textura lizard0_t0013.png x0.62; retrato do Godzilla 2000.
+Sons: ste_sounds.py <iso> <pasta files/ da pasta de trabalho> sounds (tools/ste/ste_sound.py); sounds/ = os WAVs que ele grava
+(lizard_s_NNN = banco proprio LIZARD_S, genamb_s_NNN = banco comum proprio GENAMB_S), depois modkit.py pack ste_teste.

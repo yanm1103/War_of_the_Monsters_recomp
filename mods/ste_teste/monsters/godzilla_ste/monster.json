@@ -6,6 +6,7 @@
   "files": true,
   "narrator": "togera",
   "ai": true,
+  "specialRoar": true,
   "portrait": "portrait.png",
   "portraitTex": 3
 }
