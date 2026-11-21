@@ -25,7 +25,10 @@ LAID_UP = {'turn': [90, 0, 0], 'shift': [0, 62.3, 15.1]}        # de costas (80,
 LAID_DOWN = {'turn': [-90, 0, 0], 'shift': [0, -63.3, 17.5]}    # de bruços (81, 85)
 
 # id do WotM -> (nome da animacao no STE, ciclo?, duracao em s ou None = a do STE[, opcoes]). So entra o que foi conferido olhando.
-# Opcoes: 'laid' (retarget --own), 'still' (2 quadros iguais, o 1o do clipe), 'settle' (tira a deriva da raiz de um clipe unico).
+# Opcoes: 'laid' (retarget --own), 'still' (2 quadros iguais, o 1o do clipe), 'settle' (tira a deriva da raiz de um clipe unico),
+# 'face' (o clipe termina com a frente da pose parada: {'from': u} desvira de u ate o fim, 'dir': +1/-1 fecha a volta nesse
+# sentido, 'ease': 'out' desvira rapido no comeco, 'in': u desfaz ate u o giro com que o clipe do STE comeca), 'turn' (o giro
+# sai do clipe e vai para o rootTurn do jogo), 'knots' (a deformacao do tempo dada a mao; vence a que o 'strike' acharia).
 ID_MAP = {
     90: ('NORMAL_IDLE', True, None),
     1: ('WALK', True, None),
@@ -53,7 +56,7 @@ ID_MAP = {
     85: ('KOED_FACEDOWN_IDLE', False, None, {'laid': LAID_DOWN, 'still': True}),   # pouso, 2 quadros (o jogo estica a 60)
     86: ('KOED_FACEUP_IDLE', False, None, {'laid': LAID_UP, 'still': True}),
     87: ('KOED_FACEDOWN_GETUP', False, None, {'settle': True}),        # levantar de bruços (o jogo estica a 60 campos)
-    88: ('KOED_FACEUP_GETUP_ATTACK', False, None, {'settle': True}),   # de costas: so esta comeca na pose deitada (o rolar nao encadeia)
+    88: ('KOED_FACEUP_GETUP_ATTACK', False, None, {'settle': True, 'face': {'from': 0.6}}),   # de costas: so esta comeca na pose deitada (o rolar nao encadeia)
     120: ('SLUMP', False, None),            # morte em pe: cai de frente e termina na pose de KOED_FACEDOWN_IDLE
     # pulo: o STE tem um unico JUMP_UP com o arco inteiro; o WotM divide em fases (StateJump) e a altura vem da fisica, entao cada
     # fase e um trecho do JUMP_UP (u = fracao da animacao) e a subida da raiz encolhe para ~0,43 (o Togera embute +40 de altura).
@@ -75,13 +78,13 @@ ID_MAP = {
     # mais golpes e movimento: 13 e a mao esquerda do combo (slot 2.5 do .CHR); andar e correr de costas = o ciclo ao contrario;
     # o pisao acerta em 50% (StateStompAttack) e o STOMP tem os dois pes no chao em ~46%; os levantares atacando e a morte
     # deitada comecam na pose deitada do levantar (87/88), sem `laid` (o jogo nao inclina o monstro nesses).
-    13: ('JAB_L', False, 0.4, {'turn': True, 'strike': {'eff': 'hand_l', 'win': (0.55, 0.99)}}),
+    13: ('JAB_L', False, 0.4, {'strike': {'eff': 'hand_l', 'win': (0.55, 0.99)}}),
     7: ('WALK', True, None, {'reverse': True}),
     8: ('RUN', True, None, {'reverse': True}),
     240: ('STOMP', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.5, 0.46), (1, 1)]}),
     241: ('STOMP', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.5, 0.46), (1, 1)]}),
-    242: ('KOED_FACEDOWN_GETUP_ATTACK', False, 50 / 60.0, {'settle': True}),
-    243: ('KOED_FACEUP_GETUP_ATTACK', False, 50 / 60.0, {'settle': True}),
+    242: ('KOED_FACEDOWN_GETUP_ATTACK', False, 50 / 60.0, {'settle': True, 'face': {'from': 0.6}}),
+    243: ('KOED_FACEUP_GETUP_ATTACK', False, 50 / 60.0, {'settle': True, 'face': {'from': 0.6}}),
     121: ('KNOCKDOWN_FACEDOWN_FINISH', False, 2.0, {'knots': [(0, 0), (0.4, 1), (1, 1)]}),   # morte deitada de bruços: estrebucha e fica
     122: ('KNOCKDOWN_FACEUP_FINISH', False, 2.0, {'knots': [(0, 0), (0.3, 1), (1, 1)]}),
     # agarrar (StateGrapple: pega a vitima entre 50% e 60% do alcance; StateGrappleOHAttack: o golpe acerta em 50%): o LIFT
@@ -97,16 +100,16 @@ ID_MAP = {
     # golpes: cada slot do Togera (.CHR, `tools/chr_dump.py disc/RST/LIZARD.CHR`) acerta com um localizador (0x803 mao D, 0x80B
     # boca, 0x818 a frente da cabeca, 0x816/0x817 meio e ponta da cauda) numa janela fixa da animacao; o golpe do STE com a mesma
     # parte do corpo entra no comprimento do slot, com o golpe dentro da janela (strike: eff = parte, win = janela do slot).
-    10: ('JAB_R', False, 0.4, {'turn': True, 'strike': {'eff': 'hand_r', 'win': (0.55, 0.99)}}),            # soco rapido
-    22: ('UPPERCUT', False, 40 / 60.0, {'turn': True, 'strike': {'eff': 'hand_r', 'win': (0.47, 0.85)}}),   # soco que lanca
-    17: ('HMMR_FIN', False, 0.4, {'turn': True, 'strike': {'eff': 'hand_r', 'win': (0.60, 0.99)}}),         # pancada de mao e ombro
-    16: ('COMBO_BITE', False, 40 / 60.0, {'turn': True, 'strike': {'eff': 'head', 'win': (0.44, 0.74), 'mode': 'abs'}}),   # mordida que atordoa
-    18: ('COMBO_BITE', False, 0.4, {'turn': True, 'strike': {'eff': 'head', 'win': (0.25, 0.85), 'mode': 'abs'}}),         # mordida
-    19: ('COMBO_BITE', False, 0.4, {'turn': True, 'strike': {'eff': 'head', 'win': (0.50, 0.99), 'mode': 'abs'}}),         # mordida
-    15: ('HEADBUTT', False, 80 / 60.0, {'turn': True, 'strike': {'eff': 'head', 'win': (0.20, 0.59), 'mode': 'abs'}}),     # cabecada
-    12: ('TAIL_FULL_SPIN', False, 70 / 60.0, {'turn': True, 'strike': {'eff': 'tail', 'win': (0.25, 0.48)}}),   # cauda forte (lanca)
-    21: ('TAIL_SNAP', False, 50 / 60.0, {'turn': True, 'strike': {'eff': 'tail', 'win': (0.22, 0.49)}}),    # cauda leve
-    20: ('TAIL_REVERSAL', False, 50 / 60.0, {'turn': True, 'strike': {'eff': 'tail', 'win': (0.01, 0.49)}}),   # cauda, acerta desde o comeco
+    10: ('JAB_R', False, 0.4, {'strike': {'eff': 'hand_r', 'win': (0.55, 0.99)}}),            # soco rapido
+    22: ('UPPERCUT', False, 40 / 60.0, {'strike': {'eff': 'hand_r', 'win': (0.47, 0.85)}}),   # soco que lanca
+    17: ('HMMR_FIN', False, 0.4, {'face': {'from': 0.6}, 'strike': {'eff': 'hand_r', 'win': (0.60, 0.99)}}),         # pancada de mao e ombro
+    16: ('COMBO_BITE', False, 40 / 60.0, {'face': {'in': 0.44}, 'strike': {'eff': 'head', 'win': (0.44, 0.74), 'mode': 'abs'}}),   # mordida que atordoa
+    18: ('COMBO_BITE', False, 0.4, {'face': {'in': 0.25}, 'strike': {'eff': 'head', 'win': (0.25, 0.85), 'mode': 'abs'}}),         # mordida
+    19: ('COMBO_BITE', False, 0.4, {'face': {'in': 0.5}, 'strike': {'eff': 'head', 'win': (0.50, 0.99), 'mode': 'abs'}}),         # mordida
+    15: ('HEADBUTT', False, 80 / 60.0, {'strike': {'eff': 'head', 'win': (0.20, 0.59), 'mode': 'abs'}}),     # cabecada
+    12: ('TAIL_FULL_SPIN', False, 70 / 60.0, {'knots': [(0, 0), (0.25, 0.44), (0.36, 0.56), (1, 1)], 'face': {'from': 0.36, 'dir': 1, 'ease': 'out'}, 'strike': {'eff': 'tail', 'win': (0.25, 0.48)}}),   # cauda forte (lanca)
+    21: ('TAIL_SNAP', False, 50 / 60.0, {'strike': {'eff': 'tail', 'win': (0.22, 0.49)}}),    # cauda leve
+    20: ('TAIL_REVERSAL', False, 50 / 60.0, {'face': {'from': 0.49}, 'strike': {'eff': 'tail', 'win': (0.01, 0.49)}}),   # cauda, acerta desde o comeco
 }
 
 
@@ -294,6 +297,15 @@ def _spin(W, root, phi):
     return out
 
 
+def _yaw(W, pel):
+    """Para onde a frente do quadril (+y local) aponta, em graus a partir de +y, positivo para +x (o heading do jogo)."""
+    R = W[pel][0]
+    return math.degrees(math.atan2(R[0][1], R[1][1]))
+
+
+FACE_REF = 0.0   # a frente do quadril na pose parada (NORMAL_IDLE): main() a mede; a opcao 'face' termina o golpe nela
+
+
 def make_clip(sk, an, wid, cycle, seconds=None, opts=None):
     opts = opts or {}
     frames = max(2, int(round((seconds or an['dur']) * FPS)))
@@ -305,7 +317,7 @@ def make_clip(sk, an, wid, cycle, seconds=None, opts=None):
     joints = {nm: [] for nm in names}
     prev = [None] * len(names)
     root = sk['parent'].index(-1)
-    knots = strike_knots(sk, an, opts['strike'], frames / FPS) if opts.get('strike') else opts.get('knots')   # knots: [(saida, entrada)]
+    knots = opts.get('knots') or (strike_knots(sk, an, opts['strike'], frames / FPS) if opts.get('strike') else None)   # knots: [(saida, entrada)]; os dados vencem os do golpe
     uin = (lambda uo: warp(knots, uo)) if knots else (lambda uo: uo)
     k_travel, root0 = 1.0, None
     if opts.get('strike'):   # o STE avanca o monstro pelo golpe (a cabecada anda 400 unidades): limita a um avanco que o jogo aguente
@@ -323,6 +335,29 @@ def make_clip(sk, an, wid, cycle, seconds=None, opts=None):
         p1 = world_pose(sk, *sample_local(sk, an, 1.0, cycle))[root][1]
         drift = (p1[0] - p0[0], p1[1] - p0[1])
     pel = [i for i, n in enumerate(sk['name']) if n.endswith('Pelvis')][0]
+    face = opts.get('face')
+    if face:   # o golpe do STE termina (ou comeca) virado e o STE desvira o personagem por fora; no WotM a frente fica onde estava
+        def _wrap(a):
+            return a - 360.0 * round(a / 360.0)
+        y_ini = _yaw(world_pose(sk, *sample_local(sk, an, uin(0.0), cycle)), pel) - FACE_REF
+        y_fim = _wrap(_yaw(world_pose(sk, *sample_local(sk, an, uin(1.0), cycle)), pel) - FACE_REF)
+        fdir = face.get('dir', 0)   # +1/-1: termina a volta nesse sentido (a cauda que roda inteira); 0: pelo lado mais curto
+        e_fim = (-y_fim) % 360.0 if fdir > 0 else (-(y_fim % 360.0) if fdir < 0 else -y_fim)
+        e_ini = -_wrap(y_ini) if face.get('in') else 0.0
+        f0, fin = face.get('from', 0.0), face.get('in')
+
+        def face_turn(uo):   # graus a somar ao giro medido (+ = horario visto de cima), em suaves entre os instantes
+            def sm(x):
+                x = min(1.0, max(0.0, x))
+                return x * x * (3 - 2 * x)
+            x = min(1.0, max(0.0, (uo - f0) / (1.0 - f0)))
+            # 'ease': 'out' comeca rapido e assenta (o giro continua o embalo do golpe); sem ela, suave nas duas pontas
+            a = e_fim * ((1.0 - (1.0 - x) ** 3) if face.get('ease') == 'out' else sm(x))
+            if fin:
+                a += e_ini * (1.0 - sm(uo / fin))
+            return a
+        print('      frente: comeca %+.0f, termina %+.0f graus da pose parada; desvira %+.0f no fim%s' % (
+            _wrap(y_ini), y_fim, e_fim, ', %+.0f no comeco' % e_ini if fin else ''))
     turn_prev, turn_cum, turn_base, turns = None, 0.0, 0.0, []
     for f in range(frames):
         uo = f / float(frames if cycle else frames - 1)
@@ -336,10 +371,8 @@ def make_clip(sk, an, wid, cycle, seconds=None, opts=None):
         else:
             lt, lq = sample_local(sk, an, u, cycle)
         W = world_pose(sk, lt, lq)
-        sp = opts.get('spin')   # o golpe do STE termina virado (o STE gira o personagem; o WotM nao): termina o giro, sem estalo no fim
-        if sp and uo > sp['from']:
-            x = min(1.0, (uo - sp['from']) / (1.0 - sp['from']))
-            W = _spin(W, root, math.radians(-sp['extra'] * x * x * (3 - 2 * x)))   # `extra` no sentido do giro medido (+ = horario visto de cima)
+        if face:
+            W = _spin(W, root, math.radians(-face_turn(uo)))
         if opts.get('turn'):   # o STE gira o personagem no golpe: o clipe sai sem esse giro e a curva vai para o jogo (rootTurn)
             R0 = W[pel][0]
             ang = math.degrees(math.atan2(R0[0][1], R0[1][1]))   # frente do quadril: +y local; positivo para +x (o heading do jogo)
@@ -412,6 +445,9 @@ def main(argv):
             table[int(k)] = (v, False, None)
             ids.append(int(k))
     byname = {a.get('name'): a for a in anims if a.get('name')}
+    global FACE_REF
+    pel = [i for i, n in enumerate(sk['name']) if n.endswith('Pelvis')][0]
+    FACE_REF = _yaw(world_pose(sk, *sample_local(sk, byname['NORMAL_IDLE'], 0.0, True)), pel)
     clips = []
     for wid in ids:
         nm, cycle, secs = table[wid][:3]
@@ -419,7 +455,7 @@ def main(argv):
         print('a%d <- %s (%d quadros, %s)' % (wid, nm, clips[-1]['frames'], 'ciclo' if cycle else 'uma vez'))
         st = table[wid][3].get('strike') if len(table[wid]) > 3 else None
         if st:
-            kn = strike_knots(sk, byname[nm], st, clips[-1]['frames'] / FPS)
+            kn = table[wid][3].get('knots') or strike_knots(sk, byname[nm], st, clips[-1]['frames'] / FPS)
             print('      golpe (%s) janela %s: tempo saida->entrada %s' % (st['eff'], st['win'], ' '.join('%.2f>%.2f' % k for k in kn)))
     with open(out, 'w', encoding='utf-8') as f:
         json.dump({'clips': clips}, f, separators=(',', ':'))
