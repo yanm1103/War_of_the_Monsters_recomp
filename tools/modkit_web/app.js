@@ -1,0 +1,114 @@
+// The mod kit's page (tools/modkit_web.py serves it): the paths and the mod on top, the panes, the tasks and the log.
+// window.kit holds what the other parts of the page (and the tests driving it) use: api(), state, onState(), pick(), say().
+
+const $ = id => document.getElementById(id);
+const listeners = [];
+const kit = window.kit = {
+  state: null,
+  async api(path, body) {   // GET when there is no body
+    const r = await fetch('api/' + path, body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) });
+    return r.json();
+  },
+  onState(f) { listeners.push(f); if (kit.state) f(kit.state); },
+  setState(s) { kit.state = s; for (const f of listeners) f(s); },
+  async pick(kind, title, initial, types) {   // the system's dialog -> a path (or a list for "files"), null when cancelled
+    return (await kit.api('do/pick', { kind, title, initial, types })).path;
+  },
+  say(text, kind) { appendLog(text, kind); },
+  async run(action, body) {   // a task: its lines come through the log
+    const r = await kit.api('do/' + action, body || {});
+    if (r.error) appendLog(r.error + '\n', 'err');
+    else if (r.ok === false) appendLog('Still working on the previous task; try again when it finishes.\n', 'warn');
+    return r;
+  },
+};
+
+// ---------------------------------------------------------------- paths and mod
+function showState(s) {
+  for (const k of ['disc', 'mods']) if (document.activeElement !== $(k)) $(k).value = s[k] || '';
+  $('disc').classList.toggle('bad', !s.disc_ok);
+  $('mods').classList.toggle('bad', !s.mods_ok);
+  const sel = $('mod');
+  sel.innerHTML = '';
+  const none = document.createElement('option');
+  none.value = '';
+  none.textContent = s.mod_list.length ? '(pick a mod)' : '(no mods yet)';
+  sel.appendChild(none);
+  for (const n of s.mod_list) {
+    const o = document.createElement('option');
+    o.value = o.textContent = n;
+    sel.appendChild(o);
+  }
+  sel.value = s.mod || '';
+  busy(s.busy);
+}
+kit.onState(showState);
+async function setConf(d) { kit.setState(await kit.api('conf', d)); }
+for (const k of ['disc', 'mods']) $(k).addEventListener('change', () => setConf({ [k]: $(k).value.trim() }));
+$('mod').addEventListener('change', () => setConf({ mod: $('mod').value }));
+for (const b of document.querySelectorAll('button[data-pick]')) {
+  b.onclick = async () => {
+    const k = b.dataset.pick;
+    const p = k === 'disc'
+      ? await kit.pick('file', 'War of the Monsters ISO (NTSC-U, SCUS-97197)', kit.state.disc, [['Disc image', ['*.iso']]])
+      : await kit.pick('dir', 'Mods folder', kit.state.mods);
+    if (p) setConf({ [k]: p });
+  };
+}
+
+// ---------------------------------------------------------------- tasks and log
+function busy(on) {
+  for (const b of document.querySelectorAll('button.task')) b.disabled = !!on;
+}
+const log = $('log');
+function appendLog(text, kind) {
+  if (!text) return;
+  const stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 4;
+  const sp = document.createElement('span');
+  if (kind && kind !== 'out') sp.className = kind;
+  sp.textContent = text;
+  log.appendChild(sp);
+  while (log.childNodes.length > 4000) log.removeChild(log.firstChild);
+  if (stick) log.scrollTop = log.scrollHeight;
+}
+const events = new EventSource('api/log');   // also what tells the server this tab is open
+events.onmessage = ev => {
+  const it = JSON.parse(ev.data);
+  appendLog(it.text, it.kind);
+  if (kit.state && (it.kind === 'head' || it.kind === 'done')) {
+    kit.state.busy = it.busy;
+    busy(it.busy);
+    if (it.kind === 'done') refresh();
+  }
+};
+events.onerror = async () => {   // the server went away (Quit, or closed): say so instead of a dead page
+  try { await fetch('api/hello'); } catch (e) { $('gone').style.display = 'flex'; events.close(); }
+};
+$('check').onclick = () => kit.run('check');
+$('quit').onclick = async () => {
+  try { await kit.api('quit', {}); } catch (e) { /* already gone */ }
+  events.close();
+  $('gone').style.display = 'flex';
+};
+
+// the log's height: dragging the line above it (kept in this browser)
+const foot = $('foot');
+const savedH = parseInt(localStorage.getItem('wotm.logH') || '', 10);
+if (savedH) document.documentElement.style.setProperty('--log-h', savedH + 'px');
+$('split').addEventListener('pointerdown', ev => {
+  const y0 = ev.clientY, h0 = foot.offsetHeight;
+  const move = e => {
+    const h = Math.max(60, Math.min(window.innerHeight - 260, h0 - (e.clientY - y0)));
+    document.documentElement.style.setProperty('--log-h', h + 'px');
+  };
+  const up = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    localStorage.setItem('wotm.logH', foot.offsetHeight);
+  };
+  window.addEventListener('pointermove', move);
+  window.addEventListener('pointerup', up);
+});
+
+async function refresh() { kit.setState(await kit.api('state')); }
+refresh();

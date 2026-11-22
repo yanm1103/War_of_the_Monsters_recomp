@@ -2,6 +2,7 @@
 """Interface do kit de mods (tools/modkit.py): escolher no disco o que extrair, ver e abrir o que foi extraido, empacotar no mod.
 
   python tools/modkit_gui.py        (ou pythonw, sem console; o launcher tem o botao "Mod kit")
+  python tools/modkit_gui.py --web  (o kit numa aba do navegador, tools/modkit_web.py; ainda incompleto)
 
 Textos da janela em ingles (pedido do dono). Um mod = um projeto: no topo, "Mod:" escolhe o mod (ou "New mod..." cria um), e ele
 governa tudo; cada mod tem a sua pasta de trabalho (modkit.work_dir: <mods>/_work/<mod>). Esquerda: o disco por nome (monstros e
@@ -2318,6 +2319,9 @@ def main():
                 print(ex.code)
                 sys.exit(1)
             raise
+    if "--web" in sys.argv[1:]:   # the kit in a browser tab (tools/modkit_web.py), while it takes over from this window
+        import modkit_web
+        sys.exit(modkit_web.main([a for a in sys.argv[1:] if a != "--web"]))
     root = tk.Tk()
     try:
         ico = os.path.join(getattr(sys, "_MEIPASS", ""), "wotm.ico") if modkit.FROZEN else os.path.join(modkit.REPO, "native", "wotm.ico")

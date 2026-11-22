@@ -5,7 +5,8 @@ Pedido do dono (2026-11-22): a interface inteira do Mod kit numa janela de naveg
 Branch: `ste-monstros`. Depois, se o dono preferir, uma branch própria (`kit-web`) saindo dela.
 
 ## Estado
-- **Etapa atual:** 1 (animação na página de ossos), feita e testada por CDP; **esperando o teste do dono** (passo a passo na mensagem da sessão de 2026-11-22: Adjust bones no DK, barra de animação, pés no Walk). Depois do teste, etapa 2.
+- **Etapa atual:** 3 (Mods). Etapa 2 feita e testada por CDP (`scratchpad/cdp_web2.py`: estado, troca de mod, Check com log por SSE, segunda cópia abre aba na mesma porta, servidor sai ~20 s depois de fechar a aba). A etapa 1 foi conferida pelo dono na página (animações certas); os pés tortos no jogo eram o build antigo em `mods/` (Adjust bones regrava só a pasta de trabalho; falta o Build mod).
+- **Como abrir o kit novo:** `python tools/modkit_gui.py --web` (ou `tools/modkit_web.py`; `--no-browser`, `--port N`, `--conf ARQ` para testes não mexerem na config do dono).
 - **Feito antes deste plano:**
   - a página de ossos (`tools/orientpage.html` / `orientpage.py`), com ossos estilo Blender, slider e campo por eixo, giro líquido na frente;
   - o "Adjust bones..." (commit `6bd0fddc`);
@@ -17,7 +18,7 @@ Branch: `ste-monstros`. Depois, se o dono preferir, uma branch própria (`kit-we
 ## Decisões
 - **O que se abre continua sendo o `WotM_ModKit.exe`** (ou `python tools/modkit_gui.py`). Ele sobe um servidor em `127.0.0.1`, numa porta livre, e abre a página no navegador padrão. Não há pywebview nem Electron: o kit tem que rodar igual no Windows e no Linux, sem dependência nova.
 - **O trabalho fica no `tools/modkit.py`.** O servidor só chama as funções que o Tk já chama. Tarefas longas (build, import, export) rodam em processo separado, como o `run_proc` de hoje, com o log chegando à página por SSE (`text/event-stream`).
-- **Fechar a aba encerra o kit.** A página manda um sinal de vida (a cada ~2 s) e o servidor sai quando ele para por ~10 s, ou pelo botão "Quit". Uma segunda cópia do kit, aberta com uma já rodando, só abre outra aba na mesma porta (a porta fica gravada na config).
+- **Fechar a aba encerra o kit.** O sinal de vida é o fluxo do log (SSE) aberto: o servidor sai 15 s depois do último fechar (ou pelo botão "Quit"). Timer na página não serve: o navegador desacelera os timers de aba em segundo plano para um por minuto. Uma segunda cópia do kit, aberta com uma já rodando, só abre outra aba na mesma porta (a porta fica gravada na config).
 - **Escolher arquivo ou pasta:** o navegador não entrega o caminho, e o `.dae`/`.glb` precisa das texturas da mesma pasta. O botão pede ao servidor, que abre a janela nativa do sistema. Hoje isso é o `tkinter.filedialog`, num Tk escondido e numa thread própria; no Linux, `zenity` ou `kdialog` quando existirem. O caminho volta para a página.
 - **A config é a mesma do Tk** (`load_conf`/`save_conf`): pastas, disco, mod aberto e editores externos. Dá para alternar entre os dois kits durante a migração.
 - **O Tk fica até a última etapa.** Cada parte nova é conferida contra a mesma função no Tk. Quando tudo tiver passado, o `modkit_gui.py` vira só o lançador (ou sai) e o `MODS.md` muda.
@@ -53,17 +54,18 @@ Cada etapa termina com: teste pela página num Edge sem janela via CDP (receita 
 - [ ] **Teste do dono** com os pés do DK (escolher andar e guarda, ajustar `LFootJ`).
 
 ### 2. Esqueleto do kit web
-- [ ] **`tools/modkit_web.py` (servidor):**
+- [x] **`tools/modkit_web.py` (servidor):**
   - porta livre gravada na config;
   - sinal de vida e saída;
   - SSE do log;
   - janela de arquivo nativa;
   - fila de tarefas em processo separado, com o mesmo `--modkit-cli` do exe.
-- [ ] **`tools/modkit_web/` (página):**
+- [x] **`tools/modkit_web/` (página):**
   - casca com a barra de cima (mod aberto, disco, pasta de trabalho);
   - log embaixo e área principal;
   - um botão de tarefa por vez, como no Tk.
-- [ ] **Abrir pelo `modkit_gui.py`:** `--web` abre o novo, sem flag continua o Tk. Isso dura até a etapa 8.
+- [x] **Abrir pelo `modkit_gui.py`:** `--web` abre o novo, sem flag continua o Tk. Isso dura até a etapa 8.
+- Feito: `window.kit` (api, state, onState, pick, run, say) é a base das próximas telas; ações do servidor = métodos `act_<nome>` do `Kit` (POST `/api/do/<nome>`); tarefas = `Kit.run(título, args do modkit.py)`. A janela de arquivo nativa (`Dialogs`) não foi exercitada por CDP (abriria janela na tela do dono); é a mesma chamada do Tk.
 
 ### 3. Mods
 - [ ] lista, novo mod, abrir a pasta de trabalho, pastas e disco (`pick_dir`, `pick_disc`);
@@ -106,4 +108,4 @@ Cada etapa termina com: teste pela página num Edge sem janela via CDP (receita 
 Decididas pelo dono (goal de 2026-11-22): as prévias 3D novas entram (skin, custom e arquivo de modelo 3D selecionado mostram o modelo); o Tk sai de vez na etapa 8, sem `--tk`.
 
 ## Diário
-- 2026-11-22: plano escrito. Goal do dono: prévias 3D entram quando um monstro ou um arquivo de modelo 3D é selecionado (etapas 5 e 7 decididas); o Tk sai de vez no fim. Etapa 1 feita (barra de animação na página de ossos), esperando o teste do dono.
+- 2026-11-22: plano escrito. Goal do dono: prévias 3D entram quando um monstro ou um arquivo de modelo 3D é selecionado (etapas 5 e 7 decididas); o Tk sai de vez no fim. Etapa 1 feita (barra de animação na página de ossos); o dono viu as animações certas na página e os pés tortos no jogo vinham do build antigo em `mods/` (o `.NGP` da pasta de trabalho, com o Around de 30°, era mais novo). Etapa 2 feita (servidor e casca).

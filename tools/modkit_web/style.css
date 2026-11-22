@@ -1,0 +1,40 @@
+:root { --bg: #1b1d22; --bg2: #24272e; --bg3: #2c3039; --line: #3a3d45; --fg: #e6e6e6; --dim: #8d919b; --acc: #2f6fd6;
+        --acc2: #3b7ce6; --err: #ff8a80; --warn: #f0b030; --log-h: 160px; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px/1.4 "Segoe UI", system-ui, sans-serif; }
+body { display: flex; flex-direction: column; overflow: hidden; }
+button { background: var(--bg3); color: var(--fg); border: 1px solid #454a55; border-radius: 5px; padding: 6px 12px; cursor: pointer;
+         font: inherit; }
+button:hover { background: #363b46; }
+button:disabled, select:disabled, input:disabled { opacity: .45; cursor: default; }
+button.primary { background: var(--acc); border-color: var(--acc2); font-weight: 600; }
+button.primary:hover { background: var(--acc2); }
+input, select { background: var(--bg3); color: var(--fg); border: 1px solid #454a55; border-radius: 5px; padding: 5px 8px; font: inherit; }
+input.bad { border-color: var(--err); }
+
+header { display: flex; gap: 16px; align-items: flex-start; padding: 10px 14px 8px; border-bottom: 1px solid var(--line); }
+.paths { flex: 1; display: grid; grid-template-columns: max-content 1fr; gap: 5px 10px; align-items: center; }
+.paths label { color: var(--dim); font-size: 13px; }
+.paths label.head { color: var(--fg); font-weight: 600; font-size: 14px; }
+.field { display: flex; gap: 6px; min-width: 0; }
+.field input { flex: 1; min-width: 0; }
+.field select { min-width: 260px; }
+.pick { padding: 4px 10px; }
+
+main { flex: 1; display: flex; gap: 10px; padding: 10px 14px; min-height: 0; }
+section { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; }
+section h2 { font-size: 14px; margin: 0; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+section .body { flex: 1; overflow: auto; padding: 8px 12px; color: var(--dim); }
+
+#split { height: 6px; cursor: row-resize; margin: 0 14px; border-top: 1px solid var(--line); }
+#split:hover { background: #2a2e36; }
+footer { height: var(--log-h); display: flex; gap: 10px; padding: 4px 14px 10px; min-height: 60px; }
+.tasks { display: flex; flex-direction: column; gap: 6px; width: 150px; flex: none; }
+#log { flex: 1; margin: 0; overflow: auto; background: #15171b; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px;
+       font: 12px/1.45 Consolas, "Cascadia Mono", monospace; white-space: pre-wrap; overflow-wrap: anywhere; color: #cfd2d8; }
+#log .head { color: #9ec3ff; font-weight: 600; }
+#log .err { color: var(--err); }
+#log .warn { color: var(--warn); }
+
+#gone { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(20, 21, 25, .92);
+        font-size: 18px; z-index: 50; }
