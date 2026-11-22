@@ -60,8 +60,13 @@ CONTACT_IDS = (0x802, 0x803, 0x804, 0x805, 0x816, 0x817)   # AnimContact: hands,
 FEET = (0x804, 0x805, 0x816, 0x817)
 PAPPY_IDS = (1, 2, 3, 4, 5, 6, 7)                         # AnimPappy: rotation, translation, on/off
 BONESPRING_TYPE = 0x20    # Congar: initDynamics hooks springs on atMat 4, 8, 11, 13, 20, 22, 26, 28
-ADD_IDS = {140, 150, 151, 152, 153}   # additive once (recoil, flinches): with ngpanim.LAYER_IDS, the only ids the game
-                                      # adds on top; any other id is a main animation, even without translation curves
+# the AnimBlends of the specials that have them (the state's constructor gives the type, its init the animation): ids the
+# game adds on top (BLEND_ADDITIVE, it sums weight * curve, so they hold deltas: layers) and ids it blends over the pose
+# (BLEND_STATIC: a full pose). The curves alone miss some (Congar's 167 moves a translation: the neck reaching out)
+SPECIAL_BLENDS = {"MONKEY": ({161, 167}, {166}),    # StateSonicRoar
+                  "LAVA": ({161, 167}, {166}),      # StateLavaBlast
+                  "ROBOT": ({161, 166}, {167}),     # StateRobotSpecial
+                  "ASSBOSS": ({161, 166}, {167})}   # StateCannonHands (Goliath)
 SPRING_SLOTS = (4, 8, 11, 13, 20, 22, 26, 28)   # BoneSpring::update writes their translation every frame
 ALIASES = {"hand_l": 0x802, "hand_r": 0x803, "foot_l": 0x804, "foot_r": 0x805, "grabbed": 0x806, "grab": 0x807,
            "impale": 0x808, "chest": 0x809, "hold": 0x80A, "mouth": 0x80B, "head": 0x80C, "look": 0x80E,
@@ -195,7 +200,7 @@ class BaseInfo:
                 tch.update(i for i in g.xform(n)["tidx"] if i >= 0)
                 rch.update(i for i in g.xform(n)["ridx"] if i >= 0)
         all_anims = list(g.anims())
-        # the rotations some animation moves; one that leaves some of them without a curve (Congar's special loop, 161,
+        # the rotations some animation moves; one that leaves some of them without a curve (Congar's roar aim pose, 166,
         # moves 5 bones) has the game keep those where the animation before left them
         rot_of = {an: {c.idx for _a, c in g.curves(an) if c.idx in rch} for *_x, an in all_anims}
         rot_used = set().union(*rot_of.values()) if rot_of else set()
@@ -217,6 +222,8 @@ class BaseInfo:
             if any(abs(c.eval(st + (et - st) * i / steps)) > 1e-3 for c in tc for i in range(steps + 1)):
                 return False
             return any(abs(idle_t.get(c.idx, 0.0)) > 1e-2 for c in tc)
+        m = re.match(r"[A-Z]+", os.path.basename(path).upper())
+        sp_add, sp_mix = SPECIAL_BLENDS.get(m.group() if m else "", ((), ()))
         self.anims = {}
         for aid, k, st, et, _n, an in all_anims:
             if aid in self.anims:
@@ -225,7 +232,7 @@ class BaseInfo:
                                "head": bytes(img.d[an - BASE:an - BASE + 0x18]),
                                "ctx": bytes(img.d[actx + 60 * k - BASE:actx + 60 * k + 60 - BASE]),
                                "loop": img.u8(actx + 60 * k + 0x29),
-                               "layer": aid in ngpanim.LAYER_IDS | ADD_IDS and is_layer(an),
+                               "layer": aid in sp_add or (aid not in sp_mix and is_layer(an)),
                                "partial": bool(rot_used - rot_of[an])}
         if 90 not in self.anims:
             raise RigError("%s has no idle (90)" % os.path.basename(path))

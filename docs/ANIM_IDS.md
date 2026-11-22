@@ -160,7 +160,7 @@ Ultra-V's sword (crowd control) is a set of rigid parts on the right hand that o
 | 155 | 0x9B | head look-at layer (second axis, pitch) | same | layer | 0-40 | all but Con,Gol | likely |
 | 156 | 0x9C | air leg override (legs when off the ground outside the jump states) | Monster::updateAirLegOverride | layer | 0-2; 0-40 | all but Zor,Gol | certain |
 | 160 | 0xA0 | special (circle+triangle with the meter): windup. Ultra-V: throws the grapple-hook chain | SpecialStates (all), move_list_especiais | one | 0-80 | all | certain |
-| 161 | 0xA1 | special: active loop | same | loop | 70-106 | all | certain |
+| 161 | 0xA1 | special: active loop; Congar's StateSonicRoar adds it on top as an additive blend (`BLEND_ADDITIVE`, priority 999, like 167) | same | loop | 70-106 | all | certain |
 | 162 | 0xA2 | special: winddown (Ultra-V pulls the victim in) | same | one | 106-140 | all | certain |
 | 163 | 0xA3 | crowd control (square+X with the meter): windup. Ultra-V draws the sword | StateCrowdControl | one | 0-40 | all | certain |
 | 164 | 0xA4 | crowd control: loop on the ground (shock wave at 60%). Ultra-V spins with the sword | StateCrowdControl | loop | 40-110 | all | certain |
