@@ -24,6 +24,10 @@
   #status.err { color: #ff8a80; }
   #selName { font-weight: 600; margin: 0 0 8px; min-height: 1.4em; overflow-wrap: anywhere; }
   .tag { position: absolute; bottom: 22px; padding: 4px 10px; background: rgba(30, 32, 38, .85); border-radius: 4px; color: #cfd2d8; }
+  #labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+  .lbl { position: absolute; transform: translate(-50%, -150%); padding: 1px 6px; border-radius: 3px; white-space: nowrap;
+         background: rgba(20, 21, 25, .75); color: #e6e6e6; font-size: 12px; }
+  .lbl.strong { background: rgba(47, 111, 214, .85); font-weight: 600; }
   #done { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(20, 21, 25, .9); font-size: 18px; }
 </style>
 <script type="importmap">
@@ -32,6 +36,7 @@
 </head>
 <body>
 <div id="view"></div>
+<div id="labels"></div>
 <div class="panel" id="panel1">
   <h1>Make sure your model faces you</h1>
   <p id="hint">Turn it until it stands on its feet and looks at you, like the monster next to it.</p>
@@ -43,8 +48,8 @@
 </div>
 <div class="panel" id="panel2" style="display: none">
   <h1>Match the bones</h1>
-  <p id="hint2">Each joint of your model follows the bone of the monster with the same color; the gray ones go along with the
-    joint above them. Click a joint (Shift adds more, double click centers the view on it) to change what it follows or to
+  <p id="hint2">Each bone of your model follows the bone of the monster with the same color; the gray ones go along with the
+    bone above them. Point at a bone to see its name; click it (Shift adds more, double click centers the view on it) to change what it follows or to
     turn it, for example to close an open hand.</p>
   <div id="selName">Nothing selected</div>
   <div class="row"><span>Follows</span><select id="from"></select></div>
@@ -52,7 +57,7 @@
   <div class="row"><span>Sideways</span><button data-r="1,-15">&minus;15&deg;</button><b id="r1">0&deg;</b><button data-r="1,15">+15&deg;</button></div>
   <div class="row"><span>Around</span><button data-r="2,-15">&minus;15&deg;</button><b id="r2">0&deg;</b><button data-r="2,15">+15&deg;</button></div>
   <label><input type="checkbox" id="mirror" checked> The same on the other side</label>
-  <div class="row"><button id="below">Select the joints below</button><button id="clearTurn">No turn</button></div>
+  <div class="row"><button id="below">Select the bones below</button><button id="clearTurn">No turn</button></div>
   <div class="row"><button id="automap">Automatic map</button></div>
   <div id="status"></div>
   <div class="row"><button id="back">Back</button><button id="cancel2">Cancel</button><button id="ok2" class="primary">OK</button></div>
@@ -154,11 +159,59 @@ show();
 let joints = [];        // the model's: {name, parent, pos (game axes), kept}
 let boneNames = [];     // the monster's bones a joint can follow
 const sel = new Set();  // selected joint indices
-const markers = { model: [], base: new Map() };   // spheres: model joint index -> mesh; base bone name -> mesh
-let modelGroup = null, baseGroup = null, busy = 0, pending = null;
+const markers = { model: [], base: new Map() };   // bones (Blender-style): model joint index -> bone; base bone name -> bone
+let modelGroup = null, baseGroup = null, busy = 0, pending = null, hover = null;
 const R = H * 0.012;
-const sphere = new THREE.SphereGeometry(1, 12, 8);
 const gray = new THREE.Color(0x8d919b);
+const white = new THREE.Color(0xffffff);
+const dark = new THREE.Color(0x15171b);
+const hoverColor = new THREE.Color(0xffd24a);
+
+// a bone as Blender draws it: head at the joint, a square waist at 10% of the length, tail toward the child
+const octa = (() => {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0.1, 0, 0, 0.1, 1, -1, 0.1, 0, 0, 0.1, -1, 0, 1, 0], 3));
+  g.setIndex([0, 2, 1, 0, 3, 2, 0, 4, 3, 0, 1, 4, 5, 1, 2, 5, 2, 3, 5, 3, 4, 5, 4, 1]);
+  return g;
+})();
+const octaEdges = new THREE.EdgesGeometry(octa);
+function boneMesh(head, tail, minW) {
+  const dir = tail.clone().sub(head);
+  const len = Math.max(dir.length(), 1e-4);
+  const g = new THREE.Group();
+  const fill = new THREE.Mesh(octa, new THREE.MeshBasicMaterial({ color: gray, transparent: true, opacity: 0.6, depthTest: false, side: THREE.DoubleSide }));
+  const edge = new THREE.LineSegments(octaEdges, new THREE.LineBasicMaterial({ color: dark, transparent: true, depthTest: false }));
+  fill.renderOrder = 10;
+  edge.renderOrder = 11;
+  g.add(fill, edge);
+  const w = Math.max(len * 0.1, minW);
+  g.scale.set(w, len, w);
+  g.position.copy(head);
+  g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+  g.userData = { fill, edge, mid: head.clone().add(tail).multiplyScalar(0.5) };
+  return g;
+}
+// tails: toward the only child; with several, toward their middle (a hand to its fingers), or halfway to the farthest when the
+// middle sits on the joint (hips between the legs and the spine); a leaf goes on along its parent by 40%; a lone root goes up
+function tails(pos, parent, up) {
+  const kids = pos.map(() => []);
+  parent.forEach((p, i) => { if (p !== null && p >= 0) kids[p].push(i); });
+  return pos.map((h, i) => {
+    const ks = kids[i].filter(k => pos[k].distanceTo(h) > 1e-4);
+    if (ks.length === 1) return pos[ks[0]].clone();
+    if (ks.length > 1) {
+      const m = new THREE.Vector3();
+      ks.forEach(k => m.add(pos[k]));
+      m.divideScalar(ks.length);
+      const kf = ks.reduce((a, b) => (pos[a].distanceTo(h) >= pos[b].distanceTo(h) ? a : b));
+      if (m.distanceTo(h) > 0.3 * pos[kf].distanceTo(h)) return m;
+      return h.clone().lerp(pos[kf], 0.5);
+    }
+    const p = parent[i];
+    if (p === null || p < 0 || pos[p].distanceTo(h) < 1e-4) return h.clone().add(up.clone().multiplyScalar(R * 3));
+    return h.clone().add(h.clone().sub(pos[p]).multiplyScalar(0.4));
+  });
+}
 
 function boneColor(name) {
   const i = boneNames.indexOf(name);
@@ -200,22 +253,10 @@ function setTranslucent(root, on) {
   root.traverse(o => {
     for (const m of [].concat(o.material || [])) {
       m.transparent = on;
-      m.opacity = on ? 0.45 : 1;
+      m.opacity = on ? 0.35 : 1;
       m.depthWrite = !on;
     }
   });
-}
-function dot(color, r) {
-  const m = new THREE.Mesh(sphere, new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true }));
-  m.scale.setScalar(r);
-  m.renderOrder = 10;
-  return m;
-}
-function lines(pairs, parent) {
-  const g = new THREE.BufferGeometry().setFromPoints(pairs.flat());
-  const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xcfd2d8, depthTest: false, transparent: true, opacity: 0.7 }));
-  l.renderOrder = 9;
-  parent.add(l);
 }
 
 function buildBaseMarkers() {
@@ -223,21 +264,23 @@ function buildBaseMarkers() {
   baseGroup = new THREE.Group();
   scene.add(baseGroup);
   base.scene.updateMatrixWorld(true);
-  const set = new Set(boneNames), pairs = [];
-  for (const n of boneNames) {
-    const o = base.scene.getObjectByName(n);
-    if (!o) continue;
-    const p = o.getWorldPosition(new THREE.Vector3());
-    const m = dot(gray, R);
-    m.position.copy(p);
-    m.userData = { bone: n };
-    baseGroup.add(m);
-    markers.base.set(n, m);
+  const set = new Set(boneNames);
+  const objs = boneNames.map(n => base.scene.getObjectByName(n));
+  const names = boneNames.filter((n, i) => objs[i]);
+  const os = objs.filter(Boolean);
+  const pos = os.map(o => o.getWorldPosition(new THREE.Vector3()));
+  const parent = os.map(o => {
     let up = o.parent;
     while (up && !set.has(up.name)) up = up.parent;
-    if (up) pairs.push([p, up.getWorldPosition(new THREE.Vector3())]);
-  }
-  lines(pairs, baseGroup);
+    return up ? names.indexOf(up.name) : null;
+  });
+  const tl = tails(pos, parent, new THREE.Vector3(0, 1, 0));
+  names.forEach((n, i) => {
+    const b = boneMesh(pos[i], tl[i], R * 0.2);
+    b.userData.bone = n;
+    baseGroup.add(b);
+    markers.base.set(n, b);
+  });
 }
 function buildModelMarkers() {
   const holder = cur.getObjectByName('model');
@@ -245,35 +288,60 @@ function buildModelMarkers() {
   modelGroup = new THREE.Group();
   holder.add(modelGroup);
   const k = cur.scale.x || 1;
-  const near = joints.map(() => Infinity);   // a dot is at most 40% of the way to its nearest neighbor (fingers)
-  joints.forEach((j, i) => {
-    if (j.parent === null) return;
-    const d = Math.hypot(...j.pos.map((x, c) => x - joints[j.parent].pos[c])) * k;
-    if (d > 1e-6) { near[i] = Math.min(near[i], d); near[j.parent] = Math.min(near[j.parent], d); }
-  });
+  const pos = joints.map(j => new THREE.Vector3(...j.pos));
+  const tl = tails(pos, joints.map(j => j.parent), new THREE.Vector3(0, 0, 1));   // the model's node is in the game's axes: z up
   markers.model = joints.map((j, i) => {
-    const m = dot(gray, R / k);
-    m.position.set(...j.pos);
-    m.userData = { joint: i, r: Math.min(1, 0.4 * near[i] / R) };
-    modelGroup.add(m);
-    return m;
+    const b = boneMesh(pos[i], tl[i], R * 0.2 / k);
+    b.userData.joint = i;
+    modelGroup.add(b);
+    return b;
   });
-  lines(joints.filter(j => j.parent !== null).map(j => [new THREE.Vector3(...j.pos), new THREE.Vector3(...joints[j.parent].pos)]), modelGroup);
+}
+function look(b, color, selected, hovered) {
+  const u = b.userData;
+  u.fill.material.color.copy(selected ? color.clone().lerp(white, 0.55) : color);
+  u.fill.material.opacity = selected ? 0.9 : 0.6;
+  u.edge.material.color.copy(hovered ? hoverColor : selected ? white : dark);
 }
 function paint() {
   const used = new Set();
   joints.forEach((j, i) => {
-    const b = fromOf(j.name), m = markers.model[i];
+    const b = fromOf(j.name);
     if (b) used.add(b);
-    m.material.color.copy(sel.has(i) ? new THREE.Color(0xffffff) : b ? boneColor(b) : gray);
-    m.scale.setScalar((sel.has(i) ? 1.6 : b ? 1.15 : 0.75) * m.userData.r * R / (cur.scale.x || 1));
+    look(markers.model[i], b ? boneColor(b) : gray, sel.has(i), hover === markers.model[i]);
   });
   const selBones = new Set([...sel].map(i => fromOf(joints[i].name)).filter(Boolean));
-  for (const [n, m] of markers.base) {
-    m.material.color.copy(selBones.has(n) ? new THREE.Color(0xffffff) : used.has(n) ? boneColor(n) : gray);
-    m.scale.setScalar((selBones.has(n) ? 1.9 : used.has(n) ? 1.15 : 0.75) * R);
-  }
+  for (const [n, b] of markers.base) look(b, used.has(n) ? boneColor(n) : gray, selBones.has(n), hover === b);
   panel();
+}
+
+// names: on the bone under the mouse, the selected joints and the monster's bones they follow
+const labelBox = $('labels');
+const labelPool = [];
+function labels() {
+  const want = [];
+  const add = (b, text, strong) => { if (b) want.push([b, text, strong]); };
+  if ($('panel2').style.display !== 'none') {
+    const shown = new Set();
+    [...sel].slice(0, 16).forEach(i => {
+      add(markers.model[i], joints[i].name, true);
+      const f = fromOf(joints[i].name);
+      if (f && !shown.has(f)) { shown.add(f); add(markers.base.get(f), f, true); }
+    });
+    if (hover) add(hover, hover.userData.bone || joints[hover.userData.joint].name, false);
+  }
+  const r = renderer.domElement.getBoundingClientRect();
+  want.forEach(([b, text, strong], k) => {
+    let d = labelPool[k];
+    if (!d) { d = document.createElement('div'); d.className = 'lbl'; labelBox.appendChild(d); labelPool.push(d); }
+    const p = b.parent.localToWorld(b.userData.mid.clone()).project(camera);
+    d.style.display = p.z < 1 ? '' : 'none';
+    d.style.left = ((p.x + 1) / 2 * r.width) + 'px';
+    d.style.top = ((1 - p.y) / 2 * r.height) + 'px';
+    d.textContent = text;
+    d.classList.toggle('strong', strong);
+  });
+  for (let k = want.length; k < labelPool.length; k++) labelPool[k].style.display = 'none';
 }
 function turnOf(name) { const e = entry(name); return (e && e.turn) || [0, 0, 0]; }
 function panel() {
@@ -282,7 +350,7 @@ function panel() {
   const fs = $('from');
   fs.innerHTML = '';
   const opt = (v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; fs.appendChild(o); };
-  opt('', '(goes along with the joint above)');
+  opt('', '(goes along with the bone above)');
   for (const b of boneNames) opt(b, b);
   const vals = new Set(names.map(n => {
     const e = entry(n);
@@ -442,11 +510,16 @@ let downAt = null;
 function hit(ev) {
   const r = renderer.domElement.getBoundingClientRect();
   ray.setFromCamera(new THREE.Vector2((ev.clientX - r.left) / r.width * 2 - 1, -(ev.clientY - r.top) / r.height * 2 + 1), camera);
-  const cands = [...markers.model, ...markers.base.values()];
+  const cands = [...markers.model, ...markers.base.values()].map(b => b.userData.fill);
   const hits = ray.intersectObjects(cands, false);
-  return hits.length ? hits[0].object : null;
+  return hits.length ? hits[0].object.parent : null;   // the bone (its group)
 }
 renderer.domElement.addEventListener('pointerdown', ev => { downAt = [ev.clientX, ev.clientY]; });
+renderer.domElement.addEventListener('pointermove', ev => {
+  if (ev.buttons || $('panel2').style.display === 'none') return;
+  const o = hit(ev);
+  if (o !== hover) { hover = o; paint(); }
+});
 renderer.domElement.addEventListener('pointerup', ev => {
   if (!downAt || $('panel2').style.display === 'none') return;
   const moved = Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]);
@@ -483,7 +556,7 @@ window.wotmPage = {   // for tests driving the page (CDP): pick joints by name, 
   state: () => ({ busy, status: $('status').textContent, cfg, joints: joints.length, sel: [...sel].map(i => joints[i].name) }),
   focus: name => { const i = joints.findIndex(j => j.name === name); if (i >= 0) { controls.target.copy(markers.model[i].getWorldPosition(new THREE.Vector3())); camera.position.copy(controls.target).add(new THREE.Vector3(0, H * 0.15, -H * 1.1)); controls.update(); } },
 };
-renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); labels(); });
 </script>
 </body>
 </html>
