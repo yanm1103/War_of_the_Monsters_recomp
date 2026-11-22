@@ -78,20 +78,42 @@ Os botões da tabela vêm da parte do corpo (tipo 15) e do que o dono disse, nã
 3. **`.CHR` próprio, gerado a partir de um JSON do mod.** Uma ferramenta grava a tabela de socos inteira: animação, velocidade (+0x24), janela, dano, localizador, tranco, atordoamento e janela de combo por posição e tipo. O `chr_punch.py` hoje só troca a animação.
    - Velocidade 1,0 em todos de início; acelerar só os que ficarem lentos no teste.
    - Candidatos: Tail_sweep (3,33 s), Overhand (2,53 s), Double Swipe (2,20 s), Double Kick (2,17 s), Tail_slam (2,0 s).
-4. **Mapa de botões** (proposta, a revisar quando os combos do STE estiverem lidos):
-   - □ (rápido) = os golpes de mão do ✕ do STE: Jab_right → Jab_left → Hammer → Overhand (derruba);
-   - △ (forte) = cauda, o ○ do STE: Tail_snap → Tail_reverse → Tail_Full_Spin (derruba);
-   - frente+□ = chutes: Kick → Kick2 → Double Kick (derruba);
-   - trás+□ = Uppercut (lança);
-   - frente+△ = Tail_slam_2 (derruba);
-   - trás+△ = Tail_sweep (rasteira);
+4. **Mapa de botões.** A lista de golpes do Godzilla 2000 na Tohoku Kingdom (https://www.tohokingdom.com/vg/gste/characters.htm; o GameFAQs recusa acesso automático) não tem cadeias de combo. Cada golpe é um botão mais uma direção ou uma condição. Comandos do STE: ✕ = soco/alto, □ = chute/baixo, ○ = golpe feroz (cauda), △ = bloqueio.
+
+   | golpe do STE (lista da Tohoku Kingdom) | comando no STE | estado no MONSTER_DATA |
+   |---|---|---|
+   | Tail Snap | ○ | Tail_snap |
+   | Tail Uppercut | na direção do oponente + ○ | Tail_uppercut |
+   | Spinning Tail | cima + ○ | Tail_Full_Spin |
+   | Tail Sweep | baixo + ○ | Tail_sweep |
+   | Tail Slam | ○ de costas para o oponente | Tail_slam |
+   | Swipe | ✕ | Jab_right / Jab_left (?) |
+   | Strong Bite | cima + ✕ | Combo_Bite (?) |
+   | Overhand | cima + ✕ | Overhand |
+   | Uppercut | baixo + ✕ | Uppercut |
+   | Hammerfist | na direção do oponente + ✕ | Hammer |
+   | Ferocious Swipes | para longe do oponente + ✕ | Double Swipe (?) |
+   | Running Punch | ✕ correndo | Punch_left / Punch_right |
+   | Double Kick | para longe do oponente + □ | Double Kick |
+   | Jump Kick | R2, □ | Jump Kick |
+   | Nuclear Uppercut | □ segurando | ? |
+
+   A lista não traz o □ sozinho (Kick/Kick2) nem o Headbutt, que estão no MONSTER_DATA.
+
+   O WotM tem 6 entradas (□, △, frente/trás + cada um), contra cerca de 15 do STE (3 botões × direções), mas cada entrada muda com a posição no combo (10 posições). Proposta:
+   - □ = Jab_right → Jab_left → Kick → Kick2 → Hammer: soco e chute na mesma cadeia, como a do Ultra-V;
+   - frente+□ = Hammer → Overhand;
+   - trás+□ = Double Swipe → Double Kick;
+   - △ = Tail_snap → Tail_reverse → Tail_Full_Spin → Tail_slam;
+   - frente+△ = Tail_uppercut → Uppercut;
+   - trás+△ = Tail_sweep;
+   - Combo_Bite no meio da cadeia de △, como a mordida do Togera;
    - investida (toque duplo + ataque, 266/267) = Headbutt;
-   - ataque no ar (261/262) = Jump Kick;
-   - trocar o tipo no meio do combo (o WotM deixa) dá os combos mistos do STE, por exemplo ✕ ✕ ○ → Jab, Jab, Tail_uppercut.
+   - ataque no ar (261/262) = Jump Kick.
 5. **Dano e força para a escala do WotM.** Proposta: o dano do Togera vai de 4 a 9, o do STE de 5 a 25, então dano WotM ≈ 3 + STE × 0,25. Força 1,0 = derruba (knockback ≠ 0); força 0,6 = atordoa um pouco.
 6. **Teste:** o dono no modo treino, que mostra a tabela de socos, a janela e o dano de cada golpe.
 
 ## 5. Decisões do dono
 
-- O mapa de botões da seção 4.
-- Se a recuperação longa do STE fica (fiel) ou é cortada quando o jogador não encadeia.
+- O mapa de botões da seção 4: em aberto.
+- A recuperação longa do STE fica como está (dono, 2026-11-21: "depois eu testo e vejo"). O corte da recuperação no passo 2 fica de fora.
