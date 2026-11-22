@@ -211,14 +211,16 @@ so its refusals show up here. Besides those, it looks at:
 [--turn x90,z180] [--size F]`):
 1. a page opens in the browser with the model next to the base monster, both standing in the game's axes, already turned the
    way the file says (up axis, front); **Turn**, **Tip** and **Roll** turn it by quarter turns until it stands and faces you
-   like the monster, then **Next** (`tools/orientpage.py`; Cancel or closing the tab stops the import);
+   like the monster (the page lists only the net turn, as the fewest buttons that give it: a full circle lists nothing), then
+   **Next** (`tools/orientpage.py`; Cancel or closing the tab stops the import);
 2. **Match the bones**, in the same page: both skeletons drawn over the meshes as Blender draws bones (from the joint toward
    its child), each bone of the model in the color of the monster's bone it follows, gray when it goes along with the bone
    above it; pointing at a bone shows its name, and the selected ones and the monster's bones they follow keep theirs. The
    map starts as the `<model>_rig_map.json` kept in `files/` from an earlier import, or the one made from the two skeletons
    (`tools/automap.py`; **Automatic map** makes it again). A click on a bone (Shift adds more, a double click centers the
    view on it; a click on a bone of the monster picks the bones that follow it) shows what it follows: **Follows** changes
-   it, and **Forward**, **Sideways** and **Around** turn it at rest by 15 degrees about the game's axes, the bones below it
+   it, and **Forward**, **Sideways** and **Around** (a slider in steps of 5 degrees and a box for any angle, -180 to 180)
+   turn it at rest about the game's axes, redrawn as the slider moves, the bones below it
    going along (fingers into a fist, a mouth left open: the monster has no bone that moves them, so their rest is how they
    stay). **Select the bones below** picks a whole hand; with "The same on the other side" the mirrored bone (`L`/`R`,
    `Left`/`Right`, `_l`/`_r` in the name)

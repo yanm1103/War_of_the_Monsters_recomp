@@ -18,6 +18,8 @@
   button:disabled, select:disabled { opacity: .45; cursor: default; }
   .primary { background: #2f6fd6; border-color: #3b7ce6; font-weight: 600; }
   .primary:hover { background: #3b7ce6; }
+  .rs { flex: 1; min-width: 0; accent-color: #3b7ce6; }
+  .rn { width: 58px; flex: none; background: #2c3039; color: #e6e6e6; border: 1px solid #454a55; border-radius: 5px; padding: 4px; font: inherit; }
   select { flex: 1; min-width: 0; background: #2c3039; color: #e6e6e6; border: 1px solid #454a55; border-radius: 5px; padding: 6px; font: inherit; }
   label { display: block; margin: 2px 0 8px; color: #b9bcc4; font-size: 13px; }
   #steps, #status { color: #8d919b; font-size: 12px; min-height: 1.4em; margin: 4px 0 10px; }
@@ -53,9 +55,9 @@
     turn it, for example to close an open hand.</p>
   <div id="selName">Nothing selected</div>
   <div class="row"><span>Follows</span><select id="from"></select></div>
-  <div class="row"><span>Forward</span><button data-r="0,-15">&minus;15&deg;</button><b id="r0">0&deg;</b><button data-r="0,15">+15&deg;</button></div>
-  <div class="row"><span>Sideways</span><button data-r="1,-15">&minus;15&deg;</button><b id="r1">0&deg;</b><button data-r="1,15">+15&deg;</button></div>
-  <div class="row"><span>Around</span><button data-r="2,-15">&minus;15&deg;</button><b id="r2">0&deg;</b><button data-r="2,15">+15&deg;</button></div>
+  <div class="row"><span>Forward</span><input type="range" class="rs" id="s0" min="-180" max="180" step="5" value="0"><input type="number" class="rn" id="n0" min="-180" max="180" step="1" value="0"></div>
+  <div class="row"><span>Sideways</span><input type="range" class="rs" id="s1" min="-180" max="180" step="5" value="0"><input type="number" class="rn" id="n1" min="-180" max="180" step="1" value="0"></div>
+  <div class="row"><span>Around</span><input type="range" class="rs" id="s2" min="-180" max="180" step="5" value="0"><input type="number" class="rn" id="n2" min="-180" max="180" step="1" value="0"></div>
   <label><input type="checkbox" id="mirror" checked> The same on the other side</label>
   <div class="row"><button id="below">Select the bones below</button><button id="clearTurn">No turn</button></div>
   <div class="row"><button id="automap">Automatic map</button></div>
@@ -129,17 +131,41 @@ controls.update();
 // ---------------------------------------------------------------- step 1: facing
 const steps = [];
 const axes = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
-function show() { $('steps').textContent = steps.length ? 'Turns: ' + steps.join(', ') : 'As read from the file.'; }
-for (const b of document.querySelectorAll('button[data-t]')) {
-  b.onclick = () => {
-    const t = b.dataset.t;
-    const q = new THREE.Quaternion().setFromAxisAngle(axes[t[0]], THREE.MathUtils.degToRad(parseInt(t.slice(1))));
-    node.quaternion.premultiply(q);
-    steps.push(t);
-    place();
-    show();
-  };
+const TURN_NAMES = { z90: 'turn left', 'z-90': 'turn right', 'x-90': 'tip forward', x90: 'tip back', y90: 'roll left', 'y-90': 'roll right' };
+const qOf = t => new THREE.Quaternion().setFromAxisAngle(axes[t[0]], THREE.MathUtils.degToRad(parseInt(t.slice(1))));
+const keyOf = q => { const m = new THREE.Matrix4().makeRotationFromQuaternion(q).elements; return [0, 1, 2, 4, 5, 6, 8, 9, 10].map(i => Math.round(m[i])).join(','); };
+// the 24 ways a model can stand after quarter turns, each with the shortest run of buttons that gets there
+const SHORTEST = (() => {
+  const best = new Map([[keyOf(new THREE.Quaternion()), []]]);
+  let front = [[new THREE.Quaternion(), []]];
+  while (front.length) {
+    const next = [];
+    for (const [q, path] of front) {
+      for (const t of Object.keys(TURN_NAMES)) {
+        const q2 = qOf(t).multiply(q);   // as premultiply: the new turn about the game's axes, after the others
+        const k = keyOf(q2);
+        if (!best.has(k)) { best.set(k, [...path, t]); next.push([q2, [...path, t]]); }
+      }
+    }
+    front = next;
+  }
+  return best;
+})();
+function turnBy(list) {   // apply turns, then keep only the net one (a full circle comes back to nothing)
+  const q = node.quaternion.clone();
+  for (const t of list) q.premultiply(qOf(t));
+  steps.length = 0;
+  steps.push(...(SHORTEST.get(keyOf(q)) || []));
+  node.quaternion.identity();
+  for (const t of steps) node.quaternion.premultiply(qOf(t));
+  place();
+  show();
 }
+function show() {
+  const s = steps.map(t => TURN_NAMES[t]).join(', ');
+  $('steps').textContent = steps.length ? 'Turned: ' + s.charAt(0).toUpperCase() + s.slice(1) + '.' : 'As read from the file.';
+}
+for (const b of document.querySelectorAll('button[data-t]')) b.onclick = () => turnBy([b.dataset.t]);
 $('reset').onclick = () => { node.quaternion.identity(); steps.length = 0; place(); show(); };
 let sent = false;
 let cfg = null;   // the bone map (step 2), as retarget.py reads it
@@ -368,11 +394,15 @@ function panel() {
     fs.value = '__many';
   }
   fs.disabled = !names.length;
-  for (let a = 0; a < 3; a++) {
+  for (let a = 0; a < 3; a++) {   // the selection's angle; several different ones show empty (typing sets them all)
     const ts = new Set(names.map(n => turnOf(n)[a]));
-    $('r' + a).textContent = !names.length ? '' : ts.size === 1 ? [...ts][0] + '°' : '—';
+    const one = names.length && ts.size === 1 ? [...ts][0] : null;
+    if (document.activeElement !== $('s' + a)) $('s' + a).value = one === null ? 0 : one;
+    if (document.activeElement !== $('n' + a)) $('n' + a).value = one === null ? '' : one;
+    $('n' + a).placeholder = names.length && one === null ? '\u2014' : '';
+    $('s' + a).disabled = $('n' + a).disabled = !names.length;
   }
-  for (const b of document.querySelectorAll('button[data-r], #below, #clearTurn')) b.disabled = !names.length;
+  for (const b of document.querySelectorAll('#below, #clearTurn')) b.disabled = !names.length;
   const n = joints.filter(j => fromOf(j.name)).length;
   if (!busy && !$('status').classList.contains('err'))
     $('status').textContent = n + ' of ' + joints.length + ' joints follow a bone of ' + baseName + '.';
@@ -414,17 +444,20 @@ $('from').onchange = () => {
     tidy(n, ne);
   });
 };
-for (const b of document.querySelectorAll('button[data-r]')) {
-  b.onclick = () => {
-    const [a, d] = b.dataset.r.split(',').map(Number);
-    edit([...sel].map(i => joints[i].name), (n, mirrored) => {
-      const e = Object.assign({}, entry(n) || {});
-      const t = (e.turn || [0, 0, 0]).slice();
-      t[a] = ((t[a] + (mirrored && a > 0 ? -d : d) + 540) % 360) - 180;   // across the middle, the y and z turns go the other way
-      e.turn = t;
-      tidy(n, e);
-    });
-  };
+function setTurn(a, v) {   // the selection's angle about axis a (degrees, -180..180)
+  if (!Number.isFinite(v)) return;
+  v = Math.max(-180, Math.min(180, Math.round(v)));
+  edit([...sel].map(i => joints[i].name), (n, mirrored) => {
+    const e = Object.assign({}, entry(n) || {});
+    const t = (e.turn || [0, 0, 0]).slice();
+    t[a] = mirrored && a > 0 ? -v : v;   // across the middle, the y and z turns go the other way
+    e.turn = t;
+    tidy(n, e);
+  });
+}
+for (let a = 0; a < 3; a++) {   // dragging redraws as it goes (one preview at a time, the last one wins); typing on Enter or leaving
+  $('s' + a).addEventListener('input', () => { $('n' + a).value = $('s' + a).value; setTurn(a, parseFloat($('s' + a).value)); });
+  $('n' + a).addEventListener('change', () => { $('s' + a).value = $('n' + a).value; setTurn(a, parseFloat($('n' + a).value)); });
 }
 $('clearTurn').onclick = () => edit([...sel].map(i => joints[i].name), n => {
   const e = Object.assign({}, entry(n) || {});
@@ -550,14 +583,7 @@ function size() {
 }
 window.addEventListener('resize', size);
 size();
-if (info.start === 'bones') {   // "Adjust bones...": the facing of the last import, then straight to the bones
-  for (const t of (info.turn || '').split(',').filter(Boolean)) {
-    node.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(axes[t[0]], THREE.MathUtils.degToRad(parseInt(t.slice(1)))));
-    steps.push(t);
-  }
-  place();
-  show();
-}
+if (info.start === 'bones') turnBy((info.turn || '').split(',').filter(Boolean));   // "Adjust bones...": the last import's facing
 if (info.bones && (location.hash === '#bones' || info.start === 'bones')) enterBones();   // straight to step 2
 window.wotmPage = {   // for tests driving the page (CDP): pick joints by name, read the state
   select: names => { sel.clear(); joints.forEach((j, i) => { if (names.includes(j.name)) sel.add(i); }); paint(); },
