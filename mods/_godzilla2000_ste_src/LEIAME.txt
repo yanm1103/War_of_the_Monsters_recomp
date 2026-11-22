@@ -3,8 +3,7 @@ Mod "Godzilla 2000" (custom godzilla_ste): o Godzilla 2000 de Godzilla: Save the
 tools/rigmaps/ste_godzilla2000.json rig.glb --size 0.988 --own clips.json, com clips.json de tools/ste/ste_clips.py (ID_MAP).
 O mod: modkit.py monster new "Godzilla 2000" godzilla_ste --base togera --costume 0 --name "GODZILLA 2000" --ai;
 modkit.py monster rig ... godzilla2000_ste_rig.glb; textura lizard0_t0013.png x0.62; retrato do Godzilla 2000.
-Narrador e logo: os do Godzilla 2000 do mod Godzilla (narrator/godzilla_2000.mp3 copiado como narrator/godzilla_2000_ste.mp3;
-monsters/godzilla/logo.png).
+Narrador: o do Godzilla 2000 do mod Godzilla (narrator/godzilla_2000.mp3 copiado como narrator/godzilla_2000_ste.mp3).
 Sons: ste_sounds.py <iso> <pasta files/ da pasta de trabalho> sounds (tools/ste/ste_sound.py); sounds/ = os WAVs que ele grava
 (lizard_s_NNN = banco proprio LIZARD_S, genamb_s_NNN = banco comum proprio GENAMB_S), depois modkit.py pack "Godzilla 2000".
 Bola de fogo: 5 (disparo) = GODZILLA2K ATOMIC BREATH cortado em 1,4 s (no STE, o laco do voo da atomicfireball), 6 (explosao) =
@@ -17,3 +16,4 @@ Golpes: as animacoes inteiras do STE nos ids 10-25 (ID_MAP do ste_clips.py) e um
 modkit.py monster stats "Godzilla 2000" godzilla_ste (uma vez), depois tools/chr_moves.py moves.json disc/RST/LIZARD.CHR
 --ngp <pasta de trabalho>/LIZARD0.NGP --out <pasta de trabalho>/LIZARD.CHR e modkit.py pack "Godzilla 2000". Velocidade por golpe:
 "speed" em moves.json (1 = o ritmo do STE).
+Logo: logo_source.webp centrado num 512x256 como os logos do jogo (caixa de 80% x 60% da imagem, como os do SHELL.TEX).

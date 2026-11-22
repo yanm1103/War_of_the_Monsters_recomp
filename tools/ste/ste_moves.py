@@ -24,7 +24,9 @@ from ste_model import Iso, Vol, Bundle
 import skeleton
 
 STATE = 0x84
-PARTS = {(1, 2, 3, 4): 'cauda', (5, 6, 7): 'braco D', (8, 9, 10): 'braco E', (12, 13, 14): 'perna D', (15, 16, 17): 'perna E'}
+PARTS = {(1, 2, 3, 4): 'cauda', (5, 6, 7): 'braco D', (8, 9, 10): 'braco E', (12, 13, 14): 'perna D', (15, 16, 17): 'perna E',
+         # Godzilla 90s (ossos a mais: os conjuntos andam)
+         (5, 6, 7, 8): 'braco D', (5, 10, 11, 12): 'braco E', (13, 14, 15): 'perna D', (16, 17, 18): 'perna E'}
 
 
 def _entry_table(b):
@@ -59,7 +61,7 @@ class MonsterData:
         n = max(st['ev0'] + st['nev'] for st in self.states)
         tab0 = run[-1] + STATE + 4
         self.ev_offs = struct.unpack_from('<%dH' % n, md, tab0)
-        self.ev_base = tab0 + 2 * n
+        self.ev_base = (tab0 + 2 * n + 3) & ~3   # com n impar a tabela termina no meio de uma palavra: os eventos ficam alinhados em 4
         for st in self.states:
             st['events'] = [self._event(k) for k in range(st['ev0'], st['ev0'] + st['nev'])]
 

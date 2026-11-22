@@ -1,0 +1,20 @@
+Mod "Godzilla 90s" (custom godzilla90s_ste): o Godzilla 90s de Godzilla: Save the Earth com as animacoes proprias do STE, no mesmo
+esquema do Godzilla 2000 (mods/_godzilla2000_ste_src/LEIAME.txt). O corpo e o esqueleto sao os do 2000 (mesmas juntas do Biped).
+.dae/.png: tools/ste/export_dae.py <iso> Godzilla90s.cmp <pasta> (malha do .cmp). rig.glb: tools/retarget.py <LIZARD0.glb>
+godzilla90s_ste.dae tools/rigmaps/ste_godzilla90s.json rig.glb --size 0.982 --own clips.json, com clips.json de
+tools/ste/ste_clips.py <iso> Godzilla90s.cmp (ID_MAP do 2000 + PROFILES['Godzilla90s']). --size 0.982 = a mesma escala do 2000
+(0.988 x altura 98.6 / 99.2).
+O mod: modkit.py monster new "Godzilla 90s" godzilla90s_ste --base togera --costume 0 --name "GODZILLA 90S" --ai;
+modkit.py monster rig ... godzilla90s_ste_rig.glb; textura lizard0_t0013.png = godzilla90s_ste.png x0.62 (como no 2000);
+retrato = o do Godzilla (prototype) (mods/Godzilla, que e o 90s); monster portrait ... portrait.png.
+Narrador: narrator/godzilla_90s.mp3 do mod Godzilla copiado como narrator/godzilla_90s_ste.mp3. Logo: logo_source.png centrado num
+512x256 como os logos do jogo (caixa de 80% x 60%).
+Sons: no STE o Godzilla 90s usa as mesmas amostras do 2000 (GODZILLA90 * = amostras 419-431, 445, 446); entram os mesmos sons:
+modkit.py monster sounds ..., depois mods/_godzilla2000_ste_src/ste_sounds.py <iso> <pasta files/ da pasta de trabalho>.
+Sopro atomico ("breathFx"): tools/ste/ste_fx.py <iso> breath Godzilla90s.cmp 90s_atomicbreath <pasta do monstro>/fx
+--hit 90s_AtomicBreath_hit (copia aqui: breathfx_90s_atomicbreath.json), com "hide": [8, 51, 148, 80, 81] e as faiscas do acerto
+(camadas "hit" com basic.png) a 1/3 em "radial" e "up", como no 2000. "fireColor" #3A8BFF (azul, como o prototype) pinta o tiro
+padrao do Togera: o 90s nao tem a bola de fogo do 2000 no .cmp.
+Golpes: as animacoes inteiras do STE nos ids 10-24 (PROFILES['Godzilla90s'] do ste_clips.py) e um .CHR proprio feito de moves.json:
+modkit.py monster stats ... (uma vez), depois tools/chr_moves.py moves.json disc/RST/LIZARD.CHR --ngp <pasta de trabalho>/LIZARD0.NGP
+--out <pasta de trabalho>/LIZARD.CHR e modkit.py pack "Godzilla 90s". Mapa no comentario do moves.json.

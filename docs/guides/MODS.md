@@ -25,7 +25,7 @@ when the direct match uses one). Log: `[mods] teste_anim: mod de teste, desligad
 leaves them out of the zip.
 
 **Project mods** live in `mods/<mod>/` at the repo root: Goliath Prime (`mods/Goliath Prime/`), Cerebulon (`mods/Cerebulon/`),
-Godzilla (prototype) (`mods/Godzilla/`), Godzilla 2000 (`mods/Godzilla 2000/`, from *Godzilla: Save the Earth*), CJ (`mods/CJ/`) and the "Recompiled" logo of the intro (`mods/recompiled_logo/`). A project mod carries everything it needs
+Godzilla (prototype) (`mods/Godzilla/`), Godzilla 2000 and Godzilla 90s (`mods/Godzilla 2000/`, `mods/Godzilla 90s/`, from *Godzilla: Save the Earth*), CJ (`mods/CJ/`) and the "Recompiled" logo of the intro (`mods/recompiled_logo/`). A project mod carries everything it needs
 to run, including models and sounds from other games and the files the game loads built on top of the disc's (`.NGP`, `.PTR`, `.TEX`,
 `.RTX`, `.BNK`, edited disc textures). The sources it was made from (models, rigs, conversion scripts, WAVs) live in
 `mods/_<name>_src/` (Godzilla: `mods/_godzilla_src/`, `_godzilla1954_src/`, `_godzilla2000_src/`; Godzilla 2000: `mods/_godzilla2000_ste_src/`; CJ: `mods/_cj_src/`). Mecha is the exception:

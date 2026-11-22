@@ -5,7 +5,8 @@ movimentos que o STE deu a ele, no lugar dos do Togera.
 
 Cada clipe e `a<id>` (id de animacao do WotM, docs/ANIM_IDS.md), 60 quadros por segundo, com o mundo de cada junta na cena do
 .dae que `export_dae.py` grava (mesmos eixos, mesmas unidades, mesmos nomes de junta). `ID_MAP` diz que animacao do STE vira
-cada id; o ciclo (andar, correr, idle) amostra [0, 1) para o laco fechar sem repetir o quadro.
+cada id; o ciclo (andar, correr, idle) amostra [0, 1) para o laco fechar sem repetir o quadro. Outro monstro (Godzilla90s.cmp):
+o `PROFILES` dele troca o que muda.
 """
 import json
 import math
@@ -123,6 +124,41 @@ ID_MAP = {
     12: ('TAIL_FULL_SPIN', False, None, dict(NAT, face={'from': 0.62, 'dir': 1, 'ease': 'out'})),   # Tail_Full_Spin, 34-62%
     24: ('TAIL_UPPERCUT', False, None, dict(NAT, face={'from': 0.37})),      # Tail_uppercut, 26-37%
     22: ('UPPERCUT', False, None, dict(NAT, face={'from': 0.39})),           # Uppercut, 29-39%
+}
+
+# Outros monstros do STE sobre o mesmo corpo do Togera: o que muda no ID_MAP (o do Godzilla 2000), pelo nome do bundle
+# (Godzilla90s.cmp). None = o id fica com a animacao do Togera retargetada. As animacoes que so mudam de nome ou de ritmo
+# entram aqui; as do mesmo nome e mesmo movimento vem do ID_MAP.
+PROFILES = {
+    'Godzilla90s': {
+        92: ('TAUNT_02', False, None),
+        160: ('ATOMICBREATH_CHARGE', False, 1.2),
+        77: ('BLOCKHIT_F_HIGH_STAND', False, None),      # nao tem BLOCK_HEAVY_*: o bloqueio comum (empurra para tras)
+        87: ('KOED_FACEDOWN_GETUP_FAST', False, None, {'settle': True}),   # comeca na pose de KOED_FACEDOWN_IDLE (desvio 4)
+        56: ('THROW_OBJECT', False, 40 / 60.0, {'settle': True, 'knots': [(0, 0), (0.37, 0.25), (1, 1)]}),
+        172: ('LIFTING_IDLE_OBJECT', True, None),
+        # DROP de 3,17 s (o do 2000 tem 2,0): a mao bate no chao em ~15% (no 2000, 18%); o resto e o mesmo 1,0 s do 2000
+        177: ('DROP', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.5, 0.15), (1, 0.32)]}),
+        186: ('DROP', False, 1.0, {'settle': True, 'knots': [(0, 0), (0.5, 0.15), (1, 0.32)]}),
+        # golpes (mods/_godzilla90s_ste_src/moves.json): janela de acerto do STE no comentario
+        10: ('JAB_R', False, None, dict(NAT, face={'from': 0.41})),              # Jab_right, 7-41%
+        11: ('JAB_L', False, None, dict(NAT, face={'from': 0.25})),              # Jab_left, 16-25%
+        13: ('KICK2', False, None, dict(NAT, face={'from': 0.31})),              # Kick, 14-31%
+        14: ('KICK', False, None, dict(NAT, face={'from': 0.31})),               # Kick2, 14-31%
+        17: ('HMMR_FIN', False, None, dict(NAT, face={'from': 0.49})),           # Hammer, 33-49%
+        15: ('HOOK', False, None, dict(NAT, face={'from': 0.59})),               # Hook (cima + soco), 47-59%
+        16: ('DBLE_HMMR_FIN', False, None, dict(NAT, face={'from': 0.36})),      # Double Hammer (para longe + soco), 29-36%
+        18: ('KICK_2FT', False, None, dict(NAT, face={'from': 0.48})),           # Double Kick, 39-48%
+        19: ('COMBO_CROSS', False, None, dict(NAT, face={'in': 0.30, 'from': 0.43})),   # Combo Crossover Claw, 30-43%
+        20: None,
+        23: None,
+        21: ('TAIL_SNAP', False, None, dict(NAT, face={'from': 0.31})),          # Tail_snap, 12-31%
+        # Tail_Overhead: sem evento de ataque no STE (cauda ligada 37-75%); a ponta passa na frente, baixa, em 46-60%. O corpo
+        # gira 152 graus: fecha a volta no sentido do giro, como o TAIL_FULL_SPIN do 2000
+        12: ('TAILWHIP', False, None, dict(NAT, face={'from': 0.62, 'dir': 1, 'ease': 'out'})),
+        24: ('TAIL_UPPERCUT', False, None, dict(NAT, face={'from': 0.37})),      # Tail_uppercut, 26-37%
+        22: ('UPPERCUT', False, None, dict(NAT, face={'from': 0.34})),           # Uppercut, 25-34%
+    },
 }
 
 
@@ -451,8 +487,14 @@ def main(argv):
             print('%-34s %5.2fs' % (a.get('name'), a['dur']))
         return 0
     out = argv[2]
-    ids = sorted(ID_MAP)
     table = dict(ID_MAP)
+    prof = PROFILES.get(os.path.splitext(os.path.basename(fn))[0], {})
+    for k, v in prof.items():
+        if v is None:
+            table.pop(k, None)
+        else:
+            table[k] = v
+    ids = sorted(table)
     if '--ids' in argv:
         ids = [int(x) for x in argv[argv.index('--ids') + 1].split(',')]
     if '--as' in argv:   # pre-visualizacao: ID=NOME,ID=NOME poe qualquer animacao do STE num id (uma vez), sem mexer no ID_MAP

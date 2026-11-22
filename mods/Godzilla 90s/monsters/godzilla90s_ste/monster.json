@@ -1,0 +1,220 @@
+{
+  "id": "godzilla90s_ste",
+  "name": "GODZILLA 90S",
+  "costumeName": "GODZILLA 90S",
+  "base": "togera",
+  "costume": 0,
+  "files": true,
+  "narrator": "godzilla_90s_ste",
+  "ai": true,
+  "specialRoar": true,
+  "portrait": "portrait.png",
+  "portraitTex": 3,
+  "logo": "logo.png",
+  "fireColor": "#3A8BFF",
+  "breathFx": {
+    "scale": 1.0,
+    "hide": [
+      8,
+      51,
+      148,
+      80,
+      81
+    ],
+    "layers": [
+      {
+        "texture": "fx/atomicbreath_a.png",
+        "mode": "stretch",
+        "rate": 60.0,
+        "speed": 1430.0,
+        "speedRandom": 200.0,
+        "radial": 0.0,
+        "up": 0.0,
+        "once": false,
+        "rotate": false,
+        "life": [
+          0.7,
+          0.7
+        ],
+        "size": [
+          7.0,
+          8.0
+        ],
+        "spread": 3.2,
+        "color": [
+          0.094118,
+          0.352941,
+          1.0,
+          1.0
+        ],
+        "additive": true,
+        "colorPoly": {
+          "a": [
+            1.0,
+            0.0,
+            -1.0
+          ]
+        },
+        "stretch": [
+          0.4,
+          0.6
+        ]
+      },
+      {
+        "texture": "fx/atomicbreath2_a.png",
+        "mode": "stretch",
+        "rate": 60.0,
+        "speed": 1430.0,
+        "speedRandom": 200.0,
+        "radial": 0.0,
+        "up": 0.0,
+        "once": false,
+        "rotate": false,
+        "life": [
+          0.7,
+          0.7
+        ],
+        "size": [
+          4.0,
+          6.0
+        ],
+        "spread": 1.4,
+        "color": [
+          0.156863,
+          0.392157,
+          0.882353,
+          1.0
+        ],
+        "additive": true,
+        "colorPoly": {
+          "a": [
+            1.0,
+            0.0,
+            -1.0
+          ]
+        },
+        "stretch": [
+          0.4,
+          0.6
+        ]
+      },
+      {
+        "texture": "fx/explo_small_3.png",
+        "mode": "sprite",
+        "rate": 30.0,
+        "speed": 0.0,
+        "speedRandom": 0.0,
+        "radial": 50.0,
+        "up": 60.0,
+        "once": false,
+        "rotate": true,
+        "life": [
+          0.5,
+          0.5
+        ],
+        "size": [
+          20.0,
+          25.0
+        ],
+        "spread": 3.0,
+        "color": [
+          0.2,
+          0.2,
+          2.0,
+          1.0
+        ],
+        "additive": true,
+        "colorPoly": {
+          "a": [
+            0.75,
+            0.0,
+            -0.75
+          ]
+        },
+        "sizePoly": [
+          3.0,
+          -3.0
+        ],
+        "at": "hit"
+      },
+      {
+        "texture": "fx/basic.png",
+        "mode": "sprite",
+        "rate": 75.0,
+        "speed": 0.0,
+        "speedRandom": 0.0,
+        "radial": 33.3,
+        "up": 33.3,
+        "once": false,
+        "rotate": true,
+        "life": [
+          0.7,
+          0.75
+        ],
+        "size": [
+          10.0,
+          15.0
+        ],
+        "spread": 10.0,
+        "color": [
+          0.5,
+          0.5,
+          1.0,
+          1.0
+        ],
+        "additive": true,
+        "colorPoly": {
+          "a": [
+            1.0,
+            0.0,
+            -1.0
+          ]
+        },
+        "sizePoly": [
+          1.0,
+          -1.0
+        ],
+        "at": "hit"
+      },
+      {
+        "texture": "fx/basic.png",
+        "mode": "sprite",
+        "rate": 50.0,
+        "speed": 0.0,
+        "speedRandom": 0.0,
+        "radial": 66.7,
+        "up": 66.7,
+        "once": true,
+        "rotate": true,
+        "life": [
+          0.7,
+          0.75
+        ],
+        "size": [
+          20.0,
+          25.0
+        ],
+        "spread": 10.0,
+        "color": [
+          0.7,
+          0.784314,
+          1.0,
+          1.0
+        ],
+        "additive": true,
+        "colorPoly": {
+          "a": [
+            1.0,
+            0.0,
+            -1.0
+          ]
+        },
+        "sizePoly": [
+          1.0,
+          -1.0
+        ],
+        "at": "hit"
+      }
+    ]
+  }
+}
