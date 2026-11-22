@@ -298,6 +298,7 @@ class Model:
                 return [a[i:i + n] for i in range(0, len(a) - n + 1, st)]
             P = vec(vsrc["POSITION"], 3)
             NV = vec(vsrc["NORMAL"], 3) if "NORMAL" in vsrc else None
+            TV = vec(vsrc["TEXCOORD"], 2) if "TEXCOORD" in vsrc else None   # UV por vertice (<vertices>), sem indice proprio
             bmat = {im.get("symbol"): im.get("target", "#")[1:] for im in ic.iter(NS + "instance_material")}
             for prims in list(mesh.findall(NS + "triangles")) + list(mesh.findall(NS + "polylist")):
                 inputs = {}
@@ -334,7 +335,7 @@ class Model:
                     for q, w in acc.items():
                         pp = [a + w / tot * b for a, b in zip(pp, apply(SM[q], P[vi]))]
                         nn = [a + w / tot * b for a, b in zip(nn, apply(SM[q], n0, 0.0))]
-                    uv = T[p[e * st + inputs["TEXCOORD"][0]]] if T is not None else [0.0, 0.0]
+                    uv = T[p[e * st + inputs["TEXCOORD"][0]]] if T is not None else TV[vi] if TV is not None else [0.0, 0.0]
                     wj = {}
                     for q, w in acc.items():
                         wj[jmap[q]] = wj.get(jmap[q], 0.0) + w / tot
@@ -362,6 +363,8 @@ class Model:
                 a = _floats(msrc[sid].find(NS + "float_array"))
                 return [a[i:i + n] for i in range(0, len(a) - n + 1, n)]
             P = vec(vsrc["POSITION"], 3)
+            NV = vec(vsrc["NORMAL"], 3) if "NORMAL" in vsrc else None
+            TV = vec(vsrc["TEXCOORD"], 2) if "TEXCOORD" in vsrc else None
             bmat = {im.get("symbol"): im.get("target", "#")[1:] for im in ig.iter(NS + "instance_material")}
             tris = []
             for prims in mesh.findall(NS + "triangles"):
@@ -375,9 +378,11 @@ class Model:
                 img = material_image(bmat.get(prims.get("material"), prims.get("material")))
                 cs = []
                 for e in range(len(p) // st):
-                    pp = apply(W_node, P[p[e * st + inputs["VERTEX"][0]]])
-                    nn = _unit(apply(W_node, N[p[e * st + inputs["NORMAL"][0]]], 0.0)) if N is not None else [0.0, 0.0, 1.0]
-                    uv = T[p[e * st + inputs["TEXCOORD"][0]]] if T is not None else [0.0, 0.0]
+                    vi = p[e * st + inputs["VERTEX"][0]]
+                    pp = apply(W_node, P[vi])
+                    n0 = N[p[e * st + inputs["NORMAL"][0]]] if N is not None else NV[vi] if NV is not None else None
+                    nn = _unit(apply(W_node, n0, 0.0)) if n0 is not None else [0.0, 0.0, 1.0]
+                    uv = T[p[e * st + inputs["TEXCOORD"][0]]] if T is not None else TV[vi] if TV is not None else [0.0, 0.0]
                     cs.append((pp, nn, [uv[0], 1.0 - uv[1]]))
                 tris += [(img, cs[k:k + 3]) for k in range(0, len(cs) - 2, 3)]
             if tris:
