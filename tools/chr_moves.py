@@ -11,7 +11,9 @@ The JSON names each move once and then the chain of each attack type (combo posi
               "triangle": [...], "fwd_triangle": [...], "back_triangle": [...]}}
 
 Position p of a type plays chain[p], or the chain's last move once the chain is shorter. Every move of positions
-1..maxChain-1 lets the combo go on with any type; the moves at position maxChain end it. Slots past maxChain keep the file's.
+1..maxChain-1 lets the combo go on with any type; the moves at position maxChain end it. A type listed in "stop"
+(e.g. "stop": ["triangle"]) has no positions past its chain: the combo cannot go on with it there. Slots past maxChain keep
+the file's.
 
 Per move (only "anim" and "hit" are required):
 - "anim": animation id of the model; "frames": its length at 60 per second (read from --ngp when omitted);
@@ -64,7 +66,7 @@ def locator(v):
     return LOCATORS[v]
 
 
-def write_move(d, b, mv, frames, can_chain):
+def write_move(d, b, mv, frames, allowed):
     pf = lambda o, v: struct.pack_into("<f", d, b + o, float(v))
     pi = lambda o, v: struct.pack_into("<i", d, b + o, int(v))
     h0, h1 = mv["hit"]
@@ -89,9 +91,9 @@ def write_move(d, b, mv, frames, can_chain):
     pi(0x48, round(h0 * frames / speed))   # combo input window, fields after the start (and the hit pause)
     pi(0x4C, round(total))                 # ... and, with no wind-down, the end of the state
     pf(0x50, mv.get("chainAt", h1))
-    delay = float(mv.get("nextDelay", 60)) if can_chain else 0.0
+    delay = float(mv.get("nextDelay", 60))
     for k in range(6):
-        pf(0x54 + 4 * k, delay)
+        pf(0x54 + 4 * k, delay if allowed[k] else 0.0)
     kb = mv.get("knockback", [0, 0])
     pf(0x8C, kb[0])
     pf(0x90, kb[1])
@@ -131,19 +133,23 @@ def main(argv):
         else:
             print("error: move %s has no 'frames' (pass --ngp)" % name)
             return 1
-    for tname, chain in spec["chains"].items():
+    stop = set(spec.get("stop", []))
+    for tname in list(spec["chains"]) + list(stop):
         if tname not in TYPES:
             print("error: unknown type %r (%s)" % (tname, ", ".join(TYPES)))
             return 1
+    length = {TYPES[t]: (len(c) if t in stop else n) for t, c in spec["chains"].items()}
+    for tname, chain in spec["chains"].items():
         typ = TYPES[tname]
-        for pos in range(n):
+        for pos in range(min(n, length[typ])):
             name = chain[min(pos, len(chain) - 1)]
             if name not in moves:
                 print("error: chain %s names %r, not in moves" % (tname, name))
                 return 1
             b = slot_at(ko, pos, typ)
             d[b + 0x10:b + 0x10 + SLOT] = template
-            total = write_move(d, b, moves[name], frames[name], pos + 1 < n)
+            allowed = [pos + 1 < min(n, length.get(k, 0)) for k in range(6)]
+            total = write_move(d, b, moves[name], frames[name], allowed)
             print("pos %d %-13s %-14s anim %3d  %3.0f frames, %3.0f fields  hit %2.0f-%3.0f%%" % (
                 pos + 1, tname, name, moves[name]["anim"], frames[name], total, moves[name]["hit"][0] * 100,
                 moves[name]["hit"][1] * 100))

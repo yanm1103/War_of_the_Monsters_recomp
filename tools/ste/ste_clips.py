@@ -103,23 +103,26 @@ ID_MAP = {
     173: ('WALK_LIFTING_OBJECT', True, None),   # andar/correr carregando
     # golpes: a animacao inteira do STE, no ritmo dele (o .CHR proprio do mod da a velocidade, a janela do acerto e o resto;
     # mods/_ste_teste_src/moves.json e tools/chr_moves.py); sem a deriva da raiz, com o avanco limitado e terminando de frente.
-    # A janela de acerto do STE (tools/ste/ste_moves.py) vai no comentario: o 'face' desvira depois dela.
+    # A janela de acerto do STE (tools/ste/ste_moves.py) vai no comentario: o 'face' desvira depois dela. Fora: TAIL_REVERSAL e
+    # TAIL_SLAM acertam atras (a ponta da cauda nao passa pela frente; no STE sao golpes de costas para o oponente) e a
+    # TAILSWEEP, lenta demais.
     10: ('JAB_R', False, None, dict(NAT, face={'from': 0.41})),              # Jab_right, 7-41%
     11: ('JAB_L', False, None, dict(NAT, face={'from': 0.34})),              # Jab_left, 7-34%
     13: ('KICK3', False, None, dict(NAT, face={'from': 0.30})),              # Kick, 13-30%
     14: ('KICK', False, None, dict(NAT, face={'from': 0.31})),               # Kick2, 14-31%
     17: ('HMMR_FIN', False, None, dict(NAT, face={'from': 0.49})),           # Hammer, 33-49%
     15: ('OVERHAND', False, None, dict(NAT, face={'from': 0.50})),           # Overhand, 31-50%
-    16: ('DOUBLE_SWIPE_HOOK2', False, None, dict(NAT, face={'from': 0.72})), # Double Swipe, 13-72% (tres acertos no STE)
+    # Double Swipe: tres acertos no STE (13-21%, 28-36%, 61-72%) e o jogo so acerta uma vez por golpe: tres trechos encadeados
+    # (16, 20, 23), cada um com o seu acerto; o trecho seguinte comeca na pose em que o anterior termina.
+    16: ('DOUBLE_SWIPE_HOOK2', False, 2.2 * 0.25, dict(NAT, knots=[(0, 0), (1, 0.25)])),
+    20: ('DOUBLE_SWIPE_HOOK2', False, 2.2 * 0.25, dict(NAT, knots=[(0, 0.25), (1, 0.50)])),
+    23: ('DOUBLE_SWIPE_HOOK2', False, 2.2 * 0.50, dict(NAT, knots=[(0, 0.50), (1, 1.0)])),
     18: ('KICK_2FT', False, None, dict(NAT, face={'from': 0.48})),           # Double Kick, 39-48%
     21: ('TAIL_SNAP', False, None, dict(NAT, face={'from': 0.25})),          # Tail_snap, 12-25%
-    20: ('TAIL_REVERSAL', False, None, dict(NAT, face={'from': 0.34})),      # Tail_reverse, 17-34%
     19: ('COMBO_BITE', False, None, dict(NAT, face={'in': 0.30, 'from': 0.43})),   # Combo_Bite, 30-43%
     12: ('TAIL_FULL_SPIN', False, None, dict(NAT, face={'from': 0.62, 'dir': 1, 'ease': 'out'})),   # Tail_Full_Spin, 34-62%
-    23: ('TAIL_SLAM', False, None, dict(NAT, face={'from': 0.65})),          # Tail_slam, 27-65% (os dois acertos do STE)
     24: ('TAIL_UPPERCUT', False, None, dict(NAT, face={'from': 0.37})),      # Tail_uppercut, 26-37%
     22: ('UPPERCUT', False, None, dict(NAT, face={'from': 0.39})),           # Uppercut, 29-39%
-    25: ('TAILSWEEP', False, None, dict(NAT, face={'from': 0.46, 'dir': 1, 'ease': 'out'})),       # Tail_sweep, 28-46%
 }
 
 
