@@ -18,11 +18,17 @@ Loader rules (`native/wotm_mods.hpp`): a folder starting with `_` or `.` is disa
 in alphabetical order wins (you can use `10_base`, `20_extra`); `WOTM_MODS=<folder>` changes the folder and `WOTM_MODS=0` turns the folder off (the generated army files stay). The
 log (`logs\live.err.log`) lists each file and each texture that came from a mod (`[mods] ...`).
 
+**Test mods**: a `mod.json` at the mod's root with `{"test": true}` keeps the whole mod off (files, custom monsters, skins, custom
+stages and level patches), so what was made to try a feature does not show on the select screens. `WOTM_TEST_MODS=1` loads them
+(the launcher's **Show test mods** box; the launcher lists their monsters and skins with "(test)" and turns the variable on by itself
+when the direct match uses one). Log: `[mods] teste_anim: mod de teste, desligado (WOTM_TEST_MODS=1 liga)`. `tools/release.ps1`
+leaves them out of the zip.
+
 **Project mods** live in `mods/<mod>/` at the repo root: Goliath Prime (`mods/Goliath Prime/`), Cerebulon (`mods/Cerebulon/`),
-Godzilla (`mods/Godzilla/`), CJ (`mods/CJ/`) and the "Recompiled" logo of the intro (`mods/recompiled_logo/`). A project mod carries everything it needs
+Godzilla (prototype) (`mods/Godzilla/`), Godzilla 2000 (`mods/Godzilla 2000/`, from *Godzilla: Save the Earth*), CJ (`mods/CJ/`) and the "Recompiled" logo of the intro (`mods/recompiled_logo/`). A project mod carries everything it needs
 to run, including models and sounds from other games and the files the game loads built on top of the disc's (`.NGP`, `.PTR`, `.TEX`,
 `.RTX`, `.BNK`, edited disc textures). The sources it was made from (models, rigs, conversion scripts, WAVs) live in
-`mods/_<name>_src/` (Godzilla: `mods/_godzilla_src/`, `_godzilla1954_src/`, `_godzilla2000_src/`; CJ: `mods/_cj_src/`). Mecha is the exception:
+`mods/_<name>_src/` (Godzilla: `mods/_godzilla_src/`, `_godzilla1954_src/`, `_godzilla2000_src/`; Godzilla 2000: `mods/_godzilla2000_ste_src/`; CJ: `mods/_cj_src/`). Mecha is the exception:
 `tools/mechamon.py` builds its files from the disc, so only its `monster.json` is in the repo.
 `tools/sync_mods.ps1` mirrors each folder of `mods/` to `<runtime>\discroot\mods\` (`run_live.ps1` calls it on every boot and
 `setup_runtime.ps1` on install; `WOTM_RECOMP_DIR` or `.wotm_recomp_dir` give the runtime). Only the folders that exist in the repo are
@@ -135,7 +141,7 @@ that id: for a custom monster, the punch table of its own `.CHR` (`files/`, abov
 `python tools/chr_punch.py <file.CHR> <pos> <type> <id>` changes it (`pos` and `type` as `tools/chr_dump.py` prints them);
 `python tools/chr_moves.py <moves.json> <base.CHR> --ngp <model.NGP> --out <file.CHR>` writes the whole table from a move list
 (animation, speed, hit window, damage, locators, knockback and the chain of each attack type; format in the tool's help,
-example in `mods/_ste_teste_src/moves.json`). The
+example in `mods/_godzilla2000_ste_src/moves.json`). The
 hit window of the slot is a fraction of the animation, so it follows a longer or shorter one. `WOTM_ANIMLOG=1` logs every
 animation a monster of the fight starts (`[anim] 2401 m0 fire_togera tipo 3 anim 299 (transition)`).
 
@@ -391,7 +397,7 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
     and `sizePoly` (the same for the size), `stretch` (`[grow, shrink]`: the streak grows until that fraction of its life and
     shrinks from the second one), `additive` (default true; false = normal blend), `rotate` (random starting rotation).
   - The units are the game's (Togera's breath reaches 800). `tools/ste/ste_fx.py` builds the layers from a *Godzilla: Save the
-    Earth* effect (`TOOLS.md`); the `ste_teste` mod carries the Godzilla 2000 atomic breath made that way.
+    Earth* effect (`TOOLS.md`); the `Godzilla 2000` mod carries the Godzilla 2000 atomic breath made that way.
 - `shotFx`: the monster's own default shot (the ranged attack: square with no opponent in reach, `Monster` +0x6878), drawn by the
   port. The game still owns the shot (speed, aim, damage, sound). The port follows each shot of this monster through
   `Weapons::m_weapons` (the `_cs` position, the direction from `m_prevPos`) while it flies, and hides the game's model of the shot
@@ -401,7 +407,7 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   `Weapon::DetonateWeapon` exploded it) or `"launch"` (where it first showed up); a layer at `"impact"` or `"launch"` without `once`
   emits for `duration` seconds (default 0.2). Only in the native drawing. Log: `[mods] monstro ...: tiro proprio com N camadas`
   at load, `[custom] tiro proprio de 0x...: vaga N, tipo T, modelo escondido` on the first shot. `ste_fx.py <iso> shot <bundle>
-  <edf> <pasta> --impact <edf,...> --launch <edf>` builds the layers; the `ste_teste` mod carries the Godzilla 2000 fireball.
+  <edf> <pasta> --impact <edf,...> --launch <edf>` builds the layers; the `Godzilla 2000` mod carries the Godzilla 2000 fireball.
 - `logo`: a 2:1 PNG with the name drawn (in the monster's folder or at the mod root; the game's are 256 × 128, 512 × 256 keeps it
   sharp in a large window), shown where the game shows its monsters' logos: under the model in the select screen and above the
   stage picture in the save list. Without it, the name in text (the save list never falls back to the base type's logo).

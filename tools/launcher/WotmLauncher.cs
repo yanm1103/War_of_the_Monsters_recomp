@@ -86,6 +86,7 @@ class Launcher : Form
         new Flag("Run", "WOTM_AIVSAI", false, "Player controlled by AI", "Player 1's monster becomes an AI (playerInit -> aiInit): AI vs AI fight. For batches without the menu use tools\\lote.ps1."),
         new Flag("Run", "WOTM_WATCHDOG=0", false, "Turn off the freeze watchdog", "By default, g_frame stuck for 8 s (outside movies) writes [vigia] to live.err.log and ram_/vram_vigia_<g_frame>.bin to discroot; game frames below 25/s log a [vigia] LENTO warning."),
         new Flag("Run", "WOTM_FMV_MUTE", false, "Mute movies", ""),
+        new Flag("Run", "WOTM_TEST_MODS", false, "Show test mods", "Mods with \"test\": true in discroot\\mods\\<mod>\\mod.json (MODS.md) stay off unless this is on: their monsters, skins, stages and files do not load. In the lists below they show with (test); a direct match with one of them turns this on by itself."),
 
         new Flag("Rendering diagnostics", "WOTM_NOFX", false, "No particles/effects", "Turns off the fx[] particles and the wotm_fx effects."),
         new Flag("Rendering diagnostics", "WOTM_NOSHADOW", false, "No shadows", "Turns off blocker shadows (monsters and the like)."),
@@ -228,6 +229,17 @@ class Launcher : Form
         return m.Success ? m.Groups[1].Value : null;
     }
 
+    // Mod de teste: mod.json na raiz com "test": true (wotm_mods.hpp, Registry::testMod). Os ids dos monstros e skins dele ficam em
+    // testIds: a partida direta com um deles liga WOTM_TEST_MODS.
+    readonly HashSet<string> testIds = new HashSet<string>();
+    static bool IsTestMod(string mod)
+    {
+        string js = Path.Combine(mod, "mod.json");
+        if (!File.Exists(js)) return false;
+        try { return System.Text.RegularExpressions.Regex.IsMatch(File.ReadAllText(js), "\"test\"\\s*:\\s*true"); }
+        catch (IOException) { return false; }
+    }
+
     // Mesma regra do runtime (wotm_mods.hpp): pastas com '_' ou '.' no comeco ficam de fora; sem id, o nome da pasta; mesmo
     // monstro e id em dois mods, vale o ultimo em ordem alfabetica.
     void LoadModSkins()
@@ -244,6 +256,7 @@ class Launcher : Form
             if (n.StartsWith("_") || n.StartsWith(".")) continue;
             string skinsDir = Path.Combine(mod, "skins");
             if (!Directory.Exists(skinsDir)) continue;
+            bool test = IsTestMod(mod);
             foreach (string dir in Directory.GetDirectories(skinsDir))
             {
                 string js = Path.Combine(dir, "skin.json");
@@ -257,7 +270,8 @@ class Launcher : Form
                     if (Norm(mon) == Norm(MonsterGameNames[i]) || Norm(mon) == Norm(MonsterPrefixes[i])) k = i;
                 if (k < 0) continue;
                 string id = (JsonString(text, "id") ?? Path.GetFileName(dir)).ToLowerInvariant();
-                string name = JsonString(text, "name") ?? id.ToUpperInvariant();
+                string name = (JsonString(text, "name") ?? id.ToUpperInvariant()) + (test ? " (test)" : "");
+                if (test) testIds.Add(id);
                 byKey[k + "/" + id] = new KeyValuePair<int, KeyValuePair<string, string>>(k, new KeyValuePair<string, string>(name, id));
             }
         }
@@ -281,6 +295,7 @@ class Launcher : Form
             if (n.StartsWith("_") || n.StartsWith(".")) continue;
             string monDir = Path.Combine(mod, "monsters");
             if (!Directory.Exists(monDir)) continue;
+            bool test = IsTestMod(mod);
             foreach (string dir in Directory.GetDirectories(monDir))
             {
                 string js = Path.Combine(dir, "monster.json");
@@ -289,7 +304,8 @@ class Launcher : Form
                 try { text = File.ReadAllText(js); } catch (IOException) { continue; }
                 if (JsonString(text, "base") == null) continue;
                 string id = (JsonString(text, "id") ?? Path.GetFileName(dir)).ToLowerInvariant();
-                byId[id] = JsonString(text, "name") ?? id.ToUpperInvariant();
+                byId[id] = (JsonString(text, "name") ?? id.ToUpperInvariant()) + (test ? " (test)" : "");
+                if (test) testIds.Add(id);
             }
         }
         foreach (var kv in byId) modCustoms.Add(new KeyValuePair<string, string>(kv.Value, kv.Key));
@@ -634,7 +650,13 @@ class Launcher : Form
             if (kv.Value.Checked) psi.EnvironmentVariables[name] = value;
             else psi.EnvironmentVariables.Remove(name);
         }
-        if (matchOn.Checked) psi.EnvironmentVariables["WOTM_MATCH"] = MatchValue();
+        if (matchOn.Checked)
+        {
+            string match = MatchValue();
+            psi.EnvironmentVariables["WOTM_MATCH"] = match;
+            foreach (string tok in match.Split(',', ':'))
+                if (testIds.Contains(tok)) psi.EnvironmentVariables["WOTM_TEST_MODS"] = "1";   // monstro ou skin de mod de teste
+        }
         else psi.EnvironmentVariables.Remove("WOTM_MATCH");
         string cheats = CheatsValue();
         if (cheats.Length > 0) psi.EnvironmentVariables["WOTM_CHEATS"] = cheats;

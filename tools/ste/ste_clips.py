@@ -102,7 +102,7 @@ ID_MAP = {
     172: ('LIFTING_OBJECT', True, None),     # parado segurando objeto grande ou monstro
     173: ('WALK_LIFTING_OBJECT', True, None),   # andar/correr carregando
     # golpes: a animacao inteira do STE, no ritmo dele (o .CHR proprio do mod da a velocidade, a janela do acerto e o resto;
-    # mods/_ste_teste_src/moves.json e tools/chr_moves.py); sem a deriva da raiz, com o avanco limitado e terminando de frente.
+    # mods/_godzilla2000_ste_src/moves.json e tools/chr_moves.py); sem a deriva da raiz, com o avanco limitado e terminando de frente.
     # A janela de acerto do STE (tools/ste/ste_moves.py) vai no comentario: o 'face' desvira depois dela. Fora: TAIL_REVERSAL e
     # TAIL_SLAM acertam atras (a ponta da cauda nao passa pela frente; no STE sao golpes de costas para o oponente) e a
     # TAILSWEEP, lenta demais.

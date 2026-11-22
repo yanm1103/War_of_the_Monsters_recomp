@@ -1,15 +1,19 @@
-Mod de teste: Godzilla 2000 de Godzilla: Save the Earth com as animacoes proprias do STE.
+Mod "Godzilla 2000" (custom godzilla_ste): o Godzilla 2000 de Godzilla: Save the Earth com as animacoes proprias do STE.
 .dae/.png: tools/ste/export_dae.py (malha do Godzilla2k.cmp). rig.glb: tools/retarget.py <LIZARD0.glb> godzilla2000_ste.dae
 tools/rigmaps/ste_godzilla2000.json rig.glb --size 0.988 --own clips.json, com clips.json de tools/ste/ste_clips.py (ID_MAP).
-O mod: modkit.py monster new ste_teste godzilla_ste --base togera --costume 0 --name "GODZILLA STE" --ai --narrator togera;
+O mod: modkit.py monster new "Godzilla 2000" godzilla_ste --base togera --costume 0 --name "GODZILLA 2000" --ai;
 modkit.py monster rig ... godzilla2000_ste_rig.glb; textura lizard0_t0013.png x0.62; retrato do Godzilla 2000.
+Narrador e logo: os do Godzilla 2000 do mod Godzilla (narrator/godzilla_2000.mp3 copiado como narrator/godzilla_2000_ste.mp3;
+monsters/godzilla/logo.png).
 Sons: ste_sounds.py <iso> <pasta files/ da pasta de trabalho> sounds (tools/ste/ste_sound.py); sounds/ = os WAVs que ele grava
-(lizard_s_NNN = banco proprio LIZARD_S, genamb_s_NNN = banco comum proprio GENAMB_S), depois modkit.py pack ste_teste.
+(lizard_s_NNN = banco proprio LIZARD_S, genamb_s_NNN = banco comum proprio GENAMB_S), depois modkit.py pack "Godzilla 2000".
+Bola de fogo: 5 (disparo) = GODZILLA2K ATOMIC BREATH cortado em 1,4 s (no STE, o laco do voo da atomicfireball), 6 (explosao) =
+WI_BURNING_3 (atomicfireball_impact_shockwave); os sons de cada efeito: tools/ste/ste_fx.py <iso> list Godzilla2k.cmp (enum.sound_*).
 Sopro atomico ("breathFx" do monster.json): tools/ste/ste_fx.py <iso> breath Godzilla2k.cmp atomicbreath <pasta do monstro>/fx
 --hit AtomicBreath_hit; o breathfx.json que ele grava (copia aqui: breathfx_atomicbreath.json) vai para o "breathFx" do monster.json
 com "hide": [8, 51, 148, 80, 81] e, nas faiscas do acerto (camadas "hit" com basic.png), "radial" e "up" a 1/3 (a olho: no STE
 esses emissores sao "Normalized", escala que o port nao tem). "fireColor" #FFC840 pinta o que sobra do fogo do Togera (bola de fogo).
 Golpes: as animacoes inteiras do STE nos ids 10-25 (ID_MAP do ste_clips.py) e um .CHR proprio feito de moves.json:
-modkit.py monster stats ste_teste godzilla_ste (uma vez), depois tools/chr_moves.py moves.json disc/RST/LIZARD.CHR
---ngp <pasta de trabalho>/LIZARD0.NGP --out <pasta de trabalho>/LIZARD.CHR e modkit.py pack ste_teste. Velocidade por golpe:
+modkit.py monster stats "Godzilla 2000" godzilla_ste (uma vez), depois tools/chr_moves.py moves.json disc/RST/LIZARD.CHR
+--ngp <pasta de trabalho>/LIZARD0.NGP --out <pasta de trabalho>/LIZARD.CHR e modkit.py pack "Godzilla 2000". Velocidade por golpe:
 "speed" em moves.json (1 = o ritmo do STE).

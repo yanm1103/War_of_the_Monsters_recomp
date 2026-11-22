@@ -303,6 +303,28 @@ public:
         f.size = std::filesystem::file_size(host, ec);
     }
 
+    // Mod de teste (MODS.md, "Test mods"): mods/<mod>/mod.json com "test": true. Fica de fora (arquivos, monstros, skins, fases e
+    // patches de fase) a menos que WOTM_TEST_MODS esteja ligada; o launcher a liga sozinho quando a partida direta usa um deles.
+    static bool showTestMods() {
+        const char *e = std::getenv("WOTM_TEST_MODS");
+        return e && *e && std::strcmp(e, "0") != 0;
+    }
+    static bool testMod(const std::filesystem::path &mod) {
+        const std::filesystem::path js = child(mod, "mod.json");
+        if (js.empty()) return false;
+        std::ifstream in(js, std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        json::Value v;
+        std::string err;
+        if (!json::parse(text, v, &err) || v.type != json::Value::Obj) {
+            std::fprintf(stderr, "[mods] %s/mod.json invalido: %s\n", mod.filename().string().c_str(), err.c_str());
+            return false;
+        }
+        const json::Value *t = v.get("test");
+        return t && t->asBool(false);
+    }
+    static bool hiddenTestMod(const std::filesystem::path &mod) { return !showTestMods() && testMod(mod); }
+
     // Le a pasta mods/ (uma vez). Devolve quantos arquivos entraram (com os gerados).
     size_t scan(const std::filesystem::path &dir) {
         namespace fs = std::filesystem;
@@ -312,7 +334,12 @@ public:
         std::vector<fs::path> mods;
         for (const auto &e : fs::directory_iterator(dir, ec)) {
             const std::string n = e.path().filename().string();
-            if (e.is_directory(ec) && !n.empty() && n[0] != '_' && n[0] != '.') mods.push_back(e.path());
+            if (!e.is_directory(ec) || n.empty() || n[0] == '_' || n[0] == '.') continue;
+            if (hiddenTestMod(e.path())) {
+                std::fprintf(stderr, "[mods] %s: mod de teste, desligado (WOTM_TEST_MODS=1 liga)\n", n.c_str());
+                continue;
+            }
+            mods.push_back(e.path());
         }
         std::sort(mods.begin(), mods.end(), [](const fs::path &a, const fs::path &b) { return key(a.filename().string()) < key(b.filename().string()); });
         for (const fs::path &m : mods) {
@@ -323,6 +350,7 @@ public:
                 const std::string rel = key(fs::relative(it->path(), m, ec).generic_string());
                 const uint64_t size = it->file_size(ec);
                 if (rel.empty() || ec) continue;
+                if (rel == "MOD.JSON") continue;   // o mod.json da raiz descreve o mod, nao sobrepoe o disco
                 if (rel.rfind("SKINS/", 0) == 0) continue;   // skins/<id>/: trajes novos (scanSkins), nao sobrepoem o disco
                 if (rel.rfind("MONSTERS/", 0) == 0) continue;   // monsters/<id>/: monstros custom (scanCustoms)
                 if (rel.rfind("STAGES/", 0) == 0) continue;   // stages/<pasta>/: fases custom (scanStages)

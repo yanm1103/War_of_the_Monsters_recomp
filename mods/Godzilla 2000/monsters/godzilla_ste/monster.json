@@ -1,14 +1,16 @@
 {
   "id": "godzilla_ste",
-  "name": "GODZILLA STE",
+  "name": "GODZILLA 2000",
+  "costumeName": "GODZILLA 2000",
   "base": "togera",
   "costume": 0,
   "files": true,
-  "narrator": "togera",
+  "narrator": "godzilla_2000_ste",
   "ai": true,
   "specialRoar": true,
   "portrait": "portrait.png",
   "portraitTex": 3,
+  "logo": "logo.png",
   "breathFx": {
     "scale": 1.0,
     "hide": [

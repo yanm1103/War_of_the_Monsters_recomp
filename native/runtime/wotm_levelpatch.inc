@@ -2257,7 +2257,8 @@ void updateHook(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
 }
 
 // <mod>/levels/<FASE>.json procurado agora, a cada carga (um mod ou arquivo criado ou apagado depois do boot vale): as pastas de
-// Registry::dir() como no scan (sem '_'/'.' no comeco, em ordem de Registry::key, o ultimo vence), sem olhar maiusculas
+// Registry::dir() como no scan (sem '_'/'.' no comeco nem mod de teste desligado, em ordem de Registry::key, o ultimo vence), sem olhar
+// maiusculas
 struct Found { std::filesystem::path host; std::string mod; };
 std::filesystem::path childNoCase(const std::filesystem::path &dir, const std::string &name)
 {
@@ -2276,7 +2277,7 @@ bool findPatch(const std::string &name, Found &out)
     for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec))
     {
         const std::string n = it->path().filename().string();
-        if (!n.empty() && n[0] != '_' && n[0] != '.' && it->is_directory(ec)) mods.push_back(it->path());
+        if (!n.empty() && n[0] != '_' && n[0] != '.' && it->is_directory(ec) && !Registry::hiddenTestMod(it->path())) mods.push_back(it->path());
     }
     std::sort(mods.begin(), mods.end(), [](const fs::path &a, const fs::path &b) { return Registry::key(a.filename().string()) < Registry::key(b.filename().string()); });
     bool any = false;

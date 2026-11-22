@@ -1,9 +1,9 @@
 """Sons do Godzilla 2000 de Godzilla: Save the Earth nos numeros do Togera (o custom godzilla_ste e sobre o Togera).
 
-  python mods/_ste_teste_src/ste_sounds.py <iso> <pasta files/ da pasta de trabalho> [<pasta das fontes>]
+  python mods/_godzilla2000_ste_src/ste_sounds.py <iso> <pasta files/ da pasta de trabalho> [<pasta das fontes>]
 
 Grava `lizard_s_sNNN.wav` (banco proprio, LIZARD_S) e `genamb_s_sNNN.wav` (banco comum proprio, GENAMB_S) na pasta files/ do
-custom; `modkit.py pack ste_teste` monta os dois .BNK. Com a terceira pasta grava tambem uma copia de cada um como
+custom; `modkit.py pack "Godzilla 2000"` monta os dois .BNK. Com a terceira pasta grava tambem uma copia de cada um como
 `<banco>_<NNN>__<nome no STE>.wav` (as fontes deste mod, `sounds/`). O que cada numero e: docs/guides/MODS.md ("Togera's sounds").
 """
 import os
@@ -15,13 +15,16 @@ sys.path.insert(0, os.path.join(HERE, '..', '..', 'tools', 'ste'))
 import ste_model as S
 import ste_sound as SS
 
-# numero no banco do Togera -> nome do som no godzilla_sound do STE (a 1a amostra dele)
+# numero no banco do Togera -> nome do som no godzilla_sound do STE (a 1a amostra dele), ou (nome, segundos, fade em segundos)
+# para cortar uma amostra longa
 LIZARD = {
     0: 'G2K_ROAR_3',            # controle da multidao
     1: 'GZ2K MOAN',             # morte (animacao 120)
     2: 'G2K_ROAR_1',            # grito da entrada (e do especial, specialRoar)
     3: 'G2K_OOF_HEAVY',         # dor
     4: 'G2K_SHOUT_UP_6',        # pulo
+    5: ('GODZILLA2K ATOMIC BREATH', 1.4, 0.4),   # disparo da bola de fogo (no STE, o laco do voo dela; aqui um tiro so, cortado)
+    6: 'WI_BURNING_3',          # explosao da bola de fogo (atomicfireball_impact_shockwave no STE)
     7: 'GODZILLA2K BREATH LOOP',   # sopro, em laco durante o especial
     8: 'GODZILLA2K ROAR RAGE',  # grito
     9: 'G2K_SHOUT_LONG_2',      # grito do golpe forte
@@ -56,9 +59,17 @@ def main(argv):
         os.makedirs(src, exist_ok=True)
     for bank, table in (('lizard_s', LIZARD), ('genamb_s', GENAMB)):
         for num, nm in sorted(table.items()):
+            cut = None
+            if isinstance(nm, tuple):
+                nm, cut, fade = nm
             k = names.index(nm)
             s = samples[uses[k][0]]
             pcm = SS.decode_adpcm(sp[s['off']:s['off'] + s['size']])
+            if cut:
+                n, nf = int(cut * s['rate']), int(fade * s['rate'])
+                pcm = pcm[:n]
+                for i in range(max(0, len(pcm) - nf), len(pcm)):
+                    pcm[i] = int(pcm[i] * (len(pcm) - i) / float(nf))
             p = os.path.join(out, '%s_s%03d.wav' % (bank, num))
             SS.write_wav(p, pcm, s['rate'])
             if src:

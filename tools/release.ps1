@@ -96,9 +96,16 @@ Copy-Item (Join-Path $editorDist 'WotM_LevelEditor.exe') $stage
 # mods: os arquivos que o git rastreia em mods\ e os quatro do Mecha gerados do disco (tools/mechamon.py; no .gitignore)
 $mecha = 'mods/Mecha/monsters/mecha/files'
 $mechaFiles = 'MECHA.NGP', 'MECHA.PTR', 'MECHA.TEX', 'MECHA.RTX' | ForEach-Object { "$mecha/$_" }
-# fora do zip: as pastas mods/_<nome>_src (rigs, scripts de conversao, WAVs de origem): so o repo precisa delas; e o mod de teste
-# ste_teste (viewer do Godzilla STE), que monta arquivos do disco e nao e para o jogador
-$modFiles = @(& $git -C $repo ls-files mods | Where-Object { $_ -notlike 'mods/_*' -and $_ -notlike 'mods/ste_teste/*' }) + $mechaFiles
+# fora do zip: as pastas mods/_<nome>_src (rigs, scripts de conversao, WAVs de origem): so o repo precisa delas; e os mods de teste
+# (mod.json com "test": true, MODS.md), que nao sao para o jogador
+$testMods = @(Get-ChildItem (Join-Path $repo 'mods') -Directory | Where-Object {
+    $js = Join-Path $_.FullName 'mod.json'
+    (Test-Path $js) -and ((Get-Content $js -Raw) -match '"test"\s*:\s*true')
+} | ForEach-Object { "mods/$($_.Name)/*" })
+$modFiles = @(& $git -C $repo ls-files mods | Where-Object {
+    $f = $_
+    $f -notlike 'mods/_*' -and -not ($testMods | Where-Object { $f -like $_ })
+}) + $mechaFiles
 foreach ($m in $modFiles) {
     $src = Join-Path $repo $m
     if (-not (Test-Path $src)) { Fail "falta $m (o Mecha: python tools/mechamon.py mods/Mecha/monsters/mecha/files)" }
