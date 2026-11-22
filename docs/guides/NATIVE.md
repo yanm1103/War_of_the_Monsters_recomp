@@ -168,8 +168,8 @@ the `wotm_mainmenu.inc` panel, pause item in `wotm_pausemenu.inc`, menu flow in 
   with the type (and BASE, the damage the hit requested, when the applied one was different), the combo and the best combo, the last 4 and the last 3 hits in the frame data. The combo is the
   hits the victim took without recovering: it chains when the victim was still in a reaction state at the entry of `takeHit` (or the damage
   came up to 3 frames after the previous one), and ends when the reaction after the last hit closes. Types
-  by `source`: 2 and 11 melee, 3 held object, 1 projectile, 7 butt slam, 8 and 13 throw, 5, 6, 12, 14 and 20 special. With the
-  mode on, the damage numbers (`WOTM_DAMAGEPOP`) appear even with the option off. Log: `[treino] dano ...` for the first 30 and
+  by `source`: 2 and 11 melee, 3 held object, 1 projectile, 7 butt slam, 8 and 13 throw, 5, 6, 12, 14 and 20 special. The damage
+  numbers over the monsters follow the DAMAGE NUMBERS option (`WOTM_DAMAGEPOP`) here too. Log: `[treino] dano ...` for the first 30 and
   every 100.
 - **Punch table** (PUNCH TABLE line, on by default): at the exit of `Monster::update`, with the monster in `StatePunch`, the config of the
   punch in progress (the `PunchConfig` of the position and type, the `.CHR` values; `FORMATS.md`, "Character"), the animation point

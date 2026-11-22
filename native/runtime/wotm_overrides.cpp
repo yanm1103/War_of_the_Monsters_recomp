@@ -2943,7 +2943,7 @@ namespace
                         else
                             p[0] = p[1] = p[2] = 0.f;
                         if (!quiet && (p[0] != 0.f || p[1] != 0.f || p[2] != 0.f) &&
-                            (wotm::settings::on(wotm::settings::DamagePop) || wotm_training::g_on.load(std::memory_order_relaxed)))
+                            wotm::settings::on(wotm::settings::DamagePop))
                             wotmDamagePopup(rdram, p, lost, recent ? d->kind : 0);
                     }
                     d->last = h;
