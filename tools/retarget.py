@@ -163,6 +163,7 @@ def rot_between(a, b):
 # ---------------------------------------------------------------- the model (Collada)
 
 NS = "{http://www.collada.org/2005/11/COLLADASchema}"
+NS15 = "{http://www.collada.org/2008/03/COLLADASchema}"
 
 
 def _floats(el):
@@ -200,6 +201,9 @@ class Model:
     def __init__(self, path, up=None):
         self.path = path
         root = ET.parse(path).getroot()
+        for el in root.iter():   # Collada 1.5 (Cinema 4D, Maya): the same elements under another namespace
+            if isinstance(el.tag, str) and el.tag.startswith(NS15):
+                el.tag = NS + el.tag[len(NS15):]
         self.joints = []          # [{"name", "parent", "world"}]
         jidx = {}                 # sid / id / name -> joint index
         inst = []                 # (node world, instance_controller element)
@@ -234,7 +238,9 @@ class Model:
         images = {}
         for im in root.iter(NS + "image"):
             f = im.find(NS + "init_from")
-            if f is not None and f.text:
+            if f is not None and f.find(NS + "ref") is not None:   # 1.5: <init_from><ref>file</ref></init_from>
+                f = f.find(NS + "ref")
+            if f is not None and f.text and f.text.strip():
                 images[im.get("id")] = os.path.join(os.path.dirname(path), f.text.strip().replace("file://", ""))
 
         def material_image(mat_id):
@@ -254,6 +260,10 @@ class Model:
                     break
                 s = p.find(".//" + NS + "source")
                 f = p.find(".//" + NS + "init_from")
+                ii = p.find(".//" + NS + "instance_image")   # 1.5: <sampler2D><instance_image url="#image"/>
+                if ii is not None:
+                    ref = ii.get("url", "#")[1:]
+                    break
                 ref = (s.text if s is not None else f.text if f is not None else ref).strip()
             return images.get(ref)
 
