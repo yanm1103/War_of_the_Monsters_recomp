@@ -34,3 +34,4 @@ Ordem sugerida: 0, 1, 2, 3, 4. O 1 e o 2 ajudam os dois caminhos (malha sobre o 
 
 - Plano e ordem aprovados pelo dono (2026-11-22), no `TODO.md`; base do teste e do vídeo: Robo-47.
 - Escopo (dono, 2026-11-22): skinning não é do kit ("não somos o Mixamo"). Importa o modelo que já vem com esqueleto e pesos: esqueleto transferido (`retarget.py`) ou próprio (`Import rig`). Saem do plano a textura nova no `Import mesh` e o encaixe da malha no esqueleto do monstro; os ossos com nome ficam, porque são o que deixa ligar os ossos do modelo aos do monstro. Modelo do teste: Buzz Lightyear (esqueleto `*_jnt` com 99 ossos, nem Mixamo nem Biped).
+- Correção do dono (2026-11-22): o caminho A (malha nova presa pelo usuário nos ossos do monstro, `Import mesh`) fica; o modder tem as duas opções. Só o weight painting automático pelo kit está fora. A textura nova no `Import mesh` volta ao plano.

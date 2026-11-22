@@ -12,10 +12,11 @@ O que falta fazer, e só isso. Relatos de bug passam na frente. Item terminado s
 - **Céu: o estilo do pedaço original na vista:** o jogo força no modelo de céu o estilo do pedaço que ele troca (mistura, alfa e campos de `sky_swap`); a vista usa o estilo do próprio modelo, então uma camada de nuvens translúcida no jogo pode sair opaca no editor. Começar por copiar `userData.gs` do primeiro mesh original do tipo para os materiais de `skyDrawing` (`updateSkyView` em `web/app.js`), conferindo com um modelo translúcido.
 
 ## Malha nova pelo Mod kit (base: Robo-47)
-Plano aprovado em `docs/investigacoes/2026-11-22/plano_malha_kit.md`. O foco é o modelo que já vem com esqueleto e pesos: ele fica com o esqueleto dele e recebe as animações do monstro base (`retarget.py`), ou traz as próprias (`Import rig`). Prender uma malha nos ossos do monstro (skinning) é com o usuário. Nesta ordem:
-- **Teste:** o Buzz (modelo baixado, com esqueleto) sobre o Robo-47 pelo caminho de hoje (mapa de ossos à mão, `retarget.py`, `Import rig`); anotar onde trava e o que foi preciso saber fora dos docs (vira o roteiro do vídeo).
+Plano aprovado em `docs/investigacoes/2026-11-22/plano_malha_kit.md`. Dois caminhos para o modder: (A) malha nova presa pelo próprio usuário, no Blender, nos ossos do monstro (`Import mesh`); (B) modelo que já vem com esqueleto e pesos, que fica com o esqueleto dele e recebe as animações do monstro base (`retarget.py`) ou traz as próprias (`Import rig`). Os pesos são com o usuário: o kit não pinta pesos sozinho. Nesta ordem:
+- **Teste:** o Buzz (modelo baixado, com esqueleto) sobre o Robo-47 pelos dois caminhos de hoje (A: Export to Blender, pesos à mão, `Import mesh`; B: mapa de ossos à mão, `retarget.py`, `Import rig`); anotar onde trava e o que foi preciso saber fora dos docs (vira o roteiro do vídeo).
 - **Validação antes de importar:** botão "Check" ao lado de "Import rig..." e "Import mesh..." (e o mesmo relatório no import): texturas (tamanho, redução, memória), vértices com mais de 3 ossos ou sem peso, UV fora, limite de vértices, esqueleto mexido.
-- **Ossos com nome no Export to Blender:** `R_Hand`, `Spine`, `Tail3` no lugar de `bone<N>` (o número fica no nome para o import); é o que deixa ligar os ossos do modelo aos do monstro, à mão ou sozinho.
+- **Import mesh com textura nova (caminho A):** material com imagem vira textura própria, como no `Import rig` (`ngprig.py`); hoje o `ngpmesh.py` só aceita `tex<texId>` do traje.
+- **Ossos com nome no Export to Blender:** `R_Hand`, `Spine`, `Tail3` no lugar de `bone<N>` (o número fica no nome para o import); servem aos dois caminhos: pintar pesos no osso certo (A) e ligar os ossos do modelo aos do monstro (B).
 - **"Import rigged model..." na GUI:** `retarget.py` lendo `.glb`, reconhecendo os ossos pelo nome (Mixamo, Biped e nomes genéricos como `L_arm_1_jnt`) e montando o mapa para o monstro base.
 - **`MODS.md` e roteiro do vídeo** com o fluxo novo.
 
@@ -25,5 +26,5 @@ Plano aprovado em `docs/investigacoes/2026-11-22/plano_malha_kit.md`. O foco é 
 
 ## Descartado
 - **Customs de tipo chefe na eliminação:** a seleção segue recusando Goliath, Jelly, Cerebulon e Mecha (o diálogo 8 só conhece as colunas 1 a 10); o dono decidiu não fazer.
-- **Skinning pelo kit e textura nova no Import mesh:** prender nos ossos do monstro uma malha que não tem esqueleto, ou refazer a malha sobre o esqueleto dele, é trabalho do usuário no Blender; o dono decidiu não facilitar (o kit cuida de esqueleto transferido ou próprio).
+- **Pesos automáticos pelo kit:** prender a malha nos ossos (weight painting) é trabalho do usuário no Blender; o dono decidiu que o kit não faz isso sozinho.
 - **LOD dos props do Blender:** o custo por quadro não pede (10 props de ~1000 triângulos não mudam o FPS); o dono decidiu não fazer.
