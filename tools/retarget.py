@@ -13,7 +13,9 @@ become the rig .glb that `modkit.py monster rig` (tools/ngprig.py) takes.
   Y-up scene, +y for a Z-up one). Textures: the .dae effect's diffuse image next to the file, or the glTF base color image
   (inside or next to it); a missing one, or one that is not PNG or JPEG, leaves those triangles untextured, with a warning.
 - map.json: which model joint follows which source bone (`tools/rigmaps/biped_togera.json` is the 3ds Max Biped, Bip01_*,
-  on Togera). A source bone is named as the export names it (`L_Hand_bone1`), by its label (`L_Hand`) or by `bone1`. Keys:
+  on Togera); `auto` makes one from the two skeletons (`tools/automap.py`) and writes it next to out.glb as
+  `<out>_map.json`, to edit and pass back. A source bone is named as the export names it (`L_Hand_bone1`), by its label
+  (`L_Hand`) or by `bone1`. Keys:
   - "bones": {joint: {"from": bone | [bone_a, bone_b, f], "move": true, "align": [child_joint, child_bone]}}. The joint turns
     in the world as its source bone turns from its rest (with [a, b, f], a blend of the two turns at f); "move" also carries
     the bone's change of position (scaled by the ratio of the two rest heights); "align" first turns the joint so that the
@@ -670,7 +672,18 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
     if front is None:   # a Y-up scene faces +Z, which is -Y once it stands on Z
         front = "-y" if mdl.up_axis == "y" else "+y"
     log("model %s: %s up (%s), facing %s" % (os.path.basename(model_path), mdl.up_axis.upper(), mdl.up_from, front))
-    cfg = load_map(map_path)
+    if map_path == "auto":   # made from the two skeletons (tools/automap.py) and kept next to the output, to edit
+        import automap
+        try:
+            cfg = automap.build_map(src_path, mdl, log)
+        except automap.MapError as e:
+            raise RetargetError("bone map: %s" % e)
+        mp = os.path.splitext(out_path)[0] + "_map.json"
+        with open(mp, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=1)
+        log("bone map written to %s" % mp)
+    else:
+        cfg = load_map(map_path)
     J = mdl.joints
     nj = len(J)
 

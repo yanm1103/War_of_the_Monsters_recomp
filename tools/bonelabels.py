@@ -69,7 +69,7 @@ def labels(nodes, root=None):
     parent = {c: p for p, nd in enumerate(nodes) for c in nd.get("children", [])}
     if root is None:
         root = next((i for i, nd in enumerate(nodes) if nd.get("name") == "WotM"), None)
-    bones = [i for i, nd in enumerate(nodes) if BONE.fullmatch(nd.get("name") or "") and "@" not in nd["name"]]
+    bones = [i for i, nd in enumerate(nodes) if BONE.search(nd.get("name") or "") and "@" not in nd["name"]]
     bset = set(bones)
 
     def bone_above(i):
@@ -208,7 +208,7 @@ def main(argv):
     for i in sorted(lab, key=lambda i: int(re.search(r"(\d+)$", nodes[i]["name"].split("@")[0]).group(1))):
         print("%-10s %s" % (canonical(nodes[i]["name"]), lab[i]))
     left = [canonical(nd["name"]) for i, nd in enumerate(nodes)
-            if BONE.fullmatch(nd.get("name") or "") and "@" not in nd["name"] and i not in lab]
+            if BONE.search(nd.get("name") or "") and "@" not in nd["name"] and i not in lab]
     if left:
         print("unnamed: %s" % ", ".join(left))
     return 0

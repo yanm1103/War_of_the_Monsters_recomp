@@ -197,7 +197,9 @@ so its refusals show up here. Besides those, it looks at:
 `.gltf`) can take the base type's animations instead of new ones: export the base costume (**Export to Blender**, e.g.
 `LIZARD0.glb`), write a bone map (which model joint follows which base bone, the base bone by its full name, its label such as
 `L_Hand` or its `bone<N>`; `tools/rigmaps/biped_togera.json` covers the 3ds Max Biped, `Bip01_*`, on Togera) and run
-`python tools/retarget.py LIZARD0.glb model.glb map.json rig.glb`; then **Import rig...** with `rig.glb`. The model's up axis
+`python tools/retarget.py LIZARD0.glb model.glb map.json rig.glb`; then **Import rig...** with `rig.glb`. With `auto` in place
+of `map.json` the kit makes the map from the two skeletons (sides and hands/feet from the joint names, the rest from the shape
+of the tree; `tools/automap.py`) and writes it next to `rig.glb` as `rig_map.json`, to edit and pass back. The model's up axis
 comes from the file (`--up y|z` when it lies down) and a Y-up model faces -Y once stood up (`--front +y` turns it around). The map can
 start from another one (`{"extends": "biped_togera.json", ...}`) and change only the tail, add a `mouth` locator where the
 fire comes out or close a jaw the model's bind pose leaves open (`"turn"`). Each joint keeps the tilt it has in the model's
