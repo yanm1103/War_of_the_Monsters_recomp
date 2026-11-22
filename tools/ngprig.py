@@ -63,6 +63,10 @@ BONESPRING_TYPE = 0x20    # Congar: initDynamics hooks springs on atMat 4, 8, 11
 # the AnimBlends of the specials that have them (the state's constructor gives the type, its init the animation): ids the
 # game adds on top (BLEND_ADDITIVE, it sums weight * curve, so they hold deltas: layers) and ids it blends over the pose
 # (BLEND_STATIC: a full pose). The curves alone miss some (Congar's 167 moves a translation: the neck reaching out)
+# the GS state a node hands its children (ctx, +4 of GROUP): Robo-47's, word for word (VIF DIRECT, GIF tag A+D, ALPHA_1 0x44,
+# TEST_1 0x5040D = alpha test on, pass at >= 0x40, Z test as the game's default 0x5040C, ZBUF_1): cut-out textures
+ALPHA_TEST_CTX = struct.pack("<20I", 0, 0, 0x11000000, 0x51000004, 0x8003, 0x10000000, 0xE, 0,
+                             0x44, 0, 0x42, 0, 0x5040D, 0, 0x47, 0, 0x1000000, 0, 0x4E, 0)
 SPECIAL_BLENDS = {"MONKEY": ({161, 167}, {166}),    # StateSonicRoar
                   "LAVA": ({161, 167}, {166}),      # StateLavaBlast
                   "ROBOT": ({161, 166}, {167}),     # StateRobotSpecial
@@ -844,6 +848,16 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
     tex_ctx = dict(base.tex_ctx)
     for t in new_tex:
         tex_ctx[t] = base.tex_ctx[base.body_tex]
+    cutout = []   # new textures with see-through texels (fur cards, eyelashes): the model gets the alpha test
+    for t, (png, what) in sorted(new_tex.items()):
+        try:
+            _w, _h, px = tex.read_png(png)
+        except ValueError:
+            continue
+        if sum(1 for c in px if c[3] < 128) > len(px) // 200:
+            cutout.append(what)
+    if cutout:
+        log("alpha test on (see-through texels in %s)" % ", ".join(cutout))
 
     # ---- OBJECTs: per block, up to MAX_TEX textures each, every texture in its own sub-packets
     objects = []                   # (block, [texIds], {slot: [encoded triangles]})
@@ -1364,6 +1378,10 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
     o.f(grp + 0x1C, rad)
     for k, (a, _c) in enumerate(obj_addr):
         o.ptr(grp + 0x20 + 4 * k, a)
+    if cutout:
+        gc = o.alloc(len(ALPHA_TEST_CTX), 16)
+        o.raw(gc, ALPHA_TEST_CTX)
+        o.ptr(grp + 4, gc)
     top_node = grp
     if base.lod is not None:
         lod = base.lod

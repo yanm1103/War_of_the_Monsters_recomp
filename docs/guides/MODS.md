@@ -183,7 +183,7 @@ skeleton"). Any base, Congar too (its fur springs do not reach the new skeleton)
   where the base has it, on the nearest bone, and the log names it;
 - a mesh named `coll*` is a collision box (not drawn); without one, a box around the rest mesh is used;
 - materials: `tex<texId>` keeps one of the base's textures; a material with an image gets a texture of its own (the PNG lands
-  in `files/` as `<file>_t<texId>.png`, editable like the others); one without an image gets a PNG of its color.
+  in `files/` as `<file>_t<texId>.png`, editable like the others); one without an image gets a PNG of its color. When a new image has see-through texels (fur cards, eyelashes), the model is drawn with the alpha test Robo-47 uses (texels under half alpha are not drawn).
 A scene made in Blender (Z up, facing -Y, meters) is turned to the game's front and scaled to the base type's height, feet on the
 ground; `modkit.py monster rig ... --front +y` (a model facing +Y), `--scale S` or `--height H` change that. A `.glb` from **Export
 to Blender** (its "WotM" root) is already in the game's axes and units, so the base type's own skeleton, edited, also goes in this
