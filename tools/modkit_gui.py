@@ -2081,6 +2081,23 @@ class App:
         if not p:
             return
         key = ("skins/" if kind == "skin" else "monsters/") + tid
+        if what == "mesh":
+            try:
+                way, why = modkit.mesh_route(self.disc.get(), mods, mod, kind, tid, p)
+            except SystemExit:
+                way, why = "mesh", None
+            if way == "rig" and kind == "skin":
+                messagebox.showwarning("Import mesh", "%s: a new body.\n\nA skin only reshapes its monster's pieces. A new body "
+                                       "is a custom monster: New monster..., then Import rig... there." % why, parent=self.root)
+                return
+            if way == "rig":
+                if messagebox.askyesno("Import mesh", "%s: a new body, which Import mesh does not take.\n\nImport it with "
+                                       "Import rig, on the monster's skeleton? From then on this .glb is %s's rig: edit it and "
+                                       "use Import rig again." % (why, tid), parent=self.root):
+                    self.run("Importing the rig of %s..." % tid,
+                             lambda disc=self.disc.get(): modkit.rig_import(disc, work, mods, mod, tid, p),
+                             lambda: self.reselect(key))
+                return
         fn = modkit.mesh_import if what == "mesh" else modkit.anim_import
         self.run("Importing the %s of %s..." % (noun, tid),
                  lambda disc=self.disc.get(): fn(disc, work, mods, mod, kind, tid, p),

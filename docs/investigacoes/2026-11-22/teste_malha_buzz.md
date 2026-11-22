@@ -52,6 +52,12 @@ Rodado nos arquivos deste teste (o mesmo que o botão faz):
 - O aviso repetido de id dobrado (B8) virou uma linha comum no `ngprig` e some do relatório. JPEG dentro do `.glb` vira PNG no import (Pillow, que vai no exe do kit).
 - O check do Import rig roda o import inteiro numa pasta temporária: ~40 s no Buzz (158 animações).
 
+## Depois do corpo novo pelo Import mesh
+
+O `Import mesh` agora reconhece o corpo novo (`meshcheck.route`: malha com pele fora das peças `obj_<endereço>`, ou peça com peso fora da paleta) e, num custom, oferece o `Import rig` com o mesmo `.glb`. Pela GUI, num custom novo sem esqueleto próprio (`buzzc`): o `buzz_A2.glb` dá o diálogo "obj_a23e90 has weights on bones that piece does not follow: a new body, which Import mesh does not take", e com o "sim" o rig import roda e o Buzz entra na luta (`docs/screenshots/2026-11-22/2026-11-22_buzz_import_mesh_para_rig.png`; braços em T e textura trocada são do arquivo, como antes). Pela linha de comando a recusa cita o `monster rig`. Achado no caminho: o commit do Check (`6c18e7d7`) tirou o `data` do `rig_import`, e todo rig import caía com NameError no fim (depois de gravar os arquivos, sem as peças do especial nem o `files`); no teste do Check eu cortei a saída e não vi. Corrigido no commit seguinte.
+
+Travas A1 e A2: deixam de bloquear. A3 (a saída escondida): o kit leva até ela.
+
 ## Números para comparar depois das melhorias
 
 - Caminho B: 3 comandos fora da GUI (`retarget.py`, conversão para Z para cima, edição do `.dae`); 5 coisas que precisei saber fora dos docs (o que é cada `boneN`, Z para cima, `--front=`, a imagem que falta, a raiz com dois filhos); 1 bug do kit.

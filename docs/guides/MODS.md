@@ -124,6 +124,13 @@ Mesh: each primitive keeps the texture its material names (`tex<texId>`, one of 
 PNG of the same size. Up to 3 bones per vertex (the heaviest kept). The few vertex colors brighter than 1.0 (Magmo costume 2) come
 back at 1.0. The import refuses a mesh whose object uses two palette blocks, and one whose skeleton was moved or rescaled.
 
+**Import mesh...** reshapes the pieces the costume has: each `obj_<address>` mesh follows only the bones of its piece's palette
+(most monsters are a few skinned pieces plus rigid parts on bones). A new body, weighted freely on the exported skeleton, is
+something else: a skinned mesh with another name, or a piece weighted to bones outside its palette. On a custom monster, **Import
+mesh...** says so and offers to import the same `.glb` with **Import rig...** on the skeleton as exported, with its actions and its
+own images as textures (`modkit.py ... mesh import` names the `monster rig` command); from then on that `.glb` is the monster's
+rig. A skin keeps its monster's pieces, so a new body there means a custom monster.
+
 Animations: only the actions that differ from the game's are rewritten; the log lists each one (`a090: rebuilt, 161 -> 161 frames,
 1 transforms moved, 127 curves (1 new)`), and the others stay byte for byte. A transform that moved gets new curves (linear,
 16-bit) and the rest of the action keeps the game's. An action may get longer or shorter: the curves that did not move, including

@@ -1206,6 +1206,12 @@ def model_import(disc, work, mods, mod, kind, tid, glb=None, what="mesh"):
         raise SystemExit("%s: %s.NGP/.PTR are not on the disc" % (cmd, stem))
     if what == "mesh":
         import meshcheck
+        way, why = meshcheck.route(src, glb)
+        if way == "rig":
+            raise SystemExit("mesh import: %s: a new body. %s" % (why, (
+                "It goes in by rig import (Import rig... in the kit; modkit.py monster rig %s %s <the .glb>), on the "
+                "monster's skeleton as exported." % (mod, tid)) if kind == "monster" else (
+                "A skin only reshapes its monster's pieces; a new body is a custom monster (New monster..., then Import rig...).")))
         meshcheck.scan(glb, meshcheck.Report(), "mesh")
     rec["mesh" if what == "mesh" else "anims"] = glb
     for k in ("mesh", "anims"):
@@ -1266,6 +1272,17 @@ def _rig_layers(mods, mod, cid):
     return ngpgraft.LAYERS.get(base_name(str((data or {}).get("special", ""))), ())
 
 
+def mesh_route(disc, mods, mod, kind, tid, glb):
+    """("mesh", None) quando o mesh import leva o .glb; ("rig", motivo) quando e um corpo novo (malha que nao e peca do traje
+    base, ou pesos fora da paleta da peca), que so o rig import leva (tools/meshcheck.py route). Sem o traje no disco: mesh."""
+    stem = mesh_target(mods, mod, kind, tid)[1]
+    src = disc_file(disc, stem + ".NGP")
+    if not src or not os.path.isfile(glb):
+        return "mesh", None
+    import meshcheck
+    return meshcheck.route(src, glb)
+
+
 def mesh_check(disc, work, mods, mod, kind, tid, glb, front=None, scale=None, height=None):
     """Confere um .glb antes do import (tools/meshcheck.py), sem gravar nada: texturas, pesos, UV, lugar no esqueleto e o import
     que o leva, rodado numa pasta temporaria. Skin: sempre o mesh import; custom com esqueleto proprio: o rig import; o resto,
@@ -1306,6 +1323,7 @@ def rig_import(disc, work, mods, mod, cid, glb, front=None, scale=None, height=N
         raise SystemExit("rig import: %s.NGP/.PTR/.TEX are not on the disc" % stem)
     import meshcheck
     meshcheck.scan(glb, meshcheck.Report(), "rig")
+    data = _json_obj(os.path.join(monster_dir(mods, mod, cid), "monster.json"))
     layers = _rig_layers(mods, mod, cid)
     tmp = tempfile.mkdtemp(prefix="wotm_rig_")
     name = os.path.basename(stem)

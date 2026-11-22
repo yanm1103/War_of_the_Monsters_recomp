@@ -354,6 +354,32 @@ def pick_mode(glb, base_path):
     return "mesh" if all(nm in pieces for nm in names) else "rig"
 
 
+def route(base_path, glb_path):
+    """("mesh", None) when Import mesh takes the .glb, ("rig", why) when it is a new body that only Import rig takes: a skinned
+    mesh not named after a piece of the base, or a piece weighted to bones outside its palette. Other faults are left to the
+    import, which names them."""
+    try:
+        glb = ngpmesh.Glb(glb_path)
+        base = ngpmesh.Base(base_path)
+    except (ngpmesh.MeshError, OSError, ValueError):
+        return "mesh", None
+    pieces = {"obj_%x" % o: o for o in base.skinned}
+    names = [n.get("name") or "" for _i, n in _mesh_nodes(glb) if "skin" in n]
+    new = [nm or "(no name)" for nm in names if nm not in pieces]
+    if new:
+        return "rig", "%s %s not among %s's pieces (%s)" % (", ".join(new), "is" if len(new) == 1 else "are",
+                                                            os.path.basename(base_path), ", ".join(sorted(pieces)))
+    for nm in names:
+        warns = []
+        try:
+            ngpmesh.read_mesh(glb, nm, base, pieces[nm], warns.append)
+        except ngpmesh.MeshError as e:
+            warns.append(str(e))
+        if any("palette" in w for w in warns):
+            return "rig", "%s has weights on bones that piece does not follow" % nm
+    return "mesh", None
+
+
 def check_mesh(glb, base_path, rep):
     """The Import mesh reader on every obj_<address> mesh; the other meshes are a new body (Import rig)."""
     try:
