@@ -57,7 +57,7 @@ input[type=range] { accent-color: var(--orange); padding: 0; border: 0; backgrou
 /* ---- header: the game's title, the mod, setup */
 header { position: relative; display: flex; gap: 18px; align-items: center; padding: 6px 18px 14px; height: 100px; z-index: 20; }
 .brand { display: flex; align-items: center; gap: 12px; }
-#titleLogo { height: 76px; display: none; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, .7)); }
+#titleLogo { height: 86px; display: none; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, .7)); }
 #titleLogo.ok { display: block; }
 #titleLogo.ok + .titleText { display: none; }
 .titleText { font: 800 26px/0.95 var(--ui); letter-spacing: .02em; text-transform: uppercase; max-width: 190px;
@@ -361,7 +361,7 @@ body.dragy, body.dragy * { cursor: row-resize !important; user-select: none; }
 @media (max-height: 820px) {
   :root { --log-h: 150px; }
   header { height: 80px; padding-bottom: 10px; }
-  #titleLogo { height: 60px; }
+  #titleLogo { height: 68px; }
   #sky .stars, #sky .trees { height: 80px; }
   #sky.art .trees { background-size: auto 48px, 100% 260%; }
   main { padding-top: 6px; }

@@ -1,5 +1,6 @@
 """The game's own pictures for the mod kit page (tools/modkit_web.py), read from the user's disc: the title logo, the drive-in's
-sky and tree line (the page's background), the monsters' name logos and the levels' wide pictures (the menu's level select).
+sky and tree line (the page's header), the monsters' name logos and the levels' wide pictures (the menu's level select). The
+title is the one the game shows: a mod's when an enabled mod replaces it (the project's recompiled_logo), else the disc's.
 GET /api/art?name=title|sky|trees|logo-<PREFIX>|level-<STEM> -> PNG, made once per session in a temporary folder.
 
 All of them are in SHELL/SHELL.TEX with their palettes in SHELL/SHELL.RTX. The logos and the level pictures are the ones the
@@ -101,8 +102,8 @@ class ArtMixin:
     def art(self, name):
         """Path of the PNG for name (see the module's text), or None when the disc does not have it."""
         with _lock:
-            if getattr(self, "_art_disc", None) != self.disc:
-                self._art_disc = self.disc
+            if getattr(self, "_art_disc", None) != (self.disc, self.mods):
+                self._art_disc = (self.disc, self.mods)
                 self._art_dir = tempfile.mkdtemp(prefix="wotm_art_")
                 atexit.register(shutil.rmtree, self._art_dir, True)
                 self._art = {}
@@ -116,6 +117,10 @@ class ArtMixin:
         if not (name in BOUND or (kind == "logo" and arg in LOGOS) or (kind == "level" and arg in LEVEL_PICS)):
             return None
         try:
+            if name == "title":
+                out = self._mod_title()
+                if out:
+                    return out
             if self._shell is None:
                 self._shell = _Shell(self.disc)
             s = self._shell
@@ -132,3 +137,34 @@ class ArtMixin:
             return out
         except Exception:  # noqa: BLE001 (no disc, a damaged file: the page goes without the picture)
             return None
+
+    def _mod_title(self):
+        """The title the game shows when a mod replaces it: the last mod in load order (alphabetical, as the loader) with both
+        halves as PNGs in SHELL/ (the project's recompiled_logo). Side by side and turned upright, at most 1024 wide; None
+        without such a mod (or without Pillow)."""
+        names = ["shell_t%04d.png" % t for t in BOUND["title"]]
+        found = None
+        for _mod, folder in sorted(modkit.mod_folders(self.mods).items()):
+            paths = [os.path.join(folder, "SHELL", n) for n in names]
+            if all(os.path.isfile(x) for x in paths):
+                found = paths
+        if not found:
+            return None
+        from PIL import Image
+        ims = [Image.open(x).convert("RGBA") for x in found]
+        h = min(im.height for im in ims)
+        ims = [im if im.height == h else im.resize((round(im.width * h / im.height), h)) for im in ims]
+        out = Image.new("RGBA", (sum(im.width for im in ims), h))
+        x = 0
+        for im in ims:
+            out.paste(im, (x, 0))
+            x += im.width
+        out = out.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+        box = out.getbbox()   # the letters, without the empty margins
+        if box:
+            out = out.crop(box)
+        if out.width > 1024:
+            out = out.resize((1024, max(1, round(out.height * 1024 / out.width))), Image.Resampling.LANCZOS)
+        path = os.path.join(self._art_dir, "title.png")
+        out.save(path)
+        return path
