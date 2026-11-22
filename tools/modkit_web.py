@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """The mod kit in a browser tab: a small server on 127.0.0.1 that serves the page (tools/modkit_web/) and runs the kit
-(tools/modkit.py) for it. Plan and state between sessions: docs/investigacoes/2026-11-22/kit_navegador.md.
+(tools/modkit.py) for it.
 
-  python tools/modkit_gui.py --web        (or python tools/modkit_web.py)
+  python tools/modkit_gui.py        (or python tools/modkit_web.py)
       --no-browser: only serve; --port N; --conf FILE: another config file (tests, so they leave the user's alone)
 
-- One kit at a time: the port goes into the kit's config (the same file as the window kit, key "web_port"); a second start
+- One kit at a time: the port goes into the kit's config (key "web_port"); a second start
   while one runs opens another tab on it.
 - A tab is open while its log stream (GET /api/log) is: the server quits 15 s after the last one closed (none at all in the
   first 2 minutes also quits), or on POST /api/quit. A task that is running holds it until it ends. (A stream, not a timer
@@ -64,7 +64,7 @@ def load_conf():
 
 
 def save_conf(changes):
-    """Merges into the config file (the window kit keeps its own keys there)."""
+    """Merges into the config file (keys not given stay as they are)."""
     c = load_conf()
     c.update(changes)
     try:
@@ -237,7 +237,7 @@ class Kit(FilesMixin, SkinsMixin, MonstersMixin, ModelMixin, ArtMixin):
         return self.state()
 
     def adopt(self):
-        """As the window kit on picking a mod: the mod's files its work folder lacks come in as edited."""
+        """On picking a mod: the mod's files its work folder lacks come in as edited."""
         try:
             n = modkit.adopt_mod(self.disc, self.mods, self.mod, self.work())
             if n:
@@ -289,7 +289,7 @@ class Kit(FilesMixin, SkinsMixin, MonstersMixin, ModelMixin, ArtMixin):
         return True
 
     def run_fn(self, title, fn, after=None):
-        """fn() in a thread of this process, its prints in the log (the kit's quick tasks, as the window kit runs them);
+        """fn() in a thread of this process, its prints in the log (the kit's quick tasks);
         False when a task is running."""
         import contextlib
         import io

@@ -1,4 +1,4 @@
-# ABOUTME: Monta o WotM_ModKit.exe (tools/modkit_gui.py com Python, Tk, Pillow e numpy dentro, PyInstaller) para o zip do release.
+# ABOUTME: Monta o WotM_ModKit.exe (tools/modkit_gui.py, o kit no navegador, com Python, Tk dos dialogos de arquivo, Pillow e numpy dentro, PyInstaller) para o zip do release.
 # ABOUTME: Venv proprio fora do repo (<runtime>\modkit_build\venv); saida em <runtime>\modkit_build\dist\, com as licencas do que vai dentro.
 #
 # Uso: powershell -ExecutionPolicy Bypass -File tools\build_modkit.ps1 [-Runtime <pasta>]   (o tools\release.ps1 chama sozinho)

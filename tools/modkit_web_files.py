@@ -1,6 +1,6 @@
 """The mod kit page's file lists (tools/modkit_web.py): the game disc by name, and the mod's work folder in groups (the disc
 file each item came from, each skin, each custom monster), with what the page does on them (extract, open, replace, save,
-revert, remove). The names and groups are the window kit's (tools/modkit_gui.py)."""
+revert, remove)."""
 import os
 import shutil
 import subprocess

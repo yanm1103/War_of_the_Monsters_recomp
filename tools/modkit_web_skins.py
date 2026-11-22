@@ -1,4 +1,4 @@
-"""Skins in the mod kit page (tools/modkit_web.py), as the window kit makes them: New skin..., Turn into skin..., the skin's
+"""Skins in the mod kit page (tools/modkit_web.py): New skin..., Turn into skin..., the skin's
 properties (name, base costume, CPUs), duplicate and delete; the costumes' portraits for the base buttons; and the mesh row
 that skins and custom monsters share (Export 3D model, Check model..., Import mesh..., Import animations...)."""
 import json

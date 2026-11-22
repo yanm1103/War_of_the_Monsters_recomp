@@ -41,9 +41,9 @@ game does not read them.
 
 `pythonw tools/modkit_gui.py`, or the **Mod kit** button of `WotM_Launcher.exe`, opens the kit as a tab of the default browser:
 `tools/modkit_web.py` serves it from `127.0.0.1` and runs `modkit.py` for it (the page is `tools/modkit_web/`). It needs Python 3
-with Pillow (`pip install pillow`) and numpy for the 3D previews and the Blender export. One kit at a time: starting it again opens
+with Pillow (`pip install pillow`) and numpy for the 3D previews and the 3D model export. One kit at a time: starting it again opens
 another tab on the one running. Closing the tab quits the kit (about 15 s later, once a running task ends), as does **Quit**. The
-pages are in English. `--tk` still opens the earlier window (`tools/modkit_gui.py`).
+pages are in English.
 
 In the release zip it is `WotM_ModKit.exe`, next to `wotm.exe` (built by `tools/build_modkit.ps1` with PyInstaller, Python, Tk for the
 file dialogs, Pillow and numpy inside; `tools/release.ps1` calls it). There it finds by itself what `wotm.exe` uses: the ISO in `wotm.ini` (`iso=`) and the mods

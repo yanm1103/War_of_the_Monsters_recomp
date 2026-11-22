@@ -9,7 +9,7 @@ War of the Monsters Recompiled (wotm.exe, wotm.pdb)
 
 Mod kit (WotM_ModKit.exe)
   License: GNU General Public License 3.0 (licenses\WotM-GPL-3.0.txt); source in tools/ of the
-  same repository (modkit_gui.py, modkit.py). Built with PyInstaller and contains:
+  same repository (modkit_gui.py, modkit_web*.py, modkit.py). Built with PyInstaller and contains:
   - Python, PSF License (licenses\Python-LICENSE.txt), https://www.python.org
   - Tcl/Tk, BSD-style license (licenses\TclTk-license.terms.txt), https://www.tcl-lang.org
   - Pillow, MIT-CMU license (licenses\Pillow-LICENSE.txt), https://python-pillow.org

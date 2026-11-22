@@ -1,4 +1,4 @@
-"""Custom monsters in the mod kit page (tools/modkit_web.py), as the window kit makes them: New monster..., Turn into custom
+"""Custom monsters in the mod kit page (tools/modkit_web.py): New monster..., Turn into custom
 monster..., the monster's panel (name, camera, narrator, rules, special, CPUs, HUD portrait, look: model files, stats,
 sounds, mesh, rig, rigged model and Adjust bones), duplicate and delete."""
 import json
