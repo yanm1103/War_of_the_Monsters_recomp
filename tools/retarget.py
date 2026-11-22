@@ -23,7 +23,8 @@ become the rig .glb that `modkit.py monster rig` (tools/ngprig.py) takes.
     goes in, e.g. arms from a T-pose to the source's); "level": true lays the joint's underside flat on the ground at rest
     (a foot the model's bind pose leaves tilted; the plane through the lowest point of each cell of a grid over the vertices
     it carries, toes included); "turn": [x, y, z] turns it at rest by those degrees about the game axes (+x lifts what
-    faces forward: closes a jaw the bind pose leaves open).
+    faces forward: closes a jaw the bind pose leaves open). A joint with "turn" and no "from" is only turned at rest and
+    stays on the joint above it (fingers closed into a fist, a mouth left open): no channels of its own.
   - "chains": [{"joints": [...], "from": [...]}]: two chains of different lengths (tails), matched by their position along
     the chain.
   - "locators": {alias or loc_<hex>: {"joint": joint, "at": [x, y, z] | [joint, ...]}}: a point in the model's units (before
@@ -628,6 +629,7 @@ def load_model(path, up=None):
 
 class Source:
     def __init__(self, path):
+        self.path = path
         self.ed = ngpanim.Edited(path)
         nodes = self.ed.nodes
         r = self.ed.names.get("WotM")
@@ -691,9 +693,13 @@ def turn_matrix(spec):
 
 
 def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front=None, clips=None, own=None, log=print,
-          up=None, turn=None):
-    src = Source(src_path)
-    mdl = load_model(model_path, up)
+          up=None, turn=None, rest=None):
+    """map_path: a map file, "auto" or the map itself (a dict). rest: a dict to fill with the posed rest instead of writing
+    out_path (the page's preview, tools/orientpage.py): "joints" [{"name", "parent", "pos", "kept"}], "tris" at the posed rest
+    in the game's axes and units, "cfg" the map."""
+    src = src_path if isinstance(src_path, Source) else Source(src_path)        # loaded ones too (the page's previews)
+    mdl = model_path if not isinstance(model_path, str) else load_model(model_path, up)
+    src_path, model_path = src.path, mdl.path
     if front is None:   # a Y-up scene faces +Z, which is -Y once it stands on Z
         front = "-y" if mdl.up_axis == "y" else "+y"
     log("model %s: %s up (%s), facing %s" % (os.path.basename(model_path), mdl.up_axis.upper(), mdl.up_from, front))
@@ -707,6 +713,8 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
         with open(mp, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=1)
         log("bone map written to %s" % mp)
+    elif isinstance(map_path, dict):
+        cfg = map_path
     else:
         cfg = load_map(map_path)
     J = mdl.joints
@@ -740,7 +748,12 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
 
     # ---- the map
     bones = {}
+    rest_turn = {}   # joints only turned at rest ("turn" without "from"): rigid on the joint above
     for name, spec in cfg.get("bones", {}).items():
+        if "from" not in spec:
+            if spec.get("turn"):
+                rest_turn[jid(name)] = spec["turn"]
+            continue
         f = spec["from"]
         if isinstance(f, str):
             bones[jid(name)] = {"a": src.node(f), "b": None, "f": 0.0, "move": bool(spec.get("move")), "align": spec.get("align"),
@@ -859,8 +872,8 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
             A[i] = with_pos(mul(Q, rot3(A[i])), pos(A[i]))
         if bones.get(i, {}).get("level"):
             A[i] = with_pos(mul(level_turn(i, A[i]), rot3(A[i])), pos(A[i]))
-        if bones.get(i, {}).get("turn"):
-            A[i] = with_pos(mul(axis_turn(bones[i]["turn"]), rot3(A[i])), pos(A[i]))
+        if bones.get(i, {}).get("turn") or i in rest_turn:
+            A[i] = with_pos(mul(axis_turn(bones[i]["turn"] if i in bones else rest_turn[i]), rot3(A[i])), pos(A[i]))
     # skin to the posed rest
     Kmat = [mul(A[i], inv(G0[i])) for i in range(nj)]
 
@@ -909,6 +922,10 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
             t = sum(w for _j, w in ws)
             cs.append((pp, _unit(nn), uv, [(j, w / t) for j, w in ws]))
         out_tris.append((img, cs))
+    if rest is not None:
+        rest.update({"cfg": cfg, "tris": out_tris, "joints": [{"name": j["name"], "parent": j["parent"], "pos": pos(A[i]),
+                                                               "kept": i in keep} for i, j in enumerate(J)]})
+        return rest
 
     # ---- locators
     k_size = height / src.height if src.height else s

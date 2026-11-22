@@ -1343,14 +1343,21 @@ def rigged_import(disc, work, mods, mod, cid, model, turn=None, page=False, size
         front = "-y" if mdl.up_axis == "y" else "+y"
         print("%s: %d joints, %s up (%s), facing %s" % (os.path.basename(model), len(mdl.joints), mdl.up_axis.upper(),
                                                         mdl.up_from, front))
-        if page:
+        if page:   # facing, then the bone map (the one already in the folder, or the automatic one) on the model
             import tempfile
             import orientpage
             pv = orientpage.preview_glb(mdl, front, os.path.join(tempfile.gettempdir(), "wotm_orient_%s.glb" % cid))
             data = _json_obj(os.path.join(monster_dir(mods, mod, cid), "monster.json")) or {}
-            turn = orientpage.ask(src, pv, {"base": str(data.get("base", "the base")).title(), "model": os.path.basename(model)})
-            if turn is None:
+            bones = orientpage.Bones(src, mdl, front, size, cfg=retarget.load_map(mp) if os.path.isfile(mp) else None)
+            a = orientpage.ask(src, pv, {"base": str(data.get("base", "the base")).title(), "model": os.path.basename(model)},
+                               bones=bones)
+            if a is None:
                 raise SystemExit("rigged import: cancelled in the page")
+            turn = a["turn"]
+            if a.get("cfg"):
+                with open(mp, "w", encoding="utf-8") as f:
+                    json.dump(a["cfg"], f, indent=1)
+                print("bone map from the page: %s" % mp)
         use_map = mp if os.path.isfile(mp) else "auto"
         if use_map != "auto":
             print("bone map: %s (delete it to make a new one)" % mp)

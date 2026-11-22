@@ -211,9 +211,17 @@ so its refusals show up here. Besides those, it looks at:
 [--turn x90,z180] [--size F]`):
 1. a page opens in the browser with the model next to the base monster, both standing in the game's axes, already turned the
    way the file says (up axis, front); **Turn**, **Tip** and **Roll** turn it by quarter turns until it stands and faces you
-   like the monster, then **OK** (`tools/orientpage.py`; Cancel or closing the tab stops the import);
-2. the bone map comes from the two skeletons (`tools/automap.py`) and is kept as `<model>_rig_map.json` in `files/`; edited,
-   it is used in place of a new one on the next import (delete it to start over);
+   like the monster, then **Next** (`tools/orientpage.py`; Cancel or closing the tab stops the import);
+2. **Match the bones**, in the same page: both skeletons drawn over the meshes, each joint of the model in the color of the
+   monster's bone it follows, gray when it goes along with the joint above it. The map starts as the `<model>_rig_map.json`
+   kept in `files/` from an earlier import, or the one made from the two skeletons (`tools/automap.py`; **Automatic map**
+   makes it again). A click on a joint (Shift adds more, a double click centers the view on it; a click on a bone of the
+   monster picks the joints that follow it) shows what it follows: **Follows** changes it, and **Forward**, **Sideways** and
+   **Around** turn it at rest by 15 degrees about the game's axes, the joints below it going along (fingers into a fist, a
+   mouth left open: the monster has no bone that moves them, so their rest is how they stay). **Select the joints below**
+   picks a whole hand; with "The same on the other side" the mirrored joint (`L`/`R`, `Left`/`Right`, `_l`/`_r` in the name)
+   gets the same change. The model is redrawn at the rest the retarget will give it. **OK** keeps the map as
+   `<model>_rig_map.json`, **Back** returns to the facing;
 3. the retarget writes `<model>_rig.glb` in `files/` and **Import rig...** takes it.
 The base costume's export (`<PREFIX><costume>.glb`) is made the first time and kept. The steps below are the same by hand.
 

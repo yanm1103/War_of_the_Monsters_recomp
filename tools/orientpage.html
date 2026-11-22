@@ -6,17 +6,23 @@
 <style>
   html, body { margin: 0; height: 100%; background: #1b1d22; color: #e6e6e6; font: 14px/1.4 "Segoe UI", system-ui, sans-serif; overflow: hidden; }
   #view { position: absolute; inset: 0; }
-  #panel { position: absolute; top: 16px; left: 16px; width: 330px; background: rgba(30, 32, 38, .92); border: 1px solid #3a3d45;
+  .panel { position: absolute; top: 16px; left: 16px; width: 340px; background: rgba(30, 32, 38, .92); border: 1px solid #3a3d45;
            border-radius: 8px; padding: 14px 16px; }
   h1 { font-size: 17px; margin: 0 0 6px; }
   p { margin: 0 0 10px; color: #b9bcc4; }
-  .row { display: flex; gap: 6px; margin-bottom: 6px; }
-  .row span { width: 54px; align-self: center; color: #8d919b; font-size: 12px; }
+  .row { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
+  .row span { width: 64px; flex: none; color: #8d919b; font-size: 12px; }
+  .row b { width: 52px; flex: none; text-align: center; font-weight: 600; }
   button { flex: 1; background: #2c3039; color: #e6e6e6; border: 1px solid #454a55; border-radius: 5px; padding: 7px 6px; cursor: pointer; font: inherit; }
   button:hover { background: #363b46; }
-  #ok { background: #2f6fd6; border-color: #3b7ce6; font-weight: 600; }
-  #ok:hover { background: #3b7ce6; }
-  #steps { color: #8d919b; font-size: 12px; min-height: 1.4em; margin: 4px 0 10px; }
+  button:disabled, select:disabled { opacity: .45; cursor: default; }
+  .primary { background: #2f6fd6; border-color: #3b7ce6; font-weight: 600; }
+  .primary:hover { background: #3b7ce6; }
+  select { flex: 1; min-width: 0; background: #2c3039; color: #e6e6e6; border: 1px solid #454a55; border-radius: 5px; padding: 6px; font: inherit; }
+  label { display: block; margin: 2px 0 8px; color: #b9bcc4; font-size: 13px; }
+  #steps, #status { color: #8d919b; font-size: 12px; min-height: 1.4em; margin: 4px 0 10px; }
+  #status.err { color: #ff8a80; }
+  #selName { font-weight: 600; margin: 0 0 8px; min-height: 1.4em; overflow-wrap: anywhere; }
   .tag { position: absolute; bottom: 22px; padding: 4px 10px; background: rgba(30, 32, 38, .85); border-radius: 4px; color: #cfd2d8; }
   #done { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(20, 21, 25, .9); font-size: 18px; }
 </style>
@@ -26,14 +32,30 @@
 </head>
 <body>
 <div id="view"></div>
-<div id="panel">
+<div class="panel" id="panel1">
   <h1>Make sure your model faces you</h1>
   <p id="hint">Turn it until it stands on its feet and looks at you, like the monster next to it.</p>
   <div class="row"><span>Turn</span><button data-t="z90">&#8630; Left</button><button data-t="z-90">Right &#8631;</button></div>
   <div class="row"><span>Tip</span><button data-t="x-90">Forward</button><button data-t="x90">Back</button></div>
   <div class="row"><span>Roll</span><button data-t="y90">&#8634; Left</button><button data-t="y-90">Right &#8635;</button></div>
   <div id="steps"></div>
-  <div class="row"><button id="reset">Reset</button><button id="cancel">Cancel</button><button id="ok">OK</button></div>
+  <div class="row"><button id="reset">Reset</button><button id="cancel">Cancel</button><button id="ok" class="primary">OK</button></div>
+</div>
+<div class="panel" id="panel2" style="display: none">
+  <h1>Match the bones</h1>
+  <p id="hint2">Each joint of your model follows the bone of the monster with the same color; the gray ones go along with the
+    joint above them. Click a joint (Shift adds more, double click centers the view on it) to change what it follows or to
+    turn it, for example to close an open hand.</p>
+  <div id="selName">Nothing selected</div>
+  <div class="row"><span>Follows</span><select id="from"></select></div>
+  <div class="row"><span>Forward</span><button data-r="0,-15">&minus;15&deg;</button><b id="r0">0&deg;</b><button data-r="0,15">+15&deg;</button></div>
+  <div class="row"><span>Sideways</span><button data-r="1,-15">&minus;15&deg;</button><b id="r1">0&deg;</b><button data-r="1,15">+15&deg;</button></div>
+  <div class="row"><span>Around</span><button data-r="2,-15">&minus;15&deg;</button><b id="r2">0&deg;</b><button data-r="2,15">+15&deg;</button></div>
+  <label><input type="checkbox" id="mirror" checked> The same on the other side</label>
+  <div class="row"><button id="below">Select the joints below</button><button id="clearTurn">No turn</button></div>
+  <div class="row"><button id="automap">Automatic map</button></div>
+  <div id="status"></div>
+  <div class="row"><button id="back">Back</button><button id="cancel2">Cancel</button><button id="ok2" class="primary">OK</button></div>
 </div>
 <div class="tag" id="tagBase" style="left: 28%">monster</div>
 <div class="tag" id="tagModel" style="left: 64%">your model</div>
@@ -43,7 +65,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-const view = document.getElementById('view');
+const $ = id => document.getElementById(id);
+const view = $('view');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -58,16 +81,19 @@ const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 10000);
 const controls = new OrbitControls(camera, renderer.domElement);
 
 const info = await (await fetch('info.json')).json();
-document.getElementById('tagBase').textContent = info.base || 'monster';
-document.getElementById('tagModel').textContent = info.model || 'your model';
-document.getElementById('hint').textContent =
-  'Turn it until it stands on its feet and looks at you, like ' + (info.base || 'the monster') + ' next to it.';
+const baseName = info.base || 'the monster';
+$('tagBase').textContent = info.base || 'monster';
+$('tagModel').textContent = info.model || 'your model';
+$('hint').textContent = 'Turn it until it stands on its feet and looks at you, like ' + baseName + ' next to it.';
+$('hint2').textContent = $('hint2').textContent.replace('the monster', baseName);
+$('ok').textContent = info.bones ? 'Next' : 'OK';
 
 const loader = new GLTFLoader();
 const load = url => new Promise((ok, bad) => loader.load(url, ok, undefined, bad));
 const [base, model] = await Promise.all([load('base.glb'), load('model.glb')]);
 scene.add(base.scene, model.scene);
 const node = model.scene.getObjectByName('model');   // child of the "WotM" root: its parent space is the game's (x right, y front, z up)
+let cur = model.scene;                               // the model shown: the file's (step 1) or its rest with the map (step 2)
 
 // the monster faces -Z here (game +Y): the camera stands on that side, so screen right is -X
 const bb = new THREE.Box3().setFromObject(base.scene);
@@ -78,15 +104,16 @@ const grid = new THREE.GridHelper(H * 4, 16, 0x50545e, 0x2c2f36);
 scene.add(grid);
 
 function place() {   // the model as tall as the monster, on the ground, on the right of the screen
-  model.scene.scale.setScalar(1);
-  model.scene.position.set(0, 0, 0);
-  model.scene.updateMatrixWorld(true);
-  let b = new THREE.Box3().setFromObject(model.scene);
+  cur.scale.setScalar(1);
+  cur.position.set(0, 0, 0);
+  cur.updateMatrixWorld(true);
+  let b = new THREE.Box3().setFromObject(cur);
   const h = b.max.y - b.min.y || 1;
-  model.scene.scale.setScalar(H / h);
-  model.scene.updateMatrixWorld(true);
-  b = new THREE.Box3().setFromObject(model.scene);
-  model.scene.position.set(-margin - (b.max.x - b.min.x) / 2 - (b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2);
+  cur.scale.setScalar(H / h);
+  cur.updateMatrixWorld(true);
+  b = new THREE.Box3().setFromObject(cur);
+  cur.position.set(-margin - (b.max.x - b.min.x) / 2 - (b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2);
+  cur.updateMatrixWorld(true);
   return b.max.x - b.min.x;
 }
 const span = (bb.max.x - bb.min.x) + place() + 2 * margin;   // both models side by side fill the view's width
@@ -94,9 +121,10 @@ camera.position.set(0, H * 0.6, -Math.max(H * 3.2, span * 1.5));
 controls.target.set(0, H * 0.5, 0);
 controls.update();
 
+// ---------------------------------------------------------------- step 1: facing
 const steps = [];
 const axes = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
-function show() { document.getElementById('steps').textContent = steps.length ? 'Turns: ' + steps.join(', ') : 'As read from the file.'; }
+function show() { $('steps').textContent = steps.length ? 'Turns: ' + steps.join(', ') : 'As read from the file.'; }
 for (const b of document.querySelectorAll('button[data-t]')) {
   b.onclick = () => {
     const t = b.dataset.t;
@@ -107,18 +135,339 @@ for (const b of document.querySelectorAll('button[data-t]')) {
     show();
   };
 }
-document.getElementById('reset').onclick = () => { node.quaternion.identity(); steps.length = 0; place(); show(); };
+$('reset').onclick = () => { node.quaternion.identity(); steps.length = 0; place(); show(); };
 let sent = false;
+let cfg = null;   // the bone map (step 2), as retarget.py reads it
 function send(ok) {
   if (sent) return;
   sent = true;
-  navigator.sendBeacon('done', JSON.stringify({ ok, turn: steps.join(',') }));
-  document.getElementById('done').style.display = 'flex';
+  navigator.sendBeacon('done', JSON.stringify({ ok, turn: steps.join(','), cfg: ok ? cfg : null }));
+  $('done').style.display = 'flex';
 }
-document.getElementById('ok').onclick = () => send(true);
-document.getElementById('cancel').onclick = () => send(false);
+$('ok').onclick = () => info.bones ? enterBones() : send(true);
+$('cancel').onclick = () => send(false);
+$('cancel2').onclick = () => send(false);
 window.addEventListener('pagehide', () => send(false));
 show();
+
+// ---------------------------------------------------------------- step 2: bones
+let joints = [];        // the model's: {name, parent, pos (game axes), kept}
+let boneNames = [];     // the monster's bones a joint can follow
+const sel = new Set();  // selected joint indices
+const markers = { model: [], base: new Map() };   // spheres: model joint index -> mesh; base bone name -> mesh
+let modelGroup = null, baseGroup = null, busy = 0, pending = null;
+const R = H * 0.012;
+const sphere = new THREE.SphereGeometry(1, 12, 8);
+const gray = new THREE.Color(0x8d919b);
+
+function boneColor(name) {
+  const i = boneNames.indexOf(name);
+  return i < 0 ? gray.clone() : new THREE.Color().setHSL((i * 0.618034) % 1, 0.8, 0.58);
+}
+function entry(name) { return (cfg.bones || {})[name]; }
+function chainOf(name) { return (cfg.chains || []).find(c => c.joints.includes(name)); }
+function fromOf(name) {   // the bone a joint follows (the first of a blend), or null when it goes along with the joint above
+  const e = entry(name);
+  if (e && e.from) return typeof e.from === 'string' ? e.from : e.from[0];
+  const c = chainOf(name);
+  if (c) {
+    const i = c.joints.indexOf(name);
+    return c.from[Math.round(i * (c.from.length - 1) / Math.max(1, c.joints.length - 1))];
+  }
+  return null;
+}
+function mirrorName(n) {
+  const tries = [[/^([LR])(?=[A-Z0-9_.\s-])/, m => m === 'L' ? 'R' : 'L'],
+                 [/(?<=[_.\s:-])([LRlr])(?=$|[_.\s-])/, m => ({ L: 'R', R: 'L', l: 'r', r: 'l' })[m]],
+                 [/Left|Right|left|right/, m => ({ Left: 'Right', Right: 'Left', left: 'right', right: 'left' })[m]]];
+  for (const [re, f] of tries) {
+    if (re.test(n)) {
+      const m = n.replace(re, f);
+      if (m !== n && joints.some(j => j.name === m)) return m;
+    }
+  }
+  return null;
+}
+function mirrorBone(b) {   // L_Hand_bone25 -> R_Hand_bone18 (by the label); a bone without a side label has no mirror
+  const lab = b.replace(/_?bone\d+$/, '');
+  const m = /^([LR])_/.exec(lab);
+  if (!m) return lab === '' ? null : b;
+  const want = (m[1] === 'L' ? 'R' : 'L') + lab.slice(1) + '_bone';
+  return boneNames.find(x => x.startsWith(want)) || null;
+}
+
+function setTranslucent(root, on) {
+  root.traverse(o => {
+    for (const m of [].concat(o.material || [])) {
+      m.transparent = on;
+      m.opacity = on ? 0.45 : 1;
+      m.depthWrite = !on;
+    }
+  });
+}
+function dot(color, r) {
+  const m = new THREE.Mesh(sphere, new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true }));
+  m.scale.setScalar(r);
+  m.renderOrder = 10;
+  return m;
+}
+function lines(pairs, parent) {
+  const g = new THREE.BufferGeometry().setFromPoints(pairs.flat());
+  const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xcfd2d8, depthTest: false, transparent: true, opacity: 0.7 }));
+  l.renderOrder = 9;
+  parent.add(l);
+}
+
+function buildBaseMarkers() {
+  if (baseGroup) return;
+  baseGroup = new THREE.Group();
+  scene.add(baseGroup);
+  base.scene.updateMatrixWorld(true);
+  const set = new Set(boneNames), pairs = [];
+  for (const n of boneNames) {
+    const o = base.scene.getObjectByName(n);
+    if (!o) continue;
+    const p = o.getWorldPosition(new THREE.Vector3());
+    const m = dot(gray, R);
+    m.position.copy(p);
+    m.userData = { bone: n };
+    baseGroup.add(m);
+    markers.base.set(n, m);
+    let up = o.parent;
+    while (up && !set.has(up.name)) up = up.parent;
+    if (up) pairs.push([p, up.getWorldPosition(new THREE.Vector3())]);
+  }
+  lines(pairs, baseGroup);
+}
+function buildModelMarkers() {
+  const holder = cur.getObjectByName('model');
+  if (modelGroup) modelGroup.parent.remove(modelGroup);
+  modelGroup = new THREE.Group();
+  holder.add(modelGroup);
+  const k = cur.scale.x || 1;
+  const near = joints.map(() => Infinity);   // a dot is at most 40% of the way to its nearest neighbor (fingers)
+  joints.forEach((j, i) => {
+    if (j.parent === null) return;
+    const d = Math.hypot(...j.pos.map((x, c) => x - joints[j.parent].pos[c])) * k;
+    if (d > 1e-6) { near[i] = Math.min(near[i], d); near[j.parent] = Math.min(near[j.parent], d); }
+  });
+  markers.model = joints.map((j, i) => {
+    const m = dot(gray, R / k);
+    m.position.set(...j.pos);
+    m.userData = { joint: i, r: Math.min(1, 0.4 * near[i] / R) };
+    modelGroup.add(m);
+    return m;
+  });
+  lines(joints.filter(j => j.parent !== null).map(j => [new THREE.Vector3(...j.pos), new THREE.Vector3(...joints[j.parent].pos)]), modelGroup);
+}
+function paint() {
+  const used = new Set();
+  joints.forEach((j, i) => {
+    const b = fromOf(j.name), m = markers.model[i];
+    if (b) used.add(b);
+    m.material.color.copy(sel.has(i) ? new THREE.Color(0xffffff) : b ? boneColor(b) : gray);
+    m.scale.setScalar((sel.has(i) ? 1.6 : b ? 1.15 : 0.75) * m.userData.r * R / (cur.scale.x || 1));
+  });
+  const selBones = new Set([...sel].map(i => fromOf(joints[i].name)).filter(Boolean));
+  for (const [n, m] of markers.base) {
+    m.material.color.copy(selBones.has(n) ? new THREE.Color(0xffffff) : used.has(n) ? boneColor(n) : gray);
+    m.scale.setScalar((selBones.has(n) ? 1.9 : used.has(n) ? 1.15 : 0.75) * R);
+  }
+  panel();
+}
+function turnOf(name) { const e = entry(name); return (e && e.turn) || [0, 0, 0]; }
+function panel() {
+  const names = [...sel].map(i => joints[i].name);
+  $('selName').textContent = names.length ? (names.length > 4 ? names.slice(0, 4).join(', ') + ' and ' + (names.length - 4) + ' more' : names.join(', ')) : 'Nothing selected';
+  const fs = $('from');
+  fs.innerHTML = '';
+  const opt = (v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; fs.appendChild(o); };
+  opt('', '(goes along with the joint above)');
+  for (const b of boneNames) opt(b, b);
+  const vals = new Set(names.map(n => {
+    const e = entry(n);
+    if (chainOf(n)) return '__chain';
+    if (e && Array.isArray(e.from)) return '__blend:' + e.from[0] + ' + ' + e.from[1];
+    return (e && e.from) || '';
+  }));
+  if (vals.size === 1) {
+    const v = [...vals][0];
+    if (v === '__chain') opt('__chain', 'a chain (tail) of the map file');
+    else if (v.startsWith('__blend:')) opt(v, 'a blend of ' + v.slice(8));
+    fs.value = v;
+  } else if (vals.size > 1) {
+    opt('__many', '(different ones)');
+    fs.value = '__many';
+  }
+  fs.disabled = !names.length;
+  for (let a = 0; a < 3; a++) {
+    const ts = new Set(names.map(n => turnOf(n)[a]));
+    $('r' + a).textContent = !names.length ? '' : ts.size === 1 ? [...ts][0] + '°' : '—';
+  }
+  for (const b of document.querySelectorAll('button[data-r], #below, #clearTurn')) b.disabled = !names.length;
+  const n = joints.filter(j => fromOf(j.name)).length;
+  if (!busy && !$('status').classList.contains('err'))
+    $('status').textContent = n + ' of ' + joints.length + ' joints follow a bone of ' + baseName + '.';
+}
+
+function edit(names, f) {   // f(name, mirrored) changes cfg.bones[name]; with the box ticked, the other side gets the same
+  cfg.bones = cfg.bones || {};
+  const done = new Set();
+  for (const n of names) {
+    f(n, false);
+    done.add(n);
+  }
+  if ($('mirror').checked) {
+    for (const n of names) {
+      const m = mirrorName(n);
+      if (m && !done.has(m)) { f(m, true); done.add(m); }
+    }
+  }
+  paint();
+  preview();
+}
+function tidy(name, e) {
+  if (e.turn && e.turn.every(x => !x)) delete e.turn;
+  if (Object.keys(e).length) cfg.bones[name] = e; else delete cfg.bones[name];
+}
+$('from').onchange = () => {
+  const v = $('from').value;
+  if (v.startsWith('__')) return;
+  edit([...sel].map(i => joints[i].name), (n, mirrored) => {
+    if (chainOf(n)) return;   // the joints of a tail chain change in the map file
+    const b = v && mirrored ? mirrorBone(v) : v;
+    if (v && !b) return;
+    const e = entry(n) || {};
+    const ne = {};
+    if (b) ne.from = b;
+    if (b && e.move) ne.move = true;
+    if (b && e.level) ne.level = true;
+    if (e.turn) ne.turn = e.turn;
+    tidy(n, ne);
+  });
+};
+for (const b of document.querySelectorAll('button[data-r]')) {
+  b.onclick = () => {
+    const [a, d] = b.dataset.r.split(',').map(Number);
+    edit([...sel].map(i => joints[i].name), (n, mirrored) => {
+      const e = Object.assign({}, entry(n) || {});
+      const t = (e.turn || [0, 0, 0]).slice();
+      t[a] = ((t[a] + (mirrored && a > 0 ? -d : d) + 540) % 360) - 180;   // across the middle, the y and z turns go the other way
+      e.turn = t;
+      tidy(n, e);
+    });
+  };
+}
+$('clearTurn').onclick = () => edit([...sel].map(i => joints[i].name), n => {
+  const e = Object.assign({}, entry(n) || {});
+  delete e.turn;
+  tidy(n, e);
+});
+$('below').onclick = () => {
+  let grew = true;
+  while (grew) {
+    grew = false;
+    joints.forEach((j, i) => { if (j.parent !== null && sel.has(j.parent) && !sel.has(i)) { sel.add(i); grew = true; } });
+  }
+  paint();
+};
+
+function status(t, err) {
+  $('status').textContent = t;
+  $('status').classList.toggle('err', !!err);
+}
+async function post(path, body) {
+  const r = await fetch(path, { method: 'POST', body: JSON.stringify(body) });
+  return r.json();
+}
+async function show2(r) {   // the model at its new rest, the markers on it
+  joints = r.joints;
+  boneNames = r.bones;
+  const g = await load('rest.glb?v=' + r.v);
+  scene.remove(cur);
+  if (cur !== model.scene) cur.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+  cur = g.scene;
+  scene.add(cur);
+  place();
+  setTranslucent(cur, true);
+  buildBaseMarkers();
+  buildModelMarkers();
+  paint();
+}
+async function preview(auto) {   // asks the server for the rest with this map; one request at a time, the last one wins
+  if (busy) { pending = auto ? 'auto' : 'map'; return; }
+  busy = 1;
+  status('Updating…');
+  try {
+    const r = auto === 'start' ? await post('bones', { turn: steps.join(',') })
+            : auto ? await post('bones', { turn: steps.join(','), auto: true })
+            : await post('preview', { turn: steps.join(','), cfg });
+    if (r.error) { status(r.error, true); }
+    else {
+      if (auto) cfg = r.cfg;   // a new map; after an edit the page's own map stays (edits made while this one was on the way)
+      status('');
+      await show2(r);
+    }
+  } catch (e) {
+    status(String(e), true);
+  }
+  busy = 0;
+  panel();
+  if (pending) { const p = pending; pending = null; preview(p === 'auto'); }
+}
+$('automap').onclick = () => { sel.clear(); preview(true); };
+async function enterBones() {
+  $('panel1').style.display = 'none';
+  $('panel2').style.display = '';
+  setTranslucent(base.scene, true);
+  await preview(cfg ? false : 'start');
+}
+$('back').onclick = () => {   // back to the facing: the file's model again, the map kept
+  $('panel2').style.display = 'none';
+  $('panel1').style.display = '';
+  if (modelGroup) { modelGroup.parent.remove(modelGroup); modelGroup = null; }
+  if (baseGroup) { scene.remove(baseGroup); baseGroup = null; markers.base.clear(); }
+  scene.remove(cur);
+  cur = model.scene;
+  scene.add(cur);
+  setTranslucent(base.scene, false);
+  sel.clear();
+  place();
+};
+$('ok2').onclick = () => send(true);
+
+// picking: a click (not a drag) on a joint selects it, on a bone of the monster selects the joints that follow it
+const ray = new THREE.Raycaster();
+let downAt = null;
+function hit(ev) {
+  const r = renderer.domElement.getBoundingClientRect();
+  ray.setFromCamera(new THREE.Vector2((ev.clientX - r.left) / r.width * 2 - 1, -(ev.clientY - r.top) / r.height * 2 + 1), camera);
+  const cands = [...markers.model, ...markers.base.values()];
+  const hits = ray.intersectObjects(cands, false);
+  return hits.length ? hits[0].object : null;
+}
+renderer.domElement.addEventListener('pointerdown', ev => { downAt = [ev.clientX, ev.clientY]; });
+renderer.domElement.addEventListener('pointerup', ev => {
+  if (!downAt || $('panel2').style.display === 'none') return;
+  const moved = Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]);
+  downAt = null;
+  if (moved > 4) return;
+  const o = hit(ev);
+  if (!o) { if (!ev.shiftKey) { sel.clear(); paint(); } return; }
+  if (o.userData.joint !== undefined) {
+    const i = o.userData.joint;
+    if (ev.shiftKey) { if (sel.has(i)) sel.delete(i); else sel.add(i); }
+    else { sel.clear(); sel.add(i); }
+  } else {
+    if (!ev.shiftKey) sel.clear();
+    joints.forEach((j, i) => { if (fromOf(j.name) === o.userData.bone) sel.add(i); });
+  }
+  paint();
+});
+renderer.domElement.addEventListener('dblclick', ev => {
+  const o = hit(ev);
+  if (o) { controls.target.copy(o.getWorldPosition(new THREE.Vector3())); controls.update(); }
+});
 
 function size() {
   const w = view.clientWidth, h = view.clientHeight;
@@ -128,6 +477,12 @@ function size() {
 }
 window.addEventListener('resize', size);
 size();
+if (info.bones && location.hash === '#bones') enterBones();   // straight to step 2 (tests)
+window.wotmPage = {   // for tests driving the page (CDP): pick joints by name, read the state
+  select: names => { sel.clear(); joints.forEach((j, i) => { if (names.includes(j.name)) sel.add(i); }); paint(); },
+  state: () => ({ busy, status: $('status').textContent, cfg, joints: joints.length, sel: [...sel].map(i => joints[i].name) }),
+  focus: name => { const i = joints.findIndex(j => j.name === name); if (i >= 0) { controls.target.copy(markers.model[i].getWorldPosition(new THREE.Vector3())); camera.position.copy(controls.target).add(new THREE.Vector3(0, H * 0.15, -H * 1.1)); controls.update(); } },
+};
 renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
 </script>
 </body>

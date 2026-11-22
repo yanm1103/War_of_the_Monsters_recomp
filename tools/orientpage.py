@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""The page where the modder checks which way a downloaded model stands before the kit retargets it ("Import rigged
-model..."). It shows the model next to the base monster, both in the game's axes, with quarter-turn buttons; OK sends the
-turns back (`retarget.py --turn`).
+"""The page where the modder sets up a downloaded model before the kit retargets it ("Import rigged model..."), in two steps:
 
-  python tools/orientpage.py <base.glb> <model.dae|.glb|.gltf>     # opens the page, prints the turns
+1. Facing: the model next to the base monster, both in the game's axes, with quarter-turn buttons (`retarget.py --turn`).
+2. Bones: both skeletons drawn over the meshes, each joint of the model in the color of the monster's bone it follows (the
+   bone map, `tools/automap.py`'s or the one already in the work folder). Clicking a joint changes the bone it follows or turns
+   it at rest by steps of 15 degrees (a hand closed into a fist, a mouth opened); the model is redrawn at the rest the
+   retarget will give it (`retarget.build(..., rest=...)`), so what the page shows is what goes into the game.
+
+  python tools/orientpage.py <base.glb> <model.dae|.glb|.gltf>     # opens the page, prints the turns and the map
 
 The page is `tools/orientpage.html`, served from 127.0.0.1 with the three.js of the level editor
 (`tools/level_editor/web/vendor`; inside the mod kit's exe both are bundled under `orient/`). The model goes to the page as a
@@ -12,8 +16,10 @@ as the kit's export, with its textures. Standard library only.
 """
 import json
 import os
+import re
 import struct
 import sys
+import tempfile
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -33,12 +39,8 @@ def _assets():
     return os.path.join(HERE, "orientpage.html"), os.path.join(HERE, "level_editor", "web", "vendor")
 
 
-def preview_glb(mdl, front, out_path):
-    """The model's rest mesh in the game's axes (front as retarget.build turns it), textured, as a .glb for the page."""
-    Cm = retarget.eye() if front == "+y" else [[-1.0, 0, 0, 0], [0, -1.0, 0, 0], [0, 0, 1.0, 0], [0, 0, 0, 1.0]]
-    groups = {}
-    for img, cs in mdl.tris:
-        groups.setdefault(img, []).append(cs)
+def _write_glb(mdl, groups, out_path):
+    """groups: {image key: [(position, normal, uv) per corner]} in the game's axes -> a textured .glb under the "WotM" root."""
     binb = bytearray()
     j = {"asset": {"version": "2.0", "generator": "WotM tools/orientpage.py"}, "scene": 0, "scenes": [{"nodes": [0]}],
          "nodes": [{"name": "WotM", "rotation": list(ROOT_Q), "children": [1]}, {"name": "model", "mesh": 0}],
@@ -62,13 +64,10 @@ def preview_glb(mdl, front, out_path):
         j["accessors"].append(a)
         return len(j["accessors"]) - 1
 
-    for img, tris in sorted(groups.items(), key=lambda kv: str(kv[0])):
-        P, N, T = [], [], []
-        for cs in tris:
-            for c in cs:
-                P.append(retarget.apply(Cm, c[0]))
-                N.append(retarget._unit(retarget.apply(Cm, c[1], 0.0)))
-                T.append(c[2])
+    for img, corners in sorted(groups.items(), key=lambda kv: str(kv[0])):
+        P = [c[0] for c in corners]
+        N = [c[1] for c in corners]
+        T = [c[2] for c in corners]
         prim = {"attributes": {"POSITION": acc("f", 5126, "VEC3", P, True), "NORMAL": acc("f", 5126, "VEC3", N),
                                "TEXCOORD_0": acc("f", 5126, "VEC2", T)}, "mode": 4}
         name, data = retarget.image_data(mdl, img) if img else (None, None)
@@ -93,12 +92,66 @@ def preview_glb(mdl, front, out_path):
     return out_path
 
 
-def ask(base_glb, model_glb, info, log=print, open_page=webbrowser.open, timeout=1800):
-    """Serves the page and waits for its answer: the turns ("" = as shown, e.g. "z90,x-90") or None (Cancel, closed or
-    timed out). info: {"base": name, "model": name, "up": ..., "front": ...} for the page's text."""
+def preview_glb(mdl, front, out_path):
+    """The model's rest mesh in the game's axes (front as retarget.build turns it), textured, as a .glb for the page."""
+    Cm = retarget.eye() if front == "+y" else [[-1.0, 0, 0, 0], [0, -1.0, 0, 0], [0, 0, 1.0, 0], [0, 0, 0, 1.0]]
+    groups = {}
+    for img, cs in mdl.tris:
+        g = groups.setdefault(img, [])
+        for c in cs:
+            g.append((retarget.apply(Cm, c[0]), retarget._unit(retarget.apply(Cm, c[1], 0.0)), c[2]))
+    return _write_glb(mdl, groups, out_path)
+
+
+class Bones:
+    """The page's second step: the bone map (given, or tools/automap.py's) and the model at the rest the retarget gives it
+    with that map, as a .glb plus its joints."""
+
+    def __init__(self, src_glb, mdl, front, size=1.0, cfg=None):
+        self.src = retarget.Source(src_glb)
+        self.mdl = mdl
+        self.front = front
+        self.size = size
+        self.cfg0 = cfg
+        self.auto = None
+        self.dir = tempfile.mkdtemp(prefix="wotm_bones_")
+        self.n = 0
+        self.lock = threading.Lock()
+        # the monster's bones a joint can follow: the skinned transforms (bone<N>, with the body part in front when known)
+        self.bone_names = sorted((nd.get("name") for nd in self.src.ed.nodes if re.search(r"(^|_)bone\d+$", nd.get("name") or "")),
+                                 key=lambda s: int(re.search(r"\d+$", s).group()))
+
+    def auto_map(self):
+        if self.auto is None:
+            import automap
+            self.auto = automap.build_map(self.src.path, self.mdl, lambda *a: None)
+        return json.loads(json.dumps(self.auto))
+
+    def start_map(self):
+        return json.loads(json.dumps(self.cfg0)) if self.cfg0 else self.auto_map()
+
+    def preview(self, turn, cfg):
+        """-> {"glb": path, "joints": [...]} of the model posed at rest by this map (turn: the step 1 turns)."""
+        with self.lock:
+            rest = {}
+            retarget.build(self.src, self.mdl, cfg, None, size=self.size, front=self.front, turn=turn or None,
+                           log=lambda *a: None, rest=rest)
+            groups = {}
+            for img, cs in rest["tris"]:
+                groups.setdefault(img, []).extend((c[0], c[1], c[2]) for c in cs)
+            self.n += 1
+            out = _write_glb(self.mdl, groups, os.path.join(self.dir, "rest%d.glb" % self.n))
+            return {"glb": out, "v": self.n, "joints": rest["joints"]}
+
+
+def ask(base_glb, model_glb, info, log=print, open_page=webbrowser.open, timeout=1800, bones=None):
+    """Serves the page and waits for its answer: {"turn": the turns ("" = as shown, e.g. "z90,x-90"), "cfg": the bone map
+    (only with bones, a Bones)} or None (Cancel, closed or timed out). info: {"base": name, "model": name} for the page."""
     page, vendor = _assets()
     done = threading.Event()
     answer = {}
+    info = dict(info, bones=bones is not None)
+    last = {}
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -112,6 +165,9 @@ def ask(base_glb, model_glb, info, log=print, open_page=webbrowser.open, timeout
             self.end_headers()
             self.wfile.write(body)
 
+        def _json(self, obj):
+            self._send(200, json.dumps(obj).encode("utf-8"), "application/json")
+
         def do_GET(self):
             p = self.path.split("?", 1)[0]
             if p in ("/", "/index.html"):
@@ -120,6 +176,8 @@ def ask(base_glb, model_glb, info, log=print, open_page=webbrowser.open, timeout
                 return self._send(200, json.dumps(info).encode("utf-8"), "application/json")
             if p in ("/base.glb", "/model.glb"):
                 return self._send(200, open(base_glb if p == "/base.glb" else model_glb, "rb").read(), "model/gltf-binary")
+            if p == "/rest.glb" and last.get("glb"):
+                return self._send(200, open(last["glb"], "rb").read(), "model/gltf-binary")
             if p.startswith("/vendor/"):
                 f = os.path.normpath(os.path.join(vendor, *p[len("/vendor/"):].split("/")))
                 if f.startswith(os.path.normpath(vendor)) and os.path.isfile(f):
@@ -134,16 +192,27 @@ def ask(base_glb, model_glb, info, log=print, open_page=webbrowser.open, timeout
                 d = {}
             if self.path == "/done":
                 answer["turn"] = d.get("turn") if d.get("ok") else None
+                answer["cfg"] = d.get("cfg") if d.get("ok") else None
                 answer["got"] = True
                 self._send(200, b"{}", "application/json")
                 done.set()
-            else:
-                self._send(404, b"{}", "application/json")
+                return
+            if bones is None or self.path not in ("/bones", "/preview"):
+                return self._send(404, b"{}", "application/json")
+            try:   # /bones: the starting map ("auto": true, the automatic one); /preview: the map the page edited
+                cfg = d.get("cfg") if self.path == "/preview" else bones.auto_map() if d.get("auto") else bones.start_map()
+                r = bones.preview(d.get("turn") or "", cfg)
+            except (retarget.RetargetError, KeyError, ValueError, TypeError) as e:
+                return self._json({"error": str(e)})
+            except Exception as e:  # noqa: BLE001 (automap.MapError and the like: the page shows it and keeps the last map)
+                return self._json({"error": "%s: %s" % (type(e).__name__, e)})
+            last["glb"] = r["glb"]
+            self._json({"cfg": cfg, "joints": r["joints"], "v": r["v"], "bones": bones.bone_names})
 
     srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     url = "http://127.0.0.1:%d/" % srv.server_address[1]
-    log("check the model's facing in the page that opened (%s); OK there goes on" % url)
+    log("set the model up in the page that opened (%s); OK there goes on" % url)
     try:
         open_page(url)
         done.wait(timeout)
@@ -153,21 +222,24 @@ def ask(base_glb, model_glb, info, log=print, open_page=webbrowser.open, timeout
     if not answer.get("got"):
         log("no answer from the page")
         return None
-    return answer["turn"]
+    if answer["turn"] is None:
+        return None
+    return {"turn": answer["turn"], "cfg": answer["cfg"]}
 
 
 def main(argv):
     if len(argv) != 2:
-        print(__doc__.split("\n\n")[1])
+        print(__doc__.split("\n\n")[2])
         return 2
-    import tempfile
     mdl = retarget.load_model(argv[1])
     front = "-y" if mdl.up_axis == "y" else "+y"
     pv = preview_glb(mdl, front, os.path.join(tempfile.gettempdir(), "wotm_orient_model.glb"))
-    t = ask(argv[0], pv, {"base": os.path.basename(argv[0]), "model": os.path.basename(argv[1]), "up": mdl.up_axis,
-                          "front": front})
-    print("turn: %r" % t)
-    return 0 if t is not None else 1
+    a = ask(argv[0], pv, {"base": os.path.basename(argv[0]), "model": os.path.basename(argv[1])},
+            bones=Bones(argv[0], mdl, front))
+    print("turn: %r" % (a and a["turn"]))
+    if a and a["cfg"]:
+        print(json.dumps(a["cfg"], indent=1))
+    return 0 if a is not None else 1
 
 
 if __name__ == "__main__":
