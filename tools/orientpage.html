@@ -72,8 +72,8 @@ const node = model.scene.getObjectByName('model');   // child of the "WotM" root
 // the monster faces -Z here (game +Y): the camera stands on that side, so screen right is -X
 const bb = new THREE.Box3().setFromObject(base.scene);
 const H = bb.max.y - bb.min.y || 1;
-const gap = H * 0.55;
-base.scene.position.set(gap - (bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2);
+const margin = H * 0.15;   // each model stands its own half width (arms out in a T pose) plus this away from the middle line
+base.scene.position.set(margin + (bb.max.x - bb.min.x) / 2 - (bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2);
 const grid = new THREE.GridHelper(H * 4, 16, 0x50545e, 0x2c2f36);
 scene.add(grid);
 
@@ -86,10 +86,11 @@ function place() {   // the model as tall as the monster, on the ground, on the 
   model.scene.scale.setScalar(H / h);
   model.scene.updateMatrixWorld(true);
   b = new THREE.Box3().setFromObject(model.scene);
-  model.scene.position.set(-gap - (b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2);
+  model.scene.position.set(-margin - (b.max.x - b.min.x) / 2 - (b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2);
+  return b.max.x - b.min.x;
 }
-place();
-camera.position.set(0, H * 0.6, -H * 3.2);
+const span = (bb.max.x - bb.min.x) + place() + 2 * margin;   // both models side by side fill the view's width
+camera.position.set(0, H * 0.6, -Math.max(H * 3.2, span * 1.5));
 controls.target.set(0, H * 0.5, 0);
 controls.update();
 
