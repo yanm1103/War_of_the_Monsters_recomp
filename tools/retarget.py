@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""A game monster's animations on another model's skeleton: a rigged model (Collada .dae) and a bone map become the rig .glb
-that `modkit.py monster rig` (tools/ngprig.py) takes.
+"""A game monster's animations on another model's skeleton: a rigged model (Collada .dae, or glTF .glb / .gltf) and a bone map
+become the rig .glb that `modkit.py monster rig` (tools/ngprig.py) takes.
 
-  python tools/retarget.py <source.glb> <model.dae> <map.json> <out.glb> [--size F | --height H] [--front +y|-y]
-                           [--clips 90,1,...] [--own clips.json]
+  python tools/retarget.py <source.glb> <model.dae|.glb|.gltf> <map.json> <out.glb> [--size F | --height H]
+                           [--front +y|-y] [--up y|z] [--clips 90,1,...] [--own clips.json]
 
 - source.glb: the base costume as the kit exports it (`modkit.py monster mesh export`, e.g. LIZARD0.glb, "WotM" root): its
   skeleton and its actions `a<id>` are the motion.
-- model.dae: the new body, a skinned mesh on an armature (Z up; `--front` is the way it faces, +y by default). Its scene
-  pose is the bind pose. The texture of each material is the effect's diffuse image, read from next to the file.
+- model: the new body, a skinned mesh on an armature; its scene pose is the bind pose. Up axis: the .dae's `<up_axis>` (a
+  .dae without one: Y when its head joint sits above the top joint along Y, else Z), glTF is Y up; `--up` says it. A Y-up
+  scene is turned to Z up and then faces -Y (glTF's +Z front); `--front` is the way it faces once Z is up (default -y for a
+  Y-up scene, +y for a Z-up one). Textures: the .dae effect's diffuse image next to the file, or the glTF base color image
+  (inside or next to it); a missing one, or one that is not PNG or JPEG, leaves those triangles untextured, with a warning.
 - map.json: which model joint follows which source bone (`tools/rigmaps/biped_togera.json` is the 3ds Max Biped, Bip01_*,
   on Togera). A source bone is named as the export names it (`L_Hand_bone1`), by its label (`L_Hand`) or by `bone1`. Keys:
   - "bones": {joint: {"from": bone | [bone_a, bone_b, f], "move": true, "align": [child_joint, child_bone]}}. The joint turns
@@ -52,6 +55,7 @@ import xml.etree.ElementTree as ET
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ngpanim  # noqa: E402
+import ngpmesh  # noqa: E402
 from ngpanim import ROOT_Q, eye, inv, mul, quat_col  # noqa: E402
 
 FPS = 60.0
@@ -191,7 +195,7 @@ def _node_local(n):
 class Model:
     """Joints (name, parent, scene world) and skinned triangles of a Collada file."""
 
-    def __init__(self, path):
+    def __init__(self, path, up=None):
         self.path = path
         root = ET.parse(path).getroot()
         self.joints = []          # [{"name", "parent", "world"}]
@@ -387,6 +391,225 @@ class Model:
                 tris += [(img, cs[k:k + 3]) for k in range(0, len(cs) - 2, 3)]
             if tris:
                 self.props.append({"name": name, "joint": ji, "tris": tris})
+        ua = root.find(NS + "asset/" + NS + "up_axis")
+        ua = (ua.text or "").strip().upper() if ua is not None else ""
+        if up is None:
+            if ua == "X_UP":
+                raise RetargetError("%s: X_UP scenes are not read (export it with Z or Y up)" % path)
+            up = {"Y_UP": "y", "Z_UP": "z"}.get(ua) or guess_up(self)
+            self.up_from = "the file's <up_axis>" if ua else "the head above the root (no <up_axis>)"
+        else:
+            self.up_from = "--up"
+        self.up_axis = up
+        self.up = YUP if up == "y" else eye()
+        if up == "y":
+            turn_model(self, YUP)
+
+
+YUP = [[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, -1.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]]   # Y up -> Z up (+Z -> -Y)
+
+
+def guess_up(mdl):
+    """"y" or "z": the axis along which a joint named like a head sits furthest from the top joint; "z" when no head."""
+    head = next((j for j in mdl.joints if "head" in (j["name"] or "").lower()), None)
+    top = next((j for j in mdl.joints if j["parent"] is None), None)
+    if head is None or top is None:
+        return "z"
+    d = [a - b for a, b in zip(pos(head["world"]), pos(top["world"]))]
+    return "y" if abs(d[1]) > abs(d[2]) else "z"
+
+
+def turn_model(mdl, U):
+    """The whole model (joints, skinned triangles, props) turned by U, in its scene."""
+    for jt in mdl.joints:
+        jt["world"] = mul(U, jt["world"])
+    mdl.tris = [(img, [(apply(U, p), _unit(apply(U, n, 0.0)), uv, wj) for p, n, uv, wj in cs]) for img, cs in mdl.tris]
+    for pr in mdl.props:
+        pr["tris"] = [(img, [(apply(U, p), _unit(apply(U, n, 0.0)), uv) for p, n, uv in cs]) for img, cs in pr["tris"]]
+
+
+class GlbModel:
+    """The same as Model from a glTF (.glb or .gltf): the joints of its skins, the skinned triangles at rest, rigid meshes
+    under a joint as props. glTF is Y up and faces +Z, so the model faces -Y once turned to Z up."""
+
+    def __init__(self, path, up=None):
+        self.path = path
+        ed = ngpanim.Edited(_gltf_as_glb(path) if path.lower().endswith(".gltf") else path)
+        glb = ed.glb
+        nodes = glb.nodes
+        skins = glb.j.get("skins", [])
+        if not skins:
+            raise RetargetError("%s: no skin (a mesh on an armature)" % path)
+        jset = []
+        for s in skins:
+            for k in s.get("joints", []):
+                if k not in jset:
+                    jset.append(k)
+        parent = ed.parent
+
+        def joint_above(i):
+            p = parent.get(i)
+            while p is not None and p not in jset:
+                p = parent.get(p)
+            return p
+
+        def depth(i):
+            d = 0
+            while i in parent:
+                i, d = parent[i], d + 1
+            return d
+        order = sorted(jset, key=lambda k: (depth(k), k))
+        U = eye() if up == "z" else YUP
+        self.up_axis = up or "y"
+        self.up = U
+        self.up_from = "--up" if up else "glTF (Y up)"
+        cache = {}
+        world = {i: mul(U, ed.world(i, None, 0.0, cache)) for i in range(len(nodes))}
+        self.joints = []
+        jix = {}
+        seen = set()
+        for k in order:
+            nm = nodes[k].get("name") or "joint%d" % k
+            if nm in seen:
+                nm = "%s_%d" % (nm, k)
+            seen.add(nm)
+            jix[k] = len(self.joints)
+            self.joints.append({"name": nm, "parent": None, "world": world[k]})
+        for k in order:
+            p = joint_above(k)
+            self.joints[jix[k]]["parent"] = jix.get(p)
+        self.names = {j["name"]: i for i, j in enumerate(self.joints)}
+        self.images = {}
+        mats = glb.j.get("materials", [])
+
+        def image_key(prim):
+            mi = prim.get("material")
+            if mi is None or mi >= len(mats):
+                return None
+            t = mats[mi].get("pbrMetallicRoughness", {}).get("baseColorTexture")
+            if t is None:
+                return None
+            src = glb.j.get("textures", [])[t["index"]].get("source")
+            if src is None:
+                return None
+            key = "glb:%d" % src
+            if key not in self.images:
+                im = glb.j["images"][src]
+                data = None
+                if "bufferView" in im:
+                    v = glb.j["bufferViews"][im["bufferView"]]
+                    data = glb.bin[v.get("byteOffset", 0):v.get("byteOffset", 0) + v["byteLength"]]
+                elif im.get("uri", "").startswith("data:"):
+                    import base64
+                    data = base64.b64decode(im["uri"].split(",", 1)[1])
+                elif im.get("uri"):
+                    f = os.path.join(os.path.dirname(path), im["uri"].replace("%20", " "))
+                    data = open(f, "rb").read() if os.path.isfile(f) else None
+                self.images[key] = (im.get("name") or os.path.splitext(os.path.basename(im.get("uri", "")))[0]
+                                    or "image%d" % src, data)
+            return key
+
+        self.tris = []
+        self.props = []
+        for ni, nd in enumerate(nodes):
+            if "mesh" not in nd:
+                continue
+            skin = skins[nd["skin"]] if "skin" in nd else None
+            if skin is None:
+                h = joint_above(ni) if ni not in jset else ni
+                if h is None:
+                    continue
+                Wn = world[ni]
+            else:
+                sj = skin["joints"]
+                ibm = glb.accessor(skin["inverseBindMatrices"]) if "inverseBindMatrices" in skin else [None] * len(sj)
+                SM = [mul(world[k], ngpmesh._col(ibm[q]) if ibm[q] else eye()) for q, k in enumerate(sj)]
+            ptris = []
+            for prim in glb.j["meshes"][nd["mesh"]]["primitives"]:
+                if prim.get("mode", 4) != 4:
+                    raise RetargetError("%s: mesh %s is not triangles" % (path, nd.get("name")))
+                at = prim["attributes"]
+                P = glb.accessor(at["POSITION"])
+                N = glb.accessor(at["NORMAL"]) if "NORMAL" in at else None
+                T = glb.accessor(at["TEXCOORD_0"]) if "TEXCOORD_0" in at else None
+                idx = [i[0] for i in glb.accessor(prim["indices"])] if "indices" in prim else list(range(len(P)))
+                img = image_key(prim)
+                sets = [(glb.accessor(at["JOINTS_%d" % s]), glb.accessor(at["WEIGHTS_%d" % s]))
+                        for s in range(4) if skin is not None and "JOINTS_%d" % s in at and "WEIGHTS_%d" % s in at]
+                if skin is not None and not sets:
+                    raise RetargetError("%s: mesh %s has a skin but no weights" % (path, nd.get("name")))
+                cache_c = {}
+
+                def corner(v):
+                    if v in cache_c:
+                        return cache_c[v]
+                    n0 = list(N[v]) if N else [0.0, 0.0, 1.0]
+                    uv = list(T[v]) if T else [0.0, 0.0]
+                    if skin is None:
+                        c = (apply(Wn, P[v]), _unit(apply(Wn, n0, 0.0)), uv)
+                    else:
+                        acc = {}
+                        for js, ws in sets:
+                            for q, w in zip(js[v], ws[v]):
+                                if w > 0.0 and q < len(sj):
+                                    acc[q] = acc.get(q, 0.0) + w
+                        tot = sum(acc.values())
+                        if tot <= 0:
+                            raise RetargetError("%s: mesh %s, vertex %d has no weights" % (path, nd.get("name"), v))
+                        pp = [0.0, 0.0, 0.0]
+                        nn = [0.0, 0.0, 0.0]
+                        wj = {}
+                        for q, w in acc.items():
+                            pp = [a + w / tot * b for a, b in zip(pp, apply(SM[q], P[v]))]
+                            nn = [a + w / tot * b for a, b in zip(nn, apply(SM[q], n0, 0.0))]
+                            wj[jix[sj[q]]] = wj.get(jix[sj[q]], 0.0) + w / tot
+                        c = (pp, _unit(nn), uv, wj)
+                    cache_c[v] = c
+                    return c
+                for k in range(0, len(idx) - 2, 3):
+                    t = (img, [corner(idx[k]), corner(idx[k + 1]), corner(idx[k + 2])])
+                    (self.tris if skin is not None else ptris).append(t)
+            if skin is None and ptris:
+                self.props.append({"name": nd.get("name") or "mesh%d" % ni, "joint": jix[h], "tris": ptris})
+        if not self.tris:
+            raise RetargetError("%s: no skinned triangles" % path)
+
+
+def _gltf_as_glb(path):
+    """A .gltf (JSON + .bin next to it) as a temporary .glb that ngpmesh.Glb reads."""
+    import tempfile
+    j = json.load(open(path, encoding="utf-8"))
+    bufs = j.get("buffers", [])
+    if len(bufs) > 1:
+        raise RetargetError("%s: more than one buffer (export it as .glb)" % path)
+    data = b""
+    if bufs:
+        u = bufs[0].get("uri", "")
+        if u.startswith("data:"):
+            import base64
+            data = base64.b64decode(u.split(",", 1)[1])
+        else:
+            data = open(os.path.join(os.path.dirname(path), u.replace("%20", " ")), "rb").read()
+        bufs[0].pop("uri", None)
+    for im in j.get("images", []):   # images next to the .gltf: the path made absolute, so the temporary .glb finds them
+        u = im.get("uri", "")
+        if u and not u.startswith("data:"):
+            im["uri"] = os.path.abspath(os.path.join(os.path.dirname(path), u.replace("%20", " ")))
+    js = json.dumps(j).encode("utf-8")
+    js += b" " * (-len(js) % 4)
+    data += b"\0" * (-len(data) % 4)
+    out = tempfile.NamedTemporaryFile(suffix=".glb", delete=False)
+    out.write(struct.pack("<III", 0x46546C67, 2, 12 + 8 + len(js) + 8 + len(data)))
+    out.write(struct.pack("<II", len(js), 0x4E4F534A) + js + struct.pack("<II", len(data), 0x004E4942) + data)
+    out.close()
+    return out.name
+
+
+def load_model(path, up=None):
+    """Model (.dae) or GlbModel (.glb / .gltf) by the extension."""
+    if path.lower().endswith((".glb", ".gltf")):
+        return GlbModel(path, up)
+    return Model(path, up)
 
 
 # ---------------------------------------------------------------- the source (kit .glb)
@@ -440,9 +663,13 @@ class Source:
 
 # ---------------------------------------------------------------- the retarget
 
-def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front="+y", clips=None, own=None, log=print):
+def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front=None, clips=None, own=None, log=print,
+          up=None):
     src = Source(src_path)
-    mdl = Model(model_path)
+    mdl = load_model(model_path, up)
+    if front is None:   # a Y-up scene faces +Z, which is -Y once it stands on Z
+        front = "-y" if mdl.up_axis == "y" else "+y"
+    log("model %s: %s up (%s), facing %s" % (os.path.basename(model_path), mdl.up_axis.upper(), mdl.up_from, front))
     cfg = load_map(map_path)
     J = mdl.joints
     nj = len(J)
@@ -799,7 +1026,7 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
                     p = kparent[i]
                     k = given.get(i)
                     if k is not None:
-                        Wd = with_pos(quat_col(k[f][:4]), k[f][4:7])
+                        Wd = mul(mdl.up, with_pos(quat_col(k[f][:4]), k[f][4:7]))
                         Wt[i] = with_pos(rot3(mul(Cm, Wd)), to_game_p(pos(Wd)))
                         if U is not None:
                             Wt[i] = mul(U, Wt[i])
@@ -849,6 +1076,14 @@ def ngprig_locator_id(name):
 
 # ---------------------------------------------------------------- the .glb
 
+def image_data(mdl, key):
+    """(name, bytes or None) of a model image: a file next to a .dae, or an image inside a .glb (mdl.images)."""
+    if key in getattr(mdl, "images", {}):
+        return mdl.images[key]
+    name = os.path.splitext(os.path.basename(key))[0]
+    return name, (open(key, "rb").read() if os.path.isfile(key) else None)
+
+
 def write_glb(path, mdl, J, korder, kparent, Lk, A, tris, locs, anims, log, props=()):
     binb = bytearray()
     j = {"asset": {"version": "2.0", "generator": "WotM tools/retarget.py"}, "scene": 0, "scenes": [{"nodes": [0]}],
@@ -891,17 +1126,26 @@ def write_glb(path, mdl, J, korder, kparent, Lk, A, tris, locs, anims, log, prop
         q = quat_of(tmat(rot3(Ai)))
         j["nodes"].append({"name": nm, "translation": lp, "rotation": q})
         j["nodes"][nidx[ji]].setdefault("children", []).append(len(j["nodes"]) - 1)
-    # mesh: one primitive per image
-    imgs = sorted({img for img, _t in list(tris) + [x for pr in props for x in pr["tris"]] if img}, key=str)
+    # mesh: one primitive per image; an image that is missing or not PNG/JPEG goes untextured, with a warning
+    imgs = []
+    got = {}
+    for im in sorted({img for img, _t in list(tris) + [x for pr in props for x in pr["tris"]] if img}, key=str):
+        name, data = image_data(mdl, im)
+        mime = {b"\x89PNG": "image/png", b"\xff\xd8\xff": "image/jpeg"}
+        mt = next((v for k, v in mime.items() if data and data.startswith(k)), None)
+        if mt is None:
+            log("warning: image %s %s; drawn without it" % (name, "not found" if data is None else "is not PNG or JPEG"))
+            continue
+        got[im] = (name, data, mt)
+        imgs.append(im)
+    tris = [(img if img in got else None, t) for img, t in tris]
+    props = [dict(pr, tris=[(img if img in got else None, t) for img, t in pr["tris"]]) for pr in props]
     mat_of = {}
     for k, im in enumerate(imgs):
-        data = open(im, "rb").read()
-        if data[:8] != b"\x89PNG\r\n\x1a\n":
-            raise RetargetError("%s: textures must be PNG" % im)
-        j["images"].append({"name": os.path.splitext(os.path.basename(im))[0], "mimeType": "image/png", "bufferView": view(data)})
+        name, data, mt = got[im]
+        j["images"].append({"name": name, "mimeType": mt, "bufferView": view(data)})
         j["textures"].append({"source": k, "sampler": 0})
-        j["materials"].append({"name": os.path.splitext(os.path.basename(im))[0],
-                               "pbrMetallicRoughness": {"baseColorTexture": {"index": k}, "metallicFactor": 0.0}})
+        j["materials"].append({"name": name, "pbrMetallicRoughness": {"baseColorTexture": {"index": k}, "metallicFactor": 0.0}})
         mat_of[im] = k
     sj = {i: q for q, i in enumerate(korder)}
     prims = []
@@ -1007,7 +1251,7 @@ def write_glb(path, mdl, J, korder, kparent, Lk, A, tris, locs, anims, log, prop
 
 
 def main(argv):
-    ap = argparse.ArgumentParser(description="retarget a kit .glb's animations onto a rigged model (Collada) for ngprig")
+    ap = argparse.ArgumentParser(description="retarget a kit .glb's animations onto a rigged model (.dae, .glb, .gltf) for ngprig")
     ap.add_argument("source")
     ap.add_argument("model")
     ap.add_argument("map")
@@ -1015,12 +1259,19 @@ def main(argv):
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--size", type=float, default=1.0, help="height as a fraction of the source's (default 1)")
     g.add_argument("--height", type=float, help="height in game units")
-    ap.add_argument("--front", choices=("+y", "-y"), default="+y", help="the way the model faces (Z up)")
+    ap.add_argument("--front", choices=("+y", "-y"), help="the way the model faces once Z is up (default: +y for a Z-up "
+                                                          "scene, -y for a Y-up one)")
+    ap.add_argument("--up", choices=("y", "z"), help="the scene's up axis (default: the file's; a .dae without <up_axis> "
+                                                     "by where its head joint is)")
     ap.add_argument("--clips", help="only these animation ids (e.g. 90,1)")
     ap.add_argument("--own", help="the model's own clips (JSON) in place of the source's with the same id")
-    a = ap.parse_args(argv)
+    argv = list(argv)
+    for k, x in enumerate(argv[:-1]):   # "--front -y": argparse would read -y as an option
+        if x == "--front" and argv[k + 1] in ("-y", "+y"):
+            argv[k:k + 2] = ["--front=" + argv[k + 1], ""]
+    a = ap.parse_args([x for x in argv if x != ""])
     try:
-        build(a.source, a.model, a.map, a.out, a.size, a.height, a.front, a.clips, a.own)
+        build(a.source, a.model, a.map, a.out, a.size, a.height, a.front, a.clips, a.own, up=a.up)
     except (RetargetError, ngpanim.AnimError, OSError, KeyError, ValueError) as e:
         print("error: %s" % e, file=sys.stderr)
         return 1

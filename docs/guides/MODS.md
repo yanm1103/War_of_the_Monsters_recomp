@@ -193,10 +193,12 @@ so its refusals show up here. Besides those, it looks at:
   armature is an error, which the imports themselves do not catch.
 **Import mesh...** and **Import rig...** print the same file, texture and mesh lines before they start.
 
-**A rigged model from elsewhere.** A model that already has a skeleton (a Collada `.dae` with a skinned mesh) can take the base
-type's animations instead of new ones: export the base costume (**Export to Blender**, e.g. `LIZARD0.glb`), write a bone map
-(which model joint follows which base bone; `tools/rigmaps/biped_togera.json` covers the 3ds Max Biped, `Bip01_*`, on Togera)
-and run `python tools/retarget.py LIZARD0.glb model.dae map.json rig.glb`; then **Import rig...** with `rig.glb`. The map can
+**A rigged model from elsewhere.** A model that already has a skeleton (a skinned mesh in a Collada `.dae`, a `.glb` or a
+`.gltf`) can take the base type's animations instead of new ones: export the base costume (**Export to Blender**, e.g.
+`LIZARD0.glb`), write a bone map (which model joint follows which base bone, the base bone by its full name, its label such as
+`L_Hand` or its `bone<N>`; `tools/rigmaps/biped_togera.json` covers the 3ds Max Biped, `Bip01_*`, on Togera) and run
+`python tools/retarget.py LIZARD0.glb model.glb map.json rig.glb`; then **Import rig...** with `rig.glb`. The model's up axis
+comes from the file (`--up y|z` when it lies down) and a Y-up model faces -Y once stood up (`--front +y` turns it around). The map can
 start from another one (`{"extends": "biped_togera.json", ...}`) and change only the tail, add a `mouth` locator where the
 fire comes out or close a jaw the model's bind pose leaves open (`"turn"`). Each joint keeps the tilt it has in the model's
 bind pose, so a foot that is not flat there stays tilted in every move; the Biped map lays the feet flat (`"level"`). The base's layers (looking around, flinches) keep only rotations, as the game adds them on top of the main
