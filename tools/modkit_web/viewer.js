@@ -11,16 +11,51 @@ const clock = new THREE.Clock();
 const play = { mixer: null, dur: 0, t: 0, playing: true, speed: 1, onFrame: null };
 const FPS = 60;
 
+// The game's look (as the model museum and the port draw it): texture * vertex color * (ambient + directional * max(0, n.L)),
+// the light coming from over the camera's shoulder, the colors as stored (no sRGB conversion). The game's triangles come from
+// PS2 strips whose winding says nothing about the front: about half are wound against their normals, so every material is
+// double-sided, and three.js would turn the normal of a triangle seen "from the back" around and light it from the wrong
+// side (the dark patches). The game uses the normal as it is, and so does this: that flip is taken out of the shader.
+const GAME_NORMALS = THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', '');
+function gameMaterial(m) {
+  const n = new THREE.MeshLambertMaterial({ map: m.map, vertexColors: m.vertexColors, transparent: m.transparent, alphaTest: m.alphaTest,
+                                            side: m.side, depthWrite: m.depthWrite, opacity: m.opacity, name: m.name });
+  if (n.map) n.map.colorSpace = THREE.NoColorSpace;
+  n.onBeforeCompile = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', GAME_NORMALS); };
+  n.customProgramCacheKey = () => 'gameNormals';
+  m.dispose();
+  return n;
+}
+export function gameLook(root) {
+  root.traverse(o => {
+    if (o.isMesh && o.material) o.material = Array.isArray(o.material) ? o.material.map(gameMaterial) : gameMaterial(o.material);
+  });
+  return root;
+}
+function gameLight(cam, yawDeg = 35, pitchDeg = 8) {
+  const YAW = THREE.MathUtils.degToRad(yawDeg), PITCH = THREE.MathUtils.degToRad(pitchDeg);
+  const dir = new THREE.Vector3(Math.sin(YAW) * Math.cos(PITCH), Math.sin(PITCH), -Math.cos(YAW) * Math.cos(PITCH));
+  const c = new THREE.PerspectiveCamera();
+  c.position.copy(dir);
+  c.lookAt(0, 0, 0);
+  c.updateMatrixWorld(true);
+  const L = new THREE.Vector3(Math.sin(YAW - 0.7) * 0.6, 0.8, -Math.cos(YAW - 0.7) * 0.6).normalize();
+  const local = c.worldToLocal(dir.clone().add(L)).normalize();
+  const sun = new THREE.DirectionalLight(0xffffff, 0.6 * Math.PI);
+  sun.position.copy(local);
+  sun.target.position.set(0, 0, 0);
+  cam.add(sun, sun.target);
+  return new THREE.AmbientLight(0xffffff, 0.7 * Math.PI);
+}
+
 function setup() {
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(window.devicePixelRatio);
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  THREE.ColorManagement.enabled = false;   // colors as written, like the textures
+  renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
   scene = new THREE.Scene();
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 2.2));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.4);
-  sun.position.set(-1, 2, 1.5);
-  scene.add(sun);
   camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100000);
+  scene.add(camera, gameLight(camera));
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   ro = new ResizeObserver(size);
@@ -43,32 +78,44 @@ function size() {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
-function frame(obj) {
+// game = the model is in the game's axes (an export of the kit: its front is glTF -Z, the game's +Y); otherwise the glTF
+// convention (a Blender export faces +Z). The camera stands on the front's side, 35 degrees off to its left.
+function frame(obj, game) {
   const b = new THREE.Box3().setFromObject(obj);
   const c = b.getCenter(new THREE.Vector3()), s = b.getSize(new THREE.Vector3());
   obj.position.sub(new THREE.Vector3(c.x, b.min.y, c.z));   // on the ground, in the middle
   const H = Math.max(s.y, s.x * 0.6, s.z * 0.6, 1e-3);
   const yaw = THREE.MathUtils.degToRad(35), d = H * 2.3;
   controls.target.set(0, s.y * 0.5, 0);
-  camera.position.set(Math.sin(yaw) * d, s.y * 0.6, Math.cos(yaw) * d);
+  const f = game ? -1 : 1;
+  camera.position.set(f * Math.sin(yaw) * d, s.y * 0.6, f * Math.cos(yaw) * d);
   camera.near = H / 100;
   camera.far = H * 100;
   camera.updateProjectionMatrix();
   controls.update();
 }
 function drop() {
-  if (current) { scene.remove(current); current.traverse(o => { if (o.geometry) o.geometry.dispose(); }); current = null; }
+  if (current) {
+    scene.remove(current);
+    current.traverse(o => {
+      if (o.geometry) o.geometry.dispose();
+      for (const m of [].concat(o.material || [])) { if (m.map) m.map.dispose(); m.dispose(); }
+    });
+    current = null;
+  }
   play.mixer = null;
   play.dur = 0;
 }
 async function fetchGlb(url) {
   const r = await fetch(url);
   if (!r.ok) throw new Error((await r.text()) || r.statusText);
-  return loader.parseAsync(await r.arrayBuffer(), '');
+  const g = await loader.parseAsync(await r.arrayBuffer(), '');
+  gameLook(g.scene);
+  return g;
 }
 
 // shows the .glb at url in el (replacing what it had); resolves when it is drawn
-export async function showModel(el, url) {
+export async function showModel(el, url, game = false) {
   if (!renderer) setup();
   const my = ++token;
   if (box !== el) { if (box) ro.unobserve(box); box = el; ro.observe(el); }
@@ -85,7 +132,7 @@ export async function showModel(el, url) {
     if (my !== token) return;
     current = g.scene;
     scene.add(current);
-    frame(current);
+    frame(current, game || !!current.getObjectByName('WotM'));
     msg.remove();
   } catch (e) {
     if (my === token) msg.textContent = 'No 3D preview: ' + (e.message || e);
@@ -102,7 +149,7 @@ async function swapModel(url, still) {
   current = g.scene;
   current.traverse(o => { if (o.isMesh) o.frustumCulled = false; });   // skinned: its box is the rest one
   scene.add(current);
-  if (at) current.position.copy(at); else frame(current);
+  if (at) current.position.copy(at); else frame(current, true);
   if (url && g.animations.length) {
     play.mixer = new THREE.AnimationMixer(current);
     play.mixer.clipAction(g.animations[0]).play();

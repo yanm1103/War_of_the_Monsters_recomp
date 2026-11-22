@@ -1,8 +1,8 @@
 // Skins (MODS.md, "Skins"): New skin..., Turn into skin... (an extracted costume's PNGs become a skin), the skin's panel in
-// place of the preview (the model with its textures, name, base costume with the disc's portraits, CPUs, mesh), and
-// Duplicate / Delete in the right-click menu.
-import { showModel, animBar } from './viewer.js';
-import { meshRow } from './mesh.js';
+// place of the preview (the model with its textures, then two tabs: Settings, with the name, base costume with the disc's
+// portraits and CPUs; 3D model), and Duplicate / Delete in the right-click menu.
+import { meshBlocks } from './mesh.js';
+import { panelFrame, tabs } from './panel.js';
 
 const $ = id => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -146,16 +146,7 @@ async function turnIntoSkin(g) {
 async function skinPanel(g, body, label) {
   const sid = g.key.slice(6);
   label.textContent = 'Skin ' + sid + ': its PNGs are in the work folder (skins/' + sid + '); open the section to edit them. "Build mod" sends the edited ones to the mod\'s skins/' + sid + '.';
-  const wrap = el('div', 'panel');
-  const v = el('div', 'v3d');
-  const form = el('div', 'props');
-  wrap.append(v, form);
-  body.appendChild(wrap);
-  const still = 'api/model.glb?group=' + encodeURIComponent(g.key) + '&t=' + Date.now();
-  showModel(v, still);
-  const ab = el('div');
-  wrap.insertBefore(ab, form);
-  animBar(ab, g.key, still);
+  const form = panelFrame(body, g.key);
   const p = await kit.api('do/skin_props', { sid });
   form.appendChild(el('h4', '', 'Skin ' + sid));
   if (p.missing) { form.appendChild(el('div', 'dim', 'No skin.json in ' + p.missing)); return; }
@@ -176,8 +167,11 @@ async function skinPanel(g, body, label) {
     if (r.error) { kit.say(r.error + '\n', 'err'); return; }
     await kit.work.reload(['skins/' + sid]);
   };
-  form.append(row('Monster', el('span', '', (d.monster || '?') + '  (' + p.kind + ')')), row('Name', name), row('Base', radios),
-    row('', aiL), row('Mesh', meshRow('skin', sid, p.mesh)), row('', save));
+  const [tSet, tModel] = tabs(form, ['Settings', '3D model'], 'wotm.skinTab');
+  tSet.append(row('Monster', el('span', '', (d.monster || '?') + '  (' + p.kind + ')')), row('Name', name), row('Base', radios),
+    row('', aiL), row('', save));
+  const mb = meshBlocks('skin', sid);
+  tModel.append(el('div', 'state', 'Now: ' + p.mesh.text), mb.blender, mb.check);
 }
 
 export function initSkins() {

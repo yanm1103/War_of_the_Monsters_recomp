@@ -1,23 +1,13 @@
-// The mesh row of a skin's or a custom monster's panel: Export to Blender (.glb with the mesh and the animations), Check
-// model..., Import mesh..., Import animations...; on a custom monster also Import rig..., Import rigged model... and Adjust
-// bones... (monsters.js adds those through extra()).
-const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
-const button = (text, f) => { const b = el('button', '', text); b.type = 'button'; b.onclick = f; return b; };
+// The 3D model blocks of a skin's or a custom monster's panel (panel.js): "Edit in Blender" (Export to Blender, Import mesh...,
+// Import animations...) and "Check a model first" (Check model...). monsters.js adds the custom's own blocks (rigged model,
+// own skeleton, model files) around them.
+import { block, button } from './panel.js';
+
 const GLB = [['glTF binary', ['*.glb', '*.GLB']]];
 
-export function meshRow(kind, tid, status, extra) {
+export function meshBlocks(kind, tid) {
   const key = (kind === 'skin' ? 'skins/' : 'monsters/') + tid;
   const run = async (action, body) => { kit.workFocus = [key]; const r = await kit.run(action, body); return r; };
-  const box = el('div', 'meshrow');
-  box.appendChild(el('div', 'dim', status.text));
-  const r1 = el('div', 'btns');
-  r1.append(button('Export to Blender', () => run('mesh_export', { kind, tid })),
-    button('Check model...', async () => {
-      const start = (await kit.api('do/mesh_glb', { kind, tid, check: true })).path;
-      const p = await kit.pick('file', 'Model to check for ' + tid + ' (.glb)', start, GLB);
-      if (p) run('mesh_check', { kind, tid, path: p });
-    }), el('span', 'dim', '(.glb)'));
-  const r2 = el('div', 'btns');
   const imp = what => async () => {
     const start = (await kit.api('do/mesh_glb', { kind, tid })).path;
     const p = await kit.pick('file', 'Edited ' + (what === 'mesh' ? 'mesh' : 'animations') + ' of ' + tid + ' (.glb exported from Blender)', start, GLB);
@@ -32,8 +22,19 @@ export function meshRow(kind, tid, status, extra) {
         run('mesh_import', { kind, tid, path: p, what, as_rig: true });
     }
   };
-  r2.append(button('Import mesh...', imp('mesh')), button('Import animations...', imp('anims')));
-  box.append(r1, r2);
-  if (extra) extra(box, r2, run);
-  return box;
+  const blender = block('Edit in Blender',
+    (kind === 'skin' ? 'Reshape the monster\'s pieces or change its moves. ' : 'Reshape the body or change its moves. ') +
+    'Export to Blender writes a .glb (mesh, named bones, animations) in the work folder; after editing it, Import mesh... ' +
+    'brings back the shapes and Import animations... the moves.',
+    [button('Export to Blender', () => run('mesh_export', { kind, tid })), button('Import mesh...', imp('mesh')),
+     button('Import animations...', imp('anims'))]);
+  const check = block('Check a model first',
+    'Reads a .glb and changes nothing: the log says which import takes it and lists what would go wrong (missing textures, ' +
+    'meshes without weights, a model in other units or away from its bones).',
+    [button('Check model...', async () => {
+      const start = (await kit.api('do/mesh_glb', { kind, tid, check: true })).path;
+      const p = await kit.pick('file', 'Model to check for ' + tid + ' (.glb)', start, GLB);
+      if (p) run('mesh_check', { kind, tid, path: p });
+    })]);
+  return { blender, check, run };
 }

@@ -167,7 +167,7 @@ async function preview() {
     wrap.append(v, ab);
     body.appendChild(wrap);
     const still = 'api/model.glb?group=' + encodeURIComponent(g.key) + '&t=' + Date.now();
-    showModel(v, still);
+    showModel(v, still, true);
     animBar(ab, g.key, still);
     label.textContent = g.label + ': ' + allf.length + ' file(s); edited textures show on the model (refresh after saving one). Open the section to pick a file.';
     return;
@@ -203,7 +203,7 @@ async function preview() {
     const v = document.createElement('div');
     v.className = 'v3d';
     body.appendChild(v);
-    showModel(v, 'api/model.glb?rel=' + encodeURIComponent(f.rel) + '&m=' + f.mtime);
+    showModel(v, 'api/model.glb?rel=' + encodeURIComponent(f.rel) + '&m=' + f.mtime, ext(f.rel) === '.ngp');
   }
   const note = (await kit.api('do/note', { rel: f.rel })).note;
   if (note) text += '\n' + note;

@@ -5,6 +5,7 @@ import { initDisc } from './disc.js';
 import { initWork } from './work.js';
 import { initSkins } from './skins.js';
 import { initMonsters } from './monsters.js';
+import { makeSplit } from './split.js';
 
 const $ = id => document.getElementById(id);
 const listeners = [];
@@ -252,6 +253,11 @@ $('split').addEventListener('pointerdown', ev => {
   window.addEventListener('pointermove', move);
   window.addEventListener('pointerup', up);
 });
+
+// the column dividers: the disc list's width, and the work list's width next to the preview
+makeSplit($('splitMain'), $('discPane'), { key: 'wotm.discW', min: 220, max: () => $('main').clientWidth - 28 - 10 - 420 });
+makeSplit($('splitWork'), $('workTree'), { key: 'wotm.workTreeW', min: 160,
+                                            max: () => $('workTree').parentElement.clientWidth - 7 - 240 });
 
 async function refresh() { kit.setState(await kit.api('state')); }
 initDisc();

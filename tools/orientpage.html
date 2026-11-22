@@ -90,15 +90,45 @@ const $ = id => document.getElementById(id);
 const view = $('view');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
-renderer.outputColorSpace = THREE.SRGBColorSpace;
+THREE.ColorManagement.enabled = false;   // colors as written (hex, HSL), like the textures
+renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 view.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1b1d22);
-scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 2.2));
-const sun = new THREE.DirectionalLight(0xffffff, 1.6);
-sun.position.set(-40, 120, -80);
-scene.add(sun);
 const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 10000);
+// The game's look (as the model museum and the port draw it): texture * vertex color * (ambient + directional * max(0, n.L)),
+// the light from over the camera's shoulder, the colors as stored. The game's triangles come from PS2 strips whose winding
+// says nothing about the front, so every material is double-sided, and three.js would turn the normal of a triangle seen
+// "from the back" around and light it from the wrong side (dark patches): that flip is taken out of the shader.
+{
+  const YAW = THREE.MathUtils.degToRad(35), PITCH = THREE.MathUtils.degToRad(8);
+  const dir = new THREE.Vector3(Math.sin(YAW) * Math.cos(PITCH), Math.sin(PITCH), -Math.cos(YAW) * Math.cos(PITCH));
+  const c = new THREE.PerspectiveCamera();
+  c.position.copy(dir);
+  c.lookAt(0, 0, 0);
+  c.updateMatrixWorld(true);
+  const L = new THREE.Vector3(Math.sin(YAW - 0.7) * 0.6, 0.8, -Math.cos(YAW - 0.7) * 0.6).normalize();
+  const sun = new THREE.DirectionalLight(0xffffff, 0.6 * Math.PI);
+  sun.position.copy(c.worldToLocal(dir.clone().add(L)).normalize());
+  camera.add(sun, sun.target);
+  scene.add(camera, new THREE.AmbientLight(0xffffff, 0.7 * Math.PI));
+}
+const GAME_NORMALS = THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', '');
+function gameMaterial(m) {
+  const n = new THREE.MeshLambertMaterial({ map: m.map, vertexColors: m.vertexColors, transparent: m.transparent, alphaTest: m.alphaTest,
+                                            side: m.side, depthWrite: m.depthWrite, opacity: m.opacity, name: m.name });
+  if (n.map) n.map.colorSpace = THREE.NoColorSpace;
+  n.onBeforeCompile = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', GAME_NORMALS); };
+  n.customProgramCacheKey = () => 'gameNormals';
+  m.dispose();
+  return n;
+}
+function gameLook(g) {
+  g.scene.traverse(o => {
+    if (o.isMesh && o.material) o.material = Array.isArray(o.material) ? o.material.map(gameMaterial) : gameMaterial(o.material);
+  });
+  return g;
+}
 const controls = new OrbitControls(camera, renderer.domElement);
 
 const info = await (await fetch('info.json')).json();
@@ -110,7 +140,7 @@ $('hint2').textContent = $('hint2').textContent.replace('the monster', baseName)
 $('ok').textContent = info.bones ? 'Next' : 'OK';
 
 const loader = new GLTFLoader();
-const load = url => new Promise((ok, bad) => loader.load(url, ok, undefined, bad));
+const load = url => new Promise((ok, bad) => loader.load(url, ok, undefined, bad)).then(gameLook);
 const [base, model] = await Promise.all([load('base.glb'), load('model.glb')]);
 scene.add(base.scene, model.scene);
 const node = model.scene.getObjectByName('model');   // child of the "WotM" root: its parent space is the game's (x right, y front, z up)
