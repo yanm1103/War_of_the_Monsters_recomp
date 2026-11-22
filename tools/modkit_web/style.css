@@ -387,3 +387,16 @@ body.dragy, body.dragy * { cursor: row-resize !important; user-select: none; }
 }
 .panel > .v3d { min-height: 90px; }
 .panel > .acts, .panel > div:not(.v3d):not(.pvtop):not(.props):not(.hsplit) { flex: none; }
+
+/* icons (disc.js svg()): a kind of row, and a work folder file without a thumbnail (an icon and a word) */
+.ico svg { width: 64%; height: 64%; }
+.work .thumb.ftype { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+                     border: 1px solid var(--line2); background: rgba(255, 255, 255, .04); color: var(--dim); image-rendering: auto; }
+.thumb.ftype svg { width: 19px; height: 19px; flex: none; }
+.thumb.ftype span { font: 600 7px/1 var(--ui); letter-spacing: 0; text-transform: uppercase; }
+.thumb.ftype.model, .thumb.ftype.blender { color: var(--orange2); border-color: rgba(240, 138, 44, .35); background: rgba(240, 138, 44, .07); }
+.thumb.ftype.texture { color: #8fd0ff; border-color: rgba(90, 170, 255, .35); background: rgba(90, 170, 255, .07); }
+.thumb.ftype.sound, .thumb.ftype.music { color: #b9a2ff; border-color: rgba(150, 120, 255, .35); background: rgba(150, 120, 255, .07); }
+.thumb.ftype.stats { color: #9fe39f; border-color: rgba(90, 200, 90, .35); background: rgba(90, 200, 90, .07); }
+.thumb.ftype.ai { color: var(--yellow); border-color: rgba(232, 197, 58, .35); background: rgba(232, 197, 58, .07); }
+.work .st[title] { cursor: help; }

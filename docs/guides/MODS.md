@@ -70,7 +70,7 @@ starting points (**New skin**, **New monster**, **From the disc**), and the same
    file names); Ctrl/Shift pick several; double click or **Extract to my mod**.
 2. **Edit <mod>** (right): one group per disc file, skin or custom monster, each with its picture, name, kind (Skin, Monster,
    Costume, Level, Sounds...), file count and edited count; the **⋯** button on a group opens the same menu as the right click. After
-   extracting, the new group opens and the others close. Thumbnails, size and state ("edited" = changed since extraction). A texture the export could not
+   extracting, the new group opens and the others close. Thumbnails (a file without one shows an icon and a word for its kind: Model, Blender, Textures, Sound, Voice, Stats, AI), size and state ("edited" = changed since extraction, it goes in the next Build; "work file" = a `.glb`/`.gltf`/`.blend` for Blender, which stays in the work folder; clicking a file says what it is). A texture the export could not
    color comes out gray with `_sempaleta` in the name; `pack` writes it without the suffix (the game accepts both). Preview
    of the image (with a checkerboard behind the alpha) or the sound's waveform. A sound plays in the page itself on click ("play sounds on click"
    turns it off) or on double click; "Stop" stops it. Double clicking a texture opens it in the editor chosen in **Editors...** (one program per

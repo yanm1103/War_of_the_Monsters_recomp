@@ -4,7 +4,7 @@
 // kit.work.panels: other parts of the page register a panel for a group kind (a skin's or a monster's properties).
 import { listSelect } from './select.js';
 import { showModel, animBar } from './viewer.js';
-import { pic } from './disc.js';
+import { pic, fileIcon } from './disc.js';
 import { stageTitle } from './panel.js';
 
 const MODEL_EXT = ['.glb', '.gltf', '.dae', '.ngp'];
@@ -23,6 +23,11 @@ let reqN = 0;
 const fileUrl = f => 'api/file?rel=' + encodeURIComponent(f.rel) + '&m=' + f.mtime;
 const ext = rel => (rel.match(/\.[^./]+$/) || [''])[0].toLowerCase();
 
+const STATES = {   // the state column's hint
+  original: 'As it is on the disc: Build leaves it out',
+  edited: 'Changed since it was extracted: the next Build sends it to the mod',
+  'work file': 'Stays in the work folder: Build does not send it to the game',
+};
 const TAGS = { skin: 'Skin', monster: 'Monster', costume: 'Costume', level: 'Level', sounds: 'Sounds', music: 'Music', screen: 'Screen', files: 'Files' };
 const ICONS = { sounds: 'sound', music: 'music', screen: 'screen', level: 'level' };
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -144,8 +149,8 @@ function render() {
         th = document.createElement('img');
         th.loading = 'lazy';
         th.src = fileUrl(f);
-      } else th = document.createElement('span');
-      th.className = 'thumb' + (ext(f.rel) === '.png' ? '' : ' none');
+        th.className = 'thumb';
+      } else th = fileIcon(ext(f.rel));   // no thumbnail: an icon and a word for its kind
       const n = document.createElement('span');
       n.className = 'lbl';
       n.textContent = f.name;
@@ -155,6 +160,7 @@ function render() {
       const st = document.createElement('span');
       st.className = 'st';
       st.textContent = f.state;
+      st.title = STATES[f.state] || '';
       r.append(th, n, i, st);
       box.appendChild(r);
     }

@@ -93,9 +93,22 @@ def file_note(rel):
     if mb:
         return "Sound %d of bank %s.BNK%s" % (int(mb.group(2)), mb.group(1).upper(),
                                               ", sample %s only" % mb.group(3) if mb.group(3) is not None else "")
-    if n.lower().endswith((".wav",)):
+    low = n.lower()
+    if low.endswith(".wav"):
         return "Music or voice (.VPK/.VAG)"
-    return ""
+    if low.endswith(modkit.MESH_SRC):
+        return ("Work file: a 3D model for Blender (the Export to Blender file, or a model you imported). It stays in the work "
+                "folder and Build does not send it to the game: the game takes the .NGP made from it. Changes come back through "
+                "the monster's or skin's 3D model tab.")
+    notes = {".ngp": "The 3D model in the game's format (mesh, skeleton, animations). Build sends it to the mod.",
+             ".ptr": "Goes with the .NGP of the same name: the list the game uses to load that model. Build sends it to the mod.",
+             ".tex": "The game's texture file for the model of the same name. The textures to edit are its PNGs.",
+             ".rtx": "The game's texture file for the model of the same name. The textures to edit are its PNGs.",
+             ".chr": "The monster's fight numbers and punch table (game format).",
+             ".aic": "How the CPU fights with this monster (game format).",
+             ".bnk": "A sound bank in the game's format, built from the WAVs.",
+             ".mp3": "A narrator line, said when the monster is picked."}
+    return notes.get(os.path.splitext(low)[1], "")
 
 
 def start_program(exe, p):
@@ -286,7 +299,7 @@ class FilesMixin:
                     continue
                 groups.setdefault(group_of(rel), []).append({
                     "rel": rel, "name": n, "info": file_info(p), "mtime": int(os.path.getmtime(p)),
-                    "state": "for Blender" if src else "edited" if edited else "original"})
+                    "state": "work file" if src else "edited" if edited else "original"})
         out = []
         for key in sorted(groups, key=lambda k: (not k.startswith("monsters/"), not k.startswith("skins/"), k)):
             kind = "monster" if key.startswith("monsters/") else "skin" if key.startswith("skins/") else "file"

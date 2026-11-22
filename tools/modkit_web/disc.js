@@ -15,11 +15,48 @@ function matches(n, q) {
   return (n.kids || []).some(k => matches(k, q));
 }
 
-const GLYPHS = { sound: '♪', music: '♫', screen: '▣', level: '▲', files: '▤' };
-export function icon(kind) {   // a small box with a glyph for rows without a picture
+// line icons (24x24, drawn with the text's color)
+const SVG = {
+  cube: '<path d="M12 2.5 3.5 7v10l8.5 4.5 8.5-4.5V7z"/><path d="m3.5 7 8.5 4.5L20.5 7M12 11.5v10"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="m21 16-5-5-9 9"/>',
+  note: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
+  wave: '<path d="M2 12h2M6 8v8M10 4v16M14 7v10M18 10v4M22 12h-2"/>',
+  bars: '<path d="M5 20V11M11 20V5M17 20v-6M2 20.5h20"/>',
+  chip: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2.5V6M15 2.5V6M9 18v3.5M15 18v3.5M2.5 9H6M2.5 15H6M18 9h3.5M18 15h3.5"/>',
+  link: '<path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>',
+  screen: '<rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
+  mountain: '<path d="m2.5 20 7-12 4 7 2.5-4 5.5 9z"/><circle cx="17" cy="6" r="2"/>',
+  mic: '<rect x="9" y="2.5" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3.5"/>',
+  file: '<path d="M14 2.5H6.5a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8z"/><path d="M14 2.5V8h5.5"/>',
+};
+export function svg(name) {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+         (SVG[name] || SVG.file) + '</svg>';
+}
+// a kind of row (disc groups, work groups) -> its icon
+const KINDS = { sound: 'note', music: 'wave', screen: 'screen', level: 'mountain', files: 'file' };
+export function icon(kind) {   // a small box with an icon for rows without a picture
   const s = document.createElement('span');
   s.className = 'ico ' + (kind || 'files');
-  s.textContent = GLYPHS[kind] || GLYPHS.files;
+  s.innerHTML = svg(KINDS[kind] || 'file');
+  return s;
+}
+// a work folder file without a thumbnail -> an icon and a word for its kind
+const FILES = {
+  '.ngp': ['cube', 'Model', 'model'], '.glb': ['cube', 'Blender', 'blender'], '.gltf': ['cube', 'Blender', 'blender'],
+  '.blend': ['cube', 'Blender', 'blender'], '.dae': ['cube', 'Model', 'model'], '.ptr': ['link', 'Model', 'model'],
+  '.tex': ['image', 'Textures', 'texture'], '.rtx': ['image', 'Textures', 'texture'], '.psd': ['image', 'Image', 'texture'],
+  '.wav': ['note', 'Sound', 'sound'], '.bnk': ['note', 'Sounds', 'sound'], '.vpk': ['wave', 'Music', 'music'],
+  '.vag': ['wave', 'Music', 'music'], '.mp3': ['mic', 'Voice', 'music'], '.chr': ['bars', 'Stats', 'stats'], '.aic': ['chip', 'AI', 'ai'],
+};
+export function fileIcon(ext) {
+  const [name, word, cls] = FILES[ext] || ['file', (ext || '').slice(1).toUpperCase().slice(0, 6) || 'File', 'other'];
+  const s = document.createElement('span');
+  s.className = 'thumb ftype ' + cls;
+  s.innerHTML = svg(name);
+  const w = document.createElement('span');
+  w.textContent = word;
+  s.appendChild(w);
   return s;
 }
 
