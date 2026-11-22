@@ -832,6 +832,8 @@ class Exporter:
             anims.append(self._edit_anim(nm, aid, k, tracks, times))
         g.j["animations"] = anims
         g.j["scenes"][0]["extras"] = {"wotmEdit": 1, "ngp": os.path.basename(self.path), "fps": 60}
+        import bonelabels   # L_Hand_bone1, Spine1_bone11...: the imports find the bone by the bone<N> at the end
+        bonelabels.apply(g.j["nodes"])
         g.write(out)
         st = self.stats
         log("gravado %s: %d objetos, %d triangulos, %d transformacoes (%d ossos), %d animacoes; erro TRS max %.2g; "

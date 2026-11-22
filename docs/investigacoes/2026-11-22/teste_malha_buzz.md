@@ -58,6 +58,14 @@ O `Import mesh` agora reconhece o corpo novo (`meshcheck.route`: malha com pele 
 
 Travas A1 e A2: deixam de bloquear. A3 (a saída escondida): o kit leva até ela.
 
+## Depois dos ossos com nome
+
+O Export to Blender põe a parte do corpo na frente do `bone<N>` (`L_Hand_bone1`, `Chest_bone11`, `Tail3_bone24`; `tools/bonelabels.py`), tirada da hierarquia e dos localizadores de mão, pé, cabeça e boca. No Robo-47 sai exatamente o que descobri à mão na trava B2 (`bone5` `L_Clavicle` .. `bone1` `L_Hand`, `bone14` `L_Thigh`, `bone20` `Pelvis`, `bone21` `Root`). Conferido nos 13 modelos do disco: braços, pernas, peito, raiz e cabeça saem em todos os bípedes; o que fica sem nome são dedos e peças soltas; tentáculos e asas que terminam atrás do corpo viram `Tail`/`TailB`/`TailC` (Preytor, Magmo, Cerebulon) e as pernas compridas da Zorgulon (`JELLY`), `Leg2..Leg9`.
+
+Mesmo resultado com e sem nome: a malha importada (`ngpmesh`) sai com o mesmo sha1, nenhuma animação muda (`ngpanim`), e o retarget do Godzilla 90s com o mapa antigo (`bone<N>`) grava o mesmo `.glb`. Os mapas aceitam o nome inteiro, o rótulo (`L_Hand`) ou o `bone<N>`. Ida e volta pelo Blender 5.1: ossos e grupos de vértices mantêm os nomes, e o Check passa limpo.
+
+Trava B2: o que é cada osso passa a estar no nome.
+
 ## Números para comparar depois das melhorias
 
 - Caminho B: 3 comandos fora da GUI (`retarget.py`, conversão para Z para cima, edição do `.dae`); 5 coisas que precisei saber fora dos docs (o que é cada `boneN`, Z para cima, `--front=`, a imagem que falta, a raiz com dois filhos); 1 bug do kit.

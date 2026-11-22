@@ -107,7 +107,9 @@ custom monster...**, which moves the group's PNGs to the new monster.
 animations, on the base type's skeleton:
 1. **Export to Blender** writes the base costume as `<PREFIX><costume>.glb` (e.g. `LIZARD1.glb`) in the work folder: the skin's
    folder, or `monsters/<id>/files/` for a custom. It holds the meshes (`obj_<address>`), every transform of the skeleton as a bone
-   (`bone<N>` for the ones the mesh is weighted to; `xf_`, `st_` and `sc_` for the others: helpers, locators, scale nodes), the
+   (`bone<N>` for the ones the mesh is weighted to, with the body part in front when the kit can tell it: `L_Hand_bone1`,
+   `R_Thigh_bone18`, `Spine1_bone11`, `Head_bone0`, `Tail3_bone24`; `xf_`, `st_` and `sc_` for the others: helpers, locators,
+   scale nodes; `loc_<id>` empties are the locators), the
    weights, the textures and every animation as an action `a<id>` (`a090` is the idle; the list is in `tools/pose.py --list`). The
    default pose is the bind pose. It takes about a minute, and never overwrites a `.glb` that is already there.
 2. In Blender, set the scene's frame rate to 60 fps (*Output Properties > Frame Rate*) before *File > Import > glTF 2.0*: the

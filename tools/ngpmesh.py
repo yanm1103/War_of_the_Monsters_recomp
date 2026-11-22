@@ -223,8 +223,9 @@ class Base:
 # ---------------------------------------------------------------- glb mesh -> game vertices
 
 def _bone_out(name):
-    # bone<N>; bone<N>@<OBJECT>: the copy of the bones under the "off_<OBJECT>" node (skin with an object matrix, Agamo)
-    m = re.fullmatch(r"bone(?:[0-9a-f]+_)?(\d+)(?:@[0-9a-f]+)?", name or "")
+    # bone<N>; bone<N>@<OBJECT>: the copy of the bones under the "off_<OBJECT>" node (skin with an object matrix, Agamo);
+    # a label before it (L_Hand_bone1, tools/bonelabels.py) is only for the modder
+    m = re.search(r"(?:^|_)bone(?:[0-9a-f]+_)?(\d+)(?:@[0-9a-f]+)?$", name or "")
     return int(m.group(1)) if m else None
 
 

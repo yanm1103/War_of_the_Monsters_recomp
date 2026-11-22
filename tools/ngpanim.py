@@ -35,6 +35,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import animcurve  # noqa: E402
+import bonelabels  # noqa: E402
 import ngp  # noqa: E402
 import ngpmesh  # noqa: E402
 
@@ -637,6 +638,12 @@ class Edited:
         self.names = {}
         for i, nd in enumerate(self.nodes):
             self.names.setdefault(nd.get("name"), i)
+        for i, nd in enumerate(self.nodes):   # the kit's export names its bones L_Hand_bone1: bone1 and L_Hand find it too
+            nm = nd.get("name") or ""
+            c = bonelabels.canonical(nm)
+            self.names.setdefault(c, i)
+            if c != nm and nm.endswith("_" + c):
+                self.names.setdefault(nm[:-len(c) - 1], i)
 
     def local(self, i, clip, t):
         d = self.trs[i]

@@ -10,7 +10,7 @@ that `modkit.py monster rig` (tools/ngprig.py) takes.
 - model.dae: the new body, a skinned mesh on an armature (Z up; `--front` is the way it faces, +y by default). Its scene
   pose is the bind pose. The texture of each material is the effect's diffuse image, read from next to the file.
 - map.json: which model joint follows which source bone (`tools/rigmaps/biped_togera.json` is the 3ds Max Biped, Bip01_*,
-  on Togera). Keys:
+  on Togera). A source bone is named as the export names it (`L_Hand_bone1`), by its label (`L_Hand`) or by `bone1`. Keys:
   - "bones": {joint: {"from": bone | [bone_a, bone_b, f], "move": true, "align": [child_joint, child_bone]}}. The joint turns
     in the world as its source bone turns from its rest (with [a, b, f], a blend of the two turns at f); "move" also carries
     the bone's change of position (scaled by the ratio of the two rest heights); "align" first turns the joint so that the
