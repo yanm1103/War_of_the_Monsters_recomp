@@ -16,7 +16,7 @@
     <label for="mods">Mods folder</label>
     <div class="field"><input id="mods" spellcheck="false"><button class="pick" data-pick="mods" title="Pick the mods folder">&hellip;</button></div>
     <label for="mod" class="head">Mod</label>
-    <div class="field" id="modBar"><select id="mod"></select></div>
+    <div class="field" id="modBar"><select id="mod"></select><button id="newMod">New mod&hellip;</button></div>
   </div>
   <button id="quit" title="Close the mod kit">Quit</button>
 </header>
@@ -26,9 +26,15 @@
 </main>
 <div id="split" title="Drag to resize the log"></div>
 <footer id="foot">
-  <div class="tasks" id="tasks"><button class="task" id="check">Check mods</button></div>
+  <div class="tasks" id="tasks">
+    <button class="task needmod primary" id="build">Build mod</button>
+    <button class="task" id="check">Check mods</button>
+    <button id="openMods">Open mods folder</button>
+    <button class="needmod" id="openWork">Open work folder</button>
+  </div>
   <pre id="log"></pre>
 </footer>
+<div id="modal"><form class="box" id="modalBox"></form></div>
 <div id="gone"><div>The mod kit was closed. Start it again to go on.</div></div>
 <script type="module" src="app.js"></script>
 </body>

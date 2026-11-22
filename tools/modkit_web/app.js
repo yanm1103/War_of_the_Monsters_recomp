@@ -15,6 +15,62 @@ const kit = window.kit = {
     return (await kit.api('do/pick', { kind, title, initial, types })).path;
   },
   say(text, kind) { appendLog(text, kind); },
+  // a dialog in the page: fields [{key, label, value, hint}], ok(values) -> an error text to show (stays open) or nothing (closes);
+  // resolves with the values, or null on Cancel / Escape
+  dialog({ title, text, fields = [], okText = 'OK', ok }) {
+    return new Promise(resolve => {
+      const box = $('modalBox');
+      box.innerHTML = '';
+      const h = document.createElement('h3');
+      h.textContent = title;
+      box.appendChild(h);
+      if (text) { const p = document.createElement('p'); p.textContent = text; box.appendChild(p); }
+      const inputs = {};
+      for (const f of fields) {
+        const l = document.createElement('label');
+        l.textContent = f.label || '';
+        l.style.display = 'block';
+        const i = document.createElement('input');
+        i.type = 'text';
+        i.value = f.value || '';
+        i.placeholder = f.hint || '';
+        i.spellcheck = false;
+        l.appendChild(i);
+        box.appendChild(l);
+        inputs[f.key] = i;
+      }
+      const msg = document.createElement('div');
+      msg.className = 'msg';
+      box.appendChild(msg);
+      const bs = document.createElement('div');
+      bs.className = 'buttons';
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.textContent = 'Cancel';
+      const okb = document.createElement('button');
+      okb.type = 'submit';
+      okb.className = 'primary';
+      okb.textContent = okText;
+      bs.append(cancel, okb);
+      box.appendChild(bs);
+      const close = v => { $('modal').style.display = 'none'; document.removeEventListener('keydown', esc); resolve(v); };
+      const esc = e => { if (e.key === 'Escape') close(null); };
+      document.addEventListener('keydown', esc);
+      cancel.onclick = () => close(null);
+      box.onsubmit = async e => {
+        e.preventDefault();
+        const vals = Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, i.value]));
+        okb.disabled = true;
+        const err = ok ? await ok(vals) : null;
+        okb.disabled = false;
+        if (err) { msg.textContent = err; return; }
+        close(vals);
+      };
+      $('modal').style.display = 'flex';
+      const first = Object.values(inputs)[0] || okb;
+      first.focus();
+    });
+  },
   async run(action, body) {   // a task: its lines come through the log
     const r = await kit.api('do/' + action, body || {});
     if (r.error) appendLog(r.error + '\n', 'err');
@@ -40,6 +96,7 @@ function showState(s) {
     sel.appendChild(o);
   }
   sel.value = s.mod || '';
+  for (const b of document.querySelectorAll('.needmod')) b.classList.toggle('nomod', !s.mod);
   busy(s.busy);
 }
 kit.onState(showState);
@@ -57,8 +114,9 @@ for (const b of document.querySelectorAll('button[data-pick]')) {
 }
 
 // ---------------------------------------------------------------- tasks and log
-function busy(on) {
-  for (const b of document.querySelectorAll('button.task')) b.disabled = !!on;
+function busy(on) {   // tasks wait for the one running; the buttons of a mod wait for a mod
+  for (const b of document.querySelectorAll('button.task, button.needmod'))
+    b.disabled = (b.classList.contains('task') && !!on) || b.classList.contains('nomod');
 }
 const log = $('log');
 function appendLog(text, kind) {
@@ -85,6 +143,21 @@ events.onerror = async () => {   // the server went away (Quit, or closed): say 
   try { await fetch('api/hello'); } catch (e) { $('gone').style.display = 'flex'; events.close(); }
 };
 $('check').onclick = () => kit.run('check');
+$('build').onclick = () => kit.run('build');
+$('openMods').onclick = () => kit.run('open', { what: 'mods' });
+$('openWork').onclick = () => kit.run('open', { what: 'work' });
+$('newMod').onclick = () => kit.dialog({
+  title: 'New mod',
+  text: "Letters, digits, '_' and '-' only, starting with a letter or digit (no spaces; e.g. green_togera or Robo47-skins).",
+  fields: [{ key: 'name', label: 'Name of the new mod' }],
+  okText: 'Create',
+  ok: async v => {
+    const r = await kit.api('do/new_mod', { name: v.name.trim() });
+    if (r.error) return r.error;
+    kit.setState(r.state);
+    return null;
+  },
+});
 $('quit').onclick = async () => {
   try { await kit.api('quit', {}); } catch (e) { /* already gone */ }
   events.close();

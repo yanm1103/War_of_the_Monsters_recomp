@@ -71,7 +71,18 @@ def save_conf(changes):
 
 
 def valid_mod_name(n):
-    return bool(n) and not n.startswith(("_", ".")) and not any(ch in n for ch in '\\/:*?"<>|')
+    return not modkit.mod_name_error(n)
+
+
+def open_path(p):
+    """The system's file manager on a folder (made when missing: a mods or work folder not used yet) or a file's program."""
+    if not os.path.exists(p) and not os.path.splitext(p)[1]:
+        os.makedirs(p, exist_ok=True)
+    p = os.path.normpath(p)
+    if hasattr(os, "startfile"):
+        os.startfile(p)
+    else:
+        subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", p], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 # ------------------------------------------------------------------ the system's file dialogs
@@ -191,12 +202,24 @@ class Kit:
             self.disc = os.path.normpath(d["disc"]) if d["disc"] else ""
         if "mods" in d:
             self.mods = os.path.normpath(d["mods"]) if d["mods"] else ""
+        old = self.mod
         if "mod" in d:
             self.mod = d["mod"] or ""
         if self.mod and self.mod not in self.mod_names():
             self.mod = ""
         save_conf({"disc": self.disc, "mods": self.mods, "mod": self.mod})
+        if self.mod and self.mod != old:
+            self.adopt()
         return self.state()
+
+    def adopt(self):
+        """As the window kit on picking a mod: the mod's files its work folder lacks come in as edited."""
+        try:
+            n = modkit.adopt_mod(self.disc, self.mods, self.mod, self.work())
+            if n:
+                self.say("%d file(s) of %s copied into its work folder; they show as edited and go back on Build.\n" % (n, self.mod))
+        except Exception as ex:  # noqa: BLE001
+            self.say("Could not copy %s's files into the work folder: %s\n" % (self.mod, ex), "err")
 
     def say(self, text, kind="out"):
         with self.cond:
@@ -243,6 +266,39 @@ class Kit:
     # ---- the page's actions: name -> f(kit, body) -> JSON
     def act_check(self, d):
         return {"ok": self.run("Checking...", ["check"] + self.paths())}
+
+    def act_build(self, d):
+        if not self.mod:
+            return {"error": "Pick or create a mod first (\"Mod\" at the top)."}
+        return {"ok": self.run("Building %s..." % self.mod, ["pack", self.mod, "--work", self.work()] + self.paths(),
+                               after=lambda: self.say("Done. Start the game: the log shows a [mods] line for each file and texture "
+                                                      "of the mod.\n"))}
+
+    def act_new_mod(self, d):
+        """{"name"} -> the mod made (or picked, when it exists) and selected; {"error"} when the name does not do."""
+        n = (d.get("name") or "").strip()
+        err = modkit.new_mod_name_error(n)
+        if err:
+            return {"error": "\"%s\": %s." % (n, err)}
+        try:
+            existed = os.path.isdir(os.path.join(self.mods, n))
+            os.makedirs(os.path.join(self.mods, n), exist_ok=True)
+            os.makedirs(modkit.work_dir(self.mods, n), exist_ok=True)
+        except OSError as ex:
+            return {"error": "Could not create mod %s: %s" % (n, ex)}
+        self.say("Mod %s %s (work folder: %s)\n" % (n, "already exists, selected" if existed else "created", modkit.work_dir(self.mods, n)))
+        return {"state": self.set_conf({"mod": n})}
+
+    def act_open(self, d):
+        """{"what": "mods" | "work"}: the folder in the system's file manager."""
+        p = self.mods if d.get("what") == "mods" else self.work()
+        if not p:
+            return {"error": "Pick or create a mod first (\"Mod\" at the top)."}
+        try:
+            open_path(p)
+        except OSError as ex:
+            return {"error": str(ex)}
+        return {"ok": True}
 
     def act_pick(self, d):
         r = self.dialogs.ask(d.get("kind", "file"), d.get("title", ""), d.get("initial", ""), d.get("types"))

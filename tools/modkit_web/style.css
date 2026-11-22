@@ -36,5 +36,12 @@ footer { height: var(--log-h); display: flex; gap: 10px; padding: 4px 14px 10px;
 #log .err { color: var(--err); }
 #log .warn { color: var(--warn); }
 
+#modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(10, 11, 14, .6); z-index: 40; }
+#modal .box { min-width: 420px; max-width: 640px; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px; }
+#modal h3 { margin: 0 0 10px; font-size: 16px; }
+#modal p { margin: 0 0 10px; color: #b9bcc4; }
+#modal input[type=text] { width: 100%; }
+#modal .msg { min-height: 1.4em; margin: 6px 0 10px; color: var(--err); font-size: 13px; }
+#modal .buttons { display: flex; gap: 8px; justify-content: flex-end; }
 #gone { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(20, 21, 25, .92);
         font-size: 18px; z-index: 50; }
