@@ -26,8 +26,25 @@ const ext = rel => (rel.match(/\.[^./]+$/) || [''])[0].toLowerCase();
 const STATES = {   // the state column's hint
   original: 'As it is on the disc: Build leaves it out',
   edited: 'Changed since it was extracted: the next Build sends it to the mod',
-  'work file': 'Stays in the work folder: Build does not send it to the game',
+  source: 'Stays in the work folder: Build does not send it to the game',
 };
+// the sections of a group's files (the server's "section"): key, heading, what happens to them. The game files start closed.
+const SECTIONS = [
+  ['edit', 'Textures and sounds', 'edit these; Build sends the ones you changed'],
+  ['game', 'Game files', "in the game's format, made or copied by the kit; Build sends the changed ones as they are"],
+  ['source', 'Sources', 'for editors (3D models, image projects); they stay in the work folder'],
+];
+const secState = new Map();   // "group|section" -> open
+const secOpen = (gk, k) => secState.has(gk + '|' + k) ? secState.get(gk + '|' + k) : k !== 'game';
+function secHead(gk, k, title, hint, files, shown) {
+  const h = el('div', 'sec ' + k);
+  const a = el('span', 'arrow', shown ? '▼' : '▶');
+  const ne = files.filter(f => f.state === 'edited').length;
+  h.append(a, el('span', 'stitle', title), el('span', 'scount', files.length + (ne ? ' · ' + ne + ' edited' : '')), el('span', 'shint', hint));
+  h.title = title + ': ' + hint;
+  h.onclick = () => { secState.set(gk + '|' + k, !shown); render(); };
+  return h;
+}
 const TAGS = { skin: 'Skin', monster: 'Monster', costume: 'Costume', level: 'Level', sounds: 'Sounds', music: 'Music', screen: 'Screen', files: 'Files' };
 const ICONS = { sounds: 'sound', music: 'music', screen: 'screen', level: 'level' };
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -138,12 +155,21 @@ function render() {
     d.append(el('span', 'chip ' + (g.tag || 'files'), TAGS[g.tag] || 'Files'), more);
     box.appendChild(d);
     if (!open.has(g.key)) continue;
-    for (const f of g.files) {
+    const secs = SECTIONS.filter(([k]) => g.files.some(f => (f.section || 'edit') === k));
+    const items = [];   // headings and files, in order
+    for (const [k, title, hint] of secs) {   // one section alone: no heading
+      const fs = g.files.filter(f => (f.section || 'edit') === k);
+      const shown = secs.length < 2 || secOpen(g.key, k);
+      if (secs.length > 1) items.push(secHead(g.key, k, title, hint, fs, shown));
+      if (shown) items.push(...fs);
+    }
+    for (const f of items) {
+      if (f instanceof HTMLElement) { box.appendChild(f); continue; }
       rows.push({ id: f.rel, group: g, file: f });
       const r = document.createElement('div');
       r.className = 'row' + (sel.has(f.rel) ? ' sel' : '') + (f.state === 'edited' ? ' edited' : '');
       r.dataset.id = f.rel;
-      r.style.paddingLeft = '28px';
+      r.style.paddingLeft = '40px';
       let th;
       if (ext(f.rel) === '.png') {
         th = document.createElement('img');

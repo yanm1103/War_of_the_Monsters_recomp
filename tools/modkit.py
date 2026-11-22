@@ -43,7 +43,7 @@ O que cada tipo vira:
   <banco>_sNNN_aK.wav (feito a mao) troca so a K-esima amostra do som e mantem as camadas dele.
 - Malha e animacoes (skin ou custom) -> <PREFIXO><traje>.glb (tools/monglb.py --edit, precisa do numpy); voltam pelo
   tools/ngpmesh.py (malha) e tools/ngpanim.py (animacoes) como .NGP + .PTR, remontados do traje do disco com os dois .glb
-  importados (.blender.json na pasta). O pack nao leva .glb/.blend (MESH_SRC).
+  importados (.blender.json na pasta). O pack nao leva .glb/.blend nem projetos de editor de imagem (WORK_SRC).
 - Esqueleto proprio (custom): um .glb com armature, malha, acoes a<id> e localizadores -> .NGP/.PTR/.TEX/.RTX e os PNGs das
   texturas novas, montados sobre o traje base do disco (tools/ngprig.py); depois dele o mesh/anim import recusam esse custom.
 O pack so leva o que mudou desde o export (sha1 em modkit.json na pasta de trabalho). Nada do jogo vai para o repo: o kit le o
@@ -73,6 +73,7 @@ TEX_DIRS = ("LVL", "MON", "SHELL")
 PNG_RE = re.compile(r"^(.+?)(_rtx)?_t(\d+)(?:_sempaleta)?\.png$", re.I)   # _sempaleta: o export nao achou a paleta (cinza)
 BNK_RE = re.compile(r"^(.+)_s(\d+)(?:_a(\d+))?\.wav$", re.I)   # _aK: so a K-esima amostra de um som de camadas
 MESH_SRC = (".glb", ".gltf", ".blend", ".blend1")   # fonte da malha na pasta de trabalho (mesh export): o pack nao leva
+WORK_SRC = MESH_SRC + (".psd", ".xcf", ".kra", ".pdn")   # fontes na pasta de trabalho (malha, projetos de editor de imagem): o pack nao leva
 
 
 def sha1(path):
@@ -530,7 +531,7 @@ def pack(disc, work, mods, mod, inject=False):
         for n in files:
             p = os.path.join(root, n)
             rel = os.path.relpath(p, work).replace("\\", "/")
-            if n.endswith(".json") or n.startswith(".") or n.lower().endswith(MESH_SRC):
+            if n.endswith(".json") or n.startswith(".") or n.lower().endswith(WORK_SRC):
                 continue
             old = state["files"].get(rel, {}).get("sha1")
             if old == sha1(p):

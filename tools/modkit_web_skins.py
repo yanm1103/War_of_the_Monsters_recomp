@@ -1,6 +1,6 @@
 """Skins in the mod kit page (tools/modkit_web.py), as the window kit makes them: New skin..., Turn into skin..., the skin's
 properties (name, base costume, CPUs), duplicate and delete; the costumes' portraits for the base buttons; and the mesh row
-that skins and custom monsters share (Export to Blender, Check model..., Import mesh..., Import animations...)."""
+that skins and custom monsters share (Export 3D model, Check model..., Import mesh..., Import animations...)."""
 import json
 import os
 import tempfile
@@ -213,7 +213,7 @@ class SkinsMixin:
         if rec.get("anim_ids"):
             txt += "; animations changed: %s" % ", ".join(rec["anim_ids"])
         if glb:
-            txt += "; for Blender: %s" % ", ".join(glb)
+            txt += "; sources: %s" % ", ".join(glb)
         out = {"text": txt}
         if kind == "monster" and self.mod:
             r = modkit.rigged_record(self.work(), self.mods, self.mod, tid)
@@ -234,7 +234,7 @@ class SkinsMixin:
     def act_mesh_export(self, d):
         kind, tid = d["kind"], d["tid"]
         disc, work, mods, mod = self.disc, self.work(), self.mods, self.mod
-        return {"ok": self.run_fn("Exporting %s for Blender (mesh and animations)..." % tid,
+        return {"ok": self.run_fn("Exporting %s as a 3D model (.glb: mesh and animations)..." % tid,
                                   lambda: modkit.mesh_export(disc, work, mods, mod, kind, tid))}
 
     def act_mesh_check(self, d):

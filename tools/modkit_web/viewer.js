@@ -81,7 +81,12 @@ function size() {
 // game = the model is in the game's axes (an export of the kit: its front is glTF -Z, the game's +Y); otherwise the glTF
 // convention (a Blender export faces +Z). The camera stands on the front's side, 35 degrees off to its left.
 function frame(obj, game) {
-  const b = new THREE.Box3().setFromObject(obj);
+  // measured vertex by vertex with the bones applied: a skinned model whose scale is in its armature (an import from another
+  // program) has a mesh box far from what is drawn
+  obj.updateMatrixWorld(true);
+  obj.traverse(o => { if (o.isSkinnedMesh) o.skeleton.update(); });
+  let b = new THREE.Box3().setFromObject(obj, true);
+  if (b.isEmpty()) b = new THREE.Box3().setFromObject(obj);
   const c = b.getCenter(new THREE.Vector3()), s = b.getSize(new THREE.Vector3());
   obj.position.sub(new THREE.Vector3(c.x, b.min.y, c.z));   // on the ground, in the middle
   const H = Math.max(s.y, s.x * 0.6, s.z * 0.6, 1e-3);

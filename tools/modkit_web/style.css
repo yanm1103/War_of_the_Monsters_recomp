@@ -394,9 +394,23 @@ body.dragy, body.dragy * { cursor: row-resize !important; user-select: none; }
                      border: 1px solid var(--line2); background: rgba(255, 255, 255, .04); color: var(--dim); image-rendering: auto; }
 .thumb.ftype svg { width: 19px; height: 19px; flex: none; }
 .thumb.ftype span { font: 600 7px/1 var(--ui); letter-spacing: 0; text-transform: uppercase; }
-.thumb.ftype.model, .thumb.ftype.blender { color: var(--orange2); border-color: rgba(240, 138, 44, .35); background: rgba(240, 138, 44, .07); }
+.thumb.ftype.model { color: var(--orange2); border-color: rgba(240, 138, 44, .35); background: rgba(240, 138, 44, .07); }
 .thumb.ftype.texture { color: #8fd0ff; border-color: rgba(90, 170, 255, .35); background: rgba(90, 170, 255, .07); }
 .thumb.ftype.sound, .thumb.ftype.music { color: #b9a2ff; border-color: rgba(150, 120, 255, .35); background: rgba(150, 120, 255, .07); }
 .thumb.ftype.stats { color: #9fe39f; border-color: rgba(90, 200, 90, .35); background: rgba(90, 200, 90, .07); }
 .thumb.ftype.ai { color: var(--yellow); border-color: rgba(232, 197, 58, .35); background: rgba(232, 197, 58, .07); }
 .work .st[title] { cursor: help; }
+.thumb.ftype.source { color: #cfcbc2; border: 1px dashed rgba(255, 255, 255, .35); background: transparent; }
+.work .row .st { white-space: nowrap; }
+
+/* the sections inside an open group (work.js SECTIONS): what you edit, the game's files, the sources */
+.sec { display: flex; align-items: center; gap: 8px; padding: 6px 10px 4px 26px; cursor: pointer; user-select: none; white-space: nowrap;
+       border-top: 1px solid var(--line); overflow: hidden; }
+.sec:hover { background: rgba(255, 255, 255, .04); }
+.sec .arrow { width: 14px; flex: none; text-align: center; color: var(--orange); font-size: 9px; }
+.sec .stitle { font: 600 11.5px var(--ui); letter-spacing: .2em; text-transform: uppercase; color: var(--orange2); flex: none; }
+.sec.game .stitle { color: #8fd0ff; }
+.sec.source .stitle { color: #cfcbc2; }
+.sec .scount { font: 600 10.5px var(--ui); color: var(--dim); flex: none; }
+.sec .shint { font: 12px var(--text); color: var(--dim); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.split2:has(#preview.paneled) .sec .shint { display: none; }

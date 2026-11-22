@@ -70,7 +70,7 @@ starting points (**New skin**, **New monster**, **From the disc**), and the same
    file names); Ctrl/Shift pick several; double click or **Extract to my mod**.
 2. **Edit <mod>** (right): one group per disc file, skin or custom monster, each with its picture, name, kind (Skin, Monster,
    Costume, Level, Sounds...), file count and edited count; the **⋯** button on a group opens the same menu as the right click. After
-   extracting, the new group opens and the others close. Thumbnails (a file without one shows an icon and a word for its kind: Model, Blender, Textures, Sound, Voice, Stats, AI), size and state ("edited" = changed since extraction, it goes in the next Build; "work file" = a `.glb`/`.gltf`/`.blend` for Blender, which stays in the work folder; clicking a file says what it is). A texture the export could not
+   extracting, the new group opens and the others close. Thumbnails (a file without one shows an icon and a word for its kind: Model, Source, Textures, Sound, Voice, Stats, AI), size and state ("edited" = changed since extraction, it goes in the next Build; "source" = a `.glb`/`.gltf`/`.blend` or an image editor's project (`.psd`, `.xcf`, `.kra`, `.pdn`), which stays in the work folder and Build skips; clicking a file says what it is). An open group with more than one kind of file splits them under three headings: **Textures and sounds** (what you edit), **Game files** (already in the game's format, made or copied by the kit; closed at first) and **Sources**. A texture the export could not
    color comes out gray with `_sempaleta` in the name; `pack` writes it without the suffix (the game accepts both). Preview
    of the image (with a checkerboard behind the alpha) or the sound's waveform. A sound plays in the page itself on click ("play sounds on click"
    turns it off) or on double click; "Stop" stops it. Double clicking a texture opens it in the editor chosen in **Editors...** (one program per
@@ -102,7 +102,7 @@ and `skin.json` without `base`), *Base costume* (0 to 3, with each costume's por
 custom the default is the `costume` of `monster.json`), *Name*, *Id* (derived from the name, editable) and "CPUs may pick this skin". It creates the
 `skin.json` in `mods/<mod>/skins/<id>/` and extracts the base costume's textures to the work folder. In the list, the skin is its own group
 at the top (its name, "Skin for <monster>" and the base costume's portrait); when selected, the preview becomes the properties panel (Name, Base, CPUs may pick,
-*Mesh* with **Export to Blender**, **Import mesh...** and **Import animations...** (see "Mesh and animations from Blender" below), **Save** rewrites `skin.json`). Right click on the group: **Duplicate skin...** (copies the skin in the mod and in the work folder with the new
+*Mesh* with **Export 3D model**, **Import mesh...** and **Import animations...** (see "Mesh and animations from a 3D editor" below), **Save** rewrites `skin.json`). Right click on the group: **Duplicate skin...** (copies the skin in the mod and in the work folder with the new
 id) and **Delete skin**. With a playable monster costume group selected (e.g. "MON/SHOGUN3"), **Turn into skin...** (under its 3D view,
 in the header and on right click) creates the skin with that monster and costume and moves the group's PNGs to its folder, so the original costume stays untouched in Build; if the mod already has
 those PNGs packed in `MON/`, the window warns and offers to delete them.
@@ -118,7 +118,7 @@ preview becomes the properties panel: Name, Camera, Narrator, *Rules* (the `kind
 `portrait.png` and writes the right `portraitTex` of the costume's `.RTX`; **Remove** goes back to the costume's) and *Look* (how many textures and the own
 model; **Import model files...** copies `.NGP` + `.PTR`, and optional `.TEX`/`.RTX`, to `files/`; **Extract stats** extracts the base
 type's `.CHR` and `.AIC` files to `files/`, where the edited ones become the monster's own; **Extract sounds** extracts the base type's
-sound bank as WAVs to `files/`, and on Build the replaced ones make the monster's own bank; **Export to Blender**, **Import mesh...** and
+sound bank as WAVs to `files/`, and on Build the replaced ones make the monster's own bank; **Export 3D model**, **Import mesh...** and
 **Import animations...**, below). **Save** rewrites `monster.json`
 keeping the other keys. Right click on the group: **New skin for this monster...**, **Duplicate monster...** and **Delete monster** (its
 skins stay and the log warns). On an extracted costume group (playable or boss, e.g. "MON/ASSBOSS1"), right click has **Turn into
@@ -128,16 +128,16 @@ custom monster...**, which moves the group's PNGs to the new monster.
 the file first: it names the import that takes it and lists what would go wrong. Then:
 - *a model downloaded with its own skeleton and weights* (`.glb`, `.gltf`, `.dae`): a custom monster, **Import rigged model...**;
   it keeps the model's skeleton and gives it the base type's animations;
-- *a mesh you weight yourself in Blender, on the monster's own bones*: **Export to Blender**, weight the new mesh to the named
+- *a mesh you weight yourself in Blender, on the monster's own bones*: **Export 3D model**, weight the new mesh to the named
   bones (`L_Hand_bone1`, ...), then **Import mesh...**; on a custom monster a new body goes on through **Import rig...**, which
   the kit offers;
-- *the monster's own pieces reshaped, or its animations edited*: **Export to Blender**, **Import mesh...** and **Import
+- *the monster's own pieces reshaped, or its animations edited*: **Export 3D model**, **Import mesh...** and **Import
   animations...** (a skin or a custom);
 - *a skeleton and animations made from scratch*: **Import rig...** (a custom).
 
-**Mesh and animations from Blender.** A skin or a custom monster can have its own mesh and its own versions of the base type's
+**Mesh and animations from a 3D editor.** A skin or a custom monster can have its own mesh and its own versions of the base type's
 animations, on the base type's skeleton:
-1. **Export to Blender** writes the base costume as `<PREFIX><costume>.glb` (e.g. `LIZARD1.glb`) in the work folder: the skin's
+1. **Export 3D model** writes the base costume as `<PREFIX><costume>.glb` (e.g. `LIZARD1.glb`) in the work folder: the skin's
    folder, or `monsters/<id>/files/` for a custom. It holds the meshes (`obj_<address>`), every transform of the skeleton as a bone
    (`bone<N>` for the ones the mesh is weighted to, with the body part in front when the kit can tell it: `L_Hand_bone1`,
    `R_Thigh_bone18`, `Spine1_bone11`, `Head_bone0`, `Tail3_bone24`; `xf_`, `st_` and `sc_` for the others: helpers, locators,
@@ -213,7 +213,7 @@ way. The import writes `.NGP`, `.PTR`, `.TEX`, `.RTX` and the new PNGs to `files
 the `.NGP` goes back to the base type's skeleton. A part that scales, appears or disappears in some action (a growing claw, a
 weapon shown only in one move) has to be a rigid mesh parented to a bone: scaling a bone does not reach the weighted meshes.
 
-**Check model...** (next to **Export to Blender**; `modkit.py skin|monster mesh check <mod> <id> <model.glb>`) reads a `.glb` before
+**Check model...** (next to **Export 3D model**; `modkit.py skin|monster mesh check <mod> <id> <model.glb>`) reads a `.glb` before
 any import and writes nothing: a list of `OK`, `WARNING` and `ERROR` lines in the log (`tools/meshcheck.py`). It says which import
 takes the file (**Import mesh...** when every skinned mesh is named after a piece of the monster, `obj_<address>`; **Import
 rig...** otherwise, and always for a custom that already has its own skeleton) and then runs that import into a scratch folder,
@@ -262,7 +262,7 @@ monster rigged <mod> <id> --adjust`) opens the page again straight on **Match th
 imports the same model again with the changes. The steps below are the same by hand.
 
 **A rigged model from elsewhere.** A model that already has a skeleton (a skinned mesh in a Collada `.dae`, a `.glb` or a
-`.gltf`) can take the base type's animations instead of new ones: export the base costume (**Export to Blender**, e.g.
+`.gltf`) can take the base type's animations instead of new ones: export the base costume (**Export 3D model**, e.g.
 `LIZARD0.glb`), write a bone map (which model joint follows which base bone, the base bone by its full name, its label such as
 `L_Hand` or its `bone<N>`; `tools/rigmaps/biped_togera.json` covers the 3ds Max Biped, `Bip01_*`, on Togera) and run
 `python tools/retarget.py LIZARD0.glb model.glb map.json rig.glb`; then **Import rig...** with `rig.glb`. With `auto` in place
@@ -383,8 +383,8 @@ A skin is a folder in `mods/<mod>/skins/<folder>/` with a `skin.json`:
   - **`.TEX` and/or `.RTX`** (any name, by extension): own textures, with the same texIds as the base (`modkit pack --inject`
     writes them this way).
   - **`.NGP` + `.PTR`** (always both): own model, with the same skeleton and animations as costume 0. A new mesh comes from
-    Blender through **Export to Blender** / **Import mesh...**, and edited animations through **Import animations...**
-    (`skin mesh export|import`, `skin anim import`; "Mesh and animations from Blender").
+    Blender through **Export 3D model** / **Import mesh...**, and edited animations through **Import animations...**
+    (`skin mesh export|import`, `skin anim import`; "Mesh and animations from a 3D editor").
 - The game sees each skin as one more costume of the monster (`MON/SHOGUN4.*`, `SHOGUN5.*`...; numbers assigned on every boot, in
   mod/id order). Same monster and id in two mods: the last in alphabetical order wins. The log says what got in:
   `[mods] skin ultra-v/roxo ("PURPLE ULTRA V", meu_mod) = traje 4 (SHOGUN4); base 3, 2 png`.

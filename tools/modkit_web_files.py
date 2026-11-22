@@ -97,9 +97,11 @@ def file_note(rel):
     if low.endswith(".wav"):
         return "Music or voice (.VPK/.VAG)"
     if low.endswith(modkit.MESH_SRC):
-        return ("Work file: a 3D model for Blender (the Export to Blender file, or a model you imported). It stays in the work "
-                "folder and Build does not send it to the game: the game takes the .NGP made from it. Changes come back through "
-                "the monster's or skin's 3D model tab.")
+        return ("Source: a 3D model for a 3D editor such as Blender (the exported .glb, or a model you imported). It stays in "
+                "the work folder and Build does not send it to the game: the game takes the .NGP made from it. Changes come back "
+                "through the monster's or skin's 3D model tab.")
+    if low.endswith(modkit.WORK_SRC):
+        return "Source: an image editor's project. It stays in the work folder and Build does not send it to the game."
     notes = {".ngp": "The 3D model in the game's format (mesh, skeleton, animations). Build sends it to the mod.",
              ".ptr": "Goes with the .NGP of the same name: the list the game uses to load that model. Build sends it to the mod.",
              ".tex": "The game's texture file for the model of the same name. The textures to edit are its PNGs.",
@@ -109,6 +111,14 @@ def file_note(rel):
              ".bnk": "A sound bank in the game's format, built from the WAVs.",
              ".mp3": "A narrator line, said when the monster is picked."}
     return notes.get(os.path.splitext(low)[1], "")
+
+
+def file_section(n, src):
+    """Where a work folder file goes in its group: "edit" (textures, sounds and voices: Build sends the edited ones), "game"
+    (files already in the game's format, made or copied by the kit, sent as they are) or "source" (stays in the work folder)."""
+    if src:
+        return "source"
+    return "edit" if n.lower().endswith((".png", ".wav", ".mp3")) else "game"
 
 
 def start_program(exe, p):
@@ -291,7 +301,7 @@ class FilesMixin:
                     continue
                 p = os.path.join(root, n)
                 rel = os.path.relpath(p, work).replace("\\", "/")
-                src = n.lower().endswith(modkit.MESH_SRC)   # the Blender .glb/.blend: stays in the work folder
+                src = n.lower().endswith(modkit.WORK_SRC)   # a source (.glb, .blend, .psd...): stays in the work folder
                 edited = not src and state.get(rel, {}).get("sha1") != modkit.sha1(p)
                 total += 1
                 edited_total += edited
@@ -299,7 +309,7 @@ class FilesMixin:
                     continue
                 groups.setdefault(group_of(rel), []).append({
                     "rel": rel, "name": n, "info": file_info(p), "mtime": int(os.path.getmtime(p)),
-                    "state": "work file" if src else "edited" if edited else "original"})
+                    "state": "source" if src else "edited" if edited else "original", "section": file_section(n, src)})
         out = []
         for key in sorted(groups, key=lambda k: (not k.startswith("monsters/"), not k.startswith("skins/"), k)):
             kind = "monster" if key.startswith("monsters/") else "skin" if key.startswith("skins/") else "file"
@@ -433,7 +443,7 @@ class FilesMixin:
         out = []
         for rel in rels:
             p = self.work_path(rel)
-            if p.lower().endswith(modkit.MESH_SRC):
+            if p.lower().endswith(modkit.WORK_SRC):
                 continue
             old = st.get(rel, {}).get("sha1")
             if not old or not os.path.exists(p) or modkit.sha1(p) != old:

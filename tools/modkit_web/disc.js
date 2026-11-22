@@ -43,9 +43,10 @@ export function icon(kind) {   // a small box with an icon for rows without a pi
 }
 // a work folder file without a thumbnail -> an icon and a word for its kind
 const FILES = {
-  '.ngp': ['cube', 'Model', 'model'], '.glb': ['cube', 'Blender', 'blender'], '.gltf': ['cube', 'Blender', 'blender'],
-  '.blend': ['cube', 'Blender', 'blender'], '.dae': ['cube', 'Model', 'model'], '.ptr': ['link', 'Model', 'model'],
-  '.tex': ['image', 'Textures', 'texture'], '.rtx': ['image', 'Textures', 'texture'], '.psd': ['image', 'Image', 'texture'],
+  '.ngp': ['cube', 'Model', 'model'], '.glb': ['cube', 'Source', 'source'], '.gltf': ['cube', 'Source', 'source'],
+  '.blend': ['cube', 'Source', 'source'], '.dae': ['cube', 'Model', 'model'], '.ptr': ['link', 'Model', 'model'],
+  '.tex': ['image', 'Textures', 'texture'], '.rtx': ['image', 'Textures', 'texture'], '.psd': ['image', 'Source', 'source'], '.xcf': ['image', 'Source', 'source'], '.kra': ['image', 'Source', 'source'],
+  '.pdn': ['image', 'Source', 'source'],
   '.wav': ['note', 'Sound', 'sound'], '.bnk': ['note', 'Sounds', 'sound'], '.vpk': ['wave', 'Music', 'music'],
   '.vag': ['wave', 'Music', 'music'], '.mp3': ['mic', 'Voice', 'music'], '.chr': ['bars', 'Stats', 'stats'], '.aic': ['chip', 'AI', 'ai'],
 };
