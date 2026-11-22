@@ -34,19 +34,16 @@ function groupPic(g) {   // the row's picture: a portrait or a level's picture f
 // ---------------------------------------------------------------- welcome: no mod yet, or a mod with nothing in it
 function card(cls, title, text, art, onclick) {
   const c = el('div', 'card ' + cls);
-  const a = el('div', 'art');
-  for (const x of art) a.appendChild(x);
-  c.append(a, el('div', '', ''));
-  const t = c.lastChild;
+  if (art.length) {   // a picture on top (only New mod has one)
+    const a = el('div', 'art');
+    for (const x of art) a.appendChild(x);
+    c.appendChild(a);
+  }
+  const t = el('div');
+  c.appendChild(t);
   t.append(el('h4', '', title), el('p', '', text));
   c.onclick = onclick;
   return c;
-}
-function artImg(src, cls) {
-  const im = el('img', cls || '');
-  im.src = src;
-  im.onerror = () => im.remove();
-  return im;
 }
 const glyph = g => el('span', 'glyph', g);
 function fromDisc() {   // the disc's list: the monsters open, the search box ready
@@ -55,16 +52,15 @@ function fromDisc() {   // the disc's list: the monsters open, the search box re
   f.focus();
   f.select();
 }
-export function startCards(compact) {   // New skin, New monster, From the disc
-  const ok = kit.state && kit.state.disc_ok;
+export function startCards() {   // New skin, New monster, From the disc
   const box = el('div', 'cards');
   box.append(
     card('c2', 'New skin', 'New colors and textures for one of the monsters, picked as a costume in the game.',
-      ok ? [pic('api/portrait?prefix=MANTIS&k=0', 'files', 'big'), pic('api/portrait?prefix=MANTIS&k=2', 'files', 'big')] : [glyph('✎')], () => kit.actions.newSkin()),
+      [], () => kit.actions.newSkin()),
     card('c1', 'New monster', 'A fighter of its own on a base monster\'s moves: its name, look, 3D model, stats and sounds.',
-      ok ? [artImg('api/art?name=logo-LAVA', 'logo')] : [glyph('✚')], () => kit.actions.newMonster()),
+      [], () => kit.actions.newMonster()),
     card('c3', 'From the disc', 'Any texture or sound of the game: pick it in the list on the left and extract it to edit.',
-      ok && !compact ? [artImg('api/art?name=level-TOKYO')] : [glyph('◀')], fromDisc));
+      [], fromDisc));
   return box;
 }
 function welcome() {
@@ -97,7 +93,7 @@ function welcome() {
     }
     return;
   }
-  w.append(el('h3', '', s.mod + ' is empty'), el('p', '', 'Start with one of these:'), startCards(false));
+  w.append(el('h3', '', s.mod + ' is empty'), el('p', '', 'Start with one of these:'), startCards());
 }
 
 function render() {
@@ -274,7 +270,7 @@ async function preview() {
   if (!files.length) {
     if (kit.state && kit.state.mod && data.groups.length) {
       const st = el('div', 'pvStart');
-      st.append(el('h4', '', 'What next?'), startCards(true));
+      st.append(el('h4', '', 'What next?'), startCards());
       body.appendChild(st);
     }
     label.textContent = kit.state && kit.state.mod ? 'Or pick something in the list. Double-click opens a texture in its editor ("Editors...") and plays a sound.' : '';
