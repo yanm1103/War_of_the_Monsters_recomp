@@ -5,7 +5,7 @@ Pedido do dono (2026-11-22): a interface inteira do Mod kit numa janela de naveg
 Branch: `ste-monstros`. Depois, se o dono preferir, uma branch própria (`kit-web`) saindo dela.
 
 ## Estado
-- **Etapa atual:** 4 (arquivos do disco e do mod). Etapa 3 feita e testada por CDP (`scratchpad/cdp_web3.py`: New mod com nome ruim e bom, botões do mod desligados sem mod, Build mod com log). Etapa 2 feita e testada por CDP (`scratchpad/cdp_web2.py`: estado, troca de mod, Check com log por SSE, segunda cópia abre aba na mesma porta, servidor sai ~20 s depois de fechar a aba). A etapa 1 foi conferida pelo dono na página (animações certas); os pés tortos no jogo eram o build antigo em `mods/` (Adjust bones regrava só a pasta de trabalho; falta o Build mod).
+- **Etapa atual:** 5 (skins). Etapa 4 feita e testada por CDP (`scratchpad/cdp_web4.py`: busca no disco, Extract de um traje e de um banco de som, grupos e miniaturas, prévia da textura e da forma de onda, Replace com o aviso de proporção, menu do botão direito, Revert pela tarefa, Remove com a confirmação da página). Etapa 3 feita e testada por CDP (`scratchpad/cdp_web3.py`: New mod com nome ruim e bom, botões do mod desligados sem mod, Build mod com log). Etapa 2 feita e testada por CDP (`scratchpad/cdp_web2.py`: estado, troca de mod, Check com log por SSE, segunda cópia abre aba na mesma porta, servidor sai ~20 s depois de fechar a aba). A etapa 1 foi conferida pelo dono na página (animações certas); os pés tortos no jogo eram o build antigo em `mods/` (Adjust bones regrava só a pasta de trabalho; falta o Build mod).
 - **Como abrir o kit novo:** `python tools/modkit_gui.py --web` (ou `tools/modkit_web.py`; `--no-browser`, `--port N`, `--conf ARQ` para testes não mexerem na config do dono).
 - **Feito antes deste plano:**
   - a página de ossos (`tools/orientpage.html` / `orientpage.py`), com ossos estilo Blender, slider e campo por eixo, giro líquido na frente;
@@ -73,13 +73,14 @@ Cada etapa termina com: teste pela página num Edge sem janela via CDP (receita 
 - Feito: `kit.dialog({title, text, fields, ok})` é o diálogo da página (o `ok` devolve o erro para mostrar ou nada para fechar); trocar de mod copia para a pasta de trabalho o que o mod tem e ela não (`adopt_mod`, como no Tk). "Open mods/work folder" não foi clicado no teste (abriria o Explorer na tela do dono).
 
 ### 4. Arquivos do disco e do mod
-- [ ] **Árvore:** a árvore do disco e da pasta de trabalho (`fill_disc`, `refresh_work`), com os grupos e as skins.
-- [ ] **Ações nos arquivos:**
+- [x] **Árvore:** a árvore do disco e da pasta de trabalho (`fill_disc`, `refresh_work`), com os grupos e as skins.
+- [x] **Ações nos arquivos:**
   - export e replace;
   - revert e remove;
   - abrir com o editor configurado, mostrar na pasta;
   - salvar numa pasta.
-- [ ] **Prévia:** imagem com o tamanho original; som com forma de onda e tocar/parar (no navegador, por `<audio>`, em vez do player do Tk).
+- [x] **Prévia:** imagem com o tamanho original; som com forma de onda e tocar/parar (no navegador, por `<audio>`, em vez do player do Tk).
+- Feito: `tools/modkit_web_files.py` (`FilesMixin` do `Kit`: `act_disc`, `act_work`, `act_extract`, `act_replace`, `act_save_to`, `act_revert`, `act_remove`, `act_open_files`, `act_editors`, `act_reveal`; GET `/api/file?rel=` serve o arquivo da pasta de trabalho) e na página `disc.js`, `work.js`, `select.js` (seleção como no Explorer). As tabelas de nomes (`MONSTERS`, `LEVELS`...) estão copiadas do `modkit_gui.py` até o Tk sair. Para as próximas etapas: `kit.work.panels[kind] = (grupo, caixa, legenda) => ...` põe um painel no lugar da prévia quando um grupo de skin (`skin`) ou de custom (`monster`) é escolhido; `kit.work.menus.push((ctx, add, sep) => ...)` acrescenta itens ao menu do botão direito.
 
 ### 5. Skins
 - [ ] nova, duplicar e apagar skin; virar skin (`turn_into_skin`); painel de propriedades; retratos;
@@ -109,4 +110,4 @@ Cada etapa termina com: teste pela página num Edge sem janela via CDP (receita 
 Decididas pelo dono (goal de 2026-11-22): as prévias 3D novas entram (skin, custom e arquivo de modelo 3D selecionado mostram o modelo); o Tk sai de vez na etapa 8, sem `--tk`.
 
 ## Diário
-- 2026-11-22: plano escrito. Goal do dono: prévias 3D entram quando um monstro ou um arquivo de modelo 3D é selecionado (etapas 5 e 7 decididas); o Tk sai de vez no fim. Etapa 1 feita (barra de animação na página de ossos); o dono viu as animações certas na página e os pés tortos no jogo vinham do build antigo em `mods/` (o `.NGP` da pasta de trabalho, com o Around de 30°, era mais novo). Etapa 2 feita (servidor e casca). Etapa 3 feita (mods).
+- 2026-11-22: plano escrito. Goal do dono: prévias 3D entram quando um monstro ou um arquivo de modelo 3D é selecionado (etapas 5 e 7 decididas); o Tk sai de vez no fim. Etapa 1 feita (barra de animação na página de ossos); o dono viu as animações certas na página e os pés tortos no jogo vinham do build antigo em `mods/` (o `.NGP` da pasta de trabalho, com o Around de 30°, era mais novo). Etapa 2 feita (servidor e casca). Etapa 3 feita (mods). Etapa 4 feita (listas do disco e da pasta de trabalho).

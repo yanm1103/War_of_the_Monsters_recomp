@@ -21,8 +21,31 @@
   <button id="quit" title="Close the mod kit">Quit</button>
 </header>
 <main id="main">
-  <section id="discPane"><h2>Game disc</h2><div class="body" id="discBody"></div></section>
-  <section id="workPane"><h2>Work folder</h2><div class="body" id="workBody"></div></section>
+  <section id="discPane">
+    <h2>1. Pick from the disc</h2>
+    <div class="bar"><input id="discFilter" placeholder="Search" spellcheck="false"></div>
+    <div class="hint">Ctrl or Shift to pick several; double-click extracts</div>
+    <div class="tree" id="discTree" tabindex="0"></div>
+    <div class="bar end"><button class="task needmod primary" id="extract">Extract selected &raquo;</button></div>
+  </section>
+  <section id="workPane">
+    <h2><span id="workHead">2. Edit the work folder</span><span class="hint" id="workHint"></span>
+      <span class="grow"></span><span id="workTools"></span>
+      <button id="refreshWork">Refresh</button><label class="check"><input type="checkbox" id="onlyEdited"> edited only</label></h2>
+    <div class="split2">
+      <div class="tree work" id="workTree" tabindex="0"></div>
+      <div class="preview" id="preview">
+        <div class="pvBody" id="pvBody"></div>
+        <div class="pvLabel" id="pvLabel"></div>
+        <div class="bar">
+          <button id="pvOpen">Open in editor</button><button id="pvReveal">Show in folder</button>
+          <button id="pvPlay">Play</button><button id="pvStop">Stop</button><span class="grow"></span><button id="pvRemove">Remove</button>
+        </div>
+        <div class="bar"><label class="check"><input type="checkbox" id="autoplay"> play sounds on click</label><span class="grow"></span>
+          <button id="editorsBtn">Editors&hellip;</button></div>
+      </div>
+    </div>
+  </section>
 </main>
 <div id="split" title="Drag to resize the log"></div>
 <footer id="foot">
@@ -31,9 +54,12 @@
     <button class="task" id="check">Check mods</button>
     <button id="openMods">Open mods folder</button>
     <button class="needmod" id="openWork">Open work folder</button>
+    <div class="status" id="status"></div>
   </div>
   <pre id="log"></pre>
 </footer>
+<div id="menu"></div>
+<audio id="player"></audio>
 <div id="modal"><form class="box" id="modalBox"></form></div>
 <div id="gone"><div>The mod kit was closed. Start it again to go on.</div></div>
 <script type="module" src="app.js"></script>

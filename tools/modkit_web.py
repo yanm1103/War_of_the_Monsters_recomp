@@ -31,6 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import modkit  # noqa: E402
+from modkit_web_files import FilesMixin  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONF = os.path.join(modkit.game_data_dir(), "modkit.json") if modkit.FROZEN else os.path.join(os.path.expanduser("~"), ".wotm_modkit.json")
@@ -163,7 +164,7 @@ class Dialogs:
 
 
 # ------------------------------------------------------------------ the kit
-class Kit:
+class Kit(FilesMixin):
     """The state the page sees and the tasks it starts."""
 
     def __init__(self):
@@ -183,6 +184,19 @@ class Kit:
         self.last_seen = None          # last time a tab was open
         self.started = time.time()
 
+    # config and the system, for the parts of the kit in other files
+    @staticmethod
+    def conf_get():
+        return load_conf()
+
+    @staticmethod
+    def conf_save(d):
+        save_conf(d)
+
+    @staticmethod
+    def open_path(p):
+        open_path(p)
+
     def mod_names(self):
         try:
             return sorted((n for n in os.listdir(self.mods) if os.path.isdir(os.path.join(self.mods, n)) and valid_mod_name(n)),
@@ -194,8 +208,12 @@ class Kit:
         return modkit.work_dir(self.mods, self.mod) if self.mod else None
 
     def state(self):
+        c = load_conf()
         return {"disc": self.disc, "disc_ok": bool(modkit.disc_ok(self.disc)), "mods": self.mods, "mods_ok": os.path.isdir(self.mods),
-                "mod": self.mod, "mod_list": self.mod_names(), "work": self.work(), "busy": self.busy}
+                "mod": self.mod, "mod_list": self.mod_names(), "work": self.work(), "busy": self.busy,
+                "autoplay": c.get("autoplay", True), "editors": c.get("editors") or {},
+                "replace_dir": c.get("replace_dir") or c.get("save_dir") or os.path.expanduser("~"),
+                "save_dir": c.get("save_dir") or os.path.expanduser("~")}
 
     def set_conf(self, d):
         if "disc" in d:
@@ -205,6 +223,8 @@ class Kit:
         old = self.mod
         if "mod" in d:
             self.mod = d["mod"] or ""
+        if "autoplay" in d:
+            save_conf({"autoplay": bool(d["autoplay"])})
         if self.mod and self.mod not in self.mod_names():
             self.mod = ""
         save_conf({"disc": self.disc, "mods": self.mods, "mod": self.mod})
@@ -341,6 +361,17 @@ def make_handler(kit, page_dir, vendor_dir, server_ref):
                 return self._json(kit.state())
             if p == "/api/log":
                 return self._events()
+            if p == "/api/file":   # a work folder file (thumbnails, preview, sounds)
+                from urllib.parse import parse_qs
+                rel = (parse_qs(self.path.split("?", 1)[1]).get("rel") or [""])[0] if "?" in self.path else ""
+                try:
+                    f = kit.work_path(rel)
+                except SystemExit:
+                    return self._send(404, b"not found", "text/plain")
+                if not os.path.isfile(f):
+                    return self._send(404, b"not found", "text/plain")
+                with open(f, "rb") as fh:
+                    return self._send(200, fh.read(), TYPES.get(os.path.splitext(f)[1].lower(), "application/octet-stream"))
             if p.startswith("/vendor/"):
                 return self._file(vendor_dir, p[len("/vendor/"):])
             return self._file(page_dir, "index.html" if p == "/" else p)

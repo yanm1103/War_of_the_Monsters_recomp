@@ -1,8 +1,12 @@
 // The mod kit's page (tools/modkit_web.py serves it): the paths and the mod on top, the panes, the tasks and the log.
-// window.kit holds what the other parts of the page (and the tests driving it) use: api(), state, onState(), pick(), say().
+// window.kit holds what the other parts of the page (and the tests driving it) use: api(), state, onState(), pick(), say(),
+// dialog(), confirm(), run(), onTaskDone(). The lists are in disc.js and work.js.
+import { initDisc } from './disc.js';
+import { initWork } from './work.js';
 
 const $ = id => document.getElementById(id);
 const listeners = [];
+const doneListeners = [];
 const kit = window.kit = {
   state: null,
   async api(path, body) {   // GET when there is no body
@@ -10,12 +14,15 @@ const kit = window.kit = {
     return r.json();
   },
   onState(f) { listeners.push(f); if (kit.state) f(kit.state); },
+  onTaskDone(f) { doneListeners.push(f); },   // after each task (the lists come again)
   setState(s) { kit.state = s; for (const f of listeners) f(s); },
   async pick(kind, title, initial, types) {   // the system's dialog -> a path (or a list for "files"), null when cancelled
     return (await kit.api('do/pick', { kind, title, initial, types })).path;
   },
   say(text, kind) { appendLog(text, kind); },
-  // a dialog in the page: fields [{key, label, value, hint}], ok(values) -> an error text to show (stays open) or nothing (closes);
+  async confirm(title, text, okText) { return (await kit.dialog({ title, text, okText: okText || 'OK' })) !== null; },
+  // a dialog in the page: fields [{key, label, value, hint, pick: {kind, title, types}}] (pick: a "..." button with the system's
+  // dialog), ok(values) -> an error text to show (stays open) or nothing (closes);
   // resolves with the values, or null on Cancel / Escape
   dialog({ title, text, fields = [], okText = 'OK', ok }) {
     return new Promise(resolve => {
@@ -35,7 +42,23 @@ const kit = window.kit = {
         i.value = f.value || '';
         i.placeholder = f.hint || '';
         i.spellcheck = false;
-        l.appendChild(i);
+        if (f.pick) {
+          const row = document.createElement('div');
+          row.className = 'field';
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = '…';
+          b.onclick = async () => { const v = await kit.pick(f.pick.kind || 'file', f.pick.title || '', i.value, f.pick.types); if (v) i.value = v; };
+          row.append(i, b);
+          if (f.clear) {
+            const c = document.createElement('button');
+            c.type = 'button';
+            c.textContent = 'Clear';
+            c.onclick = () => { i.value = ''; };
+            row.appendChild(c);
+          }
+          l.appendChild(row);
+        } else l.appendChild(i);
         box.appendChild(l);
         inputs[f.key] = i;
       }
@@ -136,7 +159,7 @@ events.onmessage = ev => {
   if (kit.state && (it.kind === 'head' || it.kind === 'done')) {
     kit.state.busy = it.busy;
     busy(it.busy);
-    if (it.kind === 'done') refresh();
+    if (it.kind === 'done') { refresh(); for (const f of doneListeners) f(); }
   }
 };
 events.onerror = async () => {   // the server went away (Quit, or closed): say so instead of a dead page
@@ -184,4 +207,6 @@ $('split').addEventListener('pointerdown', ev => {
 });
 
 async function refresh() { kit.setState(await kit.api('state')); }
+initDisc();
+initWork();
 refresh();
