@@ -3,6 +3,9 @@
 // checkerboard, sound as a waveform) and what can be done with the files (open, replace, save, revert, remove).
 // kit.work.panels: other parts of the page register a panel for a group kind (a skin's or a monster's properties).
 import { listSelect } from './select.js';
+import { showModel } from './viewer.js';
+
+const MODEL_EXT = ['.glb', '.gltf', '.dae', '.ngp'];
 
 const $ = id => document.getElementById(id);
 let data = { groups: [] };
@@ -152,8 +155,17 @@ async function preview() {
   const body = $('pvBody'), label = $('pvLabel');
   body.innerHTML = '';
   const g = selectedGroup();
+  $('preview').classList.toggle('paneled', !!(g && panels[g.kind]));   // a panel: the file buttons step aside
   if (g && panels[g.kind]) { panels[g.kind](g, body, label); return; }
   const files = selectedFiles(false), allf = selectedFiles(true);
+  if (g && g.custom_base) {   // a costume of a monster: the model with the folder's textures on it
+    const v = document.createElement('div');
+    v.className = 'v3d';
+    body.appendChild(v);
+    showModel(v, 'api/model.glb?group=' + encodeURIComponent(g.key) + '&t=' + Date.now());
+    label.textContent = g.label + ': ' + allf.length + ' file(s); edited textures show on the model (refresh after saving one). Open the section to pick a file.';
+    return;
+  }
   if (!files.length && allf.length) {
     label.textContent = allf.length + ' file(s) in the selected section. Open it (arrow or double-click) and pick a file; right-click saves or removes the whole section.';
     return;
@@ -181,6 +193,11 @@ async function preview() {
     body.appendChild(ck);
   } else if (ext(f.rel) === '.wav') {
     waveform(fileUrl(f), body);
+  } else if (MODEL_EXT.includes(ext(f.rel))) {   // a 3D file: the model itself
+    const v = document.createElement('div');
+    v.className = 'v3d';
+    body.appendChild(v);
+    showModel(v, 'api/model.glb?rel=' + encodeURIComponent(f.rel) + '&m=' + f.mtime);
   }
   const note = (await kit.api('do/note', { rel: f.rel })).note;
   if (note) text += '\n' + note;

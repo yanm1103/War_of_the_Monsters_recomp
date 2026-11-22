@@ -3,6 +3,7 @@
 // dialog(), confirm(), run(), onTaskDone(). The lists are in disc.js and work.js.
 import { initDisc } from './disc.js';
 import { initWork } from './work.js';
+import { initSkins } from './skins.js';
 
 const $ = id => document.getElementById(id);
 const listeners = [];
@@ -20,6 +21,19 @@ const kit = window.kit = {
     return (await kit.api('do/pick', { kind, title, initial, types })).path;
   },
   say(text, kind) { appendLog(text, kind); },
+  // a dialog built by the caller: fill(box, close) puts its content in the box; close(value) ends it (Escape: null)
+  modal(fill) {
+    return new Promise(resolve => {
+      const box = $('modalBox');
+      box.innerHTML = '';
+      box.onsubmit = e => e.preventDefault();
+      const close = v => { $('modal').style.display = 'none'; document.removeEventListener('keydown', esc); resolve(v); };
+      const esc = e => { if (e.key === 'Escape') close(null); };
+      document.addEventListener('keydown', esc);
+      $('modal').style.display = 'flex';
+      fill(box, close);
+    });
+  },
   async confirm(title, text, okText) { return (await kit.dialog({ title, text, okText: okText || 'OK' })) !== null; },
   // a dialog in the page: fields [{key, label, value, hint, pick: {kind, title, types}}] (pick: a "..." button with the system's
   // dialog), ok(values) -> an error text to show (stays open) or nothing (closes);
@@ -209,4 +223,5 @@ $('split').addEventListener('pointerdown', ev => {
 async function refresh() { kit.setState(await kit.api('state')); }
 initDisc();
 initWork();
+initSkins();
 refresh();

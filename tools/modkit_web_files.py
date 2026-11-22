@@ -242,7 +242,7 @@ class FilesMixin:
         for key in sorted(groups, key=lambda k: (not k.startswith("monsters/"), not k.startswith("skins/"), k)):
             kind = "monster" if key.startswith("monsters/") else "skin" if key.startswith("skins/") else "file"
             out.append({"key": key, "label": self.group_label(key, customs), "kind": kind,
-                        "costume": bool(costume_of_group(key)), "custom_base": bool(costume_of_group(key, bosses=True)),
+                        "costume": bool(costume_of_group(key)), "costume_info": costume_of_group(key, bosses=True), "custom_base": bool(costume_of_group(key, bosses=True)),
                         "files": groups[key]})
         return {"groups": out, "total": total, "edited": edited_total, "status": "%d file(s), %d edited" % (total, edited_total)}
 

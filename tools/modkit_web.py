@@ -32,6 +32,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import modkit  # noqa: E402
 from modkit_web_files import FilesMixin  # noqa: E402
+from modkit_web_model import ModelMixin  # noqa: E402
+from modkit_web_skins import SkinsMixin  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONF = os.path.join(modkit.game_data_dir(), "modkit.json") if modkit.FROZEN else os.path.join(os.path.expanduser("~"), ".wotm_modkit.json")
@@ -164,7 +166,7 @@ class Dialogs:
 
 
 # ------------------------------------------------------------------ the kit
-class Kit(FilesMixin):
+class Kit(FilesMixin, SkinsMixin, ModelMixin):
     """The state the page sees and the tasks it starts."""
 
     def __init__(self):
@@ -280,6 +282,47 @@ class Kit(FilesMixin):
         threading.Thread(target=body, daemon=True).start()
         return True
 
+    def run_fn(self, title, fn, after=None):
+        """fn() in a thread of this process, its prints in the log (the kit's quick tasks, as the window kit runs them);
+        False when a task is running."""
+        import contextlib
+        import io
+        with self.cond:
+            if self.busy:
+                return False
+            self.busy = title
+        self.say("\n== %s\n" % title, "head")
+        kit = self
+
+        class W(io.TextIOBase):
+            def write(self, t):
+                if t:
+                    kit.say(t)
+                return len(t)
+
+        def body():
+            w = W()
+            ok = False
+            try:
+                with contextlib.redirect_stdout(w), contextlib.redirect_stderr(w):
+                    fn()
+                ok = True
+            except SystemExit as ex:
+                self.say("%s\n" % ex, "err")
+            except Exception:  # noqa: BLE001
+                self.say(traceback.format_exc(), "err")
+            if after and ok:
+                try:
+                    after()
+                except Exception:  # noqa: BLE001
+                    self.say(traceback.format_exc(), "err")
+            with self.cond:
+                self.busy = None
+            self.say("", "done")
+
+        threading.Thread(target=body, daemon=True).start()
+        return True
+
     def paths(self):
         return ["--disc", self.disc, "--mods", self.mods]
 
@@ -361,6 +404,20 @@ def make_handler(kit, page_dir, vendor_dir, server_ref):
                 return self._json(kit.state())
             if p == "/api/log":
                 return self._events()
+            if p in ("/api/portrait", "/api/model.glb"):
+                from urllib.parse import parse_qs
+                q = {k: v[0] for k, v in parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "").items()}
+                try:
+                    f = kit.portrait(q.get("prefix", ""), int(q.get("k", "0"))) if p == "/api/portrait" else kit.model_for(q)
+                except SystemExit as e:
+                    return self._send(404, str(e).encode("utf-8"), "text/plain")
+                except Exception as e:  # noqa: BLE001
+                    kit.say(traceback.format_exc(), "err")
+                    return self._send(500, str(e).encode("utf-8"), "text/plain")
+                if not f or not os.path.isfile(f):
+                    return self._send(404, b"not found", "text/plain")
+                with open(f, "rb") as fh:
+                    return self._send(200, fh.read(), TYPES.get(os.path.splitext(f)[1].lower(), "application/octet-stream"))
             if p == "/api/file":   # a work folder file (thumbnails, preview, sounds)
                 from urllib.parse import parse_qs
                 rel = (parse_qs(self.path.split("?", 1)[1]).get("rel") or [""])[0] if "?" in self.path else ""
