@@ -85,8 +85,10 @@ The base `.NGP` keeps everything outside its main `CHAR_INSTANCE` (type code, sh
   their joint, as they appear in the first frame of the idle.
 - **Channels:** 6 per joint, 9 per live rigid part (rotation, translation, scale), then 6 contact channels (ids 0x802..0x805,
   0x816, 0x817) from the height of those locators and the 7 AnimPappy channels (ids 1..7) copied from the base animation with
-  the same id, stretched to the new length. The sounds come from that animation's header.
-- **Layers:** a base animation with no curve on a translation channel, or whose translation curves are all 0 on channels
+  the same id, stretched to the new length. The sounds come from that animation's header. A channel with no curve in an
+  animation keeps the value the one before left (the game writes only the curves it has): when the base's animation of that
+  id leaves some rotating bone without a curve, a joint the action does not key gets no curve either, so it holds the same way.
+- **Layers:** only the ids the game adds on top (`ngpanim.LAYER_IDS` and 140, 150..153, `docs/ANIM_IDS.md`); among them, a base animation with no curve on a translation channel, or whose translation curves are all 0 on channels
   the idle (90) keeps away from 0 (Togera: no curve, 18 of them, 5, 36-38, 150-156, 166, 251-256: looking around, flinches,
   leans; Ultra-V: zero curves, 18 of them, the same with 140 in place of 166), is a layer the game adds on top of the main
   animation, channel by channel. Its new

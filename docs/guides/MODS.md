@@ -172,7 +172,9 @@ skeleton"). Any base, Congar too (its fur springs do not reach the new skeleton)
 - an armature (bone names and hierarchy are free) and the meshes weighted to it; up to 3 bones per vertex (the heaviest kept);
   a mesh parented to a bone without weights follows that bone;
 - actions named `a<id>` with the game's ids (`a090` is the idle; `tools/pose.py --list` on the base shows the ids, `docs/ANIM_IDS.md` what each one is). An id of the
-  base type that the `.glb` lacks gets the rest pose for the base's length, so every move still has an animation. The footsteps
+  base type that the `.glb` lacks gets the rest pose for the base's length, so every move still has an animation. A joint the
+  action does not key keeps where the animation before left it when the base's animation of that id also leaves some bones
+  still (most do; Congar's roar loop, 161, moves 5), as the game does with the base; otherwise it takes the rest pose. The footsteps
   and dust come from the height of the hand and foot locators; the sounds and the throw channels come from the base's animation
   with the same id. With the scene at 60 fps before the export one Blender frame is one game frame (the log warns when the keys
   are further apart than 1/60 s);

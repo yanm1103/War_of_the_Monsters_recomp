@@ -189,11 +189,16 @@ class BaseInfo:
         actx = img.u32(self.ci + 0x10)
         # a layer (looking around, flinches, leans) is added by the game on top of the main animation: it animates no
         # translation (Togera) or only zeros on translation channels that the idle keeps away from 0 (Ultra-V: deltas)
-        tch = set()
+        tch, rch = set(), set()
         for n, nd in g.nodes.items():
             if nd.op == 17 and nd.ci == self.ci:
                 tch.update(i for i in g.xform(n)["tidx"] if i >= 0)
+                rch.update(i for i in g.xform(n)["ridx"] if i >= 0)
         all_anims = list(g.anims())
+        # the rotations some animation moves; one that leaves some of them without a curve (Congar's special loop, 161,
+        # moves 5 bones) has the game keep those where the animation before left them
+        rot_of = {an: {c.idx for _a, c in g.curves(an) if c.idx in rch} for *_x, an in all_anims}
+        rot_used = set().union(*rot_of.values()) if rot_of else set()
         idle_t = {}
         idle_an = next((an for aid, _k, _st, _et, _n, an in all_anims if aid == 90), None)
         if idle_an is not None:
@@ -220,7 +225,8 @@ class BaseInfo:
                                "head": bytes(img.d[an - BASE:an - BASE + 0x18]),
                                "ctx": bytes(img.d[actx + 60 * k - BASE:actx + 60 * k + 60 - BASE]),
                                "loop": img.u8(actx + 60 * k + 0x29),
-                               "layer": aid in ngpanim.LAYER_IDS | ADD_IDS and is_layer(an)}
+                               "layer": aid in ngpanim.LAYER_IDS | ADD_IDS and is_layer(an),
+                               "partial": bool(rot_used - rot_of[an])}
         if 90 not in self.anims:
             raise RigError("%s has no idle (90)" % os.path.basename(path))
         mp = img.u32(ch + 8)
@@ -996,6 +1002,13 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
             # a layer the base lacks (or has as a plain animation; `layers`, from a borrowed special): authored over the
             # pose it is added to, the first frame is that pose and the game adds the difference from it
             vals = {c: [x - v[0] for x in v] if c in layer_rot else v for c, v in vals.items()}
+        if clip is not None and ba is not None and ba["partial"] and not (own_layer or ba["layer"]):
+            # the base's animation holds some bones where the one before left them: so do the joints the action does not
+            # key (no curve), instead of the rest pose (the T of a downloaded model in Congar's roar)
+            held = [jt for jt in J if jt.node not in clip]
+            for jt in held:
+                for q in range(6):
+                    vals.pop(6 * jt.idx + q, None)   # the contact and AnimPappy channels keep the animation non-empty
         if own_layer or (ba is not None and ba["layer"]):
             # added to the main animation: only the rotations that leave the rest (rest angles are 0), as deltas
             vals = {c: v for c, v in vals.items() if c in layer_rot and max(abs(x) for x in v) > 1e-3}
