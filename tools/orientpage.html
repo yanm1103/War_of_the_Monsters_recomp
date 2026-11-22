@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WotM Mod kit: model facing</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #1b1d22; color: #e6e6e6; font: 14px/1.4 "Segoe UI", system-ui, sans-serif; overflow: hidden; }
+  #view { position: absolute; inset: 0; }
+  #panel { position: absolute; top: 16px; left: 16px; width: 330px; background: rgba(30, 32, 38, .92); border: 1px solid #3a3d45;
+           border-radius: 8px; padding: 14px 16px; }
+  h1 { font-size: 17px; margin: 0 0 6px; }
+  p { margin: 0 0 10px; color: #b9bcc4; }
+  .row { display: flex; gap: 6px; margin-bottom: 6px; }
+  .row span { width: 54px; align-self: center; color: #8d919b; font-size: 12px; }
+  button { flex: 1; background: #2c3039; color: #e6e6e6; border: 1px solid #454a55; border-radius: 5px; padding: 7px 6px; cursor: pointer; font: inherit; }
+  button:hover { background: #363b46; }
+  #ok { background: #2f6fd6; border-color: #3b7ce6; font-weight: 600; }
+  #ok:hover { background: #3b7ce6; }
+  #steps { color: #8d919b; font-size: 12px; min-height: 1.4em; margin: 4px 0 10px; }
+  .tag { position: absolute; bottom: 22px; padding: 4px 10px; background: rgba(30, 32, 38, .85); border-radius: 4px; color: #cfd2d8; }
+  #done { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(20, 21, 25, .9); font-size: 18px; }
+</style>
+<script type="importmap">
+{"imports": {"three": "./vendor/three.module.min.js", "three/addons/": "./vendor/addons/"}}
+</script>
+</head>
+<body>
+<div id="view"></div>
+<div id="panel">
+  <h1>Make sure your model faces you</h1>
+  <p id="hint">Turn it until it stands on its feet and looks at you, like the monster next to it.</p>
+  <div class="row"><span>Turn</span><button data-t="z90">&#8630; Left</button><button data-t="z-90">Right &#8631;</button></div>
+  <div class="row"><span>Tip</span><button data-t="x-90">Forward</button><button data-t="x90">Back</button></div>
+  <div class="row"><span>Roll</span><button data-t="y90">&#8634; Left</button><button data-t="y-90">Right &#8635;</button></div>
+  <div id="steps"></div>
+  <div class="row"><button id="reset">Reset</button><button id="cancel">Cancel</button><button id="ok">OK</button></div>
+</div>
+<div class="tag" id="tagBase" style="left: 28%">monster</div>
+<div class="tag" id="tagModel" style="left: 64%">your model</div>
+<div id="done">You can close this tab and go back to the mod kit.</div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const view = document.getElementById('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+view.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1b1d22);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 2.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+sun.position.set(-40, 120, -80);
+scene.add(sun);
+const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 10000);
+const controls = new OrbitControls(camera, renderer.domElement);
+
+const info = await (await fetch('info.json')).json();
+document.getElementById('tagBase').textContent = info.base || 'monster';
+document.getElementById('tagModel').textContent = info.model || 'your model';
+document.getElementById('hint').textContent =
+  'Turn it until it stands on its feet and looks at you, like ' + (info.base || 'the monster') + ' next to it.';
+
+const loader = new GLTFLoader();
+const load = url => new Promise((ok, bad) => loader.load(url, ok, undefined, bad));
+const [base, model] = await Promise.all([load('base.glb'), load('model.glb')]);
+scene.add(base.scene, model.scene);
+const node = model.scene.getObjectByName('model');   // child of the "WotM" root: its parent space is the game's (x right, y front, z up)
+
+// the monster faces -Z here (game +Y): the camera stands on that side, so screen right is -X
+const bb = new THREE.Box3().setFromObject(base.scene);
+const H = bb.max.y - bb.min.y || 1;
+const gap = H * 0.55;
+base.scene.position.set(gap - (bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2);
+const grid = new THREE.GridHelper(H * 4, 16, 0x50545e, 0x2c2f36);
+scene.add(grid);
+
+function place() {   // the model as tall as the monster, on the ground, on the right of the screen
+  model.scene.scale.setScalar(1);
+  model.scene.position.set(0, 0, 0);
+  model.scene.updateMatrixWorld(true);
+  let b = new THREE.Box3().setFromObject(model.scene);
+  const h = b.max.y - b.min.y || 1;
+  model.scene.scale.setScalar(H / h);
+  model.scene.updateMatrixWorld(true);
+  b = new THREE.Box3().setFromObject(model.scene);
+  model.scene.position.set(-gap - (b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2);
+}
+place();
+camera.position.set(0, H * 0.6, -H * 3.2);
+controls.target.set(0, H * 0.5, 0);
+controls.update();
+
+const steps = [];
+const axes = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
+function show() { document.getElementById('steps').textContent = steps.length ? 'Turns: ' + steps.join(', ') : 'As read from the file.'; }
+for (const b of document.querySelectorAll('button[data-t]')) {
+  b.onclick = () => {
+    const t = b.dataset.t;
+    const q = new THREE.Quaternion().setFromAxisAngle(axes[t[0]], THREE.MathUtils.degToRad(parseInt(t.slice(1))));
+    node.quaternion.premultiply(q);
+    steps.push(t);
+    place();
+    show();
+  };
+}
+document.getElementById('reset').onclick = () => { node.quaternion.identity(); steps.length = 0; place(); show(); };
+let sent = false;
+function send(ok) {
+  if (sent) return;
+  sent = true;
+  navigator.sendBeacon('done', JSON.stringify({ ok, turn: steps.join(',') }));
+  document.getElementById('done').style.display = 'flex';
+}
+document.getElementById('ok').onclick = () => send(true);
+document.getElementById('cancel').onclick = () => send(false);
+window.addEventListener('pagehide', () => send(false));
+show();
+
+function size() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', size);
+size();
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+</script>
+</body>
+</html>

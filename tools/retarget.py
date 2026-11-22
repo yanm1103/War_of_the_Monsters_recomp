@@ -665,8 +665,23 @@ class Source:
 
 # ---------------------------------------------------------------- the retarget
 
+def turn_matrix(spec):
+    """"x90,z-90": quarter turns about the game's axes (x right, y front, z up), one after the other -> 4x4."""
+    M = eye()
+    for step in [s for s in re.split(r"[,\s]+", spec.strip()) if s]:
+        m = re.fullmatch(r"([xyz])([+-]?\d+)", step.lower())
+        if not m or int(m.group(2)) % 90:
+            raise RetargetError("turn %r: steps like x90, z-90, y180" % step)
+        a = int(m.group(2)) // 90 % 4
+        c, s = [1, 0, -1, 0][a], [0, 1, 0, -1][a]
+        R = {"x": [[1, 0, 0], [0, c, -s], [0, s, c]], "y": [[c, 0, s], [0, 1, 0], [-s, 0, c]],
+             "z": [[c, -s, 0], [s, c, 0], [0, 0, 1]]}[m.group(1)]
+        M = mul([[float(v) for v in r] + [0.0] for r in R] + [[0.0, 0.0, 0.0, 1.0]], M)
+    return M
+
+
 def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front=None, clips=None, own=None, log=print,
-          up=None):
+          up=None, turn=None):
     src = Source(src_path)
     mdl = load_model(model_path, up)
     if front is None:   # a Y-up scene faces +Z, which is -Y once it stands on Z
@@ -694,6 +709,9 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
 
     # ---- axes and size: model -> game (Z up, facing +Y)
     Cm = eye() if front == "+y" else [[-1.0, 0, 0, 0], [0, -1.0, 0, 0], [0, 0, 1.0, 0], [0, 0, 0, 1.0]]
+    if turn:
+        Cm = mul(turn_matrix(turn), Cm)
+        log("turned %s about the game's axes" % turn)
     zs = [apply(Cm, c[0])[2] for _i, t in mdl.tris for c in t]
     h0 = max(zs) - min(zs)
     if height is None:
@@ -1276,6 +1294,8 @@ def main(argv):
                                                           "scene, -y for a Y-up one)")
     ap.add_argument("--up", choices=("y", "z"), help="the scene's up axis (default: the file's; a .dae without <up_axis> "
                                                      "by where its head joint is)")
+    ap.add_argument("--turn", help="quarter turns about the game's axes after up and front, e.g. x90,z180 (x right, y front, "
+                                   "z up)")
     ap.add_argument("--clips", help="only these animation ids (e.g. 90,1)")
     ap.add_argument("--own", help="the model's own clips (JSON) in place of the source's with the same id")
     argv = list(argv)
@@ -1284,7 +1304,7 @@ def main(argv):
             argv[k:k + 2] = ["--front=" + argv[k + 1], ""]
     a = ap.parse_args([x for x in argv if x != ""])
     try:
-        build(a.source, a.model, a.map, a.out, a.size, a.height, a.front, a.clips, a.own, up=a.up)
+        build(a.source, a.model, a.map, a.out, a.size, a.height, a.front, a.clips, a.own, up=a.up, turn=a.turn)
     except (RetargetError, ngpanim.AnimError, OSError, KeyError, ValueError) as e:
         print("error: %s" % e, file=sys.stderr)
         return 1

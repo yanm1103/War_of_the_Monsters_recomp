@@ -66,6 +66,14 @@ Mesmo resultado com e sem nome: a malha importada (`ngpmesh`) sai com o mesmo sh
 
 Trava B2: o que é cada osso passa a estar no nome.
 
+## Depois do "Import rigged model..."
+
+O caminho B pela GUI: o botão, o `pf_buzz.dae` original como veio do models-resource, a página 3D (o Buzz já aparece de pé e de frente ao lado do Robo-47: `docs/screenshots/2026-11-22/2026-11-22_modkit_pagina_orientacao.png`), OK. O kit exporta o Robo-47 uma vez, faz o mapa de ossos sozinho (o mesmo que eu tinha escrito à mão, com o braço no `UpperArm` em vez do `Shoulder`), roda o retarget das 161 animações e o Import rig: 79 s pela linha de comando, sem nenhum arquivo editado. No jogo o Buzz luta e voa com o especial do Robo, com a textura certa (`2026-11-22_buzz_rigged_model_luta.png`). O capacete sai cinza opaco porque o `.dae` aponta para uma imagem que não existe (`buzz_dome_mat`): o kit avisa e desenha sem ela.
+
+Números de novo (os mesmos critérios do começo):
+- Caminho B: 0 comandos fora da GUI (eram 3); 0 coisas para saber fora dos docs (eram 5: os `boneN` têm nome e o mapa sai sozinho, o eixo vem do arquivo ou da cabeça, a frente segue o eixo e a página confirma, a imagem que falta vira aviso, a raiz com dois filhos o mapa resolve); o bug de UV corrigido.
+- Caminho A: 0 recusas sem saída (eram 2): o Import mesh reconhece o corpo novo e leva ao Import rig; o Check mostra antes o que o import faria, inclusive a malha que perdeu a pele (o que deixou os braços duros no primeiro teste).
+
 ## Números para comparar depois das melhorias
 
 - Caminho B: 3 comandos fora da GUI (`retarget.py`, conversão para Z para cima, edição do `.dae`); 5 coisas que precisei saber fora dos docs (o que é cada `boneN`, Z para cima, `--front=`, a imagem que falta, a raiz com dois filhos); 1 bug do kit.

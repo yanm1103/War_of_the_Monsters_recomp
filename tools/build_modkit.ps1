@@ -37,8 +37,17 @@ $dist = Join-Path $root 'dist'
 $work = Join-Path $root 'work'
 $ico = Join-Path $repo 'native\wotm.ico'
 Remove-Item -Recurse -Force $dist, $work -ErrorAction SilentlyContinue
-& $py -m PyInstaller --noconfirm --clean --onefile --windowed --name WotM_ModKit --icon $ico --add-data "$ico;." `
-    --paths (Join-Path $repo 'tools') --hidden-import ngp --hidden-import monglb --hidden-import ngpmesh --hidden-import ngpanim --distpath $dist --workpath $work --specpath $work `
+# a pagina 3D do "Import rigged model..." (tools/orientpage.html) e o three.js do editor de fase vao em orient/ (tools/orientpage.py)
+$vendor = Join-Path $repo 'tools\level_editor\web\vendor'
+$orient = @('--add-data', "$(Join-Path $repo 'tools\orientpage.html');orient",
+            '--add-data', "$(Join-Path $vendor 'three.module.min.js');orient/vendor",
+            '--add-data', "$(Join-Path $vendor 'addons\loaders\GLTFLoader.js');orient/vendor/addons/loaders",
+            '--add-data', "$(Join-Path $vendor 'addons\controls\OrbitControls.js');orient/vendor/addons/controls",
+            '--add-data', "$(Join-Path $vendor 'addons\utils\BufferGeometryUtils.js');orient/vendor/addons/utils")
+$hidden = 'ngp', 'monglb', 'ngpmesh', 'ngpanim', 'ngprig', 'meshcheck', 'bonelabels', 'automap', 'retarget', 'orientpage' |
+    ForEach-Object { '--hidden-import', $_ }
+& $py -m PyInstaller --noconfirm --clean --onefile --windowed --name WotM_ModKit --icon $ico --add-data "$ico;." @orient `
+    --paths (Join-Path $repo 'tools') @hidden --distpath $dist --workpath $work --specpath $work `
     (Join-Path $repo 'tools\modkit_gui.py')
 if ($LASTEXITCODE) { Fail 'PyInstaller falhou' }
 $exe = Join-Path $dist 'WotM_ModKit.exe'
@@ -68,5 +77,6 @@ $np = Get-ChildItem $site -Directory -Filter 'numpy-*.dist-info' | Select-Object
 $npLic = if ($np) { Get-ChildItem $np.FullName -Recurse -File | Where-Object { $_.Name -match '^LICENSE' } | Select-Object -First 1 }
 if (-not $npLic) { Fail 'licenca do numpy nao achada no dist-info' }
 Copy-Item $npLic.FullName (Join-Path $lic 'numpy-LICENSE.txt')
+Copy-Item (Join-Path $vendor 'LICENSE') (Join-Path $lic 'three.js-LICENSE.txt')
 
 Write-Host ("WotM_ModKit.exe: {0:N1} MB  ({1})" -f ((Get-Item $exe).Length / 1MB), $exe)

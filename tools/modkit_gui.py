@@ -2027,7 +2027,26 @@ class App:
                    command=lambda: self.import_mesh(kind, tid, "anims")).pack(side="left", padx=(6, 0))
         if kind == "monster":
             ttk.Button(bi, text="Import rig...", command=lambda: self.import_rig(tid)).pack(side="left", padx=(6, 0))
+            br = ttk.Frame(f)
+            br.pack(anchor="w", pady=(4, 0))
+            ttk.Button(br, text="Import rigged model...", command=lambda: self.import_rigged(tid)).pack(side="left")
+            ttk.Label(br, text="(a downloaded model with a skeleton: .glb, .gltf, .dae)", style="Dim.TLabel").pack(
+                side="left", padx=(8, 0))
         return f
+
+    def import_rigged(self, cid):
+        """Modelo com esqueleto proprio (modkit.rigged_import): a pagina 3D confere a frente, o mapa de ossos sai sozinho e o
+        modelo recebe as animacoes do tipo base."""
+        work, mod, mods = self.work(), self.cur_mod(), self.mods.get()
+        if not work:
+            return
+        p = filedialog.askopenfilename(parent=self.root, title="Model with a skeleton for %s" % cid,
+                                       filetypes=[("Rigged model", "*.glb *.gltf *.dae *.GLB *.GLTF *.DAE"), ("All files", "*.*")])
+        if not p:
+            return
+        self.run("Importing the rigged model %s into %s..." % (os.path.basename(p), cid),
+                 lambda disc=self.disc.get(): modkit.rigged_import(disc, work, mods, mod, cid, p, page=True),
+                 lambda: self.reselect("monsters/" + cid))
 
     def check_model(self, kind, tid):
         """Confere um .glb antes do Import mesh / Import rig (modkit.mesh_check): a lista sai no log, nada e gravado."""

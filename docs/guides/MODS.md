@@ -193,6 +193,17 @@ so its refusals show up here. Besides those, it looks at:
   armature is an error, which the imports themselves do not catch.
 **Import mesh...** and **Import rig...** print the same file, texture and mesh lines before they start.
 
+**Import rigged model...** (custom monsters) takes a downloaded model that already has a skeleton and weights (`.glb`,
+`.gltf` or `.dae`) and gives it the base type's animations, in one go (`modkit.py monster rigged <mod> <id> <model> [--page]
+[--turn x90,z180] [--size F]`):
+1. a page opens in the browser with the model next to the base monster, both standing in the game's axes, already turned the
+   way the file says (up axis, front); **Turn**, **Tip** and **Roll** turn it by quarter turns until it stands and faces you
+   like the monster, then **OK** (`tools/orientpage.py`; Cancel or closing the tab stops the import);
+2. the bone map comes from the two skeletons (`tools/automap.py`) and is kept as `<model>_rig_map.json` in `files/`; edited,
+   it is used in place of a new one on the next import (delete it to start over);
+3. the retarget writes `<model>_rig.glb` in `files/` and **Import rig...** takes it.
+The base costume's export (`<PREFIX><costume>.glb`) is made the first time and kept. The steps below are the same by hand.
+
 **A rigged model from elsewhere.** A model that already has a skeleton (a skinned mesh in a Collada `.dae`, a `.glb` or a
 `.gltf`) can take the base type's animations instead of new ones: export the base costume (**Export to Blender**, e.g.
 `LIZARD0.glb`), write a bone map (which model joint follows which base bone, the base bone by its full name, its label such as

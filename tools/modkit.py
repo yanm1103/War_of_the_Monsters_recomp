@@ -21,6 +21,8 @@ pasta de trabalho (<mods>/_work/<mod>/, com o modkit.json dela), e o pack de um 
   python tools/modkit.py monster mesh import my_mod fire_togera [editado.glb] # a malha editada vira o .NGP/.PTR do custom
   python tools/modkit.py monster anim import my_mod fire_togera [editado.glb] # as animacoes editadas tambem
   python tools/modkit.py monster rig my_mod lizardman rig.glb [--front +y|-y] [--scale S | --height H]   # esqueleto proprio
+  python tools/modkit.py monster rigged my_mod buzz modelo.glb [--page] [--turn x90] [--size 1.1]   # modelo baixado com esqueleto,
+                                                             # com as animacoes do tipo base (mapa de ossos automatico)
   python tools/modkit.py skin mesh export my_mod green / skin mesh import my_mod green [editado.glb]   # o mesmo numa skin
   python tools/modkit.py level prop my_mod torre.glb --stage CENTRAL [--name TORRE] [--units blender|game] [--height H] [--light auto|vertex|dir] [--strength 1..5]
                                                              # prop novo para uma fase (o editor de fase o poe; hull_* = colisao)
@@ -1305,6 +1307,59 @@ def mesh_check(disc, work, mods, mod, kind, tid, glb, front=None, scale=None, he
     return rep
 
 
+def _base_export(disc, work, rel, stem):
+    """O .glb do traje base (Export to Blender) na pasta do modelo: o que ja esta la, ou exportado agora."""
+    out = os.path.join(work, *rel.split("/"), os.path.basename(stem) + ".glb")
+    if os.path.isfile(out):
+        return out
+    src = disc_file(disc, stem + ".NGP")
+    if not src:
+        raise SystemExit("%s.NGP is not on the disc" % stem)
+    try:
+        import monglb
+    except ImportError as e:
+        raise SystemExit("the base's export needs numpy (pip install numpy): %s" % e)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    print("exporting the base costume %s (about a minute, once)..." % os.path.basename(stem))
+    monglb.main([src, out, "--vertex-alpha", "--edit"])
+    return out
+
+
+def rigged_import(disc, work, mods, mod, cid, model, turn=None, page=False, size=1.0):
+    """Modelo baixado que ja tem esqueleto (.glb, .gltf, .dae) -> corpo do custom com as animacoes do tipo base: confere a
+    frente (page=True: a pagina 3D, tools/orientpage.py; turn: giros ja dados), faz o mapa de ossos (tools/automap.py; um
+    <modelo>_rig_map.json ja na pasta, editado, vale no lugar dele), o retarget (tools/retarget.py) e o rig import."""
+    import retarget
+    rel, stem = mesh_target(mods, mod, "monster", cid)
+    model = os.path.abspath(model)
+    if not os.path.isfile(model):
+        raise SystemExit("rigged import: %s not found" % model)
+    src = _base_export(disc, work, rel, stem)
+    d = os.path.join(work, *rel.split("/"))
+    out = os.path.join(d, re.sub(r"[^A-Za-z0-9_.-]", "_", os.path.splitext(os.path.basename(model))[0]) + "_rig.glb")
+    mp = os.path.splitext(out)[0] + "_map.json"
+    try:
+        mdl = retarget.load_model(model)
+        front = "-y" if mdl.up_axis == "y" else "+y"
+        print("%s: %d joints, %s up (%s), facing %s" % (os.path.basename(model), len(mdl.joints), mdl.up_axis.upper(),
+                                                        mdl.up_from, front))
+        if page:
+            import tempfile
+            import orientpage
+            pv = orientpage.preview_glb(mdl, front, os.path.join(tempfile.gettempdir(), "wotm_orient_%s.glb" % cid))
+            data = _json_obj(os.path.join(monster_dir(mods, mod, cid), "monster.json")) or {}
+            turn = orientpage.ask(src, pv, {"base": str(data.get("base", "the base")).title(), "model": os.path.basename(model)})
+            if turn is None:
+                raise SystemExit("rigged import: cancelled in the page")
+        use_map = mp if os.path.isfile(mp) else "auto"
+        if use_map != "auto":
+            print("bone map: %s (delete it to make a new one)" % mp)
+        retarget.build(src, model, use_map, out, size=size, front=front, turn=turn or None, log=print)
+    except retarget.RetargetError as e:
+        raise SystemExit("rigged import: %s" % e)
+    return rig_import(disc, work, mods, mod, cid, out)
+
+
 def rig_import(disc, work, mods, mod, cid, glb, front=None, scale=None, height=None):
     """Esqueleto proprio (tools/ngprig.py): o .glb com armature, malha, acoes a<id> e localizadores vira o corpo do custom sobre
     o traje base do disco (codigo, sombra, sons e o resto do tipo ficam). Grava .NGP/.PTR/.TEX/.RTX e os PNGs das texturas novas
@@ -1631,12 +1686,12 @@ def main(argv):
     opts, args, i = {}, [], 0
     while i < len(argv):
         if argv[i] in ("--disc", "--mods", "--work", "--base", "--name", "--costume", "--camera", "--narrator", "--front",
-                       "--scale", "--height", "--stage", "--units", "--light", "--title", "--strength"):
+                       "--scale", "--height", "--stage", "--units", "--light", "--title", "--strength", "--turn", "--size"):
             if i + 1 >= len(argv):
                 raise SystemExit("%s needs a value" % argv[i])
             opts[argv[i][2:]] = argv[i + 1]
             i += 2
-        elif argv[i] in ("--inject", "--ai", "--no-textures"):
+        elif argv[i] in ("--inject", "--ai", "--no-textures", "--page"):
             opts[argv[i][2:]] = True
             i += 1
         else:
@@ -1723,11 +1778,19 @@ def main(argv):
                "\nmonster stats <mod> <id>\nmonster sounds <mod> <id>\nmonster mesh export <mod> <id>\nmonster mesh check <mod> <id> <model.glb>"
                "\nmonster mesh import <mod> <id> [edited.glb]"
                "\nmonster anim import <mod> <id> [edited.glb]\nmonster rig <mod> <id> <rig.glb> [--front +y|-y] "
-               "[--scale S | --height H]")
-        if len(args) < 4 or args[1] not in ("new", "portrait", "model", "stats", "sounds", "rig"):
+               "[--scale S | --height H]\nmonster rigged <mod> <id> <model.glb|.gltf|.dae> [--turn x90,z180] [--page] [--size F]")
+        if len(args) < 4 or args[1] not in ("new", "portrait", "model", "stats", "sounds", "rig", "rigged"):
             raise SystemExit(use)
         w = work_of("monster " + args[1], args[2])
-        if args[1] == "rig":
+        if args[1] == "rigged":
+            if len(args) != 5:
+                raise SystemExit(use)
+            try:
+                size = float(opts.get("size", 1.0))
+            except ValueError:
+                raise SystemExit("monster rigged: --size is a number (1 = the base's height)")
+            rigged_import(disc, w, mods, args[2], args[3], args[4], opts.get("turn"), opts.get("page", False), size)
+        elif args[1] == "rig":
             if len(args) != 5 or opts.get("front") not in (None, "+y", "-y") or ("scale" in opts and "height" in opts):
                 raise SystemExit(use)
             try:
