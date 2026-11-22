@@ -224,7 +224,13 @@ so its refusals show up here. Besides those, it looks at:
    going along (fingers into a fist, a mouth left open: the monster has no bone that moves them, so their rest is how they
    stay). **Select the bones below** picks a whole hand; with "The same on the other side" the mirrored bone (`L`/`R`,
    `Left`/`Right`, `_l`/`_r` in the name)
-   gets the same change. The model is redrawn at the rest the retarget will give it. **OK** keeps the map as
+   gets the same change. The model is redrawn at the rest the retarget will give it. The bar at the bottom plays an
+   animation of the monster on both, named by kind (walk, idle, attacks with the buttons that play them, the special...;
+   "layer" marks the ones the game adds on top of another): play and pause, a frame slider and the speed (1×, 0.5×, 0.25×).
+   The model's comes from the same retarget as the import, so a turn set while it plays (a foot that points inward on the
+   walk) shows as soon as the model is redrawn, on the same frame; the bones move with it. A layer plays here alone, without the animation
+   it goes on in the game, and a joint that the import holds still in an animation that leaves it out moves here as the
+   retarget drives it. **OK** keeps the map as
    `<model>_rig_map.json`, **Back** returns to the facing;
 3. the retarget writes `<model>_rig.glb` in `files/` and **Import rig...** takes it.
 The base costume's export (`<PREFIX><costume>.glb`) is made the first time and kept. The import runs as a separate process

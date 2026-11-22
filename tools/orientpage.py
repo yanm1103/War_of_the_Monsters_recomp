@@ -4,8 +4,10 @@
 1. Facing: the model next to the base monster, both in the game's axes, with quarter-turn buttons (`retarget.py --turn`).
 2. Bones: both skeletons drawn over the meshes, each joint of the model in the color of the monster's bone it follows (the
    bone map, `tools/automap.py`'s or the one already in the work folder). Clicking a joint changes the bone it follows or turns
-   it at rest by steps of 15 degrees (a hand closed into a fist, a mouth opened); the model is redrawn at the rest the
-   retarget will give it (`retarget.build(..., rest=...)`), so what the page shows is what goes into the game.
+   it at rest (a hand closed into a fist, a mouth opened); the model is redrawn at the rest the retarget will give it
+   (`retarget.build(..., rest=...)`), so what the page shows is what goes into the game. An animation of the monster can play
+   on both (the model's retargeted by the same `retarget.build`, one clip), named from `tools/anim_ids.json` (the model
+   museum's table, made from `docs/ANIM_IDS.md` and the monsters' combos).
 
   python tools/orientpage.py <base.glb> <model.dae|.glb|.gltf>     # opens the page, prints the turns and the map
 
@@ -32,11 +34,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def _assets():
-    """(page, vendor folder): the repo's, or the copies inside the mod kit's exe."""
+    """(page, vendor folder, animation names): the repo's, or the copies inside the mod kit's exe."""
     mp = getattr(sys, "_MEIPASS", None)
     if mp and os.path.isdir(os.path.join(mp, "orient")):
-        return os.path.join(mp, "orient", "orientpage.html"), os.path.join(mp, "orient", "vendor")
-    return os.path.join(HERE, "orientpage.html"), os.path.join(HERE, "level_editor", "web", "vendor")
+        o = os.path.join(mp, "orient")
+        return os.path.join(o, "orientpage.html"), os.path.join(o, "vendor"), os.path.join(o, "anim_ids.json")
+    return (os.path.join(HERE, "orientpage.html"), os.path.join(HERE, "level_editor", "web", "vendor"),
+            os.path.join(HERE, "anim_ids.json"))
 
 
 def _write_glb(mdl, groups, out_path):
@@ -143,14 +147,27 @@ class Bones:
             out = _write_glb(self.mdl, groups, os.path.join(self.dir, "rest%d.glb" % self.n))
             return {"glb": out, "v": self.n, "joints": rest["joints"]}
 
+    def anim(self, turn, cfg, clip):
+        """-> {"glb": path, "v": n}: the model with this map playing the monster's clip ("a001"), retargeted as the import
+        does it (the import's own path, one clip)."""
+        with self.lock:
+            self.n += 1
+            out = os.path.join(self.dir, "anim%d.glb" % self.n)
+            retarget.build(self.src, self.mdl, cfg, out, size=self.size, front=self.front, turn=turn or None, clips=[clip],
+                           log=lambda *a: None)
+            return {"glb": out, "v": self.n}
+
 
 def ask(base_glb, model_glb, info, log=print, open_page=webbrowser.open, timeout=1800, bones=None):
     """Serves the page and waits for its answer: {"turn": the turns ("" = as shown, e.g. "z90,x-90"), "cfg": the bone map
     (only with bones, a Bones)} or None (Cancel, closed or timed out). info: {"base": name, "model": name} for the page."""
-    page, vendor = _assets()
+    page, vendor, anim_ids = _assets()
     done = threading.Event()
     answer = {}
     info = dict(info, bones=bones is not None)
+    if bones is not None:   # the monster's prefix (MONKEY0.glb -> MONKEY): the names of its attacks in anim_ids.json
+        m = re.match(r"[A-Za-z]+", os.path.basename(bones.src.path))
+        info["prefix"] = m.group().upper() if m else ""
     last = {}
 
     class H(BaseHTTPRequestHandler):
@@ -178,6 +195,10 @@ def ask(base_glb, model_glb, info, log=print, open_page=webbrowser.open, timeout
                 return self._send(200, open(base_glb if p == "/base.glb" else model_glb, "rb").read(), "model/gltf-binary")
             if p == "/rest.glb" and last.get("glb"):
                 return self._send(200, open(last["glb"], "rb").read(), "model/gltf-binary")
+            if p == "/anim.glb" and last.get("anim"):
+                return self._send(200, open(last["anim"], "rb").read(), "model/gltf-binary")
+            if p == "/anim_ids.json" and os.path.isfile(anim_ids):
+                return self._send(200, open(anim_ids, "rb").read(), "application/json")
             if p.startswith("/vendor/"):
                 f = os.path.normpath(os.path.join(vendor, *p[len("/vendor/"):].split("/")))
                 if f.startswith(os.path.normpath(vendor)) and os.path.isfile(f):
@@ -197,8 +218,15 @@ def ask(base_glb, model_glb, info, log=print, open_page=webbrowser.open, timeout
                 self._send(200, b"{}", "application/json")
                 done.set()
                 return
-            if bones is None or self.path not in ("/bones", "/preview"):
+            if bones is None or self.path not in ("/bones", "/preview", "/anim"):
                 return self._send(404, b"{}", "application/json")
+            if self.path == "/anim":   # the model playing one of the monster's clips with the page's map
+                try:
+                    r = bones.anim(d.get("turn") or "", d.get("cfg"), str(d.get("clip")))
+                except Exception as e:  # noqa: BLE001 (the page shows it and keeps the rest pose)
+                    return self._json({"error": "%s: %s" % (type(e).__name__, e)})
+                last["anim"] = r["glb"]
+                return self._json({"v": r["v"]})
             try:   # /bones: the starting map ("auto": true, the automatic one); /preview: the map the page edited
                 cfg = d.get("cfg") if self.path == "/preview" else bones.auto_map() if d.get("auto") else bones.start_map()
                 r = bones.preview(d.get("turn") or "", cfg)

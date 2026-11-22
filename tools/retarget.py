@@ -1009,13 +1009,17 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
     for i in korder:
         p = kparent[i]
         Lk[i] = mul(inv(A[p]), A[i]) if p is not None else A[i]
-    want = None
-    if clips:
+    want = want_names = None
+    if isinstance(clips, (list, tuple, set)):   # clip names ("a001", "a000_26"): the page's animation preview
+        want_names = set(clips)
+    elif clips:
         want = set(int(x) for x in clips.split(","))
     anims = []
     for nm, clip, frames in src.clips:
         m = re.match(r"a(\d+)", nm)
         if want is not None and (not m or int(m.group(1)) not in want):
+            continue
+        if want_names is not None and nm not in want_names:
             continue
         tracks = {i: ([], []) for i in korder}   # joint -> (quats, positions) local
         pscale = {}                              # prop -> scale per frame

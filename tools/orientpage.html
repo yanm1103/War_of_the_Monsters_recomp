@@ -25,7 +25,14 @@
   #steps, #status { color: #8d919b; font-size: 12px; min-height: 1.4em; margin: 4px 0 10px; }
   #status.err { color: #ff8a80; }
   #selName { font-weight: 600; margin: 0 0 8px; min-height: 1.4em; overflow-wrap: anywhere; }
-  .tag { position: absolute; bottom: 22px; padding: 4px 10px; background: rgba(30, 32, 38, .85); border-radius: 4px; color: #cfd2d8; }
+  #playbar { position: absolute; left: 388px; right: 16px; bottom: 16px; display: flex; gap: 8px; align-items: center;
+             background: rgba(30, 32, 38, .92); border: 1px solid #3a3d45; border-radius: 8px; padding: 8px 12px; }
+  #playbar select { flex: 0 1 320px; }
+  #playbar button { flex: none; width: 76px; }
+  #playbar .speed { flex: none; width: 76px; }
+  #frame { flex: 1; min-width: 60px; accent-color: #3b7ce6; }
+  #frameNo { flex: none; width: 64px; text-align: right; color: #8d919b; font-size: 12px; }
+  .tag { position: absolute; bottom: 76px; padding: 4px 10px; background: rgba(30, 32, 38, .85); border-radius: 4px; color: #cfd2d8; }
   #labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
   .lbl { position: absolute; transform: translate(-50%, -150%); padding: 1px 6px; border-radius: 3px; white-space: nowrap;
          background: rgba(20, 21, 25, .75); color: #e6e6e6; font-size: 12px; }
@@ -63,6 +70,13 @@
   <div class="row"><button id="automap">Automatic map</button></div>
   <div id="status"></div>
   <div class="row"><button id="back">Back</button><button id="cancel2">Cancel</button><button id="ok2" class="primary">OK</button></div>
+</div>
+<div id="playbar" style="display: none">
+  <select id="anim" title="An animation of the monster, played by both"><option value="">Standing still (rest pose)</option></select>
+  <button id="play" disabled>Pause</button>
+  <input type="range" id="frame" min="0" max="0" step="1" value="0" disabled title="Frame">
+  <span id="frameNo"></span>
+  <select id="speed" class="speed" title="Speed"><option value="1">1&times;</option><option value="0.5">0.5&times;</option><option value="0.25">0.25&times;</option></select>
 </div>
 <div class="tag" id="tagBase" style="left: 28%">monster</div>
 <div class="tag" id="tagModel" style="left: 64%">your model</div>
@@ -187,6 +201,7 @@ let boneNames = [];     // the monster's bones a joint can follow
 const sel = new Set();  // selected joint indices
 const markers = { model: [], base: new Map() };   // bones (Blender-style): model joint index -> bone; base bone name -> bone
 let modelGroup = null, baseGroup = null, busy = 0, pending = null, hover = null;
+let baseRig = null;     // the monster's bone objects and parents, to draw its bones as it moves
 const R = H * 0.012;
 const gray = new THREE.Color(0x8d919b);
 const white = new THREE.Color(0xffffff);
@@ -201,20 +216,25 @@ const octa = (() => {
   return g;
 })();
 const octaEdges = new THREE.EdgesGeometry(octa);
-function boneMesh(head, tail, minW) {
+const UP = new THREE.Vector3(0, 1, 0);
+function setBone(g, head, tail, minW) {   // places a bone from head to tail (also every frame of an animation)
   const dir = tail.clone().sub(head);
   const len = Math.max(dir.length(), 1e-4);
+  const w = Math.max(len * 0.1, minW);
+  g.scale.set(w, len, w);
+  g.position.copy(head);
+  g.quaternion.setFromUnitVectors(UP, dir.normalize());
+  g.userData.mid = head.clone().add(tail).multiplyScalar(0.5);
+}
+function boneMesh(head, tail, minW) {
   const g = new THREE.Group();
   const fill = new THREE.Mesh(octa, new THREE.MeshBasicMaterial({ color: gray, transparent: true, opacity: 0.6, depthTest: false, side: THREE.DoubleSide }));
   const edge = new THREE.LineSegments(octaEdges, new THREE.LineBasicMaterial({ color: dark, transparent: true, depthTest: false }));
   fill.renderOrder = 10;
   edge.renderOrder = 11;
   g.add(fill, edge);
-  const w = Math.max(len * 0.1, minW);
-  g.scale.set(w, len, w);
-  g.position.copy(head);
-  g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
-  g.userData = { fill, edge, mid: head.clone().add(tail).multiplyScalar(0.5) };
+  g.userData = { fill, edge };
+  setBone(g, head, tail, minW);
   return g;
 }
 // tails: toward the only child; with several, toward their middle (a hand to its fingers), or halfway to the farthest when the
@@ -301,12 +321,21 @@ function buildBaseMarkers() {
     return up ? names.indexOf(up.name) : null;
   });
   const tl = tails(pos, parent, new THREE.Vector3(0, 1, 0));
+  baseRig = { objs: os, parent, bones: [] };
   names.forEach((n, i) => {
     const b = boneMesh(pos[i], tl[i], R * 0.2);
     b.userData.bone = n;
     baseGroup.add(b);
     markers.base.set(n, b);
+    baseRig.bones.push(b);
   });
+}
+function followBase() {   // the monster's bones where its animation has them now
+  if (!baseRig) return;
+  base.scene.updateMatrixWorld(true);
+  const pos = baseRig.objs.map(o => o.getWorldPosition(new THREE.Vector3()));
+  const tl = tails(pos, baseRig.parent, UP);
+  baseRig.bones.forEach((b, i) => setBone(b, pos[i], tl[i], R * 0.2));
 }
 function buildModelMarkers() {
   const holder = cur.getObjectByName('model');
@@ -493,6 +522,7 @@ async function show2(r) {   // the model at its new rest, the markers on it
   setTranslucent(cur, true);
   buildBaseMarkers();
   buildModelMarkers();
+  restMesh(!anim.scene);   // while an animation plays, the moving model stays until the new one comes
   paint();
 }
 async function preview(auto) {   // asks the server for the rest with this map; one request at a time, the last one wins
@@ -508,6 +538,7 @@ async function preview(auto) {   // asks the server for the rest with this map; 
       if (auto) cfg = r.cfg;   // a new map; after an edit the page's own map stays (edits made while this one was on the way)
       status('');
       await show2(r);
+      if (anim.clip) await loadAnim();
     }
   } catch (e) {
     status(String(e), true);
@@ -516,16 +547,164 @@ async function preview(auto) {   // asks the server for the rest with this map; 
   panel();
   if (pending) { const p = pending; pending = null; preview(p === 'auto'); }
 }
+// ---------------------------------------------------------------- an animation of the monster, on both
+const FPS = 60;
+const anim = { clip: null, t: 0, playing: true, speed: 1, dur: 0, scene: null, mixer: null, v: 0, rig: null };
+const baseMixer = new THREE.AnimationMixer(base.scene);
+const baseClips = new Map(base.animations.filter(c => /^a\d{3}$/.test(c.name)).map(c => [c.name, c]));
+const animIds = await fetch('anim_ids.json').then(r => r.ok ? r.json() : null).catch(() => null);
+function clipLabel(nm) {   // "1  Walk", "10  Attack (□ 1 · forward+□ 6)", "161  Special: loop (layer)"
+  const id = parseInt(nm.slice(1), 10);
+  const e = animIds && animIds.ids[id];
+  let s = e ? e.name : 'Animation';
+  const combo = animIds && animIds.combos && (animIds.combos[info.prefix] || {})[id];
+  if (combo && combo.short) s += ' (' + combo.short + ')';
+  if (e && e.loop === 'layer') s += ' (layer)';
+  return id + '  ' + s;
+}
+(function fillAnims() {
+  const sl = $('anim');
+  const groups = (animIds && animIds.groups) || [{ key: 'other', label: 'Animations' }];
+  const byGroup = new Map(groups.map(g => [g.key, []]));
+  for (const nm of [...baseClips.keys()].sort()) {
+    const e = animIds && animIds.ids[parseInt(nm.slice(1), 10)];
+    const k = e && byGroup.has(e.group) ? e.group : groups[groups.length - 1].key;
+    byGroup.get(k).push(nm);
+  }
+  for (const g of groups) {
+    const list = byGroup.get(g.key);
+    if (!list.length) continue;
+    const og = document.createElement('optgroup');
+    og.label = g.label;
+    for (const nm of list) {
+      const o = document.createElement('option');
+      o.value = nm;
+      o.textContent = clipLabel(nm);
+      og.appendChild(o);
+    }
+    sl.appendChild(og);
+  }
+})();
+function restMesh(on) {   // the model's mesh at rest (its bones stay)
+  if (!cur) return;
+  cur.traverse(o => { if (o.isMesh && o.geometry !== octa) for (const m of [].concat(o.material)) m.visible = on; });
+}
+function dropAnim() {
+  if (anim.scene) {
+    scene.remove(anim.scene);
+    anim.scene.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+  }
+  anim.scene = anim.mixer = anim.rig = null;
+}
+async function loadAnim() {   // the model playing anim.clip with the page's map (the server retargets it, about half a second)
+  const clip = anim.clip;
+  const r = await post('anim', { turn: steps.join(','), cfg, clip });
+  if (r.error) { status(r.error, true); return; }
+  const g = await load('anim.glb?v=' + r.v);
+  if (anim.clip !== clip) return;   // another one was picked meanwhile
+  dropAnim();
+  anim.scene = g.scene;
+  anim.scene.position.copy(cur.position);
+  anim.scene.scale.copy(cur.scale);
+  setTranslucent(anim.scene, true);
+  anim.scene.traverse(o => { if (o.isMesh) o.frustumCulled = false; });   // skinned: its box is the rest one
+  scene.add(anim.scene);
+  restMesh(false);
+  // each joint rides the kept joint at or above it (the others are rigid on it in the game)
+  const root = anim.scene.getObjectByName('WotM');
+  anim.scene.updateMatrixWorld(true);
+  const toRoot = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const nodes = joints.map(j => (j.kept ? anim.scene.getObjectByName(j.name) : null));
+  const hold = joints.map((j, i) => { let k = i; while (k !== null && k >= 0 && !nodes[k]) k = joints[k].parent; return k === null || k < 0 ? null : k; });
+  const off = joints.map((j, i) => {
+    if (hold[i] === null) return null;
+    const M = toRoot.clone().multiply(nodes[hold[i]].matrixWorld).invert();
+    return new THREE.Vector3(...j.pos).applyMatrix4(M);
+  });
+  anim.rig = { root, nodes, hold, off };
+  anim.mixer = new THREE.AnimationMixer(anim.scene);
+  const c = g.animations.find(a => a.name === clip) || g.animations[0];
+  if (c) anim.mixer.clipAction(c).play();
+  anim.v = r.v;
+  frameTo(anim.t);
+}
+function followModel() {   // the model's bones where the animation has them now
+  const rg = anim.rig;
+  if (!rg || !markers.model.length) return;
+  anim.scene.updateMatrixWorld(true);
+  const toRoot = new THREE.Matrix4().copy(rg.root.matrixWorld).invert();
+  const pos = joints.map((j, i) => rg.hold[i] === null ? new THREE.Vector3(...j.pos)
+    : rg.off[i].clone().applyMatrix4(toRoot.clone().multiply(rg.nodes[rg.hold[i]].matrixWorld)));
+  const tl = tails(pos, joints.map(j => j.parent), new THREE.Vector3(0, 0, 1));
+  const k = cur.scale.x || 1;
+  markers.model.forEach((b, i) => setBone(b, pos[i], tl[i], R * 0.2 / k));
+}
+function frameTo(t) {   // both at time t (seconds), looping over the monster's clip
+  anim.t = anim.dur ? ((t % anim.dur) + anim.dur) % anim.dur : 0;
+  baseMixer.setTime(anim.t);
+  if (anim.mixer) anim.mixer.setTime(anim.t);
+  followBase();
+  followModel();
+  const f = Math.round(anim.t * FPS);
+  if (document.activeElement !== $('frame')) $('frame').value = f;
+  $('frameNo').textContent = anim.clip ? f + ' / ' + $('frame').max : '';
+}
+async function pickAnim(nm) {
+  baseMixer.stopAllAction();
+  anim.clip = nm || null;
+  anim.t = 0;
+  for (const id of ['play', 'frame']) $(id).disabled = !anim.clip;
+  if (!anim.clip) {   // back to the rest pose: the monster's nodes come back as they were, the model's rest mesh shows
+    baseMixer.uncacheRoot(base.scene);
+    dropAnim();
+    restMesh(true);
+    if (baseRig) followBase();
+    buildModelMarkers();
+    paint();
+    $('frameNo').textContent = '';
+    return;
+  }
+  const c = baseClips.get(nm);
+  anim.dur = c.duration;
+  $('frame').max = Math.max(0, Math.round(c.duration * FPS));
+  baseMixer.clipAction(c).play();
+  frameTo(0);
+  if (busy) { pending = pending || 'map'; return; }   // the preview running now loads it when it is done
+  busy = 1;
+  status('Updating…');
+  try { await loadAnim(); if (!$('status').classList.contains('err')) status(''); } catch (e) { status(String(e), true); }
+  busy = 0;
+  panel();
+  if (pending) { const p = pending; pending = null; preview(p === 'auto'); }
+}
+$('anim').onchange = () => pickAnim($('anim').value);
+$('play').onclick = () => { anim.playing = !anim.playing; $('play').textContent = anim.playing ? 'Pause' : 'Play'; };
+$('frame').addEventListener('input', () => {
+  anim.playing = false;
+  $('play').textContent = 'Play';
+  frameTo(parseInt($('frame').value, 10) / FPS);
+});
+$('speed').onchange = () => { anim.speed = parseFloat($('speed').value); };
+const clock = new THREE.Clock();
+function tick() {
+  const dt = clock.getDelta();
+  if (anim.clip && anim.playing) frameTo(anim.t + dt * anim.speed);
+}
+
 $('automap').onclick = () => { sel.clear(); preview(true); };
 async function enterBones() {
   $('panel1').style.display = 'none';
   $('panel2').style.display = '';
+  $('playbar').style.display = baseClips.size ? '' : 'none';
   setTranslucent(base.scene, true);
   await preview(cfg ? false : 'start');
 }
 $('back').onclick = () => {   // back to the facing: the file's model again, the map kept
   $('panel2').style.display = 'none';
   $('panel1').style.display = '';
+  $('playbar').style.display = 'none';
+  $('anim').value = '';
+  pickAnim('');
   if (modelGroup) { modelGroup.parent.remove(modelGroup); modelGroup = null; }
   if (baseGroup) { scene.remove(baseGroup); baseGroup = null; markers.base.clear(); }
   scene.remove(cur);
@@ -587,10 +766,15 @@ if (info.start === 'bones') turnBy((info.turn || '').split(',').filter(Boolean))
 if (info.bones && (location.hash === '#bones' || info.start === 'bones')) enterBones();   // straight to step 2
 window.wotmPage = {   // for tests driving the page (CDP): pick joints by name, read the state
   select: names => { sel.clear(); joints.forEach((j, i) => { if (names.includes(j.name)) sel.add(i); }); paint(); },
-  state: () => ({ busy, status: $('status').textContent, cfg, joints: joints.length, sel: [...sel].map(i => joints[i].name) }),
+  state: () => ({ busy, status: $('status').textContent, cfg, joints: joints.length, sel: [...sel].map(i => joints[i].name),
+                  anim: anim.clip, animV: anim.v, t: anim.t, frames: parseInt($('frame').max, 10), clips: baseClips.size }),
+  anim: nm => { $('anim').value = nm; return pickAnim(nm); },   // picks an animation ('' = rest)
+  frame: f => { anim.playing = false; $('play').textContent = 'Play'; frameTo(f / FPS); },
+  bonePos: name => { const i = joints.findIndex(j => j.name === name); return i < 0 ? null : markers.model[i].position.toArray(); },
+  basePos: name => { const b = markers.base.get(name); return b ? b.position.toArray() : null; },
   focus: name => { const i = joints.findIndex(j => j.name === name); if (i >= 0) { controls.target.copy(markers.model[i].getWorldPosition(new THREE.Vector3())); camera.position.copy(controls.target).add(new THREE.Vector3(0, H * 0.15, -H * 1.1)); controls.update(); } },
 };
-renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); labels(); });
+renderer.setAnimationLoop(() => { tick(); controls.update(); renderer.render(scene, camera); labels(); });
 </script>
 </body>
 </html>

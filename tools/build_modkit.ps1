@@ -40,6 +40,7 @@ Remove-Item -Recurse -Force $dist, $work -ErrorAction SilentlyContinue
 # a pagina 3D do "Import rigged model..." (tools/orientpage.html) e o three.js do editor de fase vao em orient/ (tools/orientpage.py)
 $vendor = Join-Path $repo 'tools\level_editor\web\vendor'
 $orient = @('--add-data', "$(Join-Path $repo 'tools\orientpage.html');orient",
+            '--add-data', "$(Join-Path $repo 'tools\anim_ids.json');orient",
             '--add-data', "$(Join-Path $vendor 'three.module.min.js');orient/vendor",
             '--add-data', "$(Join-Path $vendor 'addons\loaders\GLTFLoader.js');orient/vendor/addons/loaders",
             '--add-data', "$(Join-Path $vendor 'addons\controls\OrbitControls.js');orient/vendor/addons/controls",
