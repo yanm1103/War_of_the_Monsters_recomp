@@ -225,7 +225,11 @@ so its refusals show up here. Besides those, it looks at:
    gets the same change. The model is redrawn at the rest the retarget will give it. **OK** keeps the map as
    `<model>_rig_map.json`, **Back** returns to the facing;
 3. the retarget writes `<model>_rig.glb` in `files/` and **Import rig...** takes it.
-The base costume's export (`<PREFIX><costume>.glb`) is made the first time and kept. The steps below are the same by hand.
+The base costume's export (`<PREFIX><costume>.glb`) is made the first time and kept. The import runs as a separate process
+(`modkit.py`, or the kit's exe with `--modkit-cli`), so the window stays free while its lines reach the log. The model, its
+facing and size are kept in `.blender.json`: **Adjust bones...** (next to the button, once a model went in this way; `modkit.py
+monster rigged <mod> <id> --adjust`) opens the page again straight on **Match the bones**, with the kept map, and **OK**
+imports the same model again with the changes. The steps below are the same by hand.
 
 **A rigged model from elsewhere.** A model that already has a skeleton (a skinned mesh in a Collada `.dae`, a `.glb` or a
 `.gltf`) can take the base type's animations instead of new ones: export the base costume (**Export to Blender**, e.g.

@@ -550,7 +550,15 @@ function size() {
 }
 window.addEventListener('resize', size);
 size();
-if (info.bones && location.hash === '#bones') enterBones();   // straight to step 2 (tests)
+if (info.start === 'bones') {   // "Adjust bones...": the facing of the last import, then straight to the bones
+  for (const t of (info.turn || '').split(',').filter(Boolean)) {
+    node.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(axes[t[0]], THREE.MathUtils.degToRad(parseInt(t.slice(1)))));
+    steps.push(t);
+  }
+  place();
+  show();
+}
+if (info.bones && (location.hash === '#bones' || info.start === 'bones')) enterBones();   // straight to step 2
 window.wotmPage = {   // for tests driving the page (CDP): pick joints by name, read the state
   select: names => { sel.clear(); joints.forEach((j, i) => { if (names.includes(j.name)) sel.add(i); }); paint(); },
   state: () => ({ busy, status: $('status').textContent, cfg, joints: joints.length, sel: [...sel].map(i => joints[i].name) }),

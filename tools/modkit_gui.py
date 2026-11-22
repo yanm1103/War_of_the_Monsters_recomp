@@ -2030,23 +2030,32 @@ class App:
             br = ttk.Frame(f)
             br.pack(anchor="w", pady=(4, 0))
             ttk.Button(br, text="Import rigged model...", command=lambda: self.import_rigged(tid)).pack(side="left")
-            ttk.Label(br, text="(a downloaded model with a skeleton: .glb, .gltf, .dae)", style="Dim.TLabel").pack(
-                side="left", padx=(8, 0))
+            rec = modkit.rigged_record(self.work(), self.mods.get(), self.cur_mod(), tid) if self.cur_mod() else None
+            if rec:   # the bones of the last rigged import, in the page again
+                ttk.Button(br, text="Adjust bones...", command=lambda: self.import_rigged(tid, adjust=True)).pack(
+                    side="left", padx=(6, 0))
+            ttk.Label(br, text="(a downloaded model with a skeleton: .glb, .gltf, .dae)" if not rec else
+                      "(%s)" % os.path.basename(rec["model"]), style="Dim.TLabel").pack(side="left", padx=(8, 0))
         return f
 
-    def import_rigged(self, cid):
+    def import_rigged(self, cid, adjust=False):
         """Modelo com esqueleto proprio (modkit.rigged_import): a pagina 3D confere a frente, o mapa de ossos sai sozinho e o
-        modelo recebe as animacoes do tipo base."""
+        modelo recebe as animacoes do tipo base. adjust: o mesmo modelo de novo, a pagina direto nos ossos. Roda num processo
+        a parte (run_proc): o retarget e o rig import sao Python puro e, numa thread, travavam a janela."""
         work, mod, mods = self.work(), self.cur_mod(), self.mods.get()
         if not work:
+            return
+        common = ["--disc", self.disc.get(), "--mods", mods, "--work", work]
+        if adjust:
+            self.run_proc("Adjusting the bones of %s..." % cid, ["monster", "rigged", mod, cid, "--adjust"] + common,
+                          lambda: self.reselect("monsters/" + cid))
             return
         p = filedialog.askopenfilename(parent=self.root, title="Model with a skeleton for %s" % cid,
                                        filetypes=[("Rigged model", "*.glb *.gltf *.dae *.GLB *.GLTF *.DAE"), ("All files", "*.*")])
         if not p:
             return
-        self.run("Importing the rigged model %s into %s..." % (os.path.basename(p), cid),
-                 lambda disc=self.disc.get(): modkit.rigged_import(disc, work, mods, mod, cid, p, page=True),
-                 lambda: self.reselect("monsters/" + cid))
+        self.run_proc("Importing the rigged model %s into %s..." % (os.path.basename(p), cid),
+                      ["monster", "rigged", mod, cid, p, "--page"] + common, lambda: self.reselect("monsters/" + cid))
 
     def check_model(self, kind, tid):
         """Confere um .glb antes do Import mesh / Import rig (modkit.mesh_check): a lista sai no log, nada e gravado."""
@@ -2238,6 +2247,36 @@ class App:
 
         threading.Thread(target=body, daemon=True).start()
 
+    def run_proc(self, title, args, done=None):
+        """Como run, com o modkit.py num processo a parte (a janela segue livre): as linhas que ele imprime vao para o log. No exe,
+        o proprio exe com --modkit-cli."""
+        if self.busy:
+            self.say("Still working on the previous task; try again when it finishes.\n", "warn")
+            return
+        self.busy = True
+        for b in self.task_buttons():
+            b.state(["disabled"])
+        self.say("\n== %s\n" % title)
+        if modkit.FROZEN:
+            cmd = [sys.executable, "--modkit-cli"]
+        else:
+            cmd = [sys.executable, "-u", os.path.join(modkit.REPO, "tools", "modkit.py")]
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
+
+        def body():
+            try:
+                p = subprocess.Popen(cmd + args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env,
+                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                for raw in iter(p.stdout.readline, b""):
+                    self.log_q.put(raw.decode("utf-8", "replace").replace("\r\n", "\n"))
+                if p.wait():
+                    self.log_q.put(("err", "(stopped with code %d)\n" % p.returncode))
+            except Exception:
+                self.log_q.put(("err", traceback.format_exc()))
+            self.log_q.put(("done", done))
+
+        threading.Thread(target=body, daemon=True).start()
+
     def pump_log(self):
         self.pump_portraits()
         try:
@@ -2265,6 +2304,20 @@ class App:
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--modkit-cli":   # the exe running modkit.py for run_proc
+        for fd, name in ((1, "stdout"), (2, "stderr")):
+            if getattr(sys, name) is None:
+                try:
+                    setattr(sys, name, open(fd, "w", encoding="utf-8", buffering=1, closefd=False))
+                except OSError:
+                    setattr(sys, name, io.StringIO())
+        try:
+            sys.exit(modkit.main(sys.argv[2:]))
+        except SystemExit as ex:
+            if ex.code not in (None, 0) and not isinstance(ex.code, int):
+                print(ex.code)
+                sys.exit(1)
+            raise
     root = tk.Tk()
     try:
         ico = os.path.join(getattr(sys, "_MEIPASS", ""), "wotm.ico") if modkit.FROZEN else os.path.join(modkit.REPO, "native", "wotm.ico")

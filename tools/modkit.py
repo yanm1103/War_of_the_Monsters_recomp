@@ -23,6 +23,7 @@ pasta de trabalho (<mods>/_work/<mod>/, com o modkit.json dela), e o pack de um 
   python tools/modkit.py monster rig my_mod lizardman rig.glb [--front +y|-y] [--scale S | --height H]   # esqueleto proprio
   python tools/modkit.py monster rigged my_mod buzz modelo.glb [--page] [--turn x90] [--size 1.1]   # modelo baixado com esqueleto,
                                                              # com as animacoes do tipo base (mapa de ossos automatico)
+  python tools/modkit.py monster rigged my_mod buzz --adjust                 # o mesmo modelo de novo, a pagina direto nos ossos
   python tools/modkit.py skin mesh export my_mod green / skin mesh import my_mod green [editado.glb]   # o mesmo numa skin
   python tools/modkit.py level prop my_mod torre.glb --stage CENTRAL [--name TORRE] [--units blender|game] [--height H] [--light auto|vertex|dir] [--strength 1..5]
                                                              # prop novo para uma fase (o editor de fase o poe; hull_* = colisao)
@@ -1325,12 +1326,25 @@ def _base_export(disc, work, rel, stem):
     return out
 
 
-def rigged_import(disc, work, mods, mod, cid, model, turn=None, page=False, size=1.0):
+def rigged_record(work, mods, mod, cid):
+    """O ultimo "Import rigged model" do custom ({"model", "turn", "size"}, no .blender.json) ou None."""
+    rel = mesh_target(mods, mod, "monster", cid)[0]
+    rec = (_json_obj(_blender_rec(work, rel)) or {}).get("rigged")
+    return rec if isinstance(rec, dict) and rec.get("model") else None
+
+
+def rigged_import(disc, work, mods, mod, cid, model, turn=None, page=False, size=1.0, adjust=False):
     """Modelo baixado que ja tem esqueleto (.glb, .gltf, .dae) -> corpo do custom com as animacoes do tipo base: confere a
     frente (page=True: a pagina 3D, tools/orientpage.py; turn: giros ja dados), faz o mapa de ossos (tools/automap.py; um
-    <modelo>_rig_map.json ja na pasta, editado, vale no lugar dele), o retarget (tools/retarget.py) e o rig import."""
+    <modelo>_rig_map.json ja na pasta, editado, vale no lugar dele), o retarget (tools/retarget.py) e o rig import.
+    adjust=True: o mesmo modelo, frente e tamanho do ultimo import (rigged_record), com a pagina direto na etapa dos ossos."""
     import retarget
     rel, stem = mesh_target(mods, mod, "monster", cid)
+    if adjust:
+        rec = rigged_record(work, mods, mod, cid)
+        if not rec:
+            raise SystemExit("adjust bones: %s has no rigged import to adjust (Import rigged model... first)" % cid)
+        model, turn, size, page = rec["model"], rec.get("turn") or None, float(rec.get("size", 1.0)), True
     model = os.path.abspath(model)
     if not os.path.isfile(model):
         raise SystemExit("rigged import: %s not found" % model)
@@ -1349,8 +1363,10 @@ def rigged_import(disc, work, mods, mod, cid, model, turn=None, page=False, size
             pv = orientpage.preview_glb(mdl, front, os.path.join(tempfile.gettempdir(), "wotm_orient_%s.glb" % cid))
             data = _json_obj(os.path.join(monster_dir(mods, mod, cid), "monster.json")) or {}
             bones = orientpage.Bones(src, mdl, front, size, cfg=retarget.load_map(mp) if os.path.isfile(mp) else None)
-            a = orientpage.ask(src, pv, {"base": str(data.get("base", "the base")).title(), "model": os.path.basename(model)},
-                               bones=bones)
+            info = {"base": str(data.get("base", "the base")).title(), "model": os.path.basename(model)}
+            if adjust:   # straight to the bones, with the facing already given
+                info.update(start="bones", turn=turn or "")
+            a = orientpage.ask(src, pv, info, bones=bones)
             if a is None:
                 raise SystemExit("rigged import: cancelled in the page")
             turn = a["turn"]
@@ -1364,7 +1380,13 @@ def rigged_import(disc, work, mods, mod, cid, model, turn=None, page=False, size
         retarget.build(src, model, use_map, out, size=size, front=front, turn=turn or None, log=print)
     except retarget.RetargetError as e:
         raise SystemExit("rigged import: %s" % e)
-    return rig_import(disc, work, mods, mod, cid, out)
+    res = rig_import(disc, work, mods, mod, cid, out)
+    rp = _blender_rec(work, rel)   # what "Adjust bones..." opens again
+    rec = _json_obj(rp) or {}
+    rec["rigged"] = {"model": model, "turn": turn or "", "size": size}
+    with open(rp, "w", encoding="utf-8") as f:
+        json.dump(rec, f, indent=1)
+    return res
 
 
 def rig_import(disc, work, mods, mod, cid, glb, front=None, scale=None, height=None):
@@ -1698,7 +1720,7 @@ def main(argv):
                 raise SystemExit("%s needs a value" % argv[i])
             opts[argv[i][2:]] = argv[i + 1]
             i += 2
-        elif argv[i] in ("--inject", "--ai", "--no-textures", "--page"):
+        elif argv[i] in ("--inject", "--ai", "--no-textures", "--page", "--adjust"):
             opts[argv[i][2:]] = True
             i += 1
         else:
@@ -1785,11 +1807,16 @@ def main(argv):
                "\nmonster stats <mod> <id>\nmonster sounds <mod> <id>\nmonster mesh export <mod> <id>\nmonster mesh check <mod> <id> <model.glb>"
                "\nmonster mesh import <mod> <id> [edited.glb]"
                "\nmonster anim import <mod> <id> [edited.glb]\nmonster rig <mod> <id> <rig.glb> [--front +y|-y] "
-               "[--scale S | --height H]\nmonster rigged <mod> <id> <model.glb|.gltf|.dae> [--turn x90,z180] [--page] [--size F]")
+               "[--scale S | --height H]\nmonster rigged <mod> <id> <model.glb|.gltf|.dae> [--turn x90,z180] [--page] [--size F]"
+               "\nmonster rigged <mod> <id> --adjust   (the last rigged import again, the page on the bones)")
         if len(args) < 4 or args[1] not in ("new", "portrait", "model", "stats", "sounds", "rig", "rigged"):
             raise SystemExit(use)
         w = work_of("monster " + args[1], args[2])
-        if args[1] == "rigged":
+        if args[1] == "rigged" and opts.get("adjust"):
+            if len(args) != 4:
+                raise SystemExit(use)
+            rigged_import(disc, w, mods, args[2], args[3], None, adjust=True)
+        elif args[1] == "rigged":
             if len(args) != 5:
                 raise SystemExit(use)
             try:
