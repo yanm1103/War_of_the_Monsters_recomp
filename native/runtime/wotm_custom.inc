@@ -1787,12 +1787,80 @@ namespace wotm_custom
         const uint32_t m = ctx->pc == kBreathCollis ? READ32(GPR_U32(ctx, 4) + kBreathOwner) : 0;
         const wotm::mods::Custom *cu = m ? customOf(rdram, m) : nullptr;
         const wotm::breathfx::Config *cfg = cu ? cu->breathFx.get() : nullptr;
+        static const bool aimLog = [] { const char *e = std::getenv("WOTM_BREATHAIMLOG"); return e && *e && *e != '0'; }();
         const uint32_t prevM = g_breathLosM;
-        g_breathLosM = cfg ? m : 0;
+        g_breathLosM = cfg || aimLog ? m : 0;
         g_breathLimit = -1.f;
         g_breathBlocked = false;
+        // Mira ("aim" do breathFx): o jogo aponta o bafo virando a cabeca para o alvo (camadas de olhar 154/155, updateLookAt); a
+        // inclinacao chega, mas num esqueleto proprio a virada para o lado pode nao chegar e o bafo passa ao lado (Godzilla STE: 7,6
+        // graus; o Togera acerta o peito do alvo em cheio). O eixo (+0x33D0, o que o TestCollis testa) aponta para o peito
+        // (+0x3E30) do monstro vivo mais perto do eixo, dentro do cone (para o lado e para cima ou baixo) e do alcance
+        float aimed[3];
+        bool didAim = false;
+        if (cfg && cfg->aim > 0.f)
+        {
+            float ax[3], mu[3];
+            rdV(rdram, m + kBreathAxis, ax);
+            rdV(rdram, m + kLocMuzzle, mu);
+            const float h = std::sqrt(ax[0] * ax[0] + ax[1] * ax[1]);
+            const float range = rdF(rdram, m + 0x68C0 + 0x9C) + 100.f;
+            const float cone = cfg->aim * 0.017453293f;
+            float best = cone, dir[3] = {0.f, 0.f, 0.f};
+            for (uint32_t i = 0; h > 1e-4f && i < 8; ++i)
+                if (const uint32_t o = READ32(kGameObj + kMonsters + 4 * i); o && o != m && READ32(o + kHealth) != 0)
+                {
+                    float c[3];
+                    rdV(rdram, o + kLocChest, c);
+                    const float dx = c[0] - mu[0], dy = c[1] - mu[1], dz = c[2] - mu[2], d = std::sqrt(dx * dx + dy * dy);
+                    if (d < 1.f || d > range)
+                        continue;
+                    const float off = std::fabs(std::remainder(std::atan2(dx, dy) - std::atan2(ax[0], ax[1]), 6.2831853f));
+                    const float pitchOff = std::fabs(std::atan2(dz, d) - std::atan2(ax[2], h));
+                    if (off < best && pitchOff < cone)
+                    {
+                        const float n = std::sqrt(d * d + dz * dz);
+                        best = off;
+                        dir[0] = dx / n; dir[1] = dy / n; dir[2] = dz / n;
+                    }
+                }
+            if (dir[0] != 0.f || dir[1] != 0.f)
+            {
+                for (int k = 0; k < 3; ++k) aimed[k] = dir[k];
+                for (int k = 0; k < 3; ++k)
+                {
+                    uint32_t u;
+                    std::memcpy(&u, &aimed[k], 4);
+                    WRITE32(m + kBreathAxis + 4 * k, u);
+                }
+                didAim = true;
+            }
+        }
         withFxOwner(rdram, ctx, runtime, m, g_origBreathCollis, true);
         g_breathLosM = prevM;
+        if (aimLog && m)   // eixo do bafo (+0x33D0) contra a frente do monstro (linha 1 da matriz do _cs) e contra o peito do outro mais perto
+        {
+            const uint32_t cs = READ32(m + kCs);
+            float ax[3], mu[3], best[3] = {0.f, 0.f, 0.f};
+            rdV(rdram, m + kBreathAxis, ax);
+            rdV(rdram, m + kLocMuzzle, mu);
+            const float fx = cs ? rdF(rdram, cs + 0x30) : 0.f, fy = cs ? rdF(rdram, cs + 0x34) : 1.f;
+            float bd = 1e30f;
+            for (uint32_t i = 0; i < 8; ++i)
+                if (const uint32_t o = READ32(kGameObj + kMonsters + 4 * i); o && o != m)
+                {
+                    float c[3];
+                    rdV(rdram, o + kLocChest, c);
+                    const float d2 = (c[0] - mu[0]) * (c[0] - mu[0]) + (c[1] - mu[1]) * (c[1] - mu[1]);
+                    if (d2 < bd) { bd = d2; for (int k = 0; k < 3; ++k) best[k] = c[k] - mu[k]; }
+                }
+            const float deg = 57.29578f, yaw = std::atan2(ax[0], ax[1]);
+            std::fprintf(stderr, "[sopro] 0x%08X eixo %+.1f graus da frente, inclinacao %+.1f; peito do outro a %.0f: %+.1f graus, %+.1f de "
+                                 "inclinacao; linha ate %.0f%s\n",
+                         m, std::remainder(yaw - std::atan2(fx, fy), 6.2831853f) * deg, std::asin(std::clamp(ax[2], -1.f, 1.f)) * deg,
+                         std::sqrt(bd), std::remainder(std::atan2(best[0], best[1]) - yaw, 6.2831853f) * deg,
+                         std::atan2(best[2], std::sqrt(best[0] * best[0] + best[1] * best[1])) * deg, g_breathLimit, g_breathBlocked ? " (bateu)" : "");
+        }
         if (!cfg)
             return;
         for (uint32_t i = 0; i < 8; ++i)
@@ -1802,6 +1870,9 @@ namespace wotm_custom
                 l.cfg.store(cfg, std::memory_order_relaxed);
                 l.limit.store(g_breathLimit, std::memory_order_relaxed);
                 l.blocked.store(g_breathBlocked, std::memory_order_relaxed);
+                if (didAim)
+                    for (int k = 0; k < 3; ++k) l.axis[k].store(aimed[k], std::memory_order_relaxed);
+                l.aimed.store(didAim, std::memory_order_relaxed);
                 l.m.store(m, std::memory_order_relaxed);
                 l.stamp.fetch_add(1, std::memory_order_release);
                 static std::set<const void *> logged;

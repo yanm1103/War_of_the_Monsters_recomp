@@ -393,7 +393,13 @@ namespace wotm_breathfx
                     continue;
                 e.layers.resize(cfg->layers.size());
             }
-            const Frame fr = frameOf(ram, m);
+            Frame fr = frameOf(ram, m);
+            if (l.aimed.load(std::memory_order_relaxed))   // o eixo que o gancho virou para o alvo ("aim"), o mesmo que o jogo testou
+            {
+                const float ax[3] = {l.axis[0].load(std::memory_order_relaxed), l.axis[1].load(std::memory_order_relaxed),
+                                     l.axis[2].load(std::memory_order_relaxed)};
+                fr = frameAt(fr.o, ax);
+            }
             const bool on = ram.u32(m + kBreath + kBreathState) == 1u && ram.f32(m + kBreath + kBreathTime) > 0.f;
             const float range = ram.f32(m + kBreath + kBreathRange);
             float limit = l.limit.load(std::memory_order_relaxed);

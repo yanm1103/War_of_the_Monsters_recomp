@@ -60,6 +60,9 @@ struct Config {
     std::vector<int> hide{8, 51, 148};
     float scale = 1.f;                   // tamanhos, velocidades e area de todas as camadas
     bool hideBody = true;                // tiro: o modelo do projetil do jogo some (o _cs dele deixa de ser desenhado)
+    // sopro: cone (graus para cada lado) em que o eixo vira para o peito do monstro mais perto na frente; 0 = o eixo do jogo. O
+    // jogo mira o bafo virando a cabeca (camadas de olhar 154/155); num esqueleto proprio a virada para o lado nao chega
+    float aim = 30.f;
     bool hides(uint32_t preset) const {
         for (int p : hide)
             if (uint32_t(p) == preset) return true;
@@ -73,6 +76,8 @@ struct Live {
     std::atomic<const Config *> cfg{nullptr};
     std::atomic<float> limit{-1.f};   // distancia da boca ate onde a linha de visada parou (-1 = sem teste ainda)
     std::atomic<bool> blocked{false}; // a linha parou em algo (cenario ou monstro) antes do alcance
+    std::atomic<bool> aimed{false};   // o eixo foi corrigido para o alvo ("aim"): o desenho usa axis no lugar do +0x33D0 da foto
+    std::atomic<float> axis[3];
     std::atomic<uint32_t> stamp{0};
 };
 inline Live g_live[8];

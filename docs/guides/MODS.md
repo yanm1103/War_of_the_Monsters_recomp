@@ -373,6 +373,10 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   native drawing (not in the emulated GS of `ps2EntryRunner`). Log: `[mods] monstro ...: sopro proprio com N camadas` at load,
   `[custom] sopro proprio de 0x... (vaga N): linha ate D` on the first breath.
   `{"scale": 1, "hide": [8, 51, 148], "layers": [{...}, ...]}`:
+  - `aim` (degrees, default 30; 0 = off): the game aims the breath by turning the head toward the target (look-at layers 154 and
+    155), which lands Togera's breath on the target's chest; on an own skeleton the sideways turn can fall short and the breath
+    passes beside the target. With `aim`, the breath axis the game tests (+0x33D0) points at the chest (+0x3E30) of the living
+    monster nearest to it within that cone (sideways and up or down) and the breath's range, and the layers follow that axis.
   - `scale`: multiplies every layer's sizes, speeds and spawn area. `hide`: the presets that disappear when this monster's
     `FireBreath` creates them (default `[8, 51, 148]`: Togera's breath core, cloud and sparks; add `80, 81`, the hit flash and
     sparks, when the layers bring their own hit).

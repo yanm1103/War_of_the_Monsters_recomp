@@ -505,6 +505,7 @@ private:
         auto cfg = std::make_shared<breathfx::Config>();
         if (shot) cfg->hide = {29, 36, 80, 81};   // a explosao do tiro do Togera: clarao branco, clarao, acerto e faiscas
         if (const json::Value *x = v.get("hideBody")) cfg->hideBody = x->asBool(true);
+        if (const json::Value *x = v.get("aim"); x && x->type == json::Value::Int) cfg->aim = std::clamp(float(x->asNum(30)), 0.f, 90.f);
         auto num = [](const json::Value *x, float d) { return x && x->type == json::Value::Int ? float(x->asNum(d)) : d; };
         auto pair = [&](const json::Value *x, float &lo, float &hi) {
             if (x && x->type == json::Value::Arr && x->arr.size() == 2) { lo = num(&x->arr[0], lo); hi = num(&x->arr[1], hi); }
