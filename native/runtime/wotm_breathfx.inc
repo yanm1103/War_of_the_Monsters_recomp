@@ -169,6 +169,205 @@ namespace wotm_breathfx
         }
     }
 
+    // ---- tiro proprio ("shotFx"): o projetil seguido pela foto da RAM (Weapons::m_weapons[i]: m_active +0x40, m_prevPos +0x90,
+    // _cs +0x150 com a posicao em +0x10); as camadas de "shot" nascem nele enquanto ele voa, as de "launch" no primeiro quadro em
+    // que ele aparece e as de "impact" onde o Weapon::DetonateWeapon o explodiu (wotm::breathfx::g_impacts)
+    constexpr uint32_t kWeaponsArr = 0x112490 + 0xC00, kWeaponSize = 0x170, kWActive = 0x40, kWPrev = 0x90, kWCs = 0x150, kCsTrans = 0x10;
+    struct ShotEmitter
+    {
+        uint32_t gen = 0;
+        const wotm::breathfx::Config *cfg = nullptr;
+        std::vector<LayerState> layers;
+        bool seen = false, ended = false;   // ended: o projetil ja sumiu (a vaga pode voltar com outro Weapon na mesma gen)
+        Frame fr{};
+        float burst = 0.f;   // segundos desde a saida (camadas de "launch" sem "once")
+        uint32_t rng = 0x85EBCA6Bu;
+    };
+    struct LooseEmitter   // uma explosao: as camadas de "impact" ate a ultima particula morrer
+    {
+        const wotm::breathfx::Config *cfg = nullptr;
+        std::vector<LayerState> layers;
+        Frame fr{};
+        float t = 0.f;
+        uint32_t rng = 0xC2B2AE35u;
+    };
+    ShotEmitter g_shotEm[100];
+    std::vector<LooseEmitter> g_loose;
+    uint32_t g_impactSeen = 0;
+
+    Frame frameAt(const float *o, const float *dir)
+    {
+        Frame fr;
+        float f[3] = {dir[0], dir[1], dir[2]};
+        if (dot3v(f, f) < 1e-8f) { f[0] = 0.f; f[1] = 1.f; f[2] = 0.f; }
+        norm3(f);
+        const float up[3] = {0.f, 0.f, 1.f};
+        float s[3] = {f[1] * up[2] - f[2] * up[1], f[2] * up[0] - f[0] * up[2], f[0] * up[1] - f[1] * up[0]};
+        if (dot3v(s, s) < 1e-8f) { s[0] = 1.f; s[1] = 0.f; s[2] = 0.f; }
+        norm3(s);
+        for (int k = 0; k < 3; ++k) { fr.o[k] = o[k]; fr.f[k] = f[k]; fr.s[k] = s[k]; }
+        fr.u[0] = s[1] * f[2] - s[2] * f[1];
+        fr.u[1] = s[2] * f[0] - s[0] * f[2];
+        fr.u[2] = s[0] * f[1] - s[1] * f[0];
+        return fr;
+    }
+    void ageLayer(LayerState &st, float dt)
+    {
+        for (Part &q : st.parts)
+        {
+            q.age += dt;
+            for (int k = 0; k < 3; ++k) q.p[k] += q.v[k] * dt;
+        }
+        st.parts.erase(std::remove_if(st.parts.begin(), st.parts.end(), [](const Part &q) { return q.age >= q.life; }), st.parts.end());
+    }
+    void spawnAny(uint32_t &rng, const wotm::breathfx::Layer &L, LayerState &st, float scale, const Frame &fr, float age0 = 0.f)
+    {
+        Emitter tmp;
+        tmp.rng = rng;
+        spawn(tmp, L, st, scale, fr, nullptr, age0);
+        rng = tmp.rng;
+    }
+    // Emite `L` neste passo: continua (rate por segundo) ou, com "once", a rajada de rate particulas uma vez
+    template <class E>
+    void emitLayer(E &e, const wotm::breathfx::Layer &L, LayerState &st, float scale, const Frame &fr, float dt)
+    {
+        if (L.once)
+        {
+            if (!st.fired)
+                for (int n = 0; n < int(L.rate + 0.5f) && n < 512; ++n) spawnAny(e.rng, L, st, scale, fr);
+            st.fired = true;
+            return;
+        }
+        st.acc += L.rate * dt;
+        while (st.acc >= 1.f && st.parts.size() < 2048)
+        {
+            st.acc -= 1.f;
+            spawnAny(e.rng, L, st, scale, fr, L.rate > 0.f ? st.acc / L.rate : 0.f);
+        }
+    }
+    void drawLayers(wotm::Particles &fx, const wotm::breathfx::Config &cfg, std::vector<LayerState> &layers, const Frame &fr)
+    {
+        for (size_t j = 0; j < cfg.layers.size() && j < layers.size(); ++j)
+        {
+            if (layers[j].parts.empty())
+                continue;
+            const wotm::breathfx::Layer &L = cfg.layers[j];
+            wotm::Particles::BeamSystem bs;
+            bs.texture = L.texture;
+            bs.additive = L.additive;
+            emitQuads(L, layers[j], fr, -1.f, bs);
+            if (!bs.quads.empty())
+                fx.beams.push_back(std::move(bs));
+        }
+    }
+    void prepareShots(wotm::Particles &fx, const wotm::Ram &ram, float dt)
+    {
+        using wotm::breathfx::Site;
+        for (uint32_t i = 0; i < 100; ++i)
+        {
+            const wotm::breathfx::ShotLive &sl = wotm::breathfx::g_shots[i];
+            const uint32_t gen = sl.gen.load(std::memory_order_acquire);
+            ShotEmitter &e = g_shotEm[i];
+            if (gen != e.gen)
+            {
+                e = ShotEmitter{};
+                e.gen = gen;
+                e.cfg = sl.cfg.load(std::memory_order_relaxed);
+                e.rng ^= gen * 2654435761u + i;
+                if (e.cfg)
+                    e.layers.resize(e.cfg->layers.size());
+            }
+            if (!e.cfg)
+                continue;
+            const uint32_t w = kGameObj + kWeaponsArr + kWeaponSize * i;
+            const uint32_t cs = ram.u32(w + kWCs);
+            if (e.seen && (ram.u32(w + kWActive) == 0 || !cs))
+                e.ended = true;
+            const bool active = !e.ended && ram.u32(w + kWActive) != 0 && cs;
+            if (active)
+            {
+                float p[3], d[3];
+                for (int k = 0; k < 3; ++k)
+                {
+                    p[k] = ram.f32(cs + kCsTrans + 4 * k);
+                    d[k] = p[k] - ram.f32(w + kWPrev + 4 * k);
+                }
+                e.fr = frameAt(p, dot3v(d, d) > 1e-6f || !e.seen ? d : e.fr.f);
+            }
+            const bool first = active && !e.seen;
+            if (first)
+            {
+                static int logged = 0;
+                if (logged < 3 && ++logged)
+                    std::fprintf(stderr, "[custom] tiro proprio: vaga %u saiu em (%.0f, %.0f, %.0f), indo para (%.2f, %.2f, %.2f)\n", i,
+                                 e.fr.o[0], e.fr.o[1], e.fr.o[2], e.fr.f[0], e.fr.f[1], e.fr.f[2]);
+            }
+            e.seen |= active;
+            if (e.seen && dt > 0.f)
+                e.burst += dt;
+            const wotm::breathfx::Config &cfg = *e.cfg;
+            for (size_t j = 0; j < cfg.layers.size(); ++j)
+            {
+                const wotm::breathfx::Layer &L = cfg.layers[j];
+                LayerState &st = e.layers[j];
+                if (dt > 0.f || first)
+                    ageLayer(st, dt);
+                if (L.site == Site::Shot && active && dt > 0.f)
+                    emitLayer(e, L, st, cfg.scale, e.fr, dt);
+                else if (L.site == Site::Launch && e.seen && (first || (dt > 0.f && !L.once && e.burst <= L.duration)))
+                    emitLayer(e, L, st, cfg.scale, e.fr, first && !L.once ? 1.f / 60.f : dt);
+            }
+            drawLayers(fx, cfg, e.layers, e.fr);
+        }
+        // explosoes novas
+        const uint32_t seqNow = wotm::breathfx::g_impactSeq.load(std::memory_order_acquire);
+        if (seqNow - g_impactSeen > 16)
+            g_impactSeen = seqNow - 16;
+        for (; g_impactSeen != seqNow; ++g_impactSeen)
+        {
+            const wotm::breathfx::ImpactLive &im = wotm::breathfx::g_impacts[(g_impactSeen + 1) % 16];
+            if (im.seq.load(std::memory_order_acquire) != g_impactSeen + 1)
+                continue;
+            LooseEmitter le;
+            le.cfg = im.cfg.load(std::memory_order_relaxed);
+            if (!le.cfg)
+                continue;
+            const float p[3] = {im.p[0].load(), im.p[1].load(), im.p[2].load()}, d[3] = {0.f, 1.f, 0.f};
+            le.fr = frameAt(p, d);
+            le.layers.resize(le.cfg->layers.size());
+            le.rng ^= (g_impactSeen + 1) * 2246822519u;
+            for (size_t j = 0; j < le.cfg->layers.size(); ++j)
+                if (le.cfg->layers[j].site == Site::Impact)
+                    emitLayer(le, le.cfg->layers[j], le.layers[j], le.cfg->scale, le.fr, 1.f / 60.f);
+            g_loose.push_back(std::move(le));
+        }
+        for (LooseEmitter &le : g_loose)
+        {
+            if (dt > 0.f)
+                le.t += dt;
+            bool any = false;
+            for (size_t j = 0; j < le.cfg->layers.size(); ++j)
+            {
+                const wotm::breathfx::Layer &L = le.cfg->layers[j];
+                LayerState &st = le.layers[j];
+                if (dt > 0.f)
+                {
+                    ageLayer(st, dt);
+                    if (L.site == Site::Impact && !L.once && le.t <= L.duration)
+                        emitLayer(le, L, st, le.cfg->scale, le.fr, dt);
+                }
+                any |= !st.parts.empty() || (L.site == Site::Impact && !L.once && le.t <= L.duration);
+            }
+            if (!any)
+                le.cfg = nullptr;
+            else
+                drawLayers(fx, *le.cfg, le.layers, le.fr);
+        }
+        g_loose.erase(std::remove_if(g_loose.begin(), g_loose.end(), [](const LooseEmitter &le) { return !le.cfg; }), g_loose.end());
+        if (g_loose.size() > 32)
+            g_loose.erase(g_loose.begin(), g_loose.begin() + (g_loose.size() - 32));
+    }
+
     void prepare(wotm::Particles &fx, const wotm::Ram &ram, uint32_t g)
     {
         fx.beams.clear();
@@ -247,5 +446,6 @@ namespace wotm_breathfx
                     fx.beams.push_back(std::move(bs));
             }
         }
+        prepareShots(fx, ram, dt);
     }
 } // namespace wotm_breathfx

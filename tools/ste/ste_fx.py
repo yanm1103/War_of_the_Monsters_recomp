@@ -174,6 +174,10 @@ def write_texture(path, b, e, names):
     psm, = struct.unpack_from('<I', c, 4)
     w, h = struct.unpack_from('<HH', c, 8)
     pal_kind, = struct.unpack_from('<I', c, 0x20)
+    if psm == 0:   # descritor {1, 0, ...}: PSMCT32 cru (RGBA, alfa 0..128)
+        raw = b.tail_bytes(e)[:w * h * 4]
+        write_png(path, w, h, b''.join(bytes((raw[i], raw[i + 1], raw[i + 2], min(255, raw[i + 3] * 2))) for i in range(0, w * h * 4, 4)))
+        return
     assert psm & 0xff == 0x13, 'textura psm %x' % psm
     raw = b.tail_bytes(e)[:w * h]
     lin = unswizzle8(raw, w, h) if psm & 0x40000000 else raw
@@ -195,11 +199,13 @@ def write_texture(path, b, e, names):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('iso')
-    ap.add_argument('cmd', choices=['list', 'breath'])
+    ap.add_argument('cmd', choices=['list', 'breath', 'shot'])
     ap.add_argument('bundle')
     ap.add_argument('edf', nargs='?', default='')
     ap.add_argument('out', nargs='?')
     ap.add_argument('--hit', default='', help='efeito do acerto (camadas "at": "hit"), ex. AtomicBreath_hit')
+    ap.add_argument('--impact', default='', help='shot: efeitos da explosao, separados por virgula (composite vira as partes)')
+    ap.add_argument('--launch', default='', help='shot: efeito da saida do tiro, ex. fireball_release')
     a = ap.parse_args()
     iso = Iso(a.iso)
     vol = Vol(iso)
@@ -243,6 +249,44 @@ def main():
             print('textura %s -> %s' % (nm, fn))
         return 'fx/' + used[nm.lower()]
 
+    def emitters(name, seen=()):
+        """Emissores de particula de um efeito; composite vira os das partes (as que nao sao de particula ficam de fora)."""
+        k = next((x for x in edfs if x.lower() == name.lower().replace('.edf', '')), None)
+        if not k or k in seen:
+            print('efeito %s nao achado ou repetido' % name)
+            return []
+        q = parse_edf(edfs[k], names)
+        head = dict(q['head'])
+        kind = fmt(head.get('type', [])).strip('"')
+        if kind == 'composite':
+            n = int(fmt(head.get('int.num_edfs', [('lit', '0')])).strip('"') or 0)
+            out = []
+            for i in range(n):
+                part = fmt(head.get('edf.name.%d' % i, [])).strip('"')
+                out += emitters(part, seen + (k,))
+            return out
+        if kind != 'particle':
+            print('efeito %s: tipo %s, fica de fora' % (k, kind))
+            return []
+        return [em for em in q['emitters'] if '+NoRender' not in ' '.join(x for t, x in dict(em).get('flags.particle.def', []))]
+
+    if a.cmd == 'shot':   # tiro proprio ("shotFx" do monster.json): voo, explosao e saida
+        layers = []
+        for em in emitters(key):
+            L = layer_of(em, tex_file)
+            L['at'] = 'shot'
+            L['relative'] = '+EmitterRelativeParticles' in ' '.join(x for t, x in dict(em).get('flags.emitter.def', []))
+            layers.append(L)
+        for site, lst in (('impact', a.impact), ('launch', a.launch)):
+            for nm in [x for x in lst.split(',') if x]:
+                for em in emitters(nm):
+                    L = layer_of(em, tex_file)
+                    L['at'] = site
+                    layers.append(L)
+        with open(os.path.join(a.out, 'shotfx.json'), 'w') as f:
+            json.dump({'layers': layers}, f, indent=2)
+        print('%d camadas -> %s' % (len(layers), os.path.join(a.out, 'shotfx.json')))
+        return
     layers = [layer_of(em, tex_file) for em in p['emitters']]
     if a.hit:   # efeito do acerto: camadas que nascem onde o sopro bate
         hk = next((k for k in edfs if k.lower() == a.hit.lower()), None)

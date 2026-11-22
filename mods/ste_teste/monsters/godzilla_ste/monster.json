@@ -283,5 +283,255 @@
       }
     ]
   },
-  "fireColor": "#FFC840"
+  "fireColor": "#FFC840",
+  "shotFx": {
+    "scale": 1.0,
+    "hideBody": true,
+    "hide": [
+      29,
+      36,
+      80,
+      81
+    ],
+    "layers": [
+      {
+        "at": "shot",
+        "texture": "fx/basic.png",
+        "mode": "sprite",
+        "relative": true,
+        "rate": 60,
+        "life": [
+          0.1,
+          0.1
+        ],
+        "size": [
+          36,
+          40
+        ],
+        "spread": 0,
+        "color": [
+          1.0,
+          0.6,
+          0.25,
+          1.0
+        ],
+        "colorPoly": {
+          "a": [
+            1,
+            -1
+          ]
+        },
+        "additive": true
+      },
+      {
+        "texture": "fx/smoke_11.png",
+        "mode": "sprite",
+        "rate": 60.0,
+        "speed": 0.0,
+        "speedRandom": 0.0,
+        "radial": -8.0,
+        "up": 0.0,
+        "once": false,
+        "rotate": false,
+        "life": [
+          0.7,
+          0.7
+        ],
+        "size": [
+          16.0,
+          20.0
+        ],
+        "spread": 3.0,
+        "color": [
+          1.0,
+          0.501961,
+          0.219608,
+          1.0
+        ],
+        "additive": true,
+        "colorPoly": {
+          "a": [
+            1.0,
+            -1.0
+          ]
+        },
+        "sizePoly": [
+          1.0,
+          -0.8
+        ],
+        "at": "shot",
+        "relative": false
+      },
+      {
+        "texture": "fx/smoke_lines.png",
+        "mode": "sprite",
+        "rate": 15.0,
+        "speed": 0.0,
+        "speedRandom": 0.0,
+        "radial": 0.0,
+        "up": 0.0,
+        "once": false,
+        "rotate": true,
+        "life": [
+          0.5,
+          0.5
+        ],
+        "size": [
+          20.0,
+          24.0
+        ],
+        "spread": 0.0,
+        "color": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "additive": false,
+        "colorPoly": {
+          "a": [
+            0.0,
+            0.4,
+            -0.4
+          ]
+        },
+        "at": "shot",
+        "relative": true
+      },
+      {
+        "texture": "fx/shock_ring_2.png",
+        "mode": "sprite",
+        "rate": 1.0,
+        "speed": 0.0,
+        "speedRandom": 0.0,
+        "radial": 0.0,
+        "up": 0.0,
+        "once": true,
+        "rotate": false,
+        "life": [
+          1.0,
+          1.0
+        ],
+        "size": [
+          4.5,
+          4.5
+        ],
+        "spread": 0.0,
+        "color": [
+          1.0,
+          0.501961,
+          0.062745,
+          1.0
+        ],
+        "additive": true,
+        "colorPoly": {
+          "a": [
+            1.0,
+            -1.0
+          ]
+        },
+        "sizePoly": [
+          1.0,
+          40.0
+        ],
+        "at": "impact"
+      },
+      {
+        "texture": "fx/basic.png",
+        "mode": "sprite",
+        "rate": 90.0,
+        "speed": 0.0,
+        "speedRandom": 0.0,
+        "radial": 667,
+        "up": 0.0,
+        "once": true,
+        "rotate": false,
+        "life": [
+          1.0,
+          2.0
+        ],
+        "size": [
+          5.0,
+          8.0
+        ],
+        "spread": 2.0,
+        "color": [
+          1.0,
+          0.235294,
+          0.0,
+          1.0
+        ],
+        "additive": true,
+        "sizePoly": [
+          1.0,
+          -0.95
+        ],
+        "at": "impact"
+      },
+      {
+        "texture": "fx/spark.png",
+        "mode": "sprite",
+        "rate": 120.0,
+        "speed": 0.0,
+        "speedRandom": 0.0,
+        "radial": 333,
+        "up": 0.0,
+        "once": true,
+        "rotate": false,
+        "life": [
+          1.0,
+          2.0
+        ],
+        "size": [
+          4.0,
+          5.0
+        ],
+        "spread": 2.0,
+        "color": [
+          1.0,
+          0.580392,
+          0.086275,
+          1.0
+        ],
+        "additive": true,
+        "sizePoly": [
+          1.0,
+          -0.95
+        ],
+        "at": "impact"
+      },
+      {
+        "texture": "fx/basic.png",
+        "mode": "sprite",
+        "rate": 500.0,
+        "speed": 40.0,
+        "speedRandom": 35.0,
+        "radial": 0.0,
+        "up": 0.0,
+        "once": false,
+        "rotate": false,
+        "life": [
+          0.4,
+          0.4
+        ],
+        "size": [
+          12.0,
+          15.0
+        ],
+        "spread": 1.0,
+        "color": [
+          0.784314,
+          0.333333,
+          0.117647,
+          1.0
+        ],
+        "additive": true,
+        "sizePoly": [
+          1.0,
+          -0.9
+        ],
+        "at": "launch"
+      }
+    ]
+  }
 }

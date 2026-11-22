@@ -388,6 +388,16 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
     shrinks from the second one), `additive` (default true; false = normal blend), `rotate` (random starting rotation).
   - The units are the game's (Togera's breath reaches 800). `tools/ste/ste_fx.py` builds the layers from a *Godzilla: Save the
     Earth* effect (`TOOLS.md`); the `ste_teste` mod carries the Godzilla 2000 atomic breath made that way.
+- `shotFx`: the monster's own default shot (the ranged attack: square with no opponent in reach, `Monster` +0x6878), drawn by the
+  port. The game still owns the shot (speed, aim, damage, sound). The port follows each shot of this monster through
+  `Weapons::m_weapons` (the `_cs` position, the direction from `m_prevPos`) while it flies, and hides the game's model of the shot
+  (`hideBody`, default true: the shot's `_cs` stops being drawn) and the effects its explosion creates (`hide`, default
+  `[29, 36, 80, 81]`: Togera's white flash, flash, hit and sparks). Same format as `breathFx`, with `at`: `"shot"` (default: born
+  on the shot while it flies; `relative` true makes the particles move with it, false leaves a trail), `"impact"` (where
+  `Weapon::DetonateWeapon` exploded it) or `"launch"` (where it first showed up); a layer at `"impact"` or `"launch"` without `once`
+  emits for `duration` seconds (default 0.2). Only in the native drawing. Log: `[mods] monstro ...: tiro proprio com N camadas`
+  at load, `[custom] tiro proprio de 0x...: vaga N, tipo T, modelo escondido` on the first shot. `ste_fx.py <iso> shot <bundle>
+  <edf> <pasta> --impact <edf,...> --launch <edf>` builds the layers; the `ste_teste` mod carries the Godzilla 2000 fireball.
 - `logo`: a 2:1 PNG with the name drawn (in the monster's folder or at the mod root; the game's are 256 × 128, 512 × 256 keeps it
   sharp in a large window), shown where the game shows its monsters' logos: under the model in the select screen and above the
   stage picture in the save list. Without it, the name in text (the save list never falls back to the base type's logo).

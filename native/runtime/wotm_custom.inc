@@ -1667,6 +1667,7 @@ namespace wotm_custom
     uint32_t g_fxOwner = 0;   // monstro dono dos efeitos criados agora (0 = nenhum)
     bool g_fxShot = false;    // os efeitos criados agora sao da explosao do tiro padrao de g_fxOwner
     bool g_fxBreath = false;  // os efeitos criados agora sao do FireBreath de g_fxOwner (Activate, TestCollis): o "hide" do breathFx so vale neles
+    bool g_fxShotFx = false;  // ... sao do tiro padrao de g_fxOwner, que tem "shotFx" (InitWeapon, DetonateWeapon): vale o "hide" dele
 
     bool togeraFx(uint32_t preset)
     {
@@ -1714,9 +1715,10 @@ namespace wotm_custom
             std::fprintf(stderr, "[fx] criado fx[%u] preset %u por 0x%08X, dono 0x%08X\n", idx, preset, GPR_U32(ctx, 31), owner);
         if (preset == ~0u || idx >= 100)
             return;
-        {   // sopro proprio ("breathFx"): os sistemas do bafo do jogo que ele substitui somem (wotm_breathfx.hpp)
-            const wotm::mods::Custom *cu = owner && g_fxBreath ? customOf(rdram, owner) : nullptr;
-            const bool hide = cu && cu->breathFx && cu->breathFx->hides(preset);
+        {   // sopro e tiro proprios ("breathFx", "shotFx"): os sistemas do jogo que eles substituem somem (wotm_breathfx.hpp)
+            const wotm::mods::Custom *cu = owner && (g_fxBreath || g_fxShotFx) ? customOf(rdram, owner) : nullptr;
+            const wotm::breathfx::Config *own = !cu ? nullptr : g_fxBreath ? cu->breathFx.get() : cu->shotFx.get();
+            const bool hide = own && own->hides(preset);
             wotm::breathfx::g_hide[idx].store(hide ? preset + 1 : 0, std::memory_order_relaxed);
             if (hide)
                 return;
@@ -1828,14 +1830,37 @@ namespace wotm_custom
     {
         return owner && cRd32(rdram, w + kWeaponType) == cRd32(rdram, owner + kShotType) ? shotColorOf(rdram, owner) : 0;
     }
+    // Tiro proprio ("shotFx") de um Weapon: a config do dono quando o Weapon e o tiro padrao dele; nullptr = o do jogo
+    const wotm::breathfx::Config *weaponShotFx(uint8_t *rdram, uint32_t w, uint32_t owner)
+    {
+        if (!owner || cRd32(rdram, w + kWeaponType) != cRd32(rdram, owner + kShotType))
+            return nullptr;
+        const wotm::mods::Custom *cu = customOf(rdram, owner);
+        return cu ? cu->shotFx.get() : nullptr;
+    }
+    constexpr uint32_t kWeaponActive = 0x40, kWeaponSlots = 0xC00, kWeaponSize = 0x170, kCsTrans = 0x10, kCsDrawMe = 0xC;
     void detonate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t w = ctx->pc == kDetonate ? GPR_U32(ctx, 4) : 0;
         const uint32_t m = w ? weaponOwner(rdram, w) : 0;
-        const bool prev = g_fxShot;
+        const wotm::breathfx::Config *sfx = w ? weaponShotFx(rdram, w, m) : nullptr;
+        if (sfx)   // a explosao: onde o projetil esta agora (o _cs dele)
+            if (const uint32_t cs = READ32(w + kWeaponCs))
+            {
+                const uint32_t seq = wotm::breathfx::g_impactSeq.fetch_add(1, std::memory_order_relaxed) + 1;
+                wotm::breathfx::ImpactLive &im = wotm::breathfx::g_impacts[seq % 16];
+                im.seq.store(0, std::memory_order_relaxed);
+                for (int k = 0; k < 3; ++k)
+                    im.p[k].store(rdF(rdram, cs + kCsTrans + 4 * k), std::memory_order_relaxed);
+                im.cfg.store(sfx, std::memory_order_relaxed);
+                im.seq.store(seq, std::memory_order_release);
+            }
+        const bool prev = g_fxShot, prevSfx = g_fxShotFx;
         g_fxShot = weaponShotColor(rdram, w, m) != 0;
+        g_fxShotFx = sfx != nullptr;
         withFxOwner(rdram, ctx, runtime, m, g_origDetonate);
         g_fxShot = prev;
+        g_fxShotFx = prevSfx;
     }
     // A cor `in` (rgb) com o matiz de `color` (0xRRGGBB), como o Particles::tinted das particulas (wotm_fx.hpp): v = canal maior,
     // s = saturacao; a parte saturada vai para a cor (normalizada para canal maior 1) e a parte branca continua branca
@@ -1857,6 +1882,16 @@ namespace wotm_custom
         const uint32_t w = ctx->pc == kInitWeapon ? GPR_U32(ctx, 4) : 0;
         const uint32_t type = w ? READ32(w + kWeaponType) : 0, own = w && type < 45 ? ownWeaponNode(rdram, weaponOwner(rdram, w), type) : 0;
         const uint32_t slot = kGameObj + kWeapons + 4 * type, prev = own ? READ32(slot) : 0;
+        const uint32_t owner = w ? weaponOwner(rdram, w) : 0;
+        const wotm::breathfx::Config *sfx = w ? weaponShotFx(rdram, w, owner) : nullptr;
+        const uint32_t prevOwner = g_fxOwner;
+        const bool prevSfx = g_fxShotFx, prevBreath = g_fxBreath;
+        if (sfx)
+        {
+            g_fxOwner = owner;
+            g_fxShotFx = true;
+            g_fxBreath = false;
+        }
         if (own)
         {
             const uint32_t ra = GPR_U32(ctx, 31);
@@ -1867,7 +1902,26 @@ namespace wotm_custom
         }
         else
             g_origInitWeapon(rdram, ctx, runtime);
-        const uint32_t color = w ? weaponShotColor(rdram, w, weaponOwner(rdram, w)) : 0;
+        g_fxOwner = prevOwner;
+        g_fxShotFx = prevSfx;
+        g_fxBreath = prevBreath;
+        // Tiro proprio ("shotFx", wotm_breathfx.hpp): a vaga do Weapon passa a ser seguida pela apresentacao; o modelo do jogo
+        // deixa de ser desenhado (drawMe do _cs do tiro; o hierInitCs do proximo csActivate o religa)
+        const uint32_t base = kGameObj + kWeapons + kWeaponSlots;
+        if (sfx && w >= base && (w - base) % kWeaponSize == 0 && (w - base) / kWeaponSize < 100)
+        {
+            wotm::breathfx::ShotLive &sl = wotm::breathfx::g_shots[(w - base) / kWeaponSize];
+            sl.cfg.store(sfx, std::memory_order_relaxed);
+            sl.gen.fetch_add(1, std::memory_order_release);
+            const uint32_t cs = READ32(w + kWeaponCs);
+            if (sfx->hideBody && cs)
+                WRITE8(cs + kCsDrawMe, 0);
+            static std::set<const void *> logged;
+            if (logged.insert(sfx).second)
+                std::fprintf(stderr, "[custom] tiro proprio de 0x%08X: vaga %u, tipo %u%s\n", owner, (w - base) / kWeaponSize, type,
+                             sfx->hideBody && cs ? ", modelo escondido" : "");
+        }
+        const uint32_t color = w ? weaponShotColor(rdram, w, owner) : 0;
         if (!color)
             return;
         auto writeF = [&](uint32_t a, float f) {

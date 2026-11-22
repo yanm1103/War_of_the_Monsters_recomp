@@ -190,7 +190,10 @@ struct Custom {
     // "breathFx": sopro proprio desenhado pelo port no lugar do bafo do Togera (wotm_breathfx.hpp); nullptr = o do jogo. Endereco
     // fixo (o runtime guarda o ponteiro)
     std::shared_ptr<const breathfx::Config> breathFx;
-    bool ai = false;           // uma CPU pode usar (quadro de CPU da selecao)
+    // "shotFx": tiro proprio (o projetil padrao do tipo, Monster +0x6878): camadas no projetil em voo, na explosao e na saida, no
+    // lugar do modelo e dos efeitos de explosao do jogo (wotm_breathfx.hpp); nullptr = o do jogo
+    std::shared_ptr<const breathfx::Config> shotFx;
+    bool ai = false;          // uma CPU pode usar (quadro de CPU da selecao)
     std::filesystem::path portrait;   // PNG do retrato do HUD (vazio = o do .RTX)
     int portraitTex = -1;       // texId do retrato no <PREFIXO><traje>.RTX
     std::filesystem::path logo;   // PNG 2:1 do logo (selecao e lista de saves; vazio = o nome em texto)
@@ -493,10 +496,15 @@ private:
         std::fprintf(stderr, "[mods] %s: \"%s\" tem de ser \"#RRGGBB\"; ignorado\n", where.c_str(), key);
         return 0;
     }
-    // "breathFx" (MODS.md): {"scale", "hide": [presets], "layers": [{...}]}; texturas na pasta do monstro ou na raiz do mod
+    // "breathFx" e "shotFx" (MODS.md): {"scale", "hide": [presets], "layers": [{...}]} (o do tiro tambem "hideBody"); texturas na
+    // pasta do monstro ou na raiz do mod
     static std::shared_ptr<const breathfx::Config> breathFx(const json::Value &v, const std::filesystem::path &dir,
-                                                            const std::filesystem::path &modDir, const std::string &where) {
+                                                            const std::filesystem::path &modDir, const std::string &where,
+                                                            bool shot = false) {
+        const char *key = shot ? "shotFx" : "breathFx";
         auto cfg = std::make_shared<breathfx::Config>();
+        if (shot) cfg->hide = {29, 36, 80, 81};   // a explosao do tiro do Togera: clarao branco, clarao, acerto e faiscas
+        if (const json::Value *x = v.get("hideBody")) cfg->hideBody = x->asBool(true);
         auto num = [](const json::Value *x, float d) { return x && x->type == json::Value::Int ? float(x->asNum(d)) : d; };
         auto pair = [&](const json::Value *x, float &lo, float &hi) {
             if (x && x->type == json::Value::Arr && x->arr.size() == 2) { lo = num(&x->arr[0], lo); hi = num(&x->arr[1], hi); }
@@ -523,12 +531,18 @@ private:
                     if (std::filesystem::is_regular_file(p, ec))
                         L.texture = p.string();
                     else
-                        std::fprintf(stderr, "[mods] monstro %s: \"breathFx\" textura %s nao achada (fica a mancha redonda)\n", where.c_str(), t->s.c_str());
+                        std::fprintf(stderr, "[mods] monstro %s: \"%s\" textura %s nao achada (fica a mancha redonda)\n", where.c_str(), key,
+                                     t->s.c_str());
                 }
                 const json::Value *at = l.get("at"), *mode = l.get("mode");
-                L.hit = at && at->type == json::Value::Str && lower(at->s) == "hit";
+                const std::string site = at && at->type == json::Value::Str ? lower(at->s) : "";
+                if (shot)
+                    L.site = site == "impact" ? breathfx::Impact : site == "launch" ? breathfx::Launch : breathfx::Shot;
+                else
+                    L.site = site == "hit" ? breathfx::Hit : breathfx::Mouth;
+                L.hit = L.site == breathfx::Hit;
                 L.stretch = mode && mode->type == json::Value::Str && lower(mode->s) == "stretch";
-                L.relative = !L.hit;
+                L.relative = L.site == breathfx::Mouth;
                 if (const json::Value *x = l.get("relative")) L.relative = x->asBool(L.relative);
                 if (const json::Value *x = l.get("once")) L.once = x->asBool(false);
                 if (const json::Value *x = l.get("additive")) L.additive = x->asBool(true);
@@ -553,13 +567,14 @@ private:
                 }
                 poly(l.get("sizePoly"), L.sizeMul);
                 pair(l.get("stretch"), L.grow, L.shrink);
+                L.duration = std::max(0.f, num(l.get("duration"), L.duration));
                 cfg->layers.push_back(std::move(L));
             }
         if (cfg->layers.empty()) {
-            std::fprintf(stderr, "[mods] monstro %s: \"breathFx\" sem \"layers\"; fica o sopro do jogo\n", where.c_str());
+            std::fprintf(stderr, "[mods] monstro %s: \"%s\" sem \"layers\"; fica o %s do jogo\n", where.c_str(), key, shot ? "tiro" : "sopro");
             return nullptr;
         }
-        std::fprintf(stderr, "[mods] monstro %s: sopro proprio com %zu camadas\n", where.c_str(), cfg->layers.size());
+        std::fprintf(stderr, "[mods] monstro %s: %s proprio com %zu camadas\n", where.c_str(), shot ? "tiro" : "sopro", cfg->layers.size());
         return cfg;
     }
     // Filho de `dir` com esse nome, sem olhar maiusculas
@@ -980,6 +995,8 @@ private:
                 c.shotColor = color(v, "shotColor", "monstro " + where);
                 if (const json::Value *bf = v.get("breathFx"); bf && bf->type == json::Value::Obj)
                     c.breathFx = breathFx(*bf, s, m, where);
+                if (const json::Value *sf = v.get("shotFx"); sf && sf->type == json::Value::Obj)
+                    c.shotFx = breathFx(*sf, s, m, where, true);
                 if (const json::Value *ki = v.get("kind"); ki && ki->type == json::Value::Str) c.kind = lower(ki->s);
                 if (const json::Value *sr = v.get("specialRoar")) c.specialRoar = sr->asBool(false);
                 if (const json::Value *fb = v.get("fallBlend"); fb && fb->type == json::Value::Int && fb->i >= 0 && fb->i <= 120)

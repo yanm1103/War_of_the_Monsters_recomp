@@ -1,5 +1,5 @@
-// Sopro proprio de um monstro custom ("breathFx" do monster.json; MODS.md, "Custom monsters"): camadas de particulas desenhadas
-// pelo port no lugar do bafo do Togera (FireBreath). O jogo continua dono do golpe (alcance, dano, duracao, som); o port so troca o
+// Sopro e tiro proprios de um monstro custom ("breathFx" e "shotFx" do monster.json; MODS.md, "Custom monsters"): camadas de
+// particulas desenhadas pelo port no lugar do bafo do Togera (FireBreath) e do modelo e da explosao do tiro padrao. O jogo continua dono do golpe (alcance, dano, duracao, som); o port so troca o
 // visual: esconde os sistemas do bafo que o FireBreath::Activate cria (presets "hide") e desenha as camadas a partir da boca do
 // monstro enquanto o FireBreath esta ligado.
 //
@@ -26,9 +26,14 @@ struct Poly {
     }
 };
 
+// Onde a camada nasce ("at"): no sopro, a boca ou onde ele bate; no tiro ("shotFx"), o projetil em voo, o ponto da explosao ou o
+// ponto de onde ele saiu
+enum Site : uint8_t { Mouth, Hit, Shot, Impact, Launch };
+
 // Uma camada: um emissor de particulas. Unidades do mundo do jogo e segundos.
 struct Layer {
     std::string texture;        // PNG (caminho no PC); vazio = mancha redonda
+    Site site = Mouth;
     bool hit = false;           // "at": "hit" = nasce onde o sopro bate (so enquanto bate em algo); "mouth" = na boca
     bool stretch = false;       // "mode": "stretch" = risco esticado na direcao da velocidade; "sprite" = quadrado de frente
     bool relative = true;       // as particulas andam com a boca (a cabeca vira e o sopro acompanha); padrao: so as da boca
@@ -45,6 +50,7 @@ struct Layer {
     float color[4] = {1.f, 1.f, 1.f, 1.f};
     Poly r, g, b, a, sizeMul;
     float grow = 0.2f, shrink = 0.6f;   // risco: cresce ate grow da vida e encolhe a partir de shrink (fracoes)
+    float duration = 0.2f;      // camadas de explosao e de saida do tiro sem "once": segundos emitindo
 };
 
 struct Config {
@@ -53,6 +59,7 @@ struct Config {
     // dele): bafo, miolo e faiscas do Togera; 80/81 = clarao e faiscas do acerto (para quem traz camadas de "hit")
     std::vector<int> hide{8, 51, 148};
     float scale = 1.f;                   // tamanhos, velocidades e area de todas as camadas
+    bool hideBody = true;                // tiro: o modelo do projetil do jogo some (o _cs dele deixa de ser desenhado)
     bool hides(uint32_t preset) const {
         for (int p : hide)
             if (uint32_t(p) == preset) return true;
@@ -72,5 +79,22 @@ inline Live g_live[8];
 // fx[i] criado por um monstro com breathFx, preset escondido: preset + 1 (0 = desenha). Vale enquanto o preset de fx[i] for o
 // gravado (Particles::hideTags)
 inline std::atomic<uint32_t> g_hide[100];
+
+// Tiro proprio ("shotFx"): uma vaga por Weapons::m_weapons[i] (TheGame +0x112490 +0xC00, 0x170 cada). O gancho do
+// Weapon::InitWeapon do tiro padrao de um monstro com shotFx grava a config e sobe gen; a apresentacao segue o projetil pela foto
+// da RAM enquanto o m_active dele vale e gen nao muda
+struct ShotLive {
+    std::atomic<const Config *> cfg{nullptr};
+    std::atomic<uint32_t> gen{0};
+};
+inline ShotLive g_shots[100];
+// Explosoes (Weapon::DetonateWeapon), em anel: a apresentacao solta as camadas de "impact" de cada uma uma vez
+struct ImpactLive {
+    std::atomic<uint32_t> seq{0};      // 0 = vazio; sobe por ultimo
+    std::atomic<const Config *> cfg{nullptr};
+    std::atomic<float> p[3];
+};
+inline ImpactLive g_impacts[16];
+inline std::atomic<uint32_t> g_impactSeq{0};
 
 }  // namespace wotm::breathfx
