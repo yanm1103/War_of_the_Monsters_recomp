@@ -103,6 +103,17 @@ keeping the other keys. Right click on the group: **New skin for this monster...
 skins stay and the log warns). On an extracted costume group (playable or boss, e.g. "MON/ASSBOSS1"), right click has **Turn into
 custom monster...**, which moves the group's PNGs to the new monster.
 
+**A new body: which way.** The kit takes a mesh that is already weighted; it does not paint weights. Run **Check model...** on
+the file first: it names the import that takes it and lists what would go wrong. Then:
+- *a model downloaded with its own skeleton and weights* (`.glb`, `.gltf`, `.dae`): a custom monster, **Import rigged model...**;
+  it keeps the model's skeleton and gives it the base type's animations;
+- *a mesh you weight yourself in Blender, on the monster's own bones*: **Export to Blender**, weight the new mesh to the named
+  bones (`L_Hand_bone1`, ...), then **Import mesh...**; on a custom monster a new body goes on through **Import rig...**, which
+  the kit offers;
+- *the monster's own pieces reshaped, or its animations edited*: **Export to Blender**, **Import mesh...** and **Import
+  animations...** (a skin or a custom);
+- *a skeleton and animations made from scratch*: **Import rig...** (a custom).
+
 **Mesh and animations from Blender.** A skin or a custom monster can have its own mesh and its own versions of the base type's
 animations, on the base type's skeleton:
 1. **Export to Blender** writes the base costume as `<PREFIX><costume>.glb` (e.g. `LIZARD1.glb`) in the work folder: the skin's
