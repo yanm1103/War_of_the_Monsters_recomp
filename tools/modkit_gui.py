@@ -2319,7 +2319,7 @@ def main():
                 print(ex.code)
                 sys.exit(1)
             raise
-    if "--web" in sys.argv[1:]:   # the kit in a browser tab (tools/modkit_web.py), while it takes over from this window
+    if "--tk" not in sys.argv[1:]:   # the kit in a browser tab (tools/modkit_web.py); --tk: this window, until it goes
         import modkit_web
         sys.exit(modkit_web.main([a for a in sys.argv[1:] if a != "--web"]))
     root = tk.Tk()

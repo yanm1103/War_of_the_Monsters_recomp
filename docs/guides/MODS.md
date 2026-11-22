@@ -37,12 +37,16 @@ Windows the path `mods` falls on the disc's `MOD\`, the IRX one) next to the ELF
 (`WOTM_REPO`, which `run_live.bat` and the launcher pass). Folders that start with `_` (sources, `_work`) are not mirrored and the
 game does not read them.
 
-## Interface (`tools/modkit_gui.py`, the launcher's "Mod kit" button)
+## Interface (the kit in a browser tab, the launcher's "Mod kit" button)
 
-`pythonw tools/modkit_gui.py`, or the **Mod kit** button of `WotM_Launcher.exe`. It needs Python 3 with Pillow (`pip install pillow`). The window is in English.
+`pythonw tools/modkit_gui.py`, or the **Mod kit** button of `WotM_Launcher.exe`, opens the kit as a tab of the default browser:
+`tools/modkit_web.py` serves it from `127.0.0.1` and runs `modkit.py` for it (the page is `tools/modkit_web/`). It needs Python 3
+with Pillow (`pip install pillow`) and numpy for the 3D previews and the Blender export. One kit at a time: starting it again opens
+another tab on the one running. Closing the tab quits the kit (about 15 s later, once a running task ends), as does **Quit**. The
+pages are in English. `--tk` still opens the earlier window (`tools/modkit_gui.py`).
 
-In the release zip it is `WotM_ModKit.exe`, next to `wotm.exe` (built by `tools/build_modkit.ps1` with PyInstaller, Python, Tk and
-Pillow inside; `tools/release.ps1` calls it). There it finds by itself what `wotm.exe` uses: the ISO in `wotm.ini` (`iso=`) and the mods
+In the release zip it is `WotM_ModKit.exe`, next to `wotm.exe` (built by `tools/build_modkit.ps1` with PyInstaller, Python, Tk for the
+file dialogs, Pillow and numpy inside; `tools/release.ps1` calls it). There it finds by itself what `wotm.exe` uses: the ISO in `wotm.ini` (`iso=`) and the mods
 folder (`<data>/mods`, otherwise `<game>/mods`, where `<data>` is the game folder or `%LOCALAPPDATA%\WotM`).
 
 **Game disc** takes the `.iso` or the extracted disc folder. With the ISO, each file the kit needs is copied once to
@@ -59,9 +63,15 @@ work area. Without a mod, the right-hand list is empty and the buttons tied to i
 2. **Edit <mod>'s work folder** (right): one group per disc file ("MON/MONKEY0 (Congar, costume 1)"); after extracting, the
    new group opens and the others close. Thumbnails, size and state ("edited" = changed since extraction). A texture the export could not
    color comes out gray with `_sempaleta` in the name; `pack` writes it without the suffix (the game accepts both). Preview
-   of the image (with a checkerboard behind the alpha) or the sound's waveform. A sound plays in the window itself on click ("play sounds on click"
+   of the image (with a checkerboard behind the alpha) or the sound's waveform. A sound plays in the page itself on click ("play sounds on click"
    turns it off) or on double click; "Stop" stops it. Double clicking a texture opens it in the editor chosen in **Editors...** (one program per
-   type, `.png` and `.wav`; empty = Windows default program; with a `.wav` editor set, double clicking a sound opens it there).
+   type, `.png` and `.wav`; empty = the system's default program; with a `.wav` editor set, double clicking a sound opens it there).
+   A monster costume group, a skin or a custom monster shows its model in 3D, standing in its idle with the work folder's PNGs over
+   the disc's textures (an edited texture shows on the model), and under it the list of the model's animations, named by kind (walk,
+   idle, attacks with the buttons that play them, the special...), with play, a frame slider and the speed; each animation is the
+   model's own, posed as the game poses it (`tools/monglb.py`; without the fur springs and the blended layers). A 3D file of the work
+   folder (`.glb`, `.gltf`, `.dae`, `.NGP`) shows the model itself. Drag turns the view, the wheel zooms.
+   Picking a file or a folder (the disc, Replace with..., Import...) opens the system's own dialog.
    Right click on the list: Play, Open in ..., **Open with...** (picks the program and asks whether it becomes the default), **Replace with...** (only with one file
    selected: replaces it with the file you pick and writes it with the right name; JPG, BMP, TGA etc. become PNG; warns if the aspect ratio
    changes; sound only accepts WAV), Show in folder, **Revert to original** (only shows up if there are edited files in the selection; on a group, reverts its
@@ -69,9 +79,10 @@ work area. Without a mod, the right-hand list is empty and the buttons tied to i
    **Save to folder...** (copies the selected files, or the whole group, to a folder) and Remove (the Del key too). Clicking a
    section only selects it: open and play apply only to files picked one by one; on a section, right click saves or removes everything.
 3. **Build** (bottom): **Build mod** (`pack` of the picked mod), **Check mods**, **Open mods folder** and **Open work folder**. The log
-   sits at the bottom, with a divider you can drag up and down.
+   sits at the bottom, with a divider you can drag up and down (its height is kept by the browser). One task runs at a time; the
+   buttons of the others wait for it.
 
-The folders (disc and mods), the last mod, the editors, the log height and the last "Save to folder" folder are kept in
+The folders (disc and mods), the last mod, the editors, the last "Save to folder" folder and the kit's port are kept in
 `~/.wotm_modkit.json` (in `WotM_ModKit.exe`, `modkit.json` in the game's data folder, next to `wotm.ini`); a saved folder that no
 longer exists falls back to the default. Underneath are the same functions of `modkit.py` below.
 
@@ -209,7 +220,7 @@ so its refusals show up here. Besides those, it looks at:
 **Import rigged model...** (custom monsters) takes a downloaded model that already has a skeleton and weights (`.glb`,
 `.gltf` or `.dae`) and gives it the base type's animations, in one go (`modkit.py monster rigged <mod> <id> <model> [--page]
 [--turn x90,z180] [--size F]`):
-1. a page opens in the browser with the model next to the base monster, both standing in the game's axes, already turned the
+1. a page opens over the kit (from the command line, in a browser tab) with the model next to the base monster, both standing in the game's axes, already turned the
    way the file says (up axis, front); **Turn**, **Tip** and **Roll** turn it by quarter turns until it stands and faces you
    like the monster (the page lists only the net turn, as the fewest buttons that give it: a full circle lists nothing), then
    **Next** (`tools/orientpage.py`; Cancel or closing the tab stops the import);
@@ -234,7 +245,8 @@ so its refusals show up here. Besides those, it looks at:
    `<model>_rig_map.json`, **Back** returns to the facing;
 3. the retarget writes `<model>_rig.glb` in `files/` and **Import rig...** takes it.
 The base costume's export (`<PREFIX><costume>.glb`) is made the first time and kept. The import runs as a separate process
-(`modkit.py`, or the kit's exe with `--modkit-cli`), so the window stays free while its lines reach the log. The model, its
+(`modkit.py`, or the kit's exe with `--modkit-cli`; `--embed` prints the page's address for the kit to show instead of opening
+a tab), and its lines reach the log; closing the page cancels the import. The model, its
 facing and size are kept in `.blender.json`: **Adjust bones...** (next to the button, once a model went in this way; `modkit.py
 monster rigged <mod> <id> --adjust`) opens the page again straight on **Match the bones**, with the kept map, and **OK**
 imports the same model again with the changes. The steps below are the same by hand.

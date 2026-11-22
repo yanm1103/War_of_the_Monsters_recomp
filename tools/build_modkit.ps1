@@ -45,9 +45,13 @@ $orient = @('--add-data', "$(Join-Path $repo 'tools\orientpage.html');orient",
             '--add-data', "$(Join-Path $vendor 'addons\loaders\GLTFLoader.js');orient/vendor/addons/loaders",
             '--add-data', "$(Join-Path $vendor 'addons\controls\OrbitControls.js');orient/vendor/addons/controls",
             '--add-data', "$(Join-Path $vendor 'addons\utils\BufferGeometryUtils.js');orient/vendor/addons/utils")
-$hidden = 'ngp', 'monglb', 'ngpmesh', 'ngpanim', 'ngprig', 'meshcheck', 'bonelabels', 'automap', 'retarget', 'orientpage' |
+# o kit no navegador (tools/modkit_web.py): a pagina vai em modkit_web/ (o three.js e o de orient/vendor)
+$web = Get-ChildItem (Join-Path $repo 'tools\modkit_web') -File | ForEach-Object { '--add-data', "$($_.FullName);modkit_web" }
+$web += '--add-data', "$(Join-Path $repo 'tools\anim_ids.json');modkit_web"
+$hidden = 'ngp', 'monglb', 'ngpmesh', 'ngpanim', 'ngprig', 'meshcheck', 'bonelabels', 'automap', 'retarget', 'orientpage',
+          'modkit_web', 'modkit_web_files', 'modkit_web_skins', 'modkit_web_monsters', 'modkit_web_model', 'pose', 'gltf', 'tex' |
     ForEach-Object { '--hidden-import', $_ }
-& $py -m PyInstaller --noconfirm --clean --onefile --windowed --name WotM_ModKit --icon $ico --add-data "$ico;." @orient `
+& $py -m PyInstaller --noconfirm --clean --onefile --windowed --name WotM_ModKit --icon $ico --add-data "$ico;." @orient @web `
     --paths (Join-Path $repo 'tools') @hidden --distpath $dist --workpath $work --specpath $work `
     (Join-Path $repo 'tools\modkit_gui.py')
 if ($LASTEXITCODE) { Fail 'PyInstaller falhou' }

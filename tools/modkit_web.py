@@ -418,7 +418,7 @@ def make_handler(kit, page_dir, vendor_dir, server_ref):
                 with open(f, "rb") as fh:
                     return self._send(200, fh.read(), TYPES.get(os.path.splitext(f)[1].lower(), "application/octet-stream"))
             if p == "/anim_ids.json":   # the animations' names (the bones page's copy of the model museum's table)
-                f = os.path.join(os.path.dirname(page_dir), "anim_ids.json")
+                f = os.path.join(page_dir, "anim_ids.json")   # inside the exe; the repo has it in tools/
                 if not os.path.isfile(f):
                     f = os.path.join(HERE, "anim_ids.json")
                 with open(f, "rb") as fh:
