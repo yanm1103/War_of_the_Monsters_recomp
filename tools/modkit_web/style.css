@@ -114,3 +114,11 @@ footer { height: var(--log-h); display: flex; gap: 10px; padding: 4px 14px 10px;
 #preview.paneled .pvBody { align-items: stretch; }
 .split2:has(#preview.paneled) .tree { flex: 2; }
 .split2:has(#preview.paneled) .preview { flex: 3; }
+#taskPage { position: fixed; inset: 0; z-index: 30; display: none; flex-direction: column; background: var(--bg); }
+#taskPage .bar { border-bottom: 1px solid var(--line); color: var(--dim); }
+#taskPage iframe { flex: 1; border: 0; width: 100%; }
+.inline { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+img.hud { max-width: 128px; max-height: 64px; background: #2c3039; }
+.props select { max-width: 260px; }
+.props .btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+.props .btns button { padding: 4px 9px; font-size: 13px; }

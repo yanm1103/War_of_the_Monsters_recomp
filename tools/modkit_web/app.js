@@ -4,6 +4,7 @@
 import { initDisc } from './disc.js';
 import { initWork } from './work.js';
 import { initSkins } from './skins.js';
+import { initMonsters } from './monsters.js';
 
 const $ = id => document.getElementById(id);
 const listeners = [];
@@ -167,8 +168,40 @@ function appendLog(text, kind) {
   if (stick) log.scrollTop = log.scrollHeight;
 }
 const events = new EventSource('api/log');   // also what tells the server this tab is open
+// a page of a task (the bones page of Import rigged model / Adjust bones) shows over the kit until the task ends; closing it
+// cancels the import (the page sends "cancel" as it goes away)
+function showTaskPage(url) {
+  let o = $('taskPage');
+  if (!o) {
+    o = document.createElement('div');
+    o.id = 'taskPage';
+    const bar = document.createElement('div');
+    bar.className = 'bar';
+    const t = document.createElement('span');
+    t.textContent = 'Set up the model, then OK in the page.';
+    const x = document.createElement('button');
+    x.textContent = 'Close (cancels the import)';
+    x.onclick = () => hideTaskPage();
+    const g = document.createElement('span');
+    g.className = 'grow';
+    bar.append(t, g, x);
+    const f = document.createElement('iframe');
+    o.append(bar, f);
+    document.body.appendChild(o);
+  }
+  o.querySelector('iframe').src = url;
+  o.style.display = 'flex';
+}
+function hideTaskPage() {
+  const o = $('taskPage');
+  if (!o) return;
+  o.querySelector('iframe').src = 'about:blank';
+  o.style.display = 'none';
+}
 events.onmessage = ev => {
   const it = JSON.parse(ev.data);
+  if (it.kind === 'page') { showTaskPage(it.text); return; }
+  if (it.kind === 'head' || it.kind === 'done') hideTaskPage();
   appendLog(it.text, it.kind);
   if (kit.state && (it.kind === 'head' || it.kind === 'done')) {
     kit.state.busy = it.busy;
@@ -224,4 +257,5 @@ async function refresh() { kit.setState(await kit.api('state')); }
 initDisc();
 initWork();
 initSkins();
+initMonsters();
 refresh();

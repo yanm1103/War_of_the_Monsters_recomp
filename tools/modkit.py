@@ -1333,7 +1333,7 @@ def rigged_record(work, mods, mod, cid):
     return rec if isinstance(rec, dict) and rec.get("model") else None
 
 
-def rigged_import(disc, work, mods, mod, cid, model, turn=None, page=False, size=1.0, adjust=False):
+def rigged_import(disc, work, mods, mod, cid, model, turn=None, page=False, size=1.0, adjust=False, embed=False):
     """Modelo baixado que ja tem esqueleto (.glb, .gltf, .dae) -> corpo do custom com as animacoes do tipo base: confere a
     frente (page=True: a pagina 3D, tools/orientpage.py; turn: giros ja dados), faz o mapa de ossos (tools/automap.py; um
     <modelo>_rig_map.json ja na pasta, editado, vale no lugar dele), o retarget (tools/retarget.py) e o rig import.
@@ -1366,7 +1366,9 @@ def rigged_import(disc, work, mods, mod, cid, model, turn=None, page=False, size
             info = {"base": str(data.get("base", "the base")).title(), "model": os.path.basename(model)}
             if adjust:   # straight to the bones, with the facing already given
                 info.update(start="bones", turn=turn or "")
-            a = orientpage.ask(src, pv, info, bones=bones)
+            # embed: the kit's page shows it (tools/modkit_web.py reads this line) instead of a new browser tab
+            opener = (lambda url: print("[page] %s" % url, flush=True)) if embed else None
+            a = orientpage.ask(src, pv, info, bones=bones, **({"open_page": opener} if opener else {}))
             if a is None:
                 raise SystemExit("rigged import: cancelled in the page")
             turn = a["turn"]
@@ -1720,7 +1722,7 @@ def main(argv):
                 raise SystemExit("%s needs a value" % argv[i])
             opts[argv[i][2:]] = argv[i + 1]
             i += 2
-        elif argv[i] in ("--inject", "--ai", "--no-textures", "--page", "--adjust"):
+        elif argv[i] in ("--inject", "--ai", "--no-textures", "--page", "--adjust", "--embed"):
             opts[argv[i][2:]] = True
             i += 1
         else:
@@ -1815,7 +1817,7 @@ def main(argv):
         if args[1] == "rigged" and opts.get("adjust"):
             if len(args) != 4:
                 raise SystemExit(use)
-            rigged_import(disc, w, mods, args[2], args[3], None, adjust=True)
+            rigged_import(disc, w, mods, args[2], args[3], None, adjust=True, embed=opts.get("embed", False))
         elif args[1] == "rigged":
             if len(args) != 5:
                 raise SystemExit(use)
@@ -1823,7 +1825,8 @@ def main(argv):
                 size = float(opts.get("size", 1.0))
             except ValueError:
                 raise SystemExit("monster rigged: --size is a number (1 = the base's height)")
-            rigged_import(disc, w, mods, args[2], args[3], args[4], opts.get("turn"), opts.get("page", False), size)
+            rigged_import(disc, w, mods, args[2], args[3], args[4], opts.get("turn"), opts.get("page", False), size,
+                          embed=opts.get("embed", False))
         elif args[1] == "rig":
             if len(args) != 5 or opts.get("front") not in (None, "+y", "-y") or ("scale" in opts and "height" in opts):
                 raise SystemExit(use)

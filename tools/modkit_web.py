@@ -34,6 +34,7 @@ import modkit  # noqa: E402
 from modkit_web_files import FilesMixin  # noqa: E402
 from modkit_web_model import ModelMixin  # noqa: E402
 from modkit_web_skins import SkinsMixin  # noqa: E402
+from modkit_web_monsters import MonstersMixin  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONF = os.path.join(modkit.game_data_dir(), "modkit.json") if modkit.FROZEN else os.path.join(os.path.expanduser("~"), ".wotm_modkit.json")
@@ -166,7 +167,7 @@ class Dialogs:
 
 
 # ------------------------------------------------------------------ the kit
-class Kit(FilesMixin, SkinsMixin, ModelMixin):
+class Kit(FilesMixin, SkinsMixin, MonstersMixin, ModelMixin):
     """The state the page sees and the tasks it starts."""
 
     def __init__(self):
@@ -264,7 +265,11 @@ class Kit(FilesMixin, SkinsMixin, ModelMixin):
                 p = subprocess.Popen(cmd + args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env,
                                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 for raw in iter(p.stdout.readline, b""):
-                    self.say(raw.decode("utf-8", "replace").replace("\r\n", "\n"))
+                    line = raw.decode("utf-8", "replace").replace("\r\n", "\n")
+                    if line.startswith("[page] "):   # a page of the task (the bones page): the kit's page shows it
+                        self.say(line[7:].strip(), "page")
+                        continue
+                    self.say(line)
                 code = p.wait()
                 if code:
                     self.say("(stopped with code %d)\n" % code, "err")
@@ -404,6 +409,14 @@ def make_handler(kit, page_dir, vendor_dir, server_ref):
                 return self._json(kit.state())
             if p == "/api/log":
                 return self._events()
+            if p == "/api/hud":   # a custom's HUD portrait
+                from urllib.parse import parse_qs
+                cid = (parse_qs(self.path.split("?", 1)[1]).get("cid") or [""])[0] if "?" in self.path else ""
+                f = kit.portrait_of(cid) if cid else None
+                if not f:
+                    return self._send(404, b"not found", "text/plain")
+                with open(f, "rb") as fh:
+                    return self._send(200, fh.read(), TYPES.get(os.path.splitext(f)[1].lower(), "application/octet-stream"))
             if p in ("/api/portrait", "/api/model.glb"):
                 from urllib.parse import parse_qs
                 q = {k: v[0] for k, v in parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "").items()}
