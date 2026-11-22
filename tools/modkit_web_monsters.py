@@ -175,6 +175,18 @@ class MonstersMixin:
         p = os.path.join(modkit.monster_dir(self.mods, self.mod, cid), por) if por else ""
         return p if p and os.path.isfile(p) else None
 
+    def logo_of(self, cid):
+        """GET /api/hud?cid=&logo=1: the custom's name logo ("logo" of monster.json, in its folder or at the mod's root)."""
+        data = self.monster_data(cid)
+        lg = data.get("logo") if isinstance(data.get("logo"), str) else ""
+        if not lg:
+            return None
+        mdir = modkit.monster_dir(self.mods, self.mod, cid)
+        for p in (os.path.join(mdir, lg), os.path.join(self.mods, self.mod, lg)):
+            if os.path.isfile(p):
+                return p
+        return None
+
     def act_portrait_set(self, d):
         cid, p = d["cid"], d["path"]
         src = p

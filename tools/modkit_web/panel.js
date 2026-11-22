@@ -7,7 +7,21 @@ import { makeSplit } from './split.js';
 export const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 export const button = (text, f, cls) => { const b = el('button', cls || '', text); b.type = 'button'; b.onclick = f; return b; };
 
-export function panelFrame(body, groupKey) {
+// the monster's name over the 3D view, as the menus show it: its logo from the disc (or the custom's own "logo"), else the
+// name in big letters
+export function stageTitle(v, g) {
+  if (!g) return;
+  const name = el('div', 'name3d', g.title || '');
+  if (g.logo) {
+    const im = el('img', 'logo3d');
+    im.alt = '';
+    im.onerror = () => { im.remove(); v.appendChild(name); };
+    im.src = g.logo;
+    v.appendChild(im);
+  } else if (g.title) v.appendChild(name);
+}
+
+export function panelFrame(body, groupKey, g) {
   const wrap = el('div', 'panel');
   const top = el('div', 'pvtop');
   const v = el('div', 'v3d');
@@ -20,6 +34,7 @@ export function panelFrame(body, groupKey) {
   body.appendChild(wrap);
   const still = 'api/model.glb?group=' + encodeURIComponent(groupKey) + '&t=' + Date.now();
   showModel(v, still, true);   // the kit's export: the game's axes
+  stageTitle(v, g);   // after: showModel empties the box
   animBar(ab, groupKey, still);
   makeSplit(bar, top, { axis: 'y', key: 'wotm.v3dH', min: 140, max: () => wrap.clientHeight - 150 });
   return form;

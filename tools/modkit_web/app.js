@@ -12,6 +12,7 @@ const listeners = [];
 const doneListeners = [];
 const kit = window.kit = {
   state: null,
+  actions: {},   // newSkin(), newMonster(): set by skins.js and monsters.js (the welcome cards call them)
   async api(path, body) {   // GET when there is no body
     const r = await fetch('api/' + path, body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) });
     return r.json();
@@ -118,16 +119,57 @@ const kit = window.kit = {
   },
 };
 
+// ---------------------------------------------------------------- the game's pictures (modkit_web_art.py: read from the disc)
+let artFor;
+function loadArt(disc) {
+  if (disc === artFor) return;
+  artFor = disc;
+  const t = Date.now();
+  const logo = $('titleLogo');
+  logo.classList.remove('ok');
+  logo.onload = () => logo.classList.add('ok');
+  logo.onerror = () => logo.classList.remove('ok');
+  logo.src = 'api/art?name=title&t=' + t;
+  const sky = $('sky');
+  const urls = { sky: 'api/art?name=sky&t=' + t, trees: 'api/art?name=trees&t=' + t };
+  Promise.all(Object.values(urls).map(u => new Promise(ok => { const i = new Image(); i.onload = () => ok(true); i.onerror = () => ok(false); i.src = u; })))
+    .then(([a, b]) => {
+      sky.style.setProperty('--sky', 'url("' + urls.sky + '")');
+      sky.style.setProperty('--trees', 'url("' + urls.trees + '")');
+      sky.classList.toggle('art', a && b);
+    });
+}
+
+// ---------------------------------------------------------------- setup: the disc and the mods folder
+let setupAuto = null;   // what the drawer opened by itself for (it opens once per problem)
+function setupOpen(on) { $('setup').classList.toggle('open', on); }
+function showSetup(s) {
+  const msg = !s.disc_ok ? 'Pick your War of the Monsters disc: the .iso (NTSC-U, SCUS-97197) or the folder it was extracted to.'
+            : !s.mods_ok ? 'Pick the mods folder: the "mods" folder next to the game.' : '';
+  $('setupMsg').textContent = msg;
+  $('setupBtn').classList.toggle('bad', !!msg);
+  if (msg && setupAuto !== msg) { setupAuto = msg; setupOpen(true); }
+  if (!msg) setupAuto = null;
+}
+$('setupBtn').onclick = () => setupOpen(!$('setup').classList.contains('open'));
+$('setupClose').onclick = () => setupOpen(false);
+document.addEventListener('mousedown', e => {
+  if ($('setup').classList.contains('open') && !e.target.closest('#setup, #setupBtn, #modal') && !$('setupBtn').classList.contains('bad'))
+    setupOpen(false);
+});
+
 // ---------------------------------------------------------------- paths and mod
 function showState(s) {
   for (const k of ['disc', 'mods']) if (document.activeElement !== $(k)) $(k).value = s[k] || '';
   $('disc').classList.toggle('bad', !s.disc_ok);
   $('mods').classList.toggle('bad', !s.mods_ok);
+  showSetup(s);
+  if (s.disc_ok) loadArt(s.disc);
   const sel = $('mod');
   sel.innerHTML = '';
   const none = document.createElement('option');
   none.value = '';
-  none.textContent = s.mod_list.length ? '(pick a mod)' : '(no mods yet)';
+  none.textContent = s.mod_list.length ? 'Pick a mod...' : 'No mods yet';
   sel.appendChild(none);
   for (const n of s.mod_list) {
     const o = document.createElement('option');
@@ -217,9 +259,9 @@ $('check').onclick = () => kit.run('check');
 $('build').onclick = () => kit.run('build');
 $('openMods').onclick = () => kit.run('open', { what: 'mods' });
 $('openWork').onclick = () => kit.run('open', { what: 'work' });
-$('newMod').onclick = () => kit.dialog({
+kit.newMod = () => kit.dialog({
   title: 'New mod',
-  text: "Letters, digits, '_' and '-' only, starting with a letter or digit (no spaces; e.g. green_togera or Robo47-skins).",
+  text: "A mod is a folder the game loads over the disc: skins, monsters, textures and sounds. Its name takes letters, digits, '_' and '-' (no spaces; e.g. green_togera or Robo47-skins).",
   fields: [{ key: 'name', label: 'Name of the new mod' }],
   okText: 'Create',
   ok: async v => {
@@ -229,6 +271,7 @@ $('newMod').onclick = () => kit.dialog({
     return null;
   },
 });
+$('newMod').onclick = () => kit.newMod();
 $('quit').onclick = async () => {
   try { await kit.api('quit', {}); } catch (e) { /* already gone */ }
   events.close();

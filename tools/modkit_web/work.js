@@ -4,6 +4,8 @@
 // kit.work.panels: other parts of the page register a panel for a group kind (a skin's or a monster's properties).
 import { listSelect } from './select.js';
 import { showModel, animBar } from './viewer.js';
+import { icon } from './disc.js';
+import { stageTitle } from './panel.js';
 
 const MODEL_EXT = ['.glb', '.gltf', '.dae', '.ngp'];
 
@@ -21,11 +23,96 @@ let reqN = 0;
 const fileUrl = f => 'api/file?rel=' + encodeURIComponent(f.rel) + '&m=' + f.mtime;
 const ext = rel => (rel.match(/\.[^./]+$/) || [''])[0].toLowerCase();
 
+const TAGS = { skin: 'Skin', monster: 'Monster', costume: 'Costume', level: 'Level', sounds: 'Sounds', music: 'Music', screen: 'Screen', files: 'Files' };
+const ICONS = { sounds: 'sound', music: 'music', screen: 'screen', level: 'level' };
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+
+function groupPic(g) {   // the row's picture: a portrait or a level's picture from the disc, else a kind's glyph
+  if (g.pic) {
+    const im = el('img', 'pic');
+    im.loading = 'lazy';
+    im.src = g.pic;
+    im.onerror = () => im.replaceWith(icon(ICONS[g.tag] || 'files'));
+    return im;
+  }
+  return icon(ICONS[g.tag] || 'files');
+}
+
+// ---------------------------------------------------------------- welcome: no mod yet, or a mod with nothing in it
+function card(cls, title, text, art, onclick) {
+  const c = el('div', 'card ' + cls);
+  const a = el('div', 'art');
+  for (const x of art) a.appendChild(x);
+  c.append(a, el('div', '', ''));
+  const t = c.lastChild;
+  t.append(el('h4', '', title), el('p', '', text));
+  c.onclick = onclick;
+  return c;
+}
+function artImg(src, cls) {
+  const im = el('img', cls || '');
+  im.src = src;
+  im.onerror = () => im.remove();
+  return im;
+}
+const glyph = g => el('span', 'glyph', g);
+function fromDisc() {   // the disc's list: the monsters open, the search box ready
+  kit.disc.open(['0']);
+  const f = $('discFilter');
+  f.focus();
+  f.select();
+}
+export function startCards(compact) {   // New skin, New monster, From the disc
+  const ok = kit.state && kit.state.disc_ok;
+  const box = el('div', 'cards');
+  box.append(
+    card('c2', 'New skin', 'New colors and textures for one of the monsters, picked as a costume in the game.',
+      ok ? [artImg('api/portrait?prefix=MANTIS&k=0'), artImg('api/portrait?prefix=MANTIS&k=2')] : [glyph('✎')], () => kit.actions.newSkin()),
+    card('c1', 'New monster', 'A fighter of its own on a base monster\'s moves: its name, look, 3D model, stats and sounds.',
+      ok ? [artImg('api/art?name=logo-LAVA', 'logo')] : [glyph('✚')], () => kit.actions.newMonster()),
+    card('c3', 'From the disc', 'Any texture or sound of the game: pick it in the list on the left and extract it to edit.',
+      ok && !compact ? [artImg('api/art?name=level-TOKYO')] : [glyph('◀')], fromDisc));
+  return box;
+}
+function welcome() {
+  const s = kit.state;
+  const pane = $('workPane');
+  const w = $('welcome');
+  const empty = s && s.mod && !data.groups.length && !$('onlyEdited').checked && data.status !== undefined;
+  const on = !!s && (!s.mod || empty);
+  pane.classList.toggle('welcome', on);
+  if (!on) { w.innerHTML = ''; w.dataset.for = ''; return; }
+  const key = (s.mod || '') + '|' + s.mod_list.join(',') + '|' + s.disc_ok;
+  if (w.dataset.for === key) return;
+  w.dataset.for = key;
+  w.innerHTML = '';
+  if (!s.mod) {
+    w.append(el('h3', '', s.mod_list.length ? 'Pick a mod' : 'Make your first mod'),
+      el('p', '', s.mod_list.length ? 'Open one of your mods, or start a new one.' : 'A mod holds your skins, monsters, textures and sounds. Start one to begin.'));
+    const cards = el('div', 'cards');
+    cards.appendChild(card('c1', 'New mod', 'An empty mod with the name you choose.', [glyph('✚')], () => kit.newMod()));
+    w.appendChild(cards);
+    if (s.mod_list.length) {
+      const ml = el('div', 'modlist');
+      ml.appendChild(el('div', 'lead', 'Your mods:'));
+      for (const n of s.mod_list) {
+        const b = el('button', '', n);
+        b.onclick = async () => kit.setState(await kit.api('conf', { mod: n }));
+        ml.appendChild(b);
+      }
+      w.appendChild(ml);
+    }
+    return;
+  }
+  w.append(el('h3', '', s.mod + ' is empty'), el('p', '', 'Start with one of these:'), startCards(false));
+}
+
 function render() {
   const box = $('workTree');
   const top = box.scrollTop;
   box.innerHTML = '';
   rows = [];
+  welcome();
   for (const g of data.groups) {
     const gid = 'grp:' + g.key;
     rows.push({ id: gid, group: g });
@@ -33,14 +120,28 @@ function render() {
     const d = document.createElement('div');
     d.className = 'row group' + (sel.has(gid) ? ' sel' : '') + (ne ? ' edited' : '');
     d.dataset.id = gid;
+    d.title = g.label;
     const a = document.createElement('span');
     a.className = 'arrow';
     a.textContent = g.files.length ? (open.has(g.key) ? '▼' : '▶') : '';
     a.onclick = e => { e.stopPropagation(); toggle(g.key); };
-    const l = document.createElement('span');
-    l.className = 'lbl';
-    l.textContent = g.label + '   [' + g.files.length + ' file(s)' + (ne ? ', ' + ne + ' edited' : '') + ']';
-    d.append(a, l);
+    const tx = el('span', 'gtext');
+    const l = el('span', 'lbl', g.title || g.label);
+    l.dataset.label = g.label;
+    const nf = g.files.length + (g.files.length === 1 ? ' file' : ' files');
+    tx.append(l, el('span', 'sub', (g.sub ? g.sub + '  ·  ' : '') + nf));
+    const more = el('button', 'more', '⋯');
+    more.type = 'button';
+    more.title = 'What can be done with it';
+    more.onclick = e => {
+      e.stopPropagation();
+      if (!sel.has(gid)) { sel.set([gid]); onSelect(); }
+      const r = more.getBoundingClientRect();
+      contextMenu({ preventDefault() {}, clientX: r.left, clientY: r.bottom + 2 });
+    };
+    d.append(a, groupPic(g), tx);
+    if (ne) d.appendChild(el('span', 'chip ed', ne + ' edited'));
+    d.append(el('span', 'chip ' + (g.tag || 'files'), TAGS[g.tag] || 'Files'), more);
     box.appendChild(d);
     if (!open.has(g.key)) continue;
     for (const f of g.files) {
@@ -69,13 +170,8 @@ function render() {
       box.appendChild(r);
     }
   }
-  if (!data.groups.length) {
-    const m = document.createElement('div');
-    m.className = 'hint';
-    m.style.padding = '10px 12px';
-    m.textContent = kit.state && kit.state.mod ? '(' + (data.status || 'empty') + ': extract something from the disc on the left)' : '';
-    box.appendChild(m);
-  }
+  if (!data.groups.length && kit.state && kit.state.mod)
+    box.appendChild(el('div', 'empty', $('onlyEdited').checked ? 'No edited files yet.' : 'Nothing here yet: extract something from the disc on the left.'));
   box.scrollTop = top;
 }
 function paintSel() {
@@ -155,29 +251,40 @@ async function preview() {
   const body = $('pvBody'), label = $('pvLabel');
   body.innerHTML = '';
   const g = selectedGroup();
-  $('preview').classList.toggle('paneled', !!(g && panels[g.kind]));   // a panel: the file buttons step aside
+  $('preview').classList.toggle('paneled', !!(g && (panels[g.kind] || g.custom_base)));   // a panel or a costume: the file buttons step aside
   if (g && panels[g.kind]) { panels[g.kind](g, body, label); return; }
   const files = selectedFiles(false), allf = selectedFiles(true);
-  if (g && g.custom_base) {   // a costume of a monster: the model with the folder's textures on it
+  $('preview').classList.toggle('nofile', !files.length);   // the file buttons only with a file picked
+  if (g && g.custom_base) {   // a costume of a monster: the model with the folder's textures on it, and what it can become
     const wrap = document.createElement('div');
     wrap.className = 'panel';
     const v = document.createElement('div');
     v.className = 'v3d';
     const ab = document.createElement('div');
-    wrap.append(v, ab);
+    const acts = el('div', 'acts');
+    const items = [];
+    for (const f of menus) f({ group: g, files: [], allf }, (t, fn) => items.push([t, fn]), () => {});
+    for (const [t, fn] of items) { const b = el('button', '', t); b.type = 'button'; b.onclick = fn; acts.appendChild(b); }
+    wrap.append(v, ab, acts);
     body.appendChild(wrap);
     const still = 'api/model.glb?group=' + encodeURIComponent(g.key) + '&t=' + Date.now();
     showModel(v, still, true);
+    stageTitle(v, g);   // after: showModel empties the box
     animBar(ab, g.key, still);
-    label.textContent = g.label + ': ' + allf.length + ' file(s); edited textures show on the model (refresh after saving one). Open the section to pick a file.';
+    label.textContent = (g.sub || g.label) + ': ' + allf.length + ' file(s). Edited textures show on the model (Refresh after saving one). Open it in the list to pick a file.';
     return;
   }
   if (!files.length && allf.length) {
-    label.textContent = allf.length + ' file(s) in the selected section. Open it (arrow or double-click) and pick a file; right-click saves or removes the whole section.';
+    label.textContent = allf.length + ' file(s) in the selected section. Open it (arrow or double-click) and pick a file; the ⋯ button saves or removes the whole section.';
     return;
   }
   if (!files.length) {
-    label.textContent = kit.state && kit.state.mod ? 'Select a file in the work folder. Double-click opens a texture in its editor ("Editors...") and plays a sound; right-click for more (Save to folder...).' : '';
+    if (kit.state && kit.state.mod && data.groups.length) {
+      const st = el('div', 'pvStart');
+      st.append(el('h4', '', 'What next?'), startCards(true));
+      body.appendChild(st);
+    }
+    label.textContent = kit.state && kit.state.mod ? 'Or pick something in the list. Double-click opens a texture in its editor ("Editors...") and plays a sound.' : '';
     return;
   }
   const f = files[0];
@@ -386,8 +493,9 @@ export function initWork() {
   $('autoplay').onchange = () => kit.api('conf', { autoplay: $('autoplay').checked });
   kit.onState(s => {
     $('autoplay').checked = s.autoplay !== false;
-    $('workHead').textContent = s.mod ? '2. Edit ' + s.mod + "'s work folder" : '2. Edit the work folder';
-    $('workHint').textContent = s.mod ? '' : 'Pick or create a mod first (top)';
+    $('workHead').textContent = s.mod ? 'Edit ' + s.mod : 'Edit your mod';
+    $('workHint').textContent = '';
+    welcome();
     if (s.work !== shownWork) {   // another mod: the selection and the open groups were the other folder's
       shownWork = s.work;
       sel.clear();

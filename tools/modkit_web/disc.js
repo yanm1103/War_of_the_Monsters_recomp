@@ -11,8 +11,16 @@ let sel;
 
 function matches(n, q) {
   if (!q) return true;
-  if (n.label.toLowerCase().includes(q) || (n.pats || []).some(p => p.toLowerCase().includes(q))) return true;
+  if (n.label.toLowerCase().includes(q) || (n.sub || '').toLowerCase().includes(q) || (n.pats || []).some(p => p.toLowerCase().includes(q))) return true;
   return (n.kids || []).some(k => matches(k, q));
+}
+
+const GLYPHS = { sound: '♪', music: '♫', screen: '▣', level: '▲', files: '▤' };
+export function icon(kind) {   // a small box with a glyph for rows without a picture
+  const s = document.createElement('span');
+  s.className = 'ico ' + (kind || 'files');
+  s.textContent = GLYPHS[kind] || GLYPHS.files;
+  return s;
 }
 
 function render() {
@@ -28,21 +36,37 @@ function render() {
   });
   walk(tree, 0, '');
   for (const r of rows) {
+    const n = r.node;
     const d = document.createElement('div');
-    d.className = 'row' + (sel.has(r.id) ? ' sel' : '');
+    d.className = 'row' + (sel.has(r.id) ? ' sel' : '') + (r.depth === 0 ? ' cat' : '') + (n.logo ? ' mon' : '');
     d.style.paddingLeft = (8 + r.depth * 16) + 'px';
     d.dataset.id = r.id;
     const a = document.createElement('span');
     a.className = 'arrow';
-    a.textContent = r.node.kids && r.node.kids.length ? ((q || open.has(r.id)) ? '▼' : '▶') : '';
+    a.textContent = n.kids && n.kids.length ? ((q || open.has(r.id)) ? '▼' : '▶') : '';
     a.onclick = e => { e.stopPropagation(); toggle(r.id); };
+    d.appendChild(a);
+    if (n.pic) {   // a costume's portrait, a level's picture (from the disc)
+      const im = document.createElement('img');
+      im.className = 'pic' + (n.icon === 'level' ? ' level' : '');
+      im.loading = 'lazy';
+      im.src = n.pic;
+      im.onerror = () => { im.replaceWith(icon(n.icon)); };
+      d.appendChild(im);
+    } else if (n.icon) d.appendChild(icon(n.icon));
     const l = document.createElement('span');
     l.className = 'lbl';
-    l.textContent = r.node.label;
-    d.append(a, l);
+    l.textContent = n.label;
+    d.appendChild(l);
+    if (n.sub) {
+      const s = document.createElement('span');
+      s.className = 'sub';
+      s.textContent = n.sub;
+      d.appendChild(s);
+    }
     box.appendChild(d);
   }
-  if (!rows.length && $('discTree').dataset.msg) box.textContent = $('discTree').dataset.msg;
+  if (!rows.length && $('discTree').dataset.msg) { const m = document.createElement('div'); m.className = 'empty'; m.textContent = $('discTree').dataset.msg; box.appendChild(m); }
 }
 function paintSel() {   // only the classes: the rows stay (a double click needs the same element twice)
   for (const d of $('discTree').children) if (d.dataset.id) d.classList.toggle('sel', sel.has(d.dataset.id));
@@ -69,7 +93,7 @@ async function extract() {
 async function load() {
   const r = await kit.api('do/disc', {});
   tree = r.tree || [];
-  $('discTree').dataset.msg = r.error ? '(' + r.error + ')' : '';
+  $('discTree').dataset.msg = r.error || '';
   render();
 }
 

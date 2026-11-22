@@ -31,6 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import modkit  # noqa: E402
+from modkit_web_art import ArtMixin  # noqa: E402
 from modkit_web_files import FilesMixin  # noqa: E402
 from modkit_web_model import ModelMixin  # noqa: E402
 from modkit_web_skins import SkinsMixin  # noqa: E402
@@ -167,7 +168,7 @@ class Dialogs:
 
 
 # ------------------------------------------------------------------ the kit
-class Kit(FilesMixin, SkinsMixin, MonstersMixin, ModelMixin):
+class Kit(FilesMixin, SkinsMixin, MonstersMixin, ModelMixin, ArtMixin):
     """The state the page sees and the tasks it starts."""
 
     def __init__(self):
@@ -337,7 +338,7 @@ class Kit(FilesMixin, SkinsMixin, MonstersMixin, ModelMixin):
 
     def act_build(self, d):
         if not self.mod:
-            return {"error": "Pick or create a mod first (\"Mod\" at the top)."}
+            return {"error": "Pick or create a mod first (\"Your mod\" at the top)."}
         return {"ok": self.run("Building %s..." % self.mod, ["pack", self.mod, "--work", self.work()] + self.paths(),
                                after=lambda: self.say("Done. Start the game: the log shows a [mods] line for each file and texture "
                                                       "of the mod.\n"))}
@@ -361,7 +362,7 @@ class Kit(FilesMixin, SkinsMixin, MonstersMixin, ModelMixin):
         """{"what": "mods" | "work"}: the folder in the system's file manager."""
         p = self.mods if d.get("what") == "mods" else self.work()
         if not p:
-            return {"error": "Pick or create a mod first (\"Mod\" at the top)."}
+            return {"error": "Pick or create a mod first (\"Your mod\" at the top)."}
         try:
             open_path(p)
         except OSError as ex:
@@ -409,10 +410,14 @@ def make_handler(kit, page_dir, vendor_dir, server_ref):
                 return self._json(kit.state())
             if p == "/api/log":
                 return self._events()
-            if p == "/api/hud":   # a custom's HUD portrait
+            if p in ("/api/hud", "/api/art"):   # a custom's HUD portrait (logo=1: its name logo); the game's pictures
                 from urllib.parse import parse_qs
-                cid = (parse_qs(self.path.split("?", 1)[1]).get("cid") or [""])[0] if "?" in self.path else ""
-                f = kit.portrait_of(cid) if cid else None
+                q = {k: v[0] for k, v in parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "").items()}
+                if p == "/api/art":
+                    f = kit.art(q.get("name", ""))
+                else:
+                    cid = q.get("cid", "")
+                    f = (kit.logo_of(cid) if q.get("logo") else kit.portrait_of(cid)) if cid else None
                 if not f:
                     return self._send(404, b"not found", "text/plain")
                 with open(f, "rb") as fh:

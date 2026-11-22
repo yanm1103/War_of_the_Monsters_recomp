@@ -49,24 +49,34 @@ In the release zip it is `WotM_ModKit.exe`, next to `wotm.exe` (built by `tools/
 file dialogs, Pillow and numpy inside; `tools/release.ps1` calls it). There it finds by itself what `wotm.exe` uses: the ISO in `wotm.ini` (`iso=`) and the mods
 folder (`<data>/mods`, otherwise `<game>/mods`, where `<data>` is the game folder or `%LOCALAPPDATA%\WotM`).
 
-**Game disc** takes the `.iso` or the extracted disc folder. With the ISO, each file the kit needs is copied once to
+The page dresses in the game's menus: the header is the drive-in's horizon with the game's title, and the lists show the costumes'
+portraits, the monsters' name logos and the stages' pictures. All of it is read from the user's disc when the page asks
+(`tools/modkit_web_art.py`, `GET /api/art`: the title, the sky and the tree line from `SHELL/SHELL.TEX`, the logos and the stage pictures
+with the palettes `native/wotm_savepics.hpp` uses); without a disc the page keeps a plain night sky and the names in letters.
+
+**Setup** (top right) holds the **Game disc** and the **Mods folder**; it opens by itself, with a red mark on the button, while one of
+them is missing or wrong. The disc is the `.iso` or the extracted disc folder. With the ISO, each file the kit needs is copied once to
 `%LOCALAPPDATA%\WotM\modkit_disc\<key>\` (one folder per image; `tools/iso9660.py` reads it), and the rest works as with the folder.
 
-A mod is a project: at the top, **Mod: [list] [New mod...]** picks the mod (New mod creates the mod folder and its work folder,
+A mod is a project: at the top, **Your mod: [list] [+ New mod]** picks the mod (New mod creates the mod folder and its work folder,
 `<mods>/_work/<mod>/`; the name only has letters, digits, `_` and `-`, starting with a letter or digit). When you pick the mod, its files
 that the work folder does not have (a mod made earlier or by hand) are copied there and show up as edited; Build takes them back.
 A file removed from the work folder on purpose does not come back. The picked mod governs Extract, the right-hand list and Build; changing the mod changes the whole
-work area. Without a mod, the right-hand list is empty and the buttons tied to it are disabled, with the hint "Pick or create a mod first".
+work area. Without a mod, the right-hand pane shows **New mod** and the user's mods as buttons; a mod with nothing in it shows three
+starting points (**New skin**, **New monster**, **From the disc**), and the same three show in the preview while nothing is picked.
 
-1. **Pick from the disc** (left): monsters by name and costume (Togera › Costume 1, and its sound banks), bosses, stages by their in-game
-   name, menu and screens, sound banks, music and speech. Search field; Ctrl/Shift pick several; double click or "Extract selected".
-2. **Edit <mod>'s work folder** (right): one group per disc file ("MON/MONKEY0 (Congar, costume 1)"); after extracting, the
-   new group opens and the others close. Thumbnails, size and state ("edited" = changed since extraction). A texture the export could not
+1. **Pick from the game disc** (left): monsters by name with their portraits and costumes (Togera › Costume 1, and its sound banks),
+   bosses, stages by their in-game name with their pictures, menu and screens, sound banks, music and speech. Search field (names and
+   file names); Ctrl/Shift pick several; double click or **Extract to my mod**.
+2. **Edit <mod>** (right): one group per disc file, skin or custom monster, each with its picture, name, kind (Skin, Monster,
+   Costume, Level, Sounds...), file count and edited count; the **⋯** button on a group opens the same menu as the right click. After
+   extracting, the new group opens and the others close. Thumbnails, size and state ("edited" = changed since extraction). A texture the export could not
    color comes out gray with `_sempaleta` in the name; `pack` writes it without the suffix (the game accepts both). Preview
    of the image (with a checkerboard behind the alpha) or the sound's waveform. A sound plays in the page itself on click ("play sounds on click"
    turns it off) or on double click; "Stop" stops it. Double clicking a texture opens it in the editor chosen in **Editors...** (one program per
    type, `.png` and `.wav`; empty = the system's default program; with a `.wav` editor set, double clicking a sound opens it there).
-   A monster costume group, a skin or a custom monster shows its model in 3D, standing in its idle with the work folder's PNGs over
+   A monster costume group, a skin or a custom monster shows its model in 3D (with the monster's name logo, or a custom's `logo`, or
+   its name in big letters, over the view), standing in its idle with the work folder's PNGs over
    the disc's textures (an edited texture shows on the model), and under it the list of the model's animations, named by kind (walk,
    idle, attacks with the buttons that play them, the special...), with play, a frame slider and the speed; each animation is the
    model's own, posed as the game poses it (`tools/monglb.py`; without the fur springs and the blended layers). A 3D file of the work
@@ -78,32 +88,32 @@ work area. Without a mod, the right-hand list is empty and the buttons tied to i
    edited files; extracts again from the disc and asks for confirmation first),
    **Save to folder...** (copies the selected files, or the whole group, to a folder) and Remove (the Del key too). Clicking a
    section only selects it: open and play apply only to files picked one by one; on a section, right click saves or removes everything.
-3. **Build** (bottom): **Build mod** (`pack` of the picked mod), **Check mods**, **Open mods folder** and **Open work folder**. The log
-   sits at the bottom, with a divider you can drag up and down (its height is kept by the browser). One task runs at a time; the
-   buttons of the others wait for it.
+3. **Build and play** (bottom left): **Build mod** (`pack` of the picked mod), **Check mods**, **Mods folder** and **Work folder**.
+   **Messages** (the log) sits next to it, with a divider above you can drag up and down (its height is kept by the browser). One task
+   runs at a time; the buttons of the others wait for it.
 
 The folders (disc and mods), the last mod, the editors, the last "Save to folder" folder and the kit's port are kept in
 `~/.wotm_modkit.json` (in `WotM_ModKit.exe`, `modkit.json` in the game's data folder, next to `wotm.ini`); a saved folder that no
 longer exists falls back to the default. Underneath are the same functions of `modkit.py` below.
 
-**Skins from the window.** **New skin...** (in the list header, next to Refresh) opens a dialog: *Monster* (a list with the ten
+**Skins from the window.** **+ New skin** (in the list header) opens a dialog: *Monster* (a list with the ten
 playable monsters and the known custom monsters; it also accepts a typed id, which counts as a custom monster id: no extracted textures
 and `skin.json` without `base`), *Base costume* (0 to 3, with each costume's portrait; a costume not on the disc is disabled; for a
 custom the default is the `costume` of `monster.json`), *Name*, *Id* (derived from the name, editable) and "CPUs may pick this skin". It creates the
 `skin.json` in `mods/<mod>/skins/<id>/` and extracts the base costume's textures to the work folder. In the list, the skin is its own group
-at the top ("Skin: NAME (monster/id, base N)"); when selected, the preview becomes the properties panel (Name, Base, CPUs may pick,
+at the top (its name, "Skin for <monster>" and the base costume's portrait); when selected, the preview becomes the properties panel (Name, Base, CPUs may pick,
 *Mesh* with **Export to Blender**, **Import mesh...** and **Import animations...** (see "Mesh and animations from Blender" below), **Save** rewrites `skin.json`). Right click on the group: **Duplicate skin...** (copies the skin in the mod and in the work folder with the new
-id) and **Delete skin**. With a playable monster costume group selected (e.g. "MON/SHOGUN3"), the header's **Turn into skin...** button (also
-on right click) creates the skin with that monster and costume and moves the group's PNGs to its folder, so the original costume stays untouched in Build; if the mod already has
+id) and **Delete skin**. With a playable monster costume group selected (e.g. "MON/SHOGUN3"), **Turn into skin...** (under its 3D view,
+in the header and on right click) creates the skin with that monster and costume and moves the group's PNGs to its folder, so the original costume stays untouched in Build; if the mod already has
 those PNGs packed in `MON/`, the window warns and offers to delete them.
 
-**Custom monsters from the window.** **New monster...** (next to New skin) opens a dialog: *Base type* (the ten playable monsters and the three
+**Custom monsters from the window.** **+ New monster** (next to New skin) opens a dialog: *Base type* (the ten playable monsters and the three
 accepted bosses, with a note of what the boss lacks), *Costume* (with the portraits; for Goliath the default is 1), *Name*, *Id* (derived from the
 name; it cannot be a playable monster's name), *Camera* (the type's own or another monster's, with the distance in %; for Goliath and
 Jelly it defaults to Togera's at 200% and 300%), *Narrator* (the `narrator/*.mp3` the port finds), "Own look" and "CPUs may pick this monster".
 It creates the `monster.json` in `mods/<mod>/monsters/<id>/` and, with "Own look", writes `"files": true` and extracts the costume's textures to
 `monsters/<id>/files/` in the work folder: on Build the edited PNGs go to the monster's `files/` folder and apply only to it (the
-disc costume stays untouched). In the list, the monster is a group at the top ("Monster: NAME (custom id, base X costume N)"); when selected, the
+disc costume stays untouched). In the list, the monster is a group at the top (its name, "Custom monster, built on <base>" and its HUD portrait or the base costume's); when selected, the
 preview becomes the properties panel: Name, Camera, Narrator, *Rules* (the `kind`), *Special* (the `special`), CPUs, *HUD portrait* (**Set...** copies the image to
 `portrait.png` and writes the right `portraitTex` of the costume's `.RTX`; **Remove** goes back to the costume's) and *Look* (how many textures and the own
 model; **Import model files...** copies `.NGP` + `.PTR`, and optional `.TEX`/`.RTX`, to `files/`; **Extract stats** extracts the base

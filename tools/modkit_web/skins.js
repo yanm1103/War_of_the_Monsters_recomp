@@ -146,9 +146,8 @@ async function turnIntoSkin(g) {
 async function skinPanel(g, body, label) {
   const sid = g.key.slice(6);
   label.textContent = 'Skin ' + sid + ': its PNGs are in the work folder (skins/' + sid + '); open the section to edit them. "Build mod" sends the edited ones to the mod\'s skins/' + sid + '.';
-  const form = panelFrame(body, g.key);
+  const form = panelFrame(body, g.key, g);
   const p = await kit.api('do/skin_props', { sid });
-  form.appendChild(el('h4', '', 'Skin ' + sid));
   if (p.missing) { form.appendChild(el('div', 'dim', 'No skin.json in ' + p.missing)); return; }
   const d = p.data;
   const name = el('input');
@@ -176,7 +175,9 @@ async function skinPanel(g, body, label) {
 
 export function initSkins() {
   const tools = $('workTools');
-  const bNew = el('button', 'needmod', 'New skin...');
+  const bNew = el('button', 'needmod', '+ New skin');
+  bNew.title = 'New colors and textures for a monster';
+  kit.actions.newSkin = () => skinDialog('New skin');
   const bTurn = el('button', 'needmod', 'Turn into skin...');
   bNew.onclick = () => skinDialog('New skin');
   bTurn.onclick = () => {

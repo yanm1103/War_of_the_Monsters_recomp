@@ -125,45 +125,51 @@ class FilesMixin:
         """The disc by name: [{"label", "pats", "kids"}] groups (Monsters, Bosses, Levels...), or {"error"}."""
         disc = self.disc
         if not modkit.disc_ok(disc):
-            return {"error": "Game disc not found: pick your War of the Monsters .iso above."}
+            return {"error": "Game disc not found: pick your War of the Monsters .iso in Setup (top right)."}
 
         def has(rel):
             return modkit.disc_has(disc, rel)
 
-        def node(label, items):
-            return {"label": label, "pats": [p for it in items for p in it["pats"]], "kids": items}
+        from modkit_web_art import LEVEL_PICS, LOGOS
+
+        def node(label, items, **kw):
+            return dict({"label": label, "pats": [p for it in items for p in it["pats"]], "kids": items}, **kw)
+
+        def por(prefix, k):   # the costume's portrait (the page's API)
+            return "api/portrait?prefix=%s&k=%d" % (prefix, k)
+        # each node may have "pic" (a picture on its row), "logo" (the monster's name logo), "icon" (a kind: sound, music,
+        # screen) and "sub" (a second, smaller line)
         out = []
-        g = []
-        for prefix, name, banks in MONSTERS:
-            items = [{"label": "Costume %d  (%s%d)" % (k + 1, prefix, k), "pats": ["MON/%s%d" % (prefix, k)]}
-                     for k in range(4) if has("MON/%s%d.TEX" % (prefix, k))]
-            items += [{"label": "Sounds  (%s.BNK)" % b, "pats": ["SND/%s.BNK" % b]} for b in banks if has("SND/%s.BNK" % b)]
-            if items:
-                g.append(node(name, items))
-        out.append({"label": "Monsters", "kids": g})
-        g = []
-        for prefix, name, banks in BOSSES:
-            items = [{"label": "Form %d  (%s%d)" % (k + 1, prefix, k), "pats": ["MON/%s%d" % (prefix, k)]}
-                     for k in range(4) if has("MON/%s%d.TEX" % (prefix, k))]
-            items += [{"label": "Sounds  (%s.BNK)" % b, "pats": ["SND/%s.BNK" % b]} for b in banks if has("SND/%s.BNK" % b)]
-            if items:
-                g.append(node(name, items))
-        out.append({"label": "Bosses", "kids": g})
-        out.append({"label": "Levels", "kids": [{"label": "%s  (%s)" % (name, f), "pats": ["LVL/%s" % f]}
+        for group, table, word in (("Monsters", MONSTERS, "Costume"), ("Bosses", BOSSES, "Form")):
+            g = []
+            for prefix, name, banks in table:
+                ks = [k for k in range(4) if has("MON/%s%d.TEX" % (prefix, k))]
+                items = [{"label": "%s %d" % (word, k + 1), "sub": "%s%d" % (prefix, k), "pats": ["MON/%s%d" % (prefix, k)],
+                          "pic": por(prefix, k)} for k in ks]
+                items += [{"label": "Sounds", "sub": "%s.BNK" % b, "pats": ["SND/%s.BNK" % b], "icon": "sound"}
+                          for b in banks if has("SND/%s.BNK" % b)]
+                if items:
+                    g.append(node(name, items, pic=por(prefix, ks[0]) if ks else None,
+                                  logo="api/art?name=logo-" + prefix if prefix in LOGOS else None))
+            out.append({"label": group, "kids": g})
+        out.append({"label": "Levels", "kids": [{"label": name, "sub": f, "pats": ["LVL/%s" % f],
+                                                 "pic": "api/art?name=level-" + f if f in LEVEL_PICS else None, "icon": "level"}
                                                 for f, name in LEVELS if has("LVL/%s.TEX" % f)]})
-        out.append({"label": "Menus and screens", "kids": [{"label": "%s  (%s)" % (name, f), "pats": ["SHELL/%s" % f]}
+        out.append({"label": "Menus and screens", "kids": [{"label": name, "sub": f, "pats": ["SHELL/%s" % f], "icon": "screen"}
                                                            for f, name in SHELL if has("SHELL/%s.TEX" % f)]})
         used = {b for _, _, bs in MONSTERS + BOSSES for b in bs}
-        out.append({"label": "Sound banks", "kids": [{"label": n.upper(), "pats": ["SND/" + n]} for n in sorted(modkit.disc_listdir(disc, "SND"))
+        out.append({"label": "Sound banks", "kids": [{"label": n.upper(), "pats": ["SND/" + n], "icon": "sound"}
+                                                     for n in sorted(modkit.disc_listdir(disc, "SND"))
                                                      if n.upper().endswith(".BNK") and os.path.splitext(n)[0].upper() not in used]})
-        out.append({"label": "Music and voices", "kids": [{"label": n.upper(), "pats": ["VAG/" + n]} for n in sorted(modkit.disc_listdir(disc, "VAG"))
+        out.append({"label": "Music and voices", "kids": [{"label": n.upper(), "pats": ["VAG/" + n], "icon": "music"}
+                                                          for n in sorted(modkit.disc_listdir(disc, "VAG"))
                                                           if n.upper().endswith((".VPK", ".VAG"))]})
         return {"tree": [g for g in out if g["kids"]]}
 
     def act_extract(self, d):
         work = self.work()
         if not work:
-            return {"error": "Pick or create a mod first (\"Mod\" at the top): the files go into that mod's work folder."}
+            return {"error": "Pick or create a mod first (\"Your mod\" at the top): the files go into that mod's work folder."}
         pats = list(dict.fromkeys(d.get("pats") or []))
         if not pats:
             return {"error": "Pick a monster, costume, level or sound in the list on the left."}
@@ -177,6 +183,49 @@ class FilesMixin:
 
     def monster_data(self, cid):
         return modkit._json_obj(os.path.join(modkit.monster_dir(self.mods, self.mod, cid), "monster.json")) if self.mod else {}
+
+    def group_view(self, key, customs):
+        """What a group's row shows: {"title", "sub", "tag", "pic", "logo"}; pic (portrait or level picture) and logo (the
+        monster's name logo) are the page's API addresses, or None."""
+        from modkit_web_art import LEVEL_PICS, LOGOS
+        por = lambda pre, k: "api/portrait?prefix=%s&k=%d" % (pre, k)  # noqa: E731
+        logo = lambda pre: "api/art?name=logo-" + pre if pre in LOGOS else None  # noqa: E731
+        if key.startswith("skins/"):
+            sid = key[6:]
+            data = self.skin_data(sid)
+            mon = str(data.get("monster", "")).lower()
+            c = customs.get(mon)
+            pre = modkit.MONSTERS.get(mon) or (c["prefix"] if c else None)
+            b = data.get("base")
+            k = b if isinstance(b, int) and 0 <= b <= 3 else (c["costume"] if c else 0)
+            who = (c["name"] if c else mon.title()) if mon else "?"
+            return {"title": data.get("name") or sid, "sub": "Skin for %s" % who, "tag": "skin",
+                    "pic": por(pre, k) if pre else None, "logo": None if c else logo(pre)}
+        if key.startswith("monsters/"):
+            cid = key[9:]
+            data = self.monster_data(cid)
+            pre = modkit.base_prefix(data.get("base")) if isinstance(data.get("base"), str) else None
+            co = data.get("costume", 0) if isinstance(data.get("costume"), int) else 0
+            pic = ("api/hud?cid=" + cid) if self.portrait_of(cid) else por(pre, co) if pre else None
+            return {"title": data.get("name") or cid, "sub": "Custom monster, built on %s" % str(data.get("base", "?")).title(),
+                    "tag": "monster", "pic": pic, "logo": ("api/hud?logo=1&cid=" + cid) if self.logo_of(cid) else None}
+        d, _, n = key.rpartition("/")
+        for prefix, name, banks in MONSTERS + BOSSES:
+            if d == "MON" and n[:-1] == prefix and n[-1:].isdigit():
+                boss = (prefix, name, banks) not in MONSTERS
+                return {"title": name, "sub": "%s %d  (%s)" % ("Form" if boss else "Costume", int(n[-1]) + 1, key), "tag": "costume",
+                        "pic": por(prefix, int(n[-1])), "logo": logo(prefix)}
+            if n.endswith(".BNK") and n[:-4] in banks:
+                return {"title": name + " sounds", "sub": key, "tag": "sounds", "pic": por(prefix, 0), "logo": None}
+        for f, name in LEVELS:
+            if d == "LVL" and n == f:
+                return {"title": name, "sub": key, "tag": "level", "pic": "api/art?name=level-" + f if f in LEVEL_PICS else None,
+                        "logo": None}
+        for f, name in SHELL:
+            if n == f:
+                return {"title": name, "sub": key, "tag": "screen", "pic": None, "logo": None}
+        tag = "sounds" if n.endswith(".BNK") else "music" if n.endswith((".VPK", ".VAG")) else "files"
+        return {"title": n, "sub": key if d else "", "tag": tag, "pic": None, "logo": None}
 
     def group_label(self, key, customs):
         if key.startswith("skins/"):
@@ -243,14 +292,14 @@ class FilesMixin:
             kind = "monster" if key.startswith("monsters/") else "skin" if key.startswith("skins/") else "file"
             out.append({"key": key, "label": self.group_label(key, customs), "kind": kind,
                         "costume": bool(costume_of_group(key)), "costume_info": costume_of_group(key, bosses=True), "custom_base": bool(costume_of_group(key, bosses=True)),
-                        "files": groups[key]})
+                        "files": groups[key], **self.group_view(key, customs)})
         return {"groups": out, "total": total, "edited": edited_total, "status": "%d file(s), %d edited" % (total, edited_total)}
 
     def work_path(self, rel):
         """A work folder file from its relative path, or SystemExit when it is outside the folder."""
         work = self.work()
         if not work:
-            raise SystemExit("Pick or create a mod first (\"Mod\" at the top).")
+            raise SystemExit("Pick or create a mod first (\"Your mod\" at the top).")
         p = os.path.normpath(os.path.join(work, *rel.replace("\\", "/").split("/")))
         if not p.startswith(os.path.normpath(work) + os.sep):
             raise SystemExit("%s is outside the work folder" % rel)

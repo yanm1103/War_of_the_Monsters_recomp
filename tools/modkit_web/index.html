@@ -2,46 +2,64 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>WotM - Mod kit</title>
+<title>War of the Monsters - Mod kit</title>
 <link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%23120a06%22/%3E%3Ctext x=%2216%22 y=%2224%22 font-family=%22Impact,Arial Black,sans-serif%22 font-size=%2222%22 text-anchor=%22middle%22 fill=%22%23f08a2c%22%3EW%3C/text%3E%3C/svg%3E">
 <script type="importmap">
 {"imports": {"three": "./vendor/three.module.min.js", "three/addons/": "./vendor/addons/"}}
 </script>
 </head>
 <body>
+<div id="sky"><div class="stars"></div><div class="trees"></div></div>
 <header>
-  <div class="paths">
-    <label for="disc">Game disc (.iso)</label>
-    <div class="field"><input id="disc" spellcheck="false"><button class="pick" data-pick="disc" title="Pick the game's .iso">&hellip;</button></div>
-    <label for="mods">Mods folder</label>
-    <div class="field"><input id="mods" spellcheck="false"><button class="pick" data-pick="mods" title="Pick the mods folder">&hellip;</button></div>
-    <label for="mod" class="head">Mod</label>
-    <div class="field" id="modBar"><select id="mod"></select><button id="newMod">New mod&hellip;</button></div>
+  <div class="brand">
+    <img id="titleLogo" alt="">
+    <span class="titleText" id="titleText">War of the Monsters</span>
+    <span class="kitname">Mod kit</span>
   </div>
-  <button id="quit" title="Close the mod kit">Quit</button>
+  <div class="modpick">
+    <label for="mod">Your mod</label>
+    <div class="field" id="modBar"><select id="mod"></select><button id="newMod" title="Start a new mod">+ New mod</button></div>
+  </div>
+  <span class="grow"></span>
+  <button id="setupBtn" class="ghost" title="Game disc and mods folder"><span class="gear">&#9881;</span> Setup<span class="dot"></span></button>
+  <button id="quit" class="ghost" title="Close the mod kit">Quit</button>
+  <div id="setup">
+    <h3>Setup</h3>
+    <div class="setupMsg" id="setupMsg"></div>
+    <div class="paths">
+      <label for="disc">Game disc (.iso)</label>
+      <div class="field"><input id="disc" spellcheck="false"><button class="pick" data-pick="disc" title="Pick the game's .iso">&hellip;</button></div>
+      <label for="mods">Mods folder</label>
+      <div class="field"><input id="mods" spellcheck="false"><button class="pick" data-pick="mods" title="Pick the mods folder">&hellip;</button></div>
+    </div>
+    <div class="buttons"><button id="setupClose">Close</button></div>
+  </div>
 </header>
 <main id="main">
-  <section id="discPane">
-    <h2>1. Pick from the disc</h2>
-    <div class="bar"><input id="discFilter" placeholder="Search" spellcheck="false"></div>
-    <div class="hint">Ctrl or Shift to pick several; double-click extracts</div>
+  <section id="discPane" class="step s1">
+    <h2><span class="num">1</span><span>Pick from the game disc</span></h2>
+    <div class="bar"><input id="discFilter" placeholder="Search: a monster, a level, a sound..." spellcheck="false"></div>
+    <div class="hint">Double-click extracts it to your mod. Ctrl or Shift picks several.</div>
     <div class="tree" id="discTree" tabindex="0"></div>
-    <div class="bar end"><button class="task needmod primary" id="extract">Extract selected &raquo;</button></div>
+    <div class="bar end"><button class="task needmod primary" id="extract">Extract to my mod &raquo;</button></div>
   </section>
   <div class="vsplit" id="splitMain" title="Drag to resize; double-click: back to the default"></div>
-  <section id="workPane">
-    <h2><span id="workHead">2. Edit the work folder</span><span class="hint" id="workHint"></span>
+  <section id="workPane" class="step s2">
+    <h2><span class="num">2</span><span id="workHead">Edit your mod</span><span class="hint" id="workHint"></span>
       <span class="grow"></span><span id="workTools"></span>
-      <button id="refreshWork">Refresh</button><label class="check"><input type="checkbox" id="onlyEdited"> edited only</label></h2>
+      <label class="check" title="Show only the files you changed"><input type="checkbox" id="onlyEdited"> edited only</label>
+      <button id="refreshWork" class="icon" title="Read the work folder again">&#8635;</button></h2>
+    <div id="welcome"></div>
     <div class="split2">
       <div class="tree work" id="workTree" tabindex="0"></div>
       <div class="vsplit thin" id="splitWork" title="Drag to resize; double-click: back to the default"></div>
       <div class="preview" id="preview">
         <div class="pvBody" id="pvBody"></div>
         <div class="pvLabel" id="pvLabel"></div>
-        <div class="bar">
+        <div class="bar" id="pvFileBar">
           <button id="pvOpen">Open in editor</button><button id="pvReveal">Show in folder</button>
-          <button id="pvPlay">Play</button><button id="pvStop">Stop</button><span class="grow"></span><button id="pvRemove">Remove</button>
+          <button id="pvPlay">&#9654; Play</button><button id="pvStop">&#9632; Stop</button><span class="grow"></span><button id="pvRemove" class="danger">Remove</button>
         </div>
         <div class="bar"><label class="check"><input type="checkbox" id="autoplay"> play sounds on click</label><span class="grow"></span>
           <button id="editorsBtn">Editors&hellip;</button></div>
@@ -49,16 +67,26 @@
     </div>
   </section>
 </main>
-<div id="split" title="Drag to resize the log"></div>
+<div id="split" title="Drag to resize the messages"></div>
 <footer id="foot">
-  <div class="tasks" id="tasks">
-    <button class="task needmod primary" id="build">Build mod</button>
-    <button class="task" id="check">Check mods</button>
-    <button id="openMods">Open mods folder</button>
-    <button class="needmod" id="openWork">Open work folder</button>
-    <div class="status" id="status"></div>
-  </div>
-  <pre id="log"></pre>
+  <section class="tasks step s3" id="tasks">
+    <h2><span class="num">3</span><span>Build and play</span></h2>
+    <div class="taskgrid">
+      <div class="main">
+        <button class="task needmod primary big" id="build" title="Put your changes into the mod; start the game to play them">Build mod</button>
+        <div class="status" id="status"></div>
+      </div>
+      <div class="small">
+        <button class="task" id="check" title="Look for problems in all the mods">Check mods</button>
+        <button id="openMods" title="The folder the game reads mods from">Mods folder</button>
+        <button class="needmod" id="openWork" title="Your mod's editable files">Work folder</button>
+      </div>
+    </div>
+  </section>
+  <section class="logbox">
+    <div class="logtitle">Messages</div>
+    <pre id="log"></pre>
+  </section>
 </footer>
 <div id="menu"></div>
 <audio id="player"></audio>

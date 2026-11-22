@@ -134,9 +134,8 @@ async function turnIntoMonster(g) {
 async function monsterPanel(g, body, label) {
   const cid = g.key.slice(9);
   label.textContent = 'Custom monster ' + cid + ': its PNGs are in the work folder (monsters/' + cid + '/files); open the section to edit them. "Build mod" sends the edited ones to the mod, where they are its own look (only for it).';
-  const form = panelFrame(body, g.key);
+  const form = panelFrame(body, g.key, g);
   const [L, p] = await Promise.all([getLists(), kit.api('do/monster_props', { cid })]);
-  form.appendChild(el('h4', '', 'Custom monster ' + cid));
   if (p.missing) { form.appendChild(el('div', 'dim', 'No monster.json in ' + p.missing)); return; }
   const key = 'monsters/' + cid;
   const run = async (action, b) => { kit.workFocus = [key]; return kit.run(action, b); };
@@ -214,7 +213,9 @@ async function monsterPanel(g, body, label) {
 
 export function initMonsters() {
   const tools = $('workTools');
-  const bNew = el('button', 'needmod', 'New monster...');
+  const bNew = el('button', 'needmod', '+ New monster');
+  bNew.title = 'A fighter of its own, on a base monster';
+  kit.actions.newMonster = () => monsterDialog('New custom monster');
   bNew.onclick = () => monsterDialog('New custom monster');
   tools.appendChild(bNew);
   kit.work.panels.monster = monsterPanel;
