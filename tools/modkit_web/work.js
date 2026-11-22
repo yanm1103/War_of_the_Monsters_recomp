@@ -3,7 +3,7 @@
 // checkerboard, sound as a waveform) and what can be done with the files (open, replace, save, revert, remove).
 // kit.work.panels: other parts of the page register a panel for a group kind (a skin's or a monster's properties).
 import { listSelect } from './select.js';
-import { showModel } from './viewer.js';
+import { showModel, animBar } from './viewer.js';
 
 const MODEL_EXT = ['.glb', '.gltf', '.dae', '.ngp'];
 
@@ -159,10 +159,16 @@ async function preview() {
   if (g && panels[g.kind]) { panels[g.kind](g, body, label); return; }
   const files = selectedFiles(false), allf = selectedFiles(true);
   if (g && g.custom_base) {   // a costume of a monster: the model with the folder's textures on it
+    const wrap = document.createElement('div');
+    wrap.className = 'panel';
     const v = document.createElement('div');
     v.className = 'v3d';
-    body.appendChild(v);
-    showModel(v, 'api/model.glb?group=' + encodeURIComponent(g.key) + '&t=' + Date.now());
+    const ab = document.createElement('div');
+    wrap.append(v, ab);
+    body.appendChild(wrap);
+    const still = 'api/model.glb?group=' + encodeURIComponent(g.key) + '&t=' + Date.now();
+    showModel(v, still);
+    animBar(ab, g.key, still);
     label.textContent = g.label + ': ' + allf.length + ' file(s); edited textures show on the model (refresh after saving one). Open the section to pick a file.';
     return;
   }

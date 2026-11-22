@@ -86,6 +86,66 @@ def posed_glb(ngp, tex_path=None, rtx_path=None, png_folder=None, stem=None, ani
     return out
 
 
+class _OverLib:
+    """tex.Library with the PNGs of a folder over the textures (what a mod's PNGs do in the game)."""
+
+    def __init__(self, ov):
+        self.ov = ov
+
+    def __enter__(self):
+        import tex
+        try:
+            from PIL import Image
+        except ImportError:
+            Image = None
+        ov = self.ov
+
+        class Lib(tex.Library):
+            def image(self, tex_id, tex0, hi=False):
+                p = self.by_id.get(tex_id - self.pair.dtex)
+                if p is not None and Image is not None:
+                    _data, is_rtx = self.src[id(p)]
+                    f = ov.get((is_rtx, p.texId))
+                    if f:
+                        try:
+                            with Image.open(f) as im:
+                                im = im.convert("RGBA")
+                                return im.width, im.height, list(im.getdata())
+                        except OSError:
+                            pass
+                return super().image(tex_id, tex0, hi)
+        self.old = tex.Library
+        tex.Library = Lib
+        return self
+
+    def __exit__(self, *a):
+        import tex
+        tex.Library = self.old
+
+
+def anim_list(ngp):
+    """[{"k", "id", "frames"}] of the model's animations (k: its place in the table; ids repeat)."""
+    import pose
+    mdl = pose.Model(ngp)
+    return [{"k": k, "id": aid, "frames": int(round(et - st)) + 1} for aid, k, st, et, _n in mdl.anims()]
+
+
+def anim_glb(ngp, k, png_folder=None, stem=None):
+    """The model playing animation k (tools/monglb.py, sampled at 60/s as the game poses it), with the folder's PNGs over its
+    textures. -> path of the .glb (cached)."""
+    import monglb
+    stem = stem or os.path.splitext(os.path.basename(ngp))[0]
+    ov = _overrides(png_folder, stem)
+    tex_path, rtx_path = (os.path.splitext(ngp)[0] + e for e in (".TEX", ".RTX"))
+    out = os.path.join(cache_dir(), _key(ngp, tex_path, rtx_path, *sorted(ov.values()), extra="anim|%s|%d" % (stem, k)) + ".glb")
+    if os.path.exists(out):
+        return out
+    with _lock, _OverLib(ov):
+        ex = monglb.Exporter(ngp)
+        ex.export(out, [int(k)], 60.0)
+    return out
+
+
 def file_glb(path):
     """A 3D file of the work folder as a .glb for the page: .glb as it is, .gltf/.dae through the kit's reader (its rest mesh,
     textured), .NGP in its idle."""
@@ -153,6 +213,24 @@ class ModelMixin:
         if not ngp:
             raise SystemExit("MON/%s.NGP is not on the disc" % stem)
         return ngp, modkit.disc_file(self.disc, "MON/%s.TEX" % stem), modkit.disc_file(self.disc, "MON/%s.RTX" % stem)
+
+    def act_anims(self, d):
+        """The animations of a group's model: {"anims": [{"k", "id", "frames"}], "prefix"} (prefix: the attacks' names)."""
+        g = self.group_model(d.get("group", ""))
+        if not g:
+            return {"anims": []}
+        ngp, _t, _r, _f, stem = g
+        import re as _re
+        m = _re.match(r"[A-Za-z]+", stem)
+        return {"anims": anim_list(ngp), "prefix": m.group().upper() if m else ""}
+
+    def anim_for(self, q):
+        """GET /api/anim.glb?group=<key>&k=<n>: the path of the .glb of that animation."""
+        g = self.group_model(q.get("group", ""))
+        if not g:
+            return None
+        ngp, _t, _r, folder, stem = g
+        return anim_glb(ngp, int(q.get("k", "0")), folder, stem)
 
     def model_for(self, q):
         """GET /api/model.glb?group=<key> or ?rel=<file>: the path of the .glb to send, or None."""

@@ -1,7 +1,7 @@
 // Custom monsters (MODS.md, "Custom monsters"): New monster..., Turn into custom monster... (an extracted costume becomes a
 // custom with its own files), the monster's panel in place of the preview (the model, name, camera, narrator, rules,
 // special, CPUs, HUD portrait, look: model files, stats, sounds, mesh, rig, rigged model, Adjust bones), Duplicate / Delete.
-import { showModel } from './viewer.js';
+import { showModel, animBar } from './viewer.js';
 import { meshRow } from './mesh.js';
 import { costumeRadios, skinDialog } from './skins.js';
 
@@ -140,7 +140,11 @@ async function monsterPanel(g, body, label) {
   const form = el('div', 'props');
   wrap.append(v, form);
   body.appendChild(wrap);
-  showModel(v, 'api/model.glb?group=' + encodeURIComponent(g.key) + '&t=' + Date.now());
+  const still = 'api/model.glb?group=' + encodeURIComponent(g.key) + '&t=' + Date.now();
+  showModel(v, still);
+  const ab = el('div');
+  wrap.insertBefore(ab, form);
+  animBar(ab, g.key, still);
   const [L, p] = await Promise.all([getLists(), kit.api('do/monster_props', { cid })]);
   form.appendChild(el('h4', '', 'Custom monster ' + cid));
   if (p.missing) { form.appendChild(el('div', 'dim', 'No monster.json in ' + p.missing)); return; }

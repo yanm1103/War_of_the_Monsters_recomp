@@ -417,11 +417,18 @@ def make_handler(kit, page_dir, vendor_dir, server_ref):
                     return self._send(404, b"not found", "text/plain")
                 with open(f, "rb") as fh:
                     return self._send(200, fh.read(), TYPES.get(os.path.splitext(f)[1].lower(), "application/octet-stream"))
-            if p in ("/api/portrait", "/api/model.glb"):
+            if p == "/anim_ids.json":   # the animations' names (the bones page's copy of the model museum's table)
+                f = os.path.join(os.path.dirname(page_dir), "anim_ids.json")
+                if not os.path.isfile(f):
+                    f = os.path.join(HERE, "anim_ids.json")
+                with open(f, "rb") as fh:
+                    return self._send(200, fh.read(), "application/json")
+            if p in ("/api/portrait", "/api/model.glb", "/api/anim.glb"):
                 from urllib.parse import parse_qs
                 q = {k: v[0] for k, v in parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "").items()}
                 try:
-                    f = kit.portrait(q.get("prefix", ""), int(q.get("k", "0"))) if p == "/api/portrait" else kit.model_for(q)
+                    f = (kit.portrait(q.get("prefix", ""), int(q.get("k", "0"))) if p == "/api/portrait" else
+                         kit.anim_for(q) if p == "/api/anim.glb" else kit.model_for(q))
                 except SystemExit as e:
                     return self._send(404, str(e).encode("utf-8"), "text/plain")
                 except Exception as e:  # noqa: BLE001

@@ -1,7 +1,7 @@
 // Skins (MODS.md, "Skins"): New skin..., Turn into skin... (an extracted costume's PNGs become a skin), the skin's panel in
 // place of the preview (the model with its textures, name, base costume with the disc's portraits, CPUs, mesh), and
 // Duplicate / Delete in the right-click menu.
-import { showModel } from './viewer.js';
+import { showModel, animBar } from './viewer.js';
 import { meshRow } from './mesh.js';
 
 const $ = id => document.getElementById(id);
@@ -151,7 +151,11 @@ async function skinPanel(g, body, label) {
   const form = el('div', 'props');
   wrap.append(v, form);
   body.appendChild(wrap);
-  showModel(v, 'api/model.glb?group=' + encodeURIComponent(g.key) + '&t=' + Date.now());
+  const still = 'api/model.glb?group=' + encodeURIComponent(g.key) + '&t=' + Date.now();
+  showModel(v, still);
+  const ab = el('div');
+  wrap.insertBefore(ab, form);
+  animBar(ab, g.key, still);
   const p = await kit.api('do/skin_props', { sid });
   form.appendChild(el('h4', '', 'Skin ' + sid));
   if (p.missing) { form.appendChild(el('div', 'dim', 'No skin.json in ' + p.missing)); return; }

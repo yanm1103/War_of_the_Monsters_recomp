@@ -1,11 +1,15 @@
 // The 3D preview of the kit page: one renderer, moved into whatever box shows a model (a costume, a skin, a custom monster, a
 // 3D file of the work folder). The model stands in a 3/4 view framed on its box; drag turns it, the wheel zooms.
+// animBar() adds the list of the model's animations under it (names from anim_ids.json), with play, frame and speed.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 let renderer = null, scene, camera, controls, current = null, box = null, token = 0, ro = null;
 const loader = new GLTFLoader();
+const clock = new THREE.Clock();
+const play = { mixer: null, dur: 0, t: 0, playing: true, speed: 1, onFrame: null };
+const FPS = 60;
 
 function setup() {
   renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
@@ -20,7 +24,17 @@ function setup() {
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   ro = new ResizeObserver(size);
-  renderer.setAnimationLoop(() => { if (box && box.isConnected) { controls.update(); renderer.render(scene, camera); } });
+  renderer.setAnimationLoop(() => {
+    const dt = clock.getDelta();
+    if (!box || !box.isConnected) return;
+    if (play.mixer && play.dur) {
+      if (play.playing) play.t = (play.t + dt * play.speed) % play.dur;
+      play.mixer.setTime(play.t);
+      if (play.onFrame) play.onFrame(play.t);
+    }
+    controls.update();
+    renderer.render(scene, camera);
+  });
 }
 function size() {
   if (!box) return;
@@ -42,8 +56,18 @@ function frame(obj) {
   camera.updateProjectionMatrix();
   controls.update();
 }
+function drop() {
+  if (current) { scene.remove(current); current.traverse(o => { if (o.geometry) o.geometry.dispose(); }); current = null; }
+  play.mixer = null;
+  play.dur = 0;
+}
+async function fetchGlb(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error((await r.text()) || r.statusText);
+  return loader.parseAsync(await r.arrayBuffer(), '');
+}
 
-// shows the .glb at url in el (replacing what it had); resolves when it is drawn, rejects with the server's message
+// shows the .glb at url in el (replacing what it had); resolves when it is drawn
 export async function showModel(el, url) {
   if (!renderer) setup();
   const my = ++token;
@@ -55,11 +79,9 @@ export async function showModel(el, url) {
   msg.textContent = 'Loading the model…';
   el.appendChild(msg);
   size();
-  if (current) { scene.remove(current); current.traverse(o => { if (o.geometry) o.geometry.dispose(); }); current = null; }
+  drop();
   try {
-    const r = await fetch(url);
-    if (!r.ok) throw new Error((await r.text()) || r.statusText);
-    const g = await loader.parseAsync(await r.arrayBuffer(), '');
+    const g = await fetchGlb(url);
     if (my !== token) return;
     current = g.scene;
     scene.add(current);
@@ -69,5 +91,101 @@ export async function showModel(el, url) {
     if (my === token) msg.textContent = 'No 3D preview: ' + (e.message || e);
   }
 }
-export function modelShown() { return !!current; }
-window.kitViewer = { shown: () => !!current && !!box && box.isConnected };
+
+// the model in the same box playing the animation of the .glb at url (url null: back to still); keeps the camera
+async function swapModel(url, still) {
+  const my = ++token;
+  const at = current ? current.position.clone() : null;
+  const g = await fetchGlb(url || still);
+  if (my !== token) return 0;
+  drop();
+  current = g.scene;
+  current.traverse(o => { if (o.isMesh) o.frustumCulled = false; });   // skinned: its box is the rest one
+  scene.add(current);
+  if (at) current.position.copy(at); else frame(current);
+  if (url && g.animations.length) {
+    play.mixer = new THREE.AnimationMixer(current);
+    play.mixer.clipAction(g.animations[0]).play();
+    play.dur = g.animations[0].duration || 0;
+    play.t = 0;
+  }
+  return play.dur;
+}
+
+let animIds;
+async function names() {
+  if (animIds === undefined) animIds = await fetch('anim_ids.json').then(r => (r.ok ? r.json() : null)).catch(() => null);
+  return animIds;
+}
+
+// the animation list under a model's box: group = the work folder group whose model shows; stillUrl = its still model
+export async function animBar(el, group, stillUrl) {
+  const bar = document.createElement('div');
+  bar.className = 'animbar';
+  const sel = document.createElement('select');
+  const o0 = document.createElement('option');
+  o0.value = '';
+  o0.textContent = 'Standing still (idle, frame 0)';
+  sel.appendChild(o0);
+  const pb = document.createElement('button');
+  pb.type = 'button';
+  pb.textContent = 'Pause';
+  pb.disabled = true;
+  const fr = document.createElement('input');
+  fr.type = 'range';
+  fr.min = 0;
+  fr.max = 0;
+  fr.disabled = true;
+  const fn = document.createElement('span');
+  fn.className = 'dim';
+  const sp = document.createElement('select');
+  for (const v of [1, 0.5, 0.25]) { const o = document.createElement('option'); o.value = v; o.textContent = v + '×'; sp.appendChild(o); }
+  bar.append(sel, pb, fr, fn, sp);
+  el.appendChild(bar);
+  const [list, ids] = await Promise.all([kit.api('do/anims', { group }), names()]);
+  const groups = (ids && ids.groups) || [{ key: 'other', label: 'Animations' }];
+  const by = new Map(groups.map(g => [g.key, []]));
+  const seen = {};
+  for (const a of list.anims || []) {
+    const e = ids && ids.ids[a.id];
+    seen[a.id] = (seen[a.id] || 0) + 1;
+    let t = a.id + '  ' + (e ? e.name : 'Animation');
+    const combo = ids && ids.combos && (ids.combos[list.prefix] || {})[a.id];
+    if (combo && combo.short) t += ' (' + combo.short + ')';
+    if (e && e.loop === 'layer') t += ' (layer)';
+    if (seen[a.id] > 1) t += ' #' + seen[a.id];
+    const k = e && by.has(e.group) ? e.group : groups[groups.length - 1].key;
+    by.get(k).push([a.k, t, a.id]);
+  }
+  for (const g of groups) {
+    const items = by.get(g.key).sort((x, y) => x[2] - y[2]);
+    if (!items.length) continue;
+    const og = document.createElement('optgroup');
+    og.label = g.label;
+    for (const [k, t] of items) { const o = document.createElement('option'); o.value = k; o.textContent = t; og.appendChild(o); }
+    sel.appendChild(og);
+  }
+  const frames = () => Math.max(0, Math.round(play.dur * FPS));
+  play.onFrame = t => { if (document.activeElement !== fr) fr.value = Math.round(t * FPS); fn.textContent = Math.round(t * FPS) + ' / ' + frames(); };
+  sel.onchange = async () => {
+    const k = sel.value;
+    pb.disabled = fr.disabled = true;
+    fn.textContent = k === '' ? '' : 'Loading…';
+    try {
+      await swapModel(k === '' ? null : 'api/anim.glb?group=' + encodeURIComponent(group) + '&k=' + k + '&t=' + Date.now(), stillUrl);
+    } catch (e) { fn.textContent = String(e.message || e); return; }
+    play.playing = true;
+    pb.textContent = 'Pause';
+    fr.max = frames();
+    pb.disabled = fr.disabled = k === '';
+    if (k === '') fn.textContent = '';
+  };
+  pb.onclick = () => { play.playing = !play.playing; pb.textContent = play.playing ? 'Pause' : 'Play'; };
+  fr.oninput = () => { play.playing = false; pb.textContent = 'Play'; play.t = parseInt(fr.value, 10) / FPS; };
+  sp.onchange = () => { play.speed = parseFloat(sp.value); };
+  return bar;
+}
+window.kitViewer = {
+  shown: () => !!current && !!box && box.isConnected,
+  playing: () => ({ dur: play.dur, t: play.t, mixer: !!play.mixer }),
+};

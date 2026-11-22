@@ -122,3 +122,7 @@ img.hud { max-width: 128px; max-height: 64px; background: #2c3039; }
 .props select { max-width: 260px; }
 .props .btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
 .props .btns button { padding: 4px 9px; font-size: 13px; }
+.animbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.animbar select:first-child { flex: 1 1 200px; min-width: 0; }
+.animbar input[type=range] { flex: 1 1 100px; accent-color: #3b7ce6; }
+.animbar button { padding: 4px 9px; font-size: 13px; width: 64px; }
