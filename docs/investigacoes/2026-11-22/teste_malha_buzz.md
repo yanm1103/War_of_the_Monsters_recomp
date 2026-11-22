@@ -41,6 +41,17 @@ Do lado do usuário e do arquivo, sem culpa do kit: o `.obj` do pacote tem o V i
 4. **Mapa automático:** o Buzz não é Mixamo nem Biped. Reconhecer por nome genérico (`L_`/`R_`, `arm`, `leg`, `clav`, `spine`, `neck`, `head`, `hips`) e pela ordem na hierarquia; do lado do monstro, depende do item 3.
 5. **Avisos que não pedem ação** (B8) somem ou viram uma linha.
 
+## Depois do "Check model..." (`tools/meshcheck.py`)
+
+Rodado nos arquivos deste teste (o mesmo que o botão faz):
+- `ROBOT0.glb` do Export to Blender: sem nenhum problema (vai pelo Import mesh). A primeira versão media a distância de cada vértice ao osso que mais o move e acusava a peça `obj_a280f0` do próprio Robo (peças rígidas presas em ossos de pivô longe delas); trocada por tamanho e lugar do conjunto das malhas contra os ossos que as movem.
+- `buzz_A2.glb` (corpo renomeado `obj_a23e90`): o erro de paleta (A2) aparece antes de importar, com a dica do Import rig; avisa que a imagem própria não entra pelo Import mesh e os 1092 vértices com mais de 3 ossos.
+- `buzz_A.glb`: achou o que eu não tinha visto no teste: a malha `default` (6326 dos 7863 vértices, o corpo) ficou **sem pele** depois do join (A4) e foi para o jogo inteira presa na raiz. Os "braços duros" eram isso, não os pesos automáticos.
+- `rig.glb` do caminho B: passa, com os localizadores 0x852..0x857 postos onde o Robo os tem.
+- Cópias estragadas de propósito (`ROBOT0.glb` com as malhas ×0,02 e deslocadas 300 unidades): as duas viram erro de lugar, que o Import mesh aceitava calado.
+- O aviso repetido de id dobrado (B8) virou uma linha comum no `ngprig` e some do relatório. JPEG dentro do `.glb` vira PNG no import (Pillow, que vai no exe do kit).
+- O check do Import rig roda o import inteiro numa pasta temporária: ~40 s no Buzz (158 animações).
+
 ## Números para comparar depois das melhorias
 
 - Caminho B: 3 comandos fora da GUI (`retarget.py`, conversão para Z para cima, edição do `.dae`); 5 coisas que precisei saber fora dos docs (o que é cada `boneN`, Z para cima, `--front=`, a imagem que falta, a raiz com dois filhos); 1 bug do kit.

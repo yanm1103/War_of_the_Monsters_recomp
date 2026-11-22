@@ -17,6 +17,7 @@ pasta de trabalho (<mods>/_work/<mod>/, com o modkit.json dela), e o pack de um 
   python tools/modkit.py monster stats my_mod fire_togera                     # .CHR e .AIC do tipo base para editar (so dele)
   python tools/modkit.py monster sounds my_mod fire_togera                    # sons do banco do tipo base em WAV (banco so dele)
   python tools/modkit.py monster mesh export my_mod fire_togera               # malha e animacoes do traje base em .glb (Blender)
+  python tools/modkit.py monster mesh check my_mod fire_togera modelo.glb    # confere o .glb antes do import (nada e gravado)
   python tools/modkit.py monster mesh import my_mod fire_togera [editado.glb] # a malha editada vira o .NGP/.PTR do custom
   python tools/modkit.py monster anim import my_mod fire_togera [editado.glb] # as animacoes editadas tambem
   python tools/modkit.py monster rig my_mod lizardman rig.glb [--front +y|-y] [--scale S | --height H]   # esqueleto proprio
@@ -1203,6 +1204,9 @@ def model_import(disc, work, mods, mod, kind, tid, glb=None, what="mesh"):
     src = disc_file(disc, stem + ".NGP")
     if not src or not disc_file(disc, stem + ".PTR"):
         raise SystemExit("%s: %s.NGP/.PTR are not on the disc" % (cmd, stem))
+    if what == "mesh":
+        import meshcheck
+        meshcheck.scan(glb, meshcheck.Report(), "mesh")
     rec["mesh" if what == "mesh" else "anims"] = glb
     for k in ("mesh", "anims"):
         if rec.get(k) and not os.path.isfile(rec[k]):
@@ -1255,6 +1259,35 @@ def anim_import(disc, work, mods, mod, kind, tid, glb=None):
     return model_import(disc, work, mods, mod, kind, tid, glb, "anims")
 
 
+def _rig_layers(mods, mod, cid):
+    """Ids que o especial do custom toca por cima da animacao principal (tools/ngpgraft.py LAYERS)."""
+    import ngpgraft
+    data = _json_obj(os.path.join(monster_dir(mods, mod, cid), "monster.json"))
+    return ngpgraft.LAYERS.get(base_name(str((data or {}).get("special", ""))), ())
+
+
+def mesh_check(disc, work, mods, mod, kind, tid, glb, front=None, scale=None, height=None):
+    """Confere um .glb antes do import (tools/meshcheck.py), sem gravar nada: texturas, pesos, UV, lugar no esqueleto e o import
+    que o leva, rodado numa pasta temporaria. Skin: sempre o mesh import; custom com esqueleto proprio: o rig import; o resto,
+    pelo que o .glb tem. Devolve o Report."""
+    import meshcheck
+    rel, stem = mesh_target(mods, mod, kind, tid)
+    glb = os.path.abspath(glb)
+    if not os.path.isfile(glb):
+        raise SystemExit("mesh check: %s not found" % glb)
+    src = disc_file(disc, stem + ".NGP")
+    if not src or not disc_file(disc, stem + ".PTR"):
+        raise SystemExit("mesh check: %s.NGP/.PTR are not on the disc" % stem)
+    mode = "mesh" if kind == "skin" else "rig" if (_json_obj(_blender_rec(work, rel)) or {}).get("rig") else "auto"
+    opts = {}
+    if kind == "monster":
+        opts = {"front": front, "scale": scale, "height": height, "layer_ids": _rig_layers(mods, mod, tid)}
+    rep = meshcheck.check(src, glb, mode, **opts)
+    if kind == "skin" and any("a new body goes in by Import rig" in t for _lv, t in rep.items):
+        print("a skin keeps its monster's skeleton: a new body is a custom monster (monster new, then Import rig)")
+    return rep
+
+
 def rig_import(disc, work, mods, mod, cid, glb, front=None, scale=None, height=None):
     """Esqueleto proprio (tools/ngprig.py): o .glb com armature, malha, acoes a<id> e localizadores vira o corpo do custom sobre
     o traje base do disco (codigo, sombra, sons e o resto do tipo ficam). Grava .NGP/.PTR/.TEX/.RTX e os PNGs das texturas novas
@@ -1271,9 +1304,9 @@ def rig_import(disc, work, mods, mod, cid, glb, front=None, scale=None, height=N
     src = disc_file(disc, stem + ".NGP")
     if not src or not disc_file(disc, stem + ".PTR") or not disc_file(disc, stem + ".TEX"):
         raise SystemExit("rig import: %s.NGP/.PTR/.TEX are not on the disc" % stem)
-    import ngpgraft
-    data = _json_obj(os.path.join(monster_dir(mods, mod, cid), "monster.json"))
-    layers = ngpgraft.LAYERS.get(base_name(str((data or {}).get("special", ""))), ())
+    import meshcheck
+    meshcheck.scan(glb, meshcheck.Report(), "rig")
+    layers = _rig_layers(mods, mod, cid)
     tmp = tempfile.mkdtemp(prefix="wotm_rig_")
     name = os.path.basename(stem)
     try:
@@ -1614,14 +1647,19 @@ def main(argv):
             raise SystemExit("pack <mod>: one mod name (not starting with '_' or '.')")
         pack(disc, work_of("pack", args[1]), mods, args[1], opts.get("inject", False))
     elif args[0] in ("skin", "monster") and len(args) > 1 and args[1] in ("mesh", "anim"):
-        ok = (args[1] == "mesh" and len(args) in (5, 6) and args[2] in ("export", "import") and
-              (args[2] == "import" or len(args) == 5)) or (args[1] == "anim" and len(args) in (5, 6) and args[2] == "import")
+        ok = (args[1] == "mesh" and len(args) in (5, 6) and args[2] in ("export", "import", "check") and
+              (args[2] == "import" or len(args) == (6 if args[2] == "check" else 5))) or (
+              args[1] == "anim" and len(args) in (5, 6) and args[2] == "import")
         if not ok:
-            raise SystemExit("%s mesh export <mod> <id>\n%s mesh import <mod> <id> [edited.glb]\n%s anim import <mod> <id> "
-                             "[edited.glb]" % (args[0], args[0], args[0]))
+            raise SystemExit("%s mesh export <mod> <id>\n%s mesh check <mod> <id> <model.glb>\n%s mesh import <mod> <id> "
+                             "[edited.glb]\n%s anim import <mod> <id> [edited.glb]" % (args[0], args[0], args[0], args[0]))
         w = work_of("%s %s" % (args[0], args[1]), args[3])
         glb = args[5] if len(args) == 6 else None
-        if args[1] == "anim":
+        if args[2] == "check":
+            rep = mesh_check(disc, w, mods, args[3], args[0], args[4], glb)
+            if rep.count("ERROR"):
+                return 1
+        elif args[1] == "anim":
             anim_import(disc, w, mods, args[3], args[0], args[4], glb)
         elif args[2] == "export":
             mesh_export(disc, w, mods, args[3], args[0], args[4])
@@ -1651,7 +1689,8 @@ def main(argv):
     elif args[0] == "skin":
         if len(args) != 5 or args[1] != "new":
             raise SystemExit("skin new <mod> <monster> <id> [--base N] [--name \"GREEN TOGERA\"] [--ai]\n"
-                             "skin mesh export <mod> <id>\nskin mesh import <mod> <id> [edited.glb]\n"
+                             "skin mesh export <mod> <id>\nskin mesh check <mod> <id> <model.glb>\n"
+                             "skin mesh import <mod> <id> [edited.glb]\n"
                              "skin anim import <mod> <id> [edited.glb]")
         base = opts.get("base")
         if base is not None:
@@ -1663,7 +1702,8 @@ def main(argv):
     elif args[0] == "monster":
         use = ("monster new <mod> <id> --base <monster> [--costume N] [--name \"X\"] [--ai] [--camera togera:200 | --camera none] "
                "[--narrator <name>] [--no-textures]\nmonster portrait <mod> <id> <png>\nmonster model <mod> <id> <.NGP> <.PTR> [.TEX] [.RTX]"
-               "\nmonster stats <mod> <id>\nmonster sounds <mod> <id>\nmonster mesh export <mod> <id>\nmonster mesh import <mod> <id> [edited.glb]"
+               "\nmonster stats <mod> <id>\nmonster sounds <mod> <id>\nmonster mesh export <mod> <id>\nmonster mesh check <mod> <id> <model.glb>"
+               "\nmonster mesh import <mod> <id> [edited.glb]"
                "\nmonster anim import <mod> <id> [edited.glb]\nmonster rig <mod> <id> <rig.glb> [--front +y|-y] "
                "[--scale S | --height H]")
         if len(args) < 4 or args[1] not in ("new", "portrait", "model", "stats", "sounds", "rig"):

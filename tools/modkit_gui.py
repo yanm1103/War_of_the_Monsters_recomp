@@ -2018,13 +2018,40 @@ class App:
         bf = ttk.Frame(f)
         bf.pack(anchor="w", pady=(4, 0) if status else 0)
         ttk.Button(bf, text="Export to Blender", command=lambda: self.export_mesh(kind, tid)).pack(side="left")
-        ttk.Button(bf, text="Import mesh...", command=lambda: self.import_mesh(kind, tid)).pack(side="left", padx=(6, 0))
-        ttk.Button(bf, text="Import animations...",
+        ttk.Button(bf, text="Check model...", command=lambda: self.check_model(kind, tid)).pack(side="left", padx=(6, 0))
+        ttk.Label(bf, text="(.glb)", style="Dim.TLabel").pack(side="left", padx=(8, 0))
+        bi = ttk.Frame(f)
+        bi.pack(anchor="w", pady=(4, 0))
+        ttk.Button(bi, text="Import mesh...", command=lambda: self.import_mesh(kind, tid)).pack(side="left")
+        ttk.Button(bi, text="Import animations...",
                    command=lambda: self.import_mesh(kind, tid, "anims")).pack(side="left", padx=(6, 0))
         if kind == "monster":
-            ttk.Button(bf, text="Import rig...", command=lambda: self.import_rig(tid)).pack(side="left", padx=(6, 0))
-        ttk.Label(bf, text="(.glb)", style="Dim.TLabel").pack(side="left", padx=(8, 0))
+            ttk.Button(bi, text="Import rig...", command=lambda: self.import_rig(tid)).pack(side="left", padx=(6, 0))
         return f
+
+    def check_model(self, kind, tid):
+        """Confere um .glb antes do Import mesh / Import rig (modkit.mesh_check): a lista sai no log, nada e gravado."""
+        work, mod, mods = self.work(), self.cur_mod(), self.mods.get()
+        if not work:
+            return
+        try:
+            glb = modkit.mesh_glb(work, mods, mod, kind, tid)
+        except SystemExit as ex:
+            self.say("%s\n" % ex, "err")
+            return
+        rel = modkit.mesh_target(mods, mod, kind, tid)[0]
+        rig = (modkit._json_obj(modkit._blender_rec(work, rel)) or {}).get("rig")
+        glb = rig or glb
+        d = os.path.dirname(glb)
+        kw = {"initialdir": d} if os.path.isdir(d) else {}
+        if os.path.isfile(glb):
+            kw["initialfile"] = os.path.basename(glb)
+        p = filedialog.askopenfilename(parent=self.root, title="Model to check for %s (.glb)" % tid,
+                                       filetypes=[("glTF binary", "*.glb *.GLB"), ("All files", "*.*")], **kw)
+        if not p:
+            return
+        self.run("Checking %s for %s..." % (os.path.basename(p), tid),
+                 lambda disc=self.disc.get(): modkit.mesh_check(disc, work, mods, mod, kind, tid, p))
 
     def export_mesh(self, kind, tid):
         work, mod = self.work(), self.cur_mod()
@@ -2191,7 +2218,7 @@ class App:
                         continue
                     self.say(val, "err")
                 else:
-                    self.say(item, "warn" if ("WARNING" in item or "ERROR" in item) else None)
+                    self.say(item, "err" if item.startswith("ERROR") else "warn" if ("WARNING" in item or "ERROR" in item) else None)
         except queue.Empty:
             pass
         self.root.after(100, self.pump_log)

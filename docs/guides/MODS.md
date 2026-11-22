@@ -170,6 +170,20 @@ way. The import writes `.NGP`, `.PTR`, `.TEX`, `.RTX` and the new PNGs to `files
 the `.NGP` goes back to the base type's skeleton. A part that scales, appears or disappears in some action (a growing claw, a
 weapon shown only in one move) has to be a rigid mesh parented to a bone: scaling a bone does not reach the weighted meshes.
 
+**Check model...** (next to **Export to Blender**; `modkit.py skin|monster mesh check <mod> <id> <model.glb>`) reads a `.glb` before
+any import and writes nothing: a list of `OK`, `WARNING` and `ERROR` lines in the log (`tools/meshcheck.py`). It says which import
+takes the file (**Import mesh...** when every skinned mesh is named after a piece of the monster, `obj_<address>`; **Import
+rig...** otherwise, and always for a custom that already has its own skeleton) and then runs that import into a scratch folder,
+so its refusals show up here. Besides those, it looks at:
+- textures: each material's image, inside the `.glb` or next to it, with format and size; a missing image or one that is not PNG
+  is drawn white (a JPEG becomes PNG on import);
+- meshes: triangles only, vertices without weights, vertices on more than 3 bones (the heaviest 3 are kept), no UV under an
+  image, a mesh without a skin and no bone above it (it moves with the root and does not bend: the Armature modifier was lost,
+  for example by joining meshes);
+- place: the skinned meshes against the rest positions of the bones that move them; a mesh in other units or away from the
+  armature is an error, which the imports themselves do not catch.
+**Import mesh...** and **Import rig...** print the same file, texture and mesh lines before they start.
+
 **A rigged model from elsewhere.** A model that already has a skeleton (a Collada `.dae` with a skinned mesh) can take the base
 type's animations instead of new ones: export the base costume (**Export to Blender**, e.g. `LIZARD0.glb`), write a bone map
 (which model joint follows which base bone; `tools/rigmaps/biped_togera.json` covers the 3ds Max Biped, `Bip01_*`, on Togera)

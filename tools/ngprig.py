@@ -27,7 +27,7 @@ CHAR_INSTANCE is replaced by a new one built from the .glb:
 - collision: one box per mesh named `coll*` (not drawn), else one box around the rest mesh; they follow the main root;
 - textures: a material `tex<texId>` naming one of the base's keeps it; any other material with an image gets a new texId
   (a copy of the body's packet in the .TEX) and the image as `<name>_t<texId>.png` next to the files, the PNG the port
-  draws; a material without an image gets a PNG of its color.
+  draws (a JPEG becomes PNG when Pillow is there); a material without an image gets a PNG of its color.
 
 Axes and size: a .glb with the kit's "WotM" root (`tools/monglb.py --edit`) is in the game's axes and units; any other is a
 Blender scene (Z up, facing -Y, meters) turned to face the game's +Y and scaled to the base's height (`--front`, `--scale`,
@@ -259,6 +259,21 @@ def _locator_id(name):
     if m:
         return int(m.group(1), 16)
     return ALIASES.get(nm)
+
+
+def _to_png(data):
+    """A JPEG (Blender keeps a JPEG image as JPEG in the .glb) as PNG bytes, with Pillow (inside the mod kit's exe); None
+    without it or for another format."""
+    if data[:2] != b"\xff\xd8":
+        return None
+    try:
+        import io
+        from PIL import Image
+        out = io.BytesIO()
+        Image.open(io.BytesIO(data)).convert("RGBA").save(out, "PNG")
+        return out.getvalue()
+    except Exception:   # Pillow missing or the image unreadable: drawn white, as any image that is not PNG
+        return None
 
 
 def _clip_id(name):
@@ -609,6 +624,7 @@ class Rig:
             log("rigid parts with an animated scale or offset, each with its own OBJECT: %s" % ", ".join(
                 "%s (on %s)" % (r["name"], self.joints[r["holder"]].name) for r in self.rigid))
         self.clips = {}
+        twice = []
         for nm, clip in ed.clips.items():
             aid, loop = _clip_id(nm)
             if aid is None:
@@ -617,9 +633,11 @@ class Rig:
                 log("warning: %s: animation ids go up to %d; skipped" % (nm, ngpanim.MAX_ID))
                 continue
             if aid in self.clips:
-                log("warning: %s: id %d already given by %s; skipped" % (nm, aid, self.clips[aid][0]))
+                twice.append("%s (%s)" % (nm, self.clips[aid][0]))
                 continue
             self.clips[aid] = (nm, clip, loop)
+        if twice:   # the kit's own export has some: the base's second animation of an id
+            log("actions with an id already given, the first kept: %s" % ", ".join(twice))
         log("skeleton: %d joints (%d roots, main %s), %d locators, %d actions" % (
             len(self.joints), len(roots), self.joints[0].name, len(self.locs), len(self.clips)))
 
@@ -662,7 +680,7 @@ class Rig:
                 if os.path.exists(p):
                     data = open(p, "rb").read()
         if data is not None and data[:8] != b"\x89PNG\r\n\x1a\n":
-            return None, nm
+            data = _to_png(data)
         return data, nm
 
     def pose(self, clip, t):
@@ -797,7 +815,7 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
         if k2[0] == "img":
             png, what = rig.image_bytes(k2[1])
             if png is None:
-                log("warning: image %s is not a PNG inside or next to the .glb; drawn white" % what)
+                log("warning: image %s is not a PNG or JPEG inside or next to the .glb; drawn white" % what)
                 png = tex.png_bytes(4, 4, [(255, 255, 255, 255)] * 16)
         else:
             what = "color %02x%02x%02x" % k2[1][:3]
