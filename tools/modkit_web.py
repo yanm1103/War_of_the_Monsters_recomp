@@ -418,6 +418,8 @@ def make_handler(kit, page_dir, vendor_dir, server_ref):
                 else:
                     cid = q.get("cid", "")
                     f = (kit.logo_of(cid) if q.get("logo") else kit.portrait_of(cid)) if cid else None
+                    if f and not q.get("logo") and q.get("part"):
+                        f = kit.portrait_part(f, q["part"])
                 if not f:
                     return self._send(404, b"not found", "text/plain")
                 with open(f, "rb") as fh:
@@ -434,6 +436,8 @@ def make_handler(kit, page_dir, vendor_dir, server_ref):
                 try:
                     f = (kit.portrait(q.get("prefix", ""), int(q.get("k", "0"))) if p == "/api/portrait" else
                          kit.anim_for(q) if p == "/api/anim.glb" else kit.model_for(q))
+                    if f and p == "/api/portrait" and q.get("part"):
+                        f = kit.portrait_part(f, q["part"])
                 except SystemExit as e:
                     return self._send(404, str(e).encode("utf-8"), "text/plain")
                 except Exception as e:  # noqa: BLE001

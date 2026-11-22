@@ -50,7 +50,7 @@ file dialogs, Pillow and numpy inside; `tools/release.ps1` calls it). There it f
 folder (`<data>/mods`, otherwise `<game>/mods`, where `<data>` is the game folder or `%LOCALAPPDATA%\WotM`).
 
 The page dresses in the game's menus: the header is the drive-in's horizon with the title the game shows (an enabled mod's `SHELL/shell_t0140.png` and `shell_t0141.png`, as `mods/recompiled_logo/`, else the disc's), and the lists show the costumes'
-portraits, the monsters' name logos and the stages' pictures. All of it is read from the user's disc when the page asks
+portraits (square, the normal face, and the rage one while the pointer is over it), the monsters' name logos and the stages' pictures. All of it is read from the user's disc when the page asks
 (`tools/modkit_web_art.py`, `GET /api/art`: the title, the sky and the tree line from `SHELL/SHELL.TEX`, the logos and the stage pictures
 with the palettes `native/wotm_savepics.hpp` uses); without a disc the page keeps a plain night sky and the names in letters.
 

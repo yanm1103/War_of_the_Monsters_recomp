@@ -23,6 +23,31 @@ export function icon(kind) {   // a small box with a glyph for rows without a pi
   return s;
 }
 
+// a square picture for a row or a card: a portrait (api/portrait, api/hud) is its normal face, with the rage one shown while
+// the pointer is over the row; any other picture (a level's) is cropped square; without one (or when it fails), the glyph
+const PORTRAIT = /api\/(portrait|hud)\?/;
+export function pic(url, kind, cls) {
+  const box = document.createElement('span');
+  box.className = 'pic' + (cls ? ' ' + cls : '');
+  if (!url) {
+    const i = icon(kind);
+    if (cls) i.classList.add(cls);
+    return i;
+  }
+  const faces = PORTRAIT.test(url) && !/[?&]logo=1/.test(url) ? [['n', url + '&part=normal'], ['r', url + '&part=rage']] : [['n', url]];
+  for (const [c, u] of faces) {
+    const im = document.createElement('img');
+    im.className = c;
+    im.loading = 'lazy';
+    im.alt = '';
+    im.src = u;
+    if (c === 'n') im.onerror = () => box.replaceWith(pic(null, kind, cls));
+    else im.onerror = () => im.remove();
+    box.appendChild(im);
+  }
+  return box;
+}
+
 function render() {
   const q = $('discFilter').value.trim().toLowerCase();
   const box = $('discTree');
@@ -46,14 +71,7 @@ function render() {
     a.textContent = n.kids && n.kids.length ? ((q || open.has(r.id)) ? '▼' : '▶') : '';
     a.onclick = e => { e.stopPropagation(); toggle(r.id); };
     d.appendChild(a);
-    if (n.pic) {   // a costume's portrait, a level's picture (from the disc)
-      const im = document.createElement('img');
-      im.className = 'pic' + (n.icon === 'level' ? ' level' : '');
-      im.loading = 'lazy';
-      im.src = n.pic;
-      im.onerror = () => { im.replaceWith(icon(n.icon)); };
-      d.appendChild(im);
-    } else if (n.icon) d.appendChild(icon(n.icon));
+    if (n.pic || n.icon) d.appendChild(pic(n.pic, n.icon));   // a costume's portrait, a level's picture, or a kind's glyph
     const l = document.createElement('span');
     l.className = 'lbl';
     l.textContent = n.label;

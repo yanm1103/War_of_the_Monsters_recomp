@@ -1,7 +1,8 @@
 """The game's own pictures for the mod kit page (tools/modkit_web.py), read from the user's disc: the title logo, the drive-in's
 sky and tree line (the page's header), the monsters' name logos and the levels' wide pictures (the menu's level select). The
 title is the one the game shows: a mod's when an enabled mod replaces it (the project's recompiled_logo), else the disc's.
-GET /api/art?name=title|sky|trees|logo-<PREFIX>|level-<STEM> -> PNG, made once per session in a temporary folder.
+GET /api/art?name=title|sky|trees|logo-<PREFIX>|level-<STEM> -> PNG, made once per session in a temporary folder; the
+portraits (/api/portrait, /api/hud) take part=normal|rage for one square, upright half (portrait_part).
 
 All of them are in SHELL/SHELL.TEX with their palettes in SHELL/SHELL.RTX. The logos and the level pictures are the ones the
 port's save list draws (native/wotm_savepics.hpp): T8 tiles whose palette entry the .NGP does not bind (the menu switches it), so
@@ -137,6 +138,37 @@ class ArtMixin:
             return out
         except Exception:  # noqa: BLE001 (no disc, a damaged file: the page goes without the picture)
             return None
+
+    def portrait_part(self, path, part):
+        """A HUD portrait (2:1: the normal face on the left, the rage one on the right, rows bottom-up as the HUD texture;
+        the disc's, or a custom's portrait.png) -> one half, square and upright, for part "normal" or "rage". The same path
+        when it cannot (another part, no Pillow, a file that is not 2:1)."""
+        if part not in ("normal", "rage"):
+            return path
+        with _lock:
+            if getattr(self, "_art_disc", None) is None:
+                self._art_disc = (self.disc, self.mods)
+                self._art_dir = tempfile.mkdtemp(prefix="wotm_art_")
+                atexit.register(shutil.rmtree, self._art_dir, True)
+                self._art = {}
+                self._shell = None
+            key = ("part", os.path.normcase(os.path.abspath(path)), os.path.getmtime(path), part)
+            if key in self._art:
+                return self._art[key] or path
+            out = None
+            try:
+                from PIL import Image
+                with Image.open(path) as im:
+                    im = im.convert("RGBA")
+                    if im.width == 2 * im.height:
+                        h = im.height
+                        half = im.crop((0, 0, h, h) if part == "normal" else (h, 0, 2 * h, h))
+                        out = os.path.join(self._art_dir, "portrait_%d_%s.png" % (len(self._art), part))
+                        half.transpose(Image.Transpose.FLIP_TOP_BOTTOM).save(out)
+            except Exception:  # noqa: BLE001 (no Pillow, a damaged file: the whole portrait as it is)
+                out = None
+            self._art[key] = out
+            return out or path
 
     def _mod_title(self):
         """The title the game shows when a mod replaces it: the last mod in load order (alphabetical, as the loader) with both

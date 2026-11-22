@@ -3,6 +3,7 @@
 // portraits and CPUs; 3D model), and Duplicate / Delete in the right-click menu.
 import { meshBlocks } from './mesh.js';
 import { panelFrame, tabs } from './panel.js';
+import { pic } from './disc.js';
 
 const $ = id => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -19,14 +20,8 @@ export function costumeRadios(name, prefix, value, enabled, extra) {
     r.value = k;
     r.checked = value === k;
     r.disabled = !enabled.includes(k);
-    const pic = el('div', 'pic');
-    if (prefix && enabled.includes(k)) {
-      const im = el('img');
-      im.src = 'api/portrait?prefix=' + prefix + '&k=' + k;
-      im.onerror = () => im.remove();
-      pic.appendChild(im);
-    }
-    l.append(pic, r, document.createTextNode(' ' + k));
+    const face = prefix && enabled.includes(k) ? pic('api/portrait?prefix=' + prefix + '&k=' + k, 'files', 'big') : el('span', 'pic big');
+    l.append(face, r, document.createTextNode(' ' + k));
     box.appendChild(l);
   }
   if (extra) {
@@ -36,7 +31,7 @@ export function costumeRadios(name, prefix, value, enabled, extra) {
     r.name = name;
     r.value = extra[1];
     r.checked = value === extra[1];
-    l.append(el('div', 'pic'), r, document.createTextNode(' ' + extra[0]));
+    l.append(el('span', 'pic big'), r, document.createTextNode(' ' + extra[0]));
     box.appendChild(l);
   }
   box.value = () => { const c = box.querySelector('input:checked'); return c ? parseInt(c.value, 10) : null; };

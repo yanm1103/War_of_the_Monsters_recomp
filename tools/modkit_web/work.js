@@ -4,7 +4,7 @@
 // kit.work.panels: other parts of the page register a panel for a group kind (a skin's or a monster's properties).
 import { listSelect } from './select.js';
 import { showModel, animBar } from './viewer.js';
-import { icon } from './disc.js';
+import { pic } from './disc.js';
 import { stageTitle } from './panel.js';
 
 const MODEL_EXT = ['.glb', '.gltf', '.dae', '.ngp'];
@@ -28,14 +28,7 @@ const ICONS = { sounds: 'sound', music: 'music', screen: 'screen', level: 'level
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 
 function groupPic(g) {   // the row's picture: a portrait or a level's picture from the disc, else a kind's glyph
-  if (g.pic) {
-    const im = el('img', 'pic');
-    im.loading = 'lazy';
-    im.src = g.pic;
-    im.onerror = () => im.replaceWith(icon(ICONS[g.tag] || 'files'));
-    return im;
-  }
-  return icon(ICONS[g.tag] || 'files');
+  return pic(g.pic, ICONS[g.tag] || 'files');
 }
 
 // ---------------------------------------------------------------- welcome: no mod yet, or a mod with nothing in it
@@ -67,7 +60,7 @@ export function startCards(compact) {   // New skin, New monster, From the disc
   const box = el('div', 'cards');
   box.append(
     card('c2', 'New skin', 'New colors and textures for one of the monsters, picked as a costume in the game.',
-      ok ? [artImg('api/portrait?prefix=MANTIS&k=0'), artImg('api/portrait?prefix=MANTIS&k=2')] : [glyph('✎')], () => kit.actions.newSkin()),
+      ok ? [pic('api/portrait?prefix=MANTIS&k=0', 'files', 'big'), pic('api/portrait?prefix=MANTIS&k=2', 'files', 'big')] : [glyph('✎')], () => kit.actions.newSkin()),
     card('c1', 'New monster', 'A fighter of its own on a base monster\'s moves: its name, look, 3D model, stats and sounds.',
       ok ? [artImg('api/art?name=logo-LAVA', 'logo')] : [glyph('✚')], () => kit.actions.newMonster()),
     card('c3', 'From the disc', 'Any texture or sound of the game: pick it in the list on the left and extract it to edit.',

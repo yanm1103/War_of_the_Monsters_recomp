@@ -119,9 +119,14 @@ label.check { display: inline-flex; gap: 6px; align-items: center; font: 400 12.
 .row .lbl { overflow: hidden; text-overflow: ellipsis; }
 .row .sub { color: var(--dim); font: 12px var(--text); margin-left: 2px; overflow: hidden; text-overflow: ellipsis; }
 .row.sel .sub { color: #ff9c86; }
-.row .pic { flex: none; width: 52px; height: 26px; border-radius: 4px; object-fit: cover; background: #111; border: 1px solid var(--line2); }
-.row .pic.level { width: 52px; }
-.row .ico { flex: none; width: 26px; height: 26px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center;
+/* square pictures (disc.js pic()): a portrait shows its normal face and the rage one while the pointer is over its row or card */
+.pic { position: relative; display: inline-block; flex: none; width: 30px; height: 30px; border-radius: 5px; overflow: hidden;
+       background: #111; border: 1px solid var(--line2); }
+.pic img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.pic img.r { opacity: 0; transition: opacity .15s; }
+.row:hover .pic img.r, .card:hover .pic img.r, .costume:hover .pic img.r { opacity: 1; }
+.pic.big { width: 56px; height: 56px; border-radius: 8px; }
+.row .ico { flex: none; width: 30px; height: 30px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center;
             font-size: 14px; color: var(--orange2); background: rgba(240, 138, 44, .1); border: 1px solid rgba(240, 138, 44, .3); }
 .row .ico.music { color: #b9a2ff; background: rgba(150, 120, 255, .1); border-color: rgba(150, 120, 255, .3); }
 .row .ico.screen { color: #8fd0ff; background: rgba(90, 170, 255, .1); border-color: rgba(90, 170, 255, .3); }
@@ -131,13 +136,13 @@ label.check { display: inline-flex; gap: 6px; align-items: center; font: 400 12.
                      color: var(--orange2); }
 #discTree .row.cat.sel { color: var(--red); }
 #discTree .row.mon { min-height: 34px; font-size: 15px; }
-#discTree .row.mon .pic { width: 60px; height: 30px; }
+#discTree .row.mon .pic { width: 36px; height: 36px; }
 
 /* the work folder */
 .work .row { min-height: 44px; }
 .work .row.group { min-height: 46px; padding-top: 4px; padding-bottom: 4px; }
-.work .row.group .pic { width: 72px; height: 36px; }
-.work .row.group .ico { width: 36px; height: 36px; font-size: 18px; }
+.work .row.group .pic { width: 40px; height: 40px; }
+.work .row.group .ico { width: 40px; height: 40px; font-size: 18px; }
 .work .gtext { display: flex; flex-direction: column; min-width: 60px; flex: 1 1 auto; overflow: hidden; }
 .work .gtext .lbl { font-size: 15px; font-weight: 600; }
 .work .gtext .sub { margin: 0; }
@@ -176,7 +181,9 @@ label.check { display: inline-flex; gap: 6px; align-items: center; font: 400 12.
               transform: translateY(-2px); }
 .card .art { height: 92px; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 6px; overflow: hidden;
              background: radial-gradient(ellipse at 50% 110%, color-mix(in srgb, var(--c, var(--orange)) 30%, transparent), transparent 70%), #0b0c10; }
-.card .art img { height: 64px; border-radius: 5px; border: 1px solid var(--line2); }
+.card .art img { height: 64px; border-radius: 5px; }
+.card .art .pic.big { width: 64px; height: 64px; }
+.card .art .pic img { height: 100%; border-radius: 0; }
 .card .art img.logo { height: 84px; border: 0; }
 .card .art .glyph { font-size: 44px; color: var(--c, var(--orange)); }
 .card h4 { margin: 0; font: 600 15px var(--ui); letter-spacing: .2em; text-transform: uppercase; color: var(--c, var(--orange)); }
@@ -204,6 +211,7 @@ label.check { display: inline-flex; gap: 6px; align-items: center; font: 400 12.
 .pvStart .card { flex-direction: row; align-items: center; padding: 10px; }
 .pvStart .card .art { width: 78px; height: 52px; flex: none; }
 .pvStart .card .art img { height: 40px; }
+.pvStart .card .art .pic.big { width: 40px; height: 40px; }
 .pvStart .card .art .glyph { font-size: 28px; }
 .pvStart .card h4 { font-size: 13px; }
 .pvStart .card p { font-size: 12.5px; }
@@ -243,8 +251,7 @@ label.check { display: inline-flex; gap: 6px; align-items: center; font: 400 12.
 .costume { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; color: #c4c0b6; cursor: pointer;
            padding: 5px; border-radius: 8px; border: 1px solid transparent; }
 .costume:has(input:checked) { border-color: var(--red); background: rgba(255, 85, 52, .1); color: var(--red); }
-.costume .pic { width: 96px; height: 48px; display: flex; align-items: center; justify-content: center; }
-.costume .pic img { max-width: 96px; max-height: 48px; border-radius: 4px; }
+.costume .pic.big { width: 60px; height: 60px; }
 .costume:has(input:disabled) { opacity: .4; cursor: default; }
 .meshrow .btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
 .inline { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
