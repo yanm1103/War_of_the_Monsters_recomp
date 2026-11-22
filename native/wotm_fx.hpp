@@ -50,6 +50,7 @@
 #include <mutex>
 #include <thread>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -953,6 +954,14 @@ public:
     // preset + 1 no byte alto e 0xRRGGBB embaixo, ou 0. Vale enquanto o preset de fx[i] for o gravado (sistema recriado por outro
     // caminho sai sem cor). nullptr fora do runtime (viewer, monview).
     static inline const std::atomic<uint32_t> *tintTags = nullptr;
+    // Sistemas escondidos ("breathFx" de custom, wotm_breathfx.hpp): preset + 1 por fx[i] (0 = desenha), com a mesma regra do tintTags
+    static inline const std::atomic<uint32_t> *hideTags = nullptr;
+    // Sopro proprio de custom (runtime/wotm_breathfx.inc monta a cada quadro; o show nao apaga): quadrados com textura PNG.
+    // stretch: risco de a ate b com meia-largura half, virado para a camera; senao sprite em a com meio-lado half e giro rot.
+    // rgba no RGBAQ do GS (0x80 = 1,0), como as cores do jogo.
+    struct BeamQuad { float a[3], b[3]; float half, rot; uint32_t rgba; bool stretch; };
+    struct BeamSystem { std::string texture; bool additive = true; std::vector<BeamQuad> quads; };
+    std::vector<BeamSystem> beams;
     float wide = 1.f;  // largura da tela / largura 4:3 (Scene::wide): teste de visao com os planos laterais da tela larga
     bool fovCull = true;     // collect recorta pela vista do jogo (inViewFov); false = camera livre pausada
     bool frameGate = true;   // collect sem particulas em quadro sem particleDraw (flareSlot); false = recoleta da camera livre pausada
@@ -1197,6 +1206,11 @@ public:
             if (tintTags)
                 if (const uint32_t t = tintTags[i].load(std::memory_order_relaxed); t && (t >> 24) == ram.u32(b + fxoff::fxId) + 1)
                     s.tint = 0x01000000u | (t & 0xFFFFFFu);
+            if (hideTags)
+                if (const uint32_t t = hideTags[i].load(std::memory_order_relaxed); t && t == ram.u32(b + fxoff::fxId) + 1) {
+                    i = next;
+                    continue;
+                }
             const int maxN = int32_t(ram.u32(b + fxoff::maxParticles));
             const bool built = (ram.u32(b + fxoff::infoAttribs) & 0x400) != 0;
             const int minN = s.type == FX_SPRINE ? 2 : 1;
@@ -1689,7 +1703,7 @@ public:
     // eye: olho da camera (o W da neblina e medido a partir dele, como no VU1)
     void draw(const Ram &ram, const TexFn &texture, const float eye[3]) {
         static const bool off = std::getenv("WOTM_NOFX") != nullptr;
-        if (off || (systems.empty() && synth.empty())) return;
+        if (off || (systems.empty() && synth.empty() && beams.empty())) return;
         const Matrix mv = rlGetMatrixModelview();
         FxView view{{mv.m0, mv.m4, mv.m8}, {mv.m1, mv.m5, mv.m9}, {mv.m2, mv.m6, mv.m10}, {-mv.m2, -mv.m6, -mv.m10, -mv.m14},
                     {mv.m0, mv.m4, mv.m8, mv.m12}, {mv.m1, mv.m5, mv.m9, mv.m13}};
@@ -1708,6 +1722,7 @@ public:
         rlDisableBackfaceCulling();
         for (const FxSystem &s : systems) drawSystem(ram, s, texture, view);
         for (const SynthSystem &s : synth) drawSynth(ram, s, texture, view);
+        for (const BeamSystem &s : beams) drawBeam(s, view);
         rlDrawRenderBatchActive();
         rlNormal3f(0.f, 0.f, 0.f);   // sem neblina para o que vem depois (overlay)
         rlSetBlendMode(BLEND_ALPHA);
@@ -2344,6 +2359,7 @@ public:
 
 private:
     unsigned blob_ = 0;   // textura de reserva (disco suave) quando a do sistema nao decodifica
+    std::unordered_map<std::string, unsigned> pngTex_;   // texturas PNG do sopro proprio (pngTexture)
     std::unordered_map<uint32_t, float> flarePrev_;   // debounce do lens flare: fracao visivel do quadro anterior por ID
 
     unsigned blobTexture() {
@@ -2507,6 +2523,79 @@ private:
             const bool fu = (q.sel & 2) == 0, fv = (q.sel & 1) == 0;
             const float u0 = fu ? 1.f : 0.f, u1 = 1.f - u0, v0 = fv ? 1.f : 0.f, v1 = 1.f - v0;
             const float uv[4][2] = {{u0, v1}, {u1, v1}, {u1, v0}, {u0, v0}};
+            for (int j = 0; j < 4; ++j) {
+                vcolor(q.rgba);
+                rlTexCoord2f(uv[j][0], uv[j][1]);
+                rlVertex3f(c[j][0], c[j][1], c[j][2]);
+            }
+        }
+        rlEnd();
+        rlSetTexture(0);
+    }
+
+    // Textura de um PNG do sopro proprio (BeamSystem): cache por caminho; o alfa vai para a escala do GS (0x80 = 1,0) do modo GS
+    // do shader. 0 = nao carregou (fica a mancha redonda).
+    unsigned pngTexture(const std::string &path) {
+        if (path.empty()) return 0;
+        auto it = pngTex_.find(path);
+        if (it != pngTex_.end()) return it->second;
+        unsigned id = 0;
+        Image img = LoadImage(path.c_str());
+        if (img.data) {
+            ImageFormat(&img, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+            uint8_t *px = static_cast<uint8_t *>(img.data);
+            for (int k = 0; k < img.width * img.height; ++k) px[4 * k + 3] = uint8_t((px[4 * k + 3] * 128 + 127) / 255);
+            const Texture2D t = LoadTextureFromImage(img);
+            UnloadImage(img);
+            if (t.id) { SetTextureFilter(t, TEXTURE_FILTER_BILINEAR); SetTextureWrap(t, TEXTURE_WRAP_CLAMP); }
+            id = t.id;
+        }
+        if (!id) std::fprintf(stderr, "[fx] sopro: textura %s nao carregou\n", path.c_str());
+        pngTex_[path] = id;
+        return id;
+    }
+    void drawBeam(const BeamSystem &s, const FxView &view) {
+        if (s.quads.empty()) return;
+        unsigned tex = pngTexture(s.texture);
+        if (!tex) tex = blobTexture();
+        rlDrawRenderBatchActive();
+        const uint8_t blend = s.additive ? 0x48 : kGsAlphaNormal;
+        gsBlend(blend);
+        shaderNormal(0.f, true, true, gsBlendPremul(blend));
+        rlBegin(RL_QUADS);
+        rlSetTexture(tex);
+        for (const BeamQuad &q : s.quads) {
+            float c[4][3];
+            float uv[4][2] = {{0, 1}, {1, 1}, {1, 0}, {0, 0}};
+            const float d[3] = {q.b[0] - q.a[0], q.b[1] - q.a[1], q.b[2] - q.a[2]};
+            const float len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+            float side[3];
+            if (q.stretch && len > 1e-3f) {
+                // risco: eixo a->b, largura no plano da tela (perpendicular ao eixo e a direcao da vista); pontas estendidas
+                // meia-largura para a textura redonda nao sair cortada
+                const float ax[3] = {d[0] / len, d[1] / len, d[2] / len};
+                side[0] = ax[1] * view.back[2] - ax[2] * view.back[1];
+                side[1] = ax[2] * view.back[0] - ax[0] * view.back[2];
+                side[2] = ax[0] * view.back[1] - ax[1] * view.back[0];
+                const float sl = std::sqrt(side[0] * side[0] + side[1] * side[1] + side[2] * side[2]);
+                if (sl < 1e-4f) continue;   // risco apontado para a camera
+                for (int k = 0; k < 3; ++k) side[k] *= q.half / sl;
+                for (int k = 0; k < 3; ++k) {
+                    const float a = q.a[k] - ax[k] * q.half, b = q.b[k] + ax[k] * q.half;
+                    c[0][k] = a - side[k];
+                    c[1][k] = b - side[k];
+                    c[2][k] = b + side[k];
+                    c[3][k] = a + side[k];
+                }
+            } else {
+                const float cs = std::cos(q.rot) * q.half, sn = std::sin(q.rot) * q.half;
+                const float sx[4] = {-1, 1, 1, -1}, sy[4] = {-1, -1, 1, 1};
+                for (int j = 0; j < 4; ++j) {
+                    const float x = sx[j] * cs - sy[j] * sn, y = sx[j] * sn + sy[j] * cs;
+                    for (int k = 0; k < 3; ++k) c[j][k] = q.a[k] + x * view.right[k] + y * view.up[k];
+                }
+            }
+            if (fogged(view, c)) continue;
             for (int j = 0; j < 4; ++j) {
                 vcolor(q.rgba);
                 rlTexCoord2f(uv[j][0], uv[j][1]);

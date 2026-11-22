@@ -332,6 +332,9 @@ extern std::atomic<float> g_wotmMechaReticle;   // wotm_overrides.cpp: peso da c
 extern std::atomic<bool> g_wotmLevelReloadKey;   // wotm_levelreload.inc: F10 pede a recarga da fase
 extern std::atomic<uint32_t> g_wotmFxTint[100];   // wotm_overrides.cpp: cor do fogo por fx[i] (wotm_custom.inc grava)
 static const bool g_wotmFxTintLinked = (wotm::Particles::tintTags = g_wotmFxTint, true);
+#include "wotm_breathfx.hpp"
+static const bool g_wotmFxHideLinked = (wotm::Particles::hideTags = wotm::breathfx::g_hide, true);
+#include "wotm_breathfx.inc"   // sopro proprio de custom ("breathFx"): camadas simuladas aqui, desenhadas pelo Particles
 #include "wotm_prompts.inc"   // icones de botao 2D (Kenney) no lugar dos 3D do jogo
 #include "wotm_trainview.inc"   // modo treino: volumes, esferas dos golpes, painel de dano e numeros do HUD
 #define WOTM_HAVE_NATIVE 1
@@ -2023,6 +2026,7 @@ static bool wotmDrawNative(const uint8_t *rdram)
                 if (viewOk[v])
                     depth[v].fetch(S.scene.redrawId);   // sem flare tambem: o valid acompanha a idade
         }
+        wotm_breathfx::prepare(S.scene.fx, ram, S.snap.g);   // sopro proprio de custom, para todas as vistas deste quadro
         wotm_levelsel::prepare(S.scene, ram);   // foto propria das fases sem arte no SHELL (Scene::nodeTexture); fora do menu, nenhuma
         for (int v = 1; v < 4; ++v)
             if (viewOk[v])

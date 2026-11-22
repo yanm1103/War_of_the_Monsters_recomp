@@ -1,0 +1,266 @@
+{
+  "layers": [
+    {
+      "texture": "fx/atomicbreath_a.png",
+      "mode": "stretch",
+      "rate": 25.0,
+      "speed": 2000.0,
+      "speedRandom": 200.0,
+      "radial": 0.0,
+      "up": 0.0,
+      "once": false,
+      "rotate": false,
+      "life": [
+        0.5,
+        1.0
+      ],
+      "size": [
+        8.0,
+        15.0
+      ],
+      "spread": 1.0,
+      "color": [
+        1.0,
+        0.2,
+        0.0,
+        1.0
+      ],
+      "additive": true,
+      "stretch": [
+        0.2,
+        0.6
+      ]
+    },
+    {
+      "texture": "fx/atomicbreath2_a.png",
+      "mode": "stretch",
+      "rate": 25.0,
+      "speed": 2000.0,
+      "speedRandom": 200.0,
+      "radial": 0.0,
+      "up": 0.0,
+      "once": false,
+      "rotate": false,
+      "life": [
+        0.7,
+        0.7
+      ],
+      "size": [
+        5.0,
+        10.0
+      ],
+      "spread": 1.0,
+      "color": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "additive": true,
+      "stretch": [
+        0.1,
+        0.6
+      ]
+    },
+    {
+      "texture": "fx/basic.png",
+      "mode": "stretch",
+      "rate": 20.0,
+      "speed": 5000.0,
+      "speedRandom": 0.0,
+      "radial": 0.0,
+      "up": 0.0,
+      "once": false,
+      "rotate": false,
+      "life": [
+        0.1,
+        0.1
+      ],
+      "size": [
+        10.0,
+        30.0
+      ],
+      "spread": 10.0,
+      "color": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "additive": true,
+      "colorPoly": {
+        "a": [
+          1.0,
+          -1.0
+        ]
+      },
+      "stretch": [
+        0.75,
+        1.0
+      ]
+    },
+    {
+      "texture": "fx/basic.png",
+      "mode": "sprite",
+      "rate": 20.0,
+      "speed": 0.0,
+      "speedRandom": 0.0,
+      "radial": 0.0,
+      "up": 0.0,
+      "once": false,
+      "rotate": false,
+      "life": [
+        0.1,
+        0.1
+      ],
+      "size": [
+        15.0,
+        50.0
+      ],
+      "spread": 0.0,
+      "color": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "additive": true,
+      "colorPoly": {
+        "g": [
+          1.0,
+          -0.5
+        ],
+        "b": [
+          1.0,
+          -1.0
+        ],
+        "a": [
+          0.0,
+          2.0,
+          -2.0
+        ]
+      },
+      "sizePoly": [
+        1.0,
+        1.5
+      ]
+    },
+    {
+      "texture": "fx/explo_small_3.png",
+      "mode": "sprite",
+      "rate": 30.0,
+      "speed": 0.0,
+      "speedRandom": 0.0,
+      "radial": 50.0,
+      "up": 60.0,
+      "once": false,
+      "rotate": true,
+      "life": [
+        0.5,
+        0.5
+      ],
+      "size": [
+        20.0,
+        25.0
+      ],
+      "spread": 3.0,
+      "color": [
+        1.0,
+        0.784314,
+        0.25098,
+        1.0
+      ],
+      "additive": true,
+      "colorPoly": {
+        "a": [
+          0.75,
+          0.0,
+          -0.75
+        ]
+      },
+      "sizePoly": [
+        3.0,
+        -3.0
+      ],
+      "at": "hit"
+    },
+    {
+      "texture": "fx/basic.png",
+      "mode": "sprite",
+      "rate": 75.0,
+      "speed": 0.0,
+      "speedRandom": 0.0,
+      "radial": 100.0,
+      "up": 100.0,
+      "once": false,
+      "rotate": true,
+      "life": [
+        0.7,
+        0.75
+      ],
+      "size": [
+        10.0,
+        15.0
+      ],
+      "spread": 10.0,
+      "color": [
+        1.0,
+        0.784314,
+        0.25098,
+        1.0
+      ],
+      "additive": true,
+      "colorPoly": {
+        "a": [
+          1.0,
+          0.0,
+          -1.0
+        ]
+      },
+      "sizePoly": [
+        1.0,
+        -1.0
+      ],
+      "at": "hit"
+    },
+    {
+      "texture": "fx/basic.png",
+      "mode": "sprite",
+      "rate": 50.0,
+      "speed": 0.0,
+      "speedRandom": 0.0,
+      "radial": 200.0,
+      "up": 200.0,
+      "once": true,
+      "rotate": true,
+      "life": [
+        0.7,
+        0.75
+      ],
+      "size": [
+        20.0,
+        25.0
+      ],
+      "spread": 10.0,
+      "color": [
+        1.0,
+        0.784314,
+        0.25098,
+        1.0
+      ],
+      "additive": true,
+      "colorPoly": {
+        "a": [
+          1.0,
+          0.0,
+          -1.0
+        ]
+      },
+      "sizePoly": [
+        1.0,
+        -1.0
+      ],
+      "at": "hit"
+    }
+  ]
+}

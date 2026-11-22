@@ -18,10 +18,12 @@
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
 
+#include "wotm_breathfx.hpp"
 #include "wotm_json.hpp"
 
 namespace wotm::mods {
@@ -185,6 +187,9 @@ struct Custom {
     // "shotColor": cor do tiro padrao (o projetil do tipo, Monster +0x6878) do traje proprio e das skins sem a sua: as particulas
     // da explosao dele e a luz que ele carrega (wotm_custom.inc)
     uint32_t shotColor = 0;
+    // "breathFx": sopro proprio desenhado pelo port no lugar do bafo do Togera (wotm_breathfx.hpp); nullptr = o do jogo. Endereco
+    // fixo (o runtime guarda o ponteiro)
+    std::shared_ptr<const breathfx::Config> breathFx;
     bool ai = false;           // uma CPU pode usar (quadro de CPU da selecao)
     std::filesystem::path portrait;   // PNG do retrato do HUD (vazio = o do .RTX)
     int portraitTex = -1;       // texId do retrato no <PREFIXO><traje>.RTX
@@ -487,6 +492,75 @@ private:
             return kFireSet | uint32_t(std::stoul(s.substr(1), nullptr, 16));
         std::fprintf(stderr, "[mods] %s: \"%s\" tem de ser \"#RRGGBB\"; ignorado\n", where.c_str(), key);
         return 0;
+    }
+    // "breathFx" (MODS.md): {"scale", "hide": [presets], "layers": [{...}]}; texturas na pasta do monstro ou na raiz do mod
+    static std::shared_ptr<const breathfx::Config> breathFx(const json::Value &v, const std::filesystem::path &dir,
+                                                            const std::filesystem::path &modDir, const std::string &where) {
+        auto cfg = std::make_shared<breathfx::Config>();
+        auto num = [](const json::Value *x, float d) { return x && x->type == json::Value::Int ? float(x->asNum(d)) : d; };
+        auto pair = [&](const json::Value *x, float &lo, float &hi) {
+            if (x && x->type == json::Value::Arr && x->arr.size() == 2) { lo = num(&x->arr[0], lo); hi = num(&x->arr[1], hi); }
+            else if (x && x->type == json::Value::Int) lo = hi = num(x, lo);
+        };
+        auto poly = [&](const json::Value *x, breathfx::Poly &p) {
+            if (x && x->type == json::Value::Arr)
+                for (const json::Value &k : x->arr) p.c.push_back(num(&k, 0.f));
+        };
+        cfg->scale = num(v.get("scale"), 1.f);
+        if (const json::Value *h = v.get("hide"); h && h->type == json::Value::Arr) {
+            cfg->hide.clear();
+            for (const json::Value &p : h->arr)
+                if (p.type == json::Value::Int) cfg->hide.push_back(int(p.i));
+        }
+        std::error_code ec;
+        if (const json::Value *ls = v.get("layers"); ls && ls->type == json::Value::Arr)
+            for (const json::Value &l : ls->arr) {
+                if (l.type != json::Value::Obj) continue;
+                breathfx::Layer L;
+                if (const json::Value *t = l.get("texture"); t && t->type == json::Value::Str && !t->s.empty()) {
+                    std::filesystem::path p = dir / pathFromUtf8(t->s);
+                    if (!std::filesystem::is_regular_file(p, ec)) p = modDir / pathFromUtf8(t->s);
+                    if (std::filesystem::is_regular_file(p, ec))
+                        L.texture = p.string();
+                    else
+                        std::fprintf(stderr, "[mods] monstro %s: \"breathFx\" textura %s nao achada (fica a mancha redonda)\n", where.c_str(), t->s.c_str());
+                }
+                const json::Value *at = l.get("at"), *mode = l.get("mode");
+                L.hit = at && at->type == json::Value::Str && lower(at->s) == "hit";
+                L.stretch = mode && mode->type == json::Value::Str && lower(mode->s) == "stretch";
+                L.relative = !L.hit;
+                if (const json::Value *x = l.get("relative")) L.relative = x->asBool(L.relative);
+                if (const json::Value *x = l.get("once")) L.once = x->asBool(false);
+                if (const json::Value *x = l.get("additive")) L.additive = x->asBool(true);
+                if (const json::Value *x = l.get("rotate")) L.rotate = x->asBool(false);
+                L.rate = std::max(0.f, num(l.get("rate"), L.rate));
+                L.speed = num(l.get("speed"), 0.f);
+                L.speedRandom = num(l.get("speedRandom"), 0.f);
+                L.radial = num(l.get("radial"), 0.f);
+                L.up = num(l.get("up"), 0.f);
+                pair(l.get("life"), L.lifeMin, L.lifeMax);
+                pair(l.get("size"), L.sizeMin, L.sizeMax);
+                L.lifeMin = std::max(0.01f, L.lifeMin);
+                L.lifeMax = std::max(L.lifeMin, L.lifeMax);
+                L.spread = num(l.get("spread"), 0.f);
+                if (const json::Value *c = l.get("color"); c && c->type == json::Value::Arr)
+                    for (size_t k = 0; k < 4 && k < c->arr.size(); ++k) L.color[k] = num(&c->arr[k], 1.f);
+                if (const json::Value *cp = l.get("colorPoly"); cp && cp->type == json::Value::Obj) {
+                    poly(cp->get("r"), L.r);
+                    poly(cp->get("g"), L.g);
+                    poly(cp->get("b"), L.b);
+                    poly(cp->get("a"), L.a);
+                }
+                poly(l.get("sizePoly"), L.sizeMul);
+                pair(l.get("stretch"), L.grow, L.shrink);
+                cfg->layers.push_back(std::move(L));
+            }
+        if (cfg->layers.empty()) {
+            std::fprintf(stderr, "[mods] monstro %s: \"breathFx\" sem \"layers\"; fica o sopro do jogo\n", where.c_str());
+            return nullptr;
+        }
+        std::fprintf(stderr, "[mods] monstro %s: sopro proprio com %zu camadas\n", where.c_str(), cfg->layers.size());
+        return cfg;
     }
     // Filho de `dir` com esse nome, sem olhar maiusculas
     static std::filesystem::path child(const std::filesystem::path &dir, const std::string &name) {
@@ -904,6 +978,8 @@ private:
                 if (const json::Value *cn = v.get("costumeName"); cn && cn->type == json::Value::Str) c.costumeName = cn->s;
                 c.fireColor = color(v, "fireColor", "monstro " + where);
                 c.shotColor = color(v, "shotColor", "monstro " + where);
+                if (const json::Value *bf = v.get("breathFx"); bf && bf->type == json::Value::Obj)
+                    c.breathFx = breathFx(*bf, s, m, where);
                 if (const json::Value *ki = v.get("kind"); ki && ki->type == json::Value::Str) c.kind = lower(ki->s);
                 if (const json::Value *sr = v.get("specialRoar")) c.specialRoar = sr->asBool(false);
                 if (const json::Value *fb = v.get("fallBlend"); fb && fb->type == json::Value::Int && fb->i >= 0 && fb->i <= 120)

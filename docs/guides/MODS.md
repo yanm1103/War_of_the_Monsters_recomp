@@ -362,6 +362,29 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   `255,64,64`), through the `colorQuad` of the shot's `_cs`, the per-object vertex colour multiplier the game itself applies (so it
   also shows in the emulated GS of `ps2EntryRunner`). A pickup fired as a weapon, the special and the punch flashes keep the game's
   colours. Log: `[custom] tiro: preset 112 na cor #FFD23A`.
+- `breathFx`: the monster's own breath, drawn by the port in place of Togera's fire breath (`FireBreath`: Togera and the customs
+  based on it). The game still owns the move (range, damage, duration, sound, the hit test); only the picture changes. While the
+  `FireBreath` is on, the port emits the layers from the mouth (`Monster` +0x3E50, forward axis +0x33D0, the line the game tests)
+  and stops them where the breath's line of sight stopped (a building or a monster: the `hdLosCSTest` inside
+  `FireBreath::TestCollis`). The game's breath systems that this monster's `FireBreath` creates disappear (`hide`). Only in the
+  native drawing (not in the emulated GS of `ps2EntryRunner`). Log: `[mods] monstro ...: sopro proprio com N camadas` at load,
+  `[custom] sopro proprio de 0x... (vaga N): linha ate D` on the first breath.
+  `{"scale": 1, "hide": [8, 51, 148], "layers": [{...}, ...]}`:
+  - `scale`: multiplies every layer's sizes, speeds and spawn area. `hide`: the presets that disappear when this monster's
+    `FireBreath` creates them (default `[8, 51, 148]`: Togera's breath core, cloud and sparks; add `80, 81`, the hit flash and
+    sparks, when the layers bring their own hit).
+  - each layer is an emitter: `texture` (PNG in the monster's folder or at the mod root; white with alpha is the usual, tinted by
+    `color`; missing = a soft round blob), `at` (`"mouth"`, default, or `"hit"`: born where the breath hits, only while it hits
+    something), `mode` (`"sprite"`, a square facing the camera, or `"stretch"`, a streak along its velocity from where it was a
+    moment ago), `relative` (the particles move with the mouth, so the breath follows the head; default true at the mouth, false at
+    the hit), `rate` (particles per second), `once` (true: `rate` particles at once when the layer turns on), `speed` and
+    `speedRandom` (forward, ±), `radial` (outward from the spawn area's centre), `up` (world up), `life` and `size` (`[min, max]`,
+    seconds and side of the square; in a streak, its width), `spread` (half side of the spawn cube), `color` (`[r, g, b, a]`, 1 =
+    full), `colorPoly` (`{"r": [c0, c1, ...], ...}`: each channel multiplied by c0 + c1·t + c2·t² over the particle's age t, 0 to 1)
+    and `sizePoly` (the same for the size), `stretch` (`[grow, shrink]`: the streak grows until that fraction of its life and
+    shrinks from the second one), `additive` (default true; false = normal blend), `rotate` (random starting rotation).
+  - The units are the game's (Togera's breath reaches 800). `tools/ste/ste_fx.py` builds the layers from a *Godzilla: Save the
+    Earth* effect (`TOOLS.md`); the `ste_teste` mod carries the Godzilla 2000 atomic breath made that way.
 - `logo`: a 2:1 PNG with the name drawn (in the monster's folder or at the mod root; the game's are 256 × 128, 512 × 256 keeps it
   sharp in a large window), shown where the game shows its monsters' logos: under the model in the select screen and above the
   stage picture in the save list. Without it, the name in text (the save list never falls back to the base type's logo).

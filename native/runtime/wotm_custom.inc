@@ -1666,6 +1666,7 @@ namespace wotm_custom
                                    g_origDetonate = nullptr, g_origCrowdInto = nullptr, g_origInitWeapon = nullptr;
     uint32_t g_fxOwner = 0;   // monstro dono dos efeitos criados agora (0 = nenhum)
     bool g_fxShot = false;    // os efeitos criados agora sao da explosao do tiro padrao de g_fxOwner
+    bool g_fxBreath = false;  // os efeitos criados agora sao do FireBreath de g_fxOwner (Activate, TestCollis): o "hide" do breathFx so vale neles
 
     bool togeraFx(uint32_t preset)
     {
@@ -1713,6 +1714,13 @@ namespace wotm_custom
             std::fprintf(stderr, "[fx] criado fx[%u] preset %u por 0x%08X, dono 0x%08X\n", idx, preset, GPR_U32(ctx, 31), owner);
         if (preset == ~0u || idx >= 100)
             return;
+        {   // sopro proprio ("breathFx"): os sistemas do bafo do jogo que ele substitui somem (wotm_breathfx.hpp)
+            const wotm::mods::Custom *cu = owner && g_fxBreath ? customOf(rdram, owner) : nullptr;
+            const bool hide = cu && cu->breathFx && cu->breathFx->hides(preset);
+            wotm::breathfx::g_hide[idx].store(hide ? preset + 1 : 0, std::memory_order_relaxed);
+            if (hide)
+                return;
+        }
         const uint32_t shot = owner && g_fxShot ? shotColorOf(rdram, owner) : 0;
         const uint32_t color = shot ? shot : owner && togeraFx(preset) ? fireColorOf(rdram, owner) : 0;
         g_wotmFxTint[idx].store(color ? ((preset + 1) << 24 | (color & 0xFFFFFFu)) : 0, std::memory_order_relaxed);
@@ -1726,22 +1734,80 @@ namespace wotm_custom
     void fxPos(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { fxCreate(rdram, ctx, runtime, kFxPos, g_origFxPos); }
     void fxMat(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) { fxCreate(rdram, ctx, runtime, kFxMat, g_origFxMat); }
     // Roda `orig` com g_fxOwner = m (o anterior volta no fim: as chamadas se aninham)
-    void withFxOwner(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, PS2Runtime::RecompiledFunction orig)
+    void withFxOwner(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m, PS2Runtime::RecompiledFunction orig, bool breath = false)
     {
         const uint32_t prev = g_fxOwner;
+        const bool prevBreath = g_fxBreath;
         g_fxOwner = m;
+        g_fxBreath = breath;
         orig(rdram, ctx, runtime);
         g_fxOwner = prev;
+        g_fxBreath = prevBreath;
     }
     void breathActivate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t m = ctx->pc == kBreathActivate ? READ32(GPR_U32(ctx, 4) + kBreathOwner) : 0;
-        withFxOwner(rdram, ctx, runtime, m, g_origBreathActivate);
+        withFxOwner(rdram, ctx, runtime, m, g_origBreathActivate, true);
+    }
+    // Sopro proprio ("breathFx", wotm_breathfx.hpp): a linha de visada que o FireBreath::TestCollis testa (hdLosCSTest, da boca - 20
+    // ate o alcance no eixo +0x33D0) diz ate onde as camadas vao e onde nascem as de "hit"
+    constexpr uint32_t kBreathAxis = 0x33D0;
+    PS2Runtime::RecompiledFunction g_origBreathLos = nullptr;
+    uint32_t g_breathLosM = 0;     // monstro com breathFx no meio do TestCollis dele (0 = fora)
+    float g_breathLimit = -1.f;
+    bool g_breathBlocked = false;
+    void breathLos(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t m = g_breathLosM;
+        if (!m || ctx->pc != kLos)
+        {
+            g_origBreathLos(rdram, ctx, runtime);
+            return;
+        }
+        const uint32_t to = GPR_U32(ctx, 5), res = GPR_U32(ctx, 6);
+        float muzzle[3], axis[3], end[3];
+        for (int k = 0; k < 3; ++k)
+        {
+            muzzle[k] = rdF(rdram, m + kLocMuzzle + 4 * k);
+            axis[k] = rdF(rdram, m + kBreathAxis + 4 * k);
+            end[k] = rdF(rdram, to + 4 * k);
+        }
+        g_origBreathLos(rdram, ctx, runtime);
+        const bool hit = (READ8(res) != 0);
+        float p[3];
+        for (int k = 0; k < 3; ++k)
+            p[k] = hit ? rdF(rdram, res + 0x10 + 4 * k) : end[k];
+        g_breathLimit = std::max(0.f, (p[0] - muzzle[0]) * axis[0] + (p[1] - muzzle[1]) * axis[1] + (p[2] - muzzle[2]) * axis[2]);
+        g_breathBlocked = hit;
     }
     void breathCollis(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t m = ctx->pc == kBreathCollis ? READ32(GPR_U32(ctx, 4) + kBreathOwner) : 0;
-        withFxOwner(rdram, ctx, runtime, m, g_origBreathCollis);
+        const wotm::mods::Custom *cu = m ? customOf(rdram, m) : nullptr;
+        const wotm::breathfx::Config *cfg = cu ? cu->breathFx.get() : nullptr;
+        const uint32_t prevM = g_breathLosM;
+        g_breathLosM = cfg ? m : 0;
+        g_breathLimit = -1.f;
+        g_breathBlocked = false;
+        withFxOwner(rdram, ctx, runtime, m, g_origBreathCollis, true);
+        g_breathLosM = prevM;
+        if (!cfg)
+            return;
+        for (uint32_t i = 0; i < 8; ++i)
+            if (READ32(kGameObj + kMonsters + 4 * i) == m)
+            {
+                wotm::breathfx::Live &l = wotm::breathfx::g_live[i];
+                l.cfg.store(cfg, std::memory_order_relaxed);
+                l.limit.store(g_breathLimit, std::memory_order_relaxed);
+                l.blocked.store(g_breathBlocked, std::memory_order_relaxed);
+                l.m.store(m, std::memory_order_relaxed);
+                l.stamp.fetch_add(1, std::memory_order_release);
+                static std::set<const void *> logged;
+                if (logged.insert(cfg).second)
+                    std::fprintf(stderr, "[custom] sopro proprio de 0x%08X (vaga %u): linha ate %.0f%s\n", m, i, g_breathLimit,
+                                 g_breathBlocked ? " (bateu)" : "");
+                break;
+            }
     }
     void crowdInto(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
@@ -1889,6 +1955,8 @@ void wotmCustomInstall(PS2Runtime &runtime)
         runtime.registerFunction(kBreathActivate, &breathActivate);
     if ((g_origBreathCollis = runtime.lookupFunction(kBreathCollis)))
         runtime.registerFunction(kBreathCollis, &breathCollis);
+    if ((g_origBreathLos = runtime.lookupFunction(kLos)))
+        runtime.registerFunction(kLos, &breathLos);
     if ((g_origDetonate = runtime.lookupFunction(kDetonate)))
         runtime.registerFunction(kDetonate, &detonate);
     if ((g_origInitWeapon = runtime.lookupFunction(kInitWeapon)))

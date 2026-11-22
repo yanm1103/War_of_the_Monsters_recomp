@@ -5,3 +5,7 @@ O mod: modkit.py monster new ste_teste godzilla_ste --base togera --costume 0 --
 modkit.py monster rig ... godzilla2000_ste_rig.glb; textura lizard0_t0013.png x0.62; retrato do Godzilla 2000.
 Sons: ste_sounds.py <iso> <pasta files/ da pasta de trabalho> sounds (tools/ste/ste_sound.py); sounds/ = os WAVs que ele grava
 (lizard_s_NNN = banco proprio LIZARD_S, genamb_s_NNN = banco comum proprio GENAMB_S), depois modkit.py pack ste_teste.
+Sopro atomico ("breathFx" do monster.json): tools/ste/ste_fx.py <iso> breath Godzilla2k.cmp atomicbreath <pasta do monstro>/fx
+--hit AtomicBreath_hit; o breathfx.json que ele grava (copia aqui: breathfx_atomicbreath.json) vai para o "breathFx" do monster.json
+com "hide": [8, 51, 148, 80, 81] e, nas faiscas do acerto (camadas "hit" com basic.png), "radial" e "up" a 1/3 (a olho: no STE
+esses emissores sao "Normalized", escala que o port nao tem). "fireColor" #FFC840 pinta o que sobra do fogo do Togera (bola de fogo).
