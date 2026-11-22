@@ -30,7 +30,6 @@ Pedido do dono: depois do vídeo de skins, deixar o próximo nível (malha nova,
 
 Ordem sugerida: 0, 1, 2, 3, 4. O 1 e o 2 ajudam os dois caminhos (malha sobre o esqueleto do monstro e modelo com esqueleto próprio); o 4 é o maior e o que mais muda o resultado para modelos baixados.
 
-## 4. Em aberto (decisão do dono)
+## 4. Decisões do dono
 
-- Aprovar o plano e a ordem; o que entra no `TODO.md`.
-- Monstro e modelo do teste (passo 0) e do vídeo. O Congar só serve para o caminho "malha sobre o esqueleto"; Togera, Ultra-V ou Robo-47 servem para os dois.
+- Plano e ordem aprovados pelo dono (2026-11-22), no `TODO.md`; base do teste e do vídeo: Robo-47.
