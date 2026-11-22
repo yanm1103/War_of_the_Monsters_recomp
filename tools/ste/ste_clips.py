@@ -24,11 +24,14 @@ FPS = 60.0
 LAID_UP = {'turn': [90, 0, 0], 'shift': [0, 62.3, 15.1]}        # de costas (80, 86)
 LAID_DOWN = {'turn': [-90, 0, 0], 'shift': [0, -63.3, 17.5]}    # de bruços (81, 85)
 
+NAT = {'settle': True, 'maxtravel': 40.0}   # golpe inteiro: sem a deriva da raiz, avanco ate 40 unidades
+
 # id do WotM -> (nome da animacao no STE, ciclo?, duracao em s ou None = a do STE[, opcoes]). So entra o que foi conferido olhando.
 # Opcoes: 'laid' (retarget --own), 'still' (2 quadros iguais, o 1o do clipe), 'settle' (tira a deriva da raiz de um clipe unico),
 # 'face' (o clipe termina com a frente da pose parada: {'from': u} desvira de u ate o fim, 'dir': +1/-1 fecha a volta nesse
 # sentido, 'ease': 'out' desvira rapido no comeco, 'in': u desfaz ate u o giro com que o clipe do STE comeca), 'turn' (o giro
-# sai do clipe e vai para o rootTurn do jogo), 'knots' (a deformacao do tempo dada a mao; vence a que o 'strike' acharia).
+# sai do clipe e vai para o rootTurn do jogo), 'knots' (a deformacao do tempo dada a mao; vence a que o 'strike' acharia),
+# 'maxtravel' (o maior afastamento da raiz em relacao ao comeco, em unidades; o resto do avanco do STE sai).
 ID_MAP = {
     90: ('NORMAL_IDLE', True, None),
     95: ('NORMAL_IDLE', True, None),   # idle com pouca vida: o STE nao tem; o do Togera retargetado deixa os pes no ar
@@ -77,10 +80,9 @@ ID_MAP = {
     54: ('1HAND_THROW', False, 0.4, {'settle': True, 'knots': [(0, 0), (0.50, 0.50), (1, 1)]}),                # dardo (solta em 50%)
     55: ('THROW_2HAND', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.37, 0.25), (1, 1)]}),                # jogar com 2 maos no alvo (35-38%)
     56: ('THROW_2HAND_OBJECT', False, 40 / 60.0, {'settle': True, 'knots': [(0, 0), (0.37, 0.25), (1, 1)]}),   # jogar com 2 maos para a frente
-    # mais golpes e movimento: 13 e a mao esquerda do combo (slot 2.5 do .CHR); andar e correr de costas = o ciclo ao contrario;
+    # movimento: andar e correr de costas = o ciclo ao contrario;
     # o pisao acerta em 50% (StateStompAttack) e o STOMP tem os dois pes no chao em ~46%; os levantares atacando e a morte
     # deitada comecam na pose deitada do levantar (87/88), sem `laid` (o jogo nao inclina o monstro nesses).
-    13: ('JAB_L', False, 0.4, {'strike': {'eff': 'hand_l', 'win': (0.55, 0.99)}}),
     7: ('WALK', True, None, {'reverse': True}),
     8: ('RUN', True, None, {'reverse': True}),
     240: ('STOMP', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.5, 0.46), (1, 1)]}),
@@ -99,19 +101,25 @@ ID_MAP = {
     174: ('LIFTED', True, None),             # vitima: segurada no ar pelo agressor
     172: ('LIFTING_OBJECT', True, None),     # parado segurando objeto grande ou monstro
     173: ('WALK_LIFTING_OBJECT', True, None),   # andar/correr carregando
-    # golpes: cada slot do Togera (.CHR, `tools/chr_dump.py disc/RST/LIZARD.CHR`) acerta com um localizador (0x803 mao D, 0x80B
-    # boca, 0x818 a frente da cabeca, 0x816/0x817 meio e ponta da cauda) numa janela fixa da animacao; o golpe do STE com a mesma
-    # parte do corpo entra no comprimento do slot, com o golpe dentro da janela (strike: eff = parte, win = janela do slot).
-    10: ('JAB_R', False, 0.4, {'strike': {'eff': 'hand_r', 'win': (0.55, 0.99)}}),            # soco rapido
-    22: ('UPPERCUT', False, 40 / 60.0, {'strike': {'eff': 'hand_r', 'win': (0.47, 0.85)}}),   # soco que lanca
-    17: ('HMMR_FIN', False, 0.4, {'face': {'from': 0.6}, 'strike': {'eff': 'hand_r', 'win': (0.60, 0.99)}}),         # pancada de mao e ombro
-    16: ('COMBO_BITE', False, 40 / 60.0, {'face': {'in': 0.44}, 'strike': {'eff': 'head', 'win': (0.44, 0.74), 'mode': 'abs'}}),   # mordida que atordoa
-    18: ('COMBO_BITE', False, 0.4, {'face': {'in': 0.25}, 'strike': {'eff': 'head', 'win': (0.25, 0.85), 'mode': 'abs'}}),         # mordida
-    19: ('COMBO_BITE', False, 0.4, {'face': {'in': 0.5}, 'strike': {'eff': 'head', 'win': (0.50, 0.99), 'mode': 'abs'}}),         # mordida
-    15: ('HEADBUTT', False, 80 / 60.0, {'strike': {'eff': 'head', 'win': (0.20, 0.59), 'mode': 'abs'}}),     # cabecada
-    12: ('TAIL_FULL_SPIN', False, 70 / 60.0, {'knots': [(0, 0), (0.25, 0.44), (0.36, 0.56), (1, 1)], 'face': {'from': 0.36, 'dir': 1, 'ease': 'out'}, 'strike': {'eff': 'tail', 'win': (0.25, 0.48)}}),   # cauda forte (lanca)
-    21: ('TAIL_SNAP', False, 50 / 60.0, {'strike': {'eff': 'tail', 'win': (0.22, 0.49)}}),    # cauda leve
-    20: ('TAIL_REVERSAL', False, 50 / 60.0, {'face': {'from': 0.49}, 'strike': {'eff': 'tail', 'win': (0.01, 0.49)}}),   # cauda, acerta desde o comeco
+    # golpes: a animacao inteira do STE, no ritmo dele (o .CHR proprio do mod da a velocidade, a janela do acerto e o resto;
+    # mods/_ste_teste_src/moves.json e tools/chr_moves.py); sem a deriva da raiz, com o avanco limitado e terminando de frente.
+    # A janela de acerto do STE (tools/ste/ste_moves.py) vai no comentario: o 'face' desvira depois dela.
+    10: ('JAB_R', False, None, dict(NAT, face={'from': 0.41})),              # Jab_right, 7-41%
+    11: ('JAB_L', False, None, dict(NAT, face={'from': 0.34})),              # Jab_left, 7-34%
+    13: ('KICK3', False, None, dict(NAT, face={'from': 0.30})),              # Kick, 13-30%
+    14: ('KICK', False, None, dict(NAT, face={'from': 0.31})),               # Kick2, 14-31%
+    17: ('HMMR_FIN', False, None, dict(NAT, face={'from': 0.49})),           # Hammer, 33-49%
+    15: ('OVERHAND', False, None, dict(NAT, face={'from': 0.50})),           # Overhand, 31-50%
+    16: ('DOUBLE_SWIPE_HOOK2', False, None, dict(NAT, face={'from': 0.72})), # Double Swipe, 13-72% (tres acertos no STE)
+    18: ('KICK_2FT', False, None, dict(NAT, face={'from': 0.48})),           # Double Kick, 39-48%
+    21: ('TAIL_SNAP', False, None, dict(NAT, face={'from': 0.25})),          # Tail_snap, 12-25%
+    20: ('TAIL_REVERSAL', False, None, dict(NAT, face={'from': 0.34})),      # Tail_reverse, 17-34%
+    19: ('COMBO_BITE', False, None, dict(NAT, face={'in': 0.30, 'from': 0.43})),   # Combo_Bite, 30-43%
+    12: ('TAIL_FULL_SPIN', False, None, dict(NAT, face={'from': 0.62, 'dir': 1, 'ease': 'out'})),   # Tail_Full_Spin, 34-62%
+    23: ('TAIL_SLAM', False, None, dict(NAT, face={'from': 0.65})),          # Tail_slam, 27-65% (os dois acertos do STE)
+    24: ('TAIL_UPPERCUT', False, None, dict(NAT, face={'from': 0.37})),      # Tail_uppercut, 26-37%
+    22: ('UPPERCUT', False, None, dict(NAT, face={'from': 0.39})),           # Uppercut, 29-39%
+    25: ('TAILSWEEP', False, None, dict(NAT, face={'from': 0.46, 'dir': 1, 'ease': 'out'})),       # Tail_sweep, 28-46%
 }
 
 
@@ -321,21 +329,25 @@ def make_clip(sk, an, wid, cycle, seconds=None, opts=None):
     root = sk['parent'].index(-1)
     knots = opts.get('knots') or (strike_knots(sk, an, opts['strike'], frames / FPS) if opts.get('strike') else None)   # knots: [(saida, entrada)]; os dados vencem os do golpe
     uin = (lambda uo: warp(knots, uo)) if knots else (lambda uo: uo)
-    k_travel, root0 = 1.0, None
-    if opts.get('strike'):   # o STE avanca o monstro pelo golpe (a cabecada anda 400 unidades): limita a um avanco que o jogo aguente
-        r0 = world_pose(sk, *sample_local(sk, an, 0.0, False))[root][1]
-        far = max(((lambda p: ((p[0] - r0[0]) ** 2 + (p[1] - r0[1]) ** 2) ** 0.5)(
-            world_pose(sk, *sample_local(sk, an, f / 20.0, False))[root][1])) for f in range(21))
-        k_travel, root0 = min(1.0, opts.get('maxtravel', 40.0) / far) if far > 1e-6 else 1.0, r0
     drift = (0.0, 0.0)
     segs = opts.get('segs')
-    rest_z, first_xy, zs = None, None, opts.get('zscale')
-    if zs is not None:   # a altura do pulo e da fisica do jogo: encolhe a subida da raiz do STE (so para cima) para a que o Togera embute
-        rest_z = world_pose(sk, *sample_local(sk, an, 0.0, False))[root][1][2]
     if (cycle or opts.get('settle')) and not segs:   # o STE anda o monstro pela raiz; no WotM quem anda e o jogo: tira a deriva horizontal
         p0 = world_pose(sk, *sample_local(sk, an, 0.0, cycle))[root][1]
         p1 = world_pose(sk, *sample_local(sk, an, 1.0, cycle))[root][1]
         drift = (p1[0] - p0[0], p1[1] - p0[1])
+    k_travel, root0 = 1.0, None
+    if opts.get('strike') or opts.get('maxtravel'):   # o STE avanca o monstro pelo golpe (a cabecada anda 400 unidades): limita a um avanco que o jogo aguente
+        r0 = world_pose(sk, *sample_local(sk, an, 0.0, False))[root][1]
+
+        def _far(f):
+            u = uin(f / 20.0)
+            p = world_pose(sk, *sample_local(sk, an, u, False))[root][1]
+            return ((p[0] - drift[0] * u - r0[0]) ** 2 + (p[1] - drift[1] * u - r0[1]) ** 2) ** 0.5
+        far = max(_far(f) for f in range(21))
+        k_travel, root0 = min(1.0, opts.get('maxtravel', 40.0) / far) if far > 1e-6 else 1.0, r0
+    rest_z, first_xy, zs = None, None, opts.get('zscale')
+    if zs is not None:   # a altura do pulo e da fisica do jogo: encolhe a subida da raiz do STE (so para cima) para a que o Togera embute
+        rest_z = world_pose(sk, *sample_local(sk, an, 0.0, False))[root][1][2]
     pel = [i for i, n in enumerate(sk['name']) if n.endswith('Pelvis')][0]
     face = opts.get('face')
     if face:   # o golpe do STE termina (ou comeca) virado e o STE desvira o personagem por fora; no WotM a frente fica onde estava
@@ -389,7 +401,7 @@ def make_clip(sk, an, wid, cycle, seconds=None, opts=None):
             turns.append(round(turn_cum, 1))
         shift = (0.0, 0.0)
         if root0 is not None:
-            shift = ((W[root][1][0] - root0[0]) * (1 - k_travel), (W[root][1][1] - root0[1]) * (1 - k_travel))
+            shift = ((W[root][1][0] - drift[0] * u - root0[0]) * (1 - k_travel), (W[root][1][1] - drift[1] * u - root0[1]) * (1 - k_travel))
         if segs:   # o corpo nao anda pela raiz: quem anda e o jogo
             if first_xy is None:
                 first_xy = W[root][1][:2]

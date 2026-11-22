@@ -132,7 +132,10 @@ existing action in Blender, rename it and edit it; a bone the action does not ke
 the game's monsters loop that id; `a299_loop` and `a299_once` choose. A new animation has none of the event channels of the
 game's (hand and foot contacts: footsteps, dust, splashes). The game plays an animation only where its code or data asks for
 that id: for a custom monster, the punch table of its own `.CHR` (`files/`, above) picks the animation of each punch, and
-`python tools/chr_punch.py <file.CHR> <pos> <type> <id>` changes it (`pos` and `type` as `tools/chr_dump.py` prints them). The
+`python tools/chr_punch.py <file.CHR> <pos> <type> <id>` changes it (`pos` and `type` as `tools/chr_dump.py` prints them);
+`python tools/chr_moves.py <moves.json> <base.CHR> --ngp <model.NGP> --out <file.CHR>` writes the whole table from a move list
+(animation, speed, hit window, damage, locators, knockback and the chain of each attack type; format in the tool's help,
+example in `mods/_ste_teste_src/moves.json`). The
 hit window of the slot is a fraction of the animation, so it follows a longer or shorter one. `WOTM_ANIMLOG=1` logs every
 animation a monster of the fight starts (`[anim] 2401 m0 fire_togera tipo 3 anim 299 (transition)`).
 

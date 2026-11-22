@@ -320,10 +320,20 @@ disc/RST/<MONSTRO>.CHR [--keys] [--csv]` (punch table; `--keys` lists the keys).
   (+0x00, index into `Monster::m_anims`), +0x2C/+0x30 test window as a fraction of the animation (+0x0C/+0x10), +0x34/+0x38 counterattack window
   (+0x14/+0x18), +0x8C/+0x90 knockback (+0x64/+0x68; ≠ 0 knocks down), +0x94 stun (+0x6C; > 100 stuns), +0x98 hit pause in ms
   (+0x70), +0xA8 fist sphere radius (+0x74; 0 uses the default, key 0xFA1 +0x30, `StatePunch` +0x2980). A slot without animation and without damage is empty.
+  A slot's bytes run from +0x10 to +0xAF of that address. Timing fields (`StatePunch::startChain`, `update`):
+  +0x18 stamina cost (+0x08; `StaminaMeter::hasEnough`/`drain`), +0x24 animation speed (+0x04, `animationSetSpeed`; 1 = the
+  animation's own pace), +0x3C wind-down start as a fraction of the animation (+0x1C) and +0x40 its speed (+0x20): from that point
+  the game blends into the idle over the rest of the animation at that speed; at 1 the whole animation plays, then the idle blend
+  lasts +0x44 fields (+0x24). +0x48/+0x4C (ints, +0x28/+0x2C) are the combo input window in fields counted from the start plus the
+  delay below; with no wind-down the state also ends once +0x4C fields have passed. +0x50 (+0x30): fraction of the animation at
+  which an accepted combo press starts the next move. +0x54..+0x68 (+0x94..+0xA8): per next type, the delay in ms before the next
+  move's timing starts; 0 forbids that type. +0x6C (+0x34): the same delay for the first move of a combo.
 - **Position and type:** the position (`StatePunch` +0x2988) starts at 0 and goes up with each chained hit (up to 9). The type (+0x298C) comes from the
   `PadFlags::curMappedAction` accepted by `StatePunch::transitionOK`: 5 → 0 triangle, 6 → 1 forward + triangle, 7 → 2 back + triangle,
   1 → 3 forward + square, 2 → 4 back + square, 0 → 5 square (in control scheme 0; the direction is a recent tap on the d-pad).
   The combo's next type is the one pressed inside the input window (+0x28/+0x2C of the config), if the float `+0x94 + próximo*4` of the current config is > 0.
+  Square alone (action 0) starts a combo and goes on with one only with a monster in reach (`getClosestMonsterToPunch`) or a
+  destructible under the reticle (`getDestructibleFromReticle`); the other types start without a target.
 - Key 0xFD8 has the same layout without the leading 0x10. 0xFA4/0xFAC/0xFD7/0xFE3 are the object hits (`StateBatSwipe`): their position in the file is not decoded, but in RAM the `SwipeConfig` (0xC0 each, Monster +0xAE90 +0x20 + pos·0x480 + tipo·0xC0) repeat the start of `PunchConfig` (animation +0x00, window +0x0C/+0x10, knockback +0x64/+0x68, stun +0x6C, pause +0x70, radius +0x74, one locator +0x7C); the damage is a multiplier of the object's damage (`LevelPickups::s_info`): +0x90 with a bat (`Pickup` +0xA0 == 8), +0xB0 for the others (`getDamageMod`). Training mode reads from there (`NATIVE.md`, "Punch table").
 
 ## Destructibles (`INTERACTIVE_STATE` + `DESTRUCTIBLE`)

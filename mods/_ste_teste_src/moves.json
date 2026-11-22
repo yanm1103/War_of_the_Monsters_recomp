@@ -1,0 +1,30 @@
+{
+  "comment": "Golpes do Godzilla 2000 do STE no .CHR proprio do godzilla_ste (tools/chr_moves.py). hit = janela do ataque no STE (tools/ste/ste_moves.py), dano = 3 + 0,25 x o do STE; o que derruba no STE (forca 1,0) e as caudas fortes derrubam aqui. Velocidade 1 em todos: acelerar so o que ficar lento no teste ('speed').",
+  "maxChain": 5,
+  "moves": {
+    "jab_r":         {"anim": 10, "hit": [0.07, 0.41], "damage": 4.0, "locators": ["hand_r"], "radius": 18, "stun": 20, "pause": 40, "stamina": 5},
+    "jab_l":         {"anim": 11, "hit": [0.07, 0.34], "damage": 4.0, "locators": ["hand_l"], "radius": 18, "stun": 20, "pause": 40, "stamina": 5},
+    "kick":          {"anim": 13, "hit": [0.13, 0.30], "damage": 4.5, "locators": ["foot_r"], "radius": 20, "stun": 25, "pause": 45, "stamina": 5},
+    "kick2":         {"anim": 14, "hit": [0.14, 0.31], "damage": 4.5, "locators": ["foot_r"], "radius": 20, "stun": 25, "pause": 45, "stamina": 5},
+    "hammer":        {"anim": 17, "hit": [0.33, 0.49], "damage": 6.5, "locators": ["hand_r"], "radius": 20, "stun": 35, "pause": 45, "stamina": 8},
+    "overhand":      {"anim": 15, "hit": [0.31, 0.50], "damage": 9.0, "locators": ["hand_r"], "radius": 22, "stun": 16, "pause": 106, "stamina": 10, "knockback": [380, 700]},
+    "double_swipe":  {"anim": 16, "hit": [0.13, 0.72], "damage": 7.0, "locators": ["hand_r", "hand_l"], "radius": 20, "stun": 30, "pause": 68, "stamina": 8},
+    "double_kick":   {"anim": 18, "hit": [0.39, 0.48], "damage": 9.0, "locators": ["foot_r", "foot_l"], "radius": 22, "stun": 16, "pause": 106, "stamina": 10, "knockback": [610, 610]},
+    "tail_snap":     {"anim": 21, "hit": [0.12, 0.25], "damage": 4.5, "locators": ["tail_tip", "tail_mid"], "radius": 25, "stun": 10, "pause": 45, "stamina": 5},
+    "tail_reverse":  {"anim": 20, "hit": [0.17, 0.34], "damage": 5.5, "locators": ["tail_tip", "tail_mid"], "radius": 25, "stun": 30, "pause": 68, "stamina": 8},
+    "bite":          {"anim": 19, "hit": [0.30, 0.43], "damage": 6.5, "locators": ["mouth"], "radius": 20, "stun": 120, "pause": 68, "stamina": 8},
+    "tail_spin":     {"anim": 12, "hit": [0.34, 0.62], "damage": 9.0, "locators": ["tail_tip", "tail_mid"], "radius": 25, "stun": 16, "pause": 106, "stamina": 10, "knockback": [770, 490]},
+    "tail_slam":     {"anim": 23, "hit": [0.27, 0.65], "damage": 6.5, "locators": ["tail_tip", "tail_mid"], "radius": 25, "stun": 16, "pause": 106, "stamina": 10, "knockback": [600, 820]},
+    "tail_uppercut": {"anim": 24, "hit": [0.26, 0.37], "damage": 9.0, "locators": ["tail_tip", "tail_mid"], "radius": 25, "stun": 16, "pause": 106, "stamina": 10, "knockback": [380, 900]},
+    "uppercut":      {"anim": 22, "hit": [0.29, 0.39], "damage": 6.5, "locators": ["hand_r"], "radius": 20, "stun": 14, "pause": 108, "stamina": 8, "knockback": [300, 750]},
+    "tail_sweep":    {"anim": 25, "hit": [0.28, 0.46], "damage": 5.5, "locators": ["tail_tip", "tail_mid"], "radius": 25, "stun": 16, "pause": 68, "stamina": 8, "knockback": [250, 300]}
+  },
+  "chains": {
+    "square":        ["jab_r", "jab_l", "kick", "kick2", "hammer"],
+    "fwd_square":    ["hammer", "overhand"],
+    "back_square":   ["double_swipe", "double_kick"],
+    "triangle":      ["tail_snap", "tail_reverse", "bite", "tail_spin", "tail_slam"],
+    "fwd_triangle":  ["tail_uppercut", "uppercut"],
+    "back_triangle": ["tail_sweep"]
+  }
+}

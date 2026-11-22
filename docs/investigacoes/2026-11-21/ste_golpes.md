@@ -117,3 +117,10 @@ Os botões da tabela vêm da parte do corpo (tipo 15) e do que o dono disse, nã
 
 - O mapa de botões da seção 4: em aberto.
 - A recuperação longa do STE fica como está (dono, 2026-11-21: "depois eu testo e vejo"). O corte da recuperação no passo 2 fica de fora.
+
+## 6. Feito (2026-11-21, depois do "pode fazer" do dono)
+
+- `ste_clips.py`: os golpes entram inteiros, no ritmo do STE, nos ids 10-25 (16 golpes; 23-25 são ids que o Togera não tem). Opção `maxtravel` aplicada depois de tirar a deriva (`settle`), então o golpe termina onde começou. `face` desvira depois da janela do acerto; Tail_Full_Spin e Tail_sweep fecham a volta no sentido do giro (`dir` 1).
+- `tools/chr_moves.py` + `mods/_ste_teste_src/moves.json`: o `.CHR` próprio do mod, com as cadeias da seção 4 e velocidade 1 em todos. Campos novos do `.CHR` lidos no asm do `StatePunch` (`docs/FORMATS.md`, "Character"): +0x24 velocidade, +0x3C/+0x40 recuperação, +0x48/+0x4C janela de entrada e fim do golpe em campos, +0x50 instante em que o próximo golpe do combo começa, +0x54..+0x68 atraso por tipo seguinte (0 proíbe).
+- Teste automático (treino, `PS2X_PAD`, `WOTM_ANIMLOG`): △ × 4 encadeou 21 → 20 → 19 → 12 (cauda, reversão, mordida, giro); trás+△ = 25 (varrida), frente+□ = 17 (Hammer), trás+□ = 16 (Double Swipe). As esferas de acerto aparecem na cauda (painel do treino). O □ sozinho só sai com um monstro ao alcance ou um destrutível sob a mira (`StatePunch::transitionOK`), então não saiu no teste longe do boneco; o mesmo vale para continuar um combo com □.
+- Fora desta rodada: investida = Headbutt e ataque no ar = Jump Kick. A investida é o `StateRamAttack` (o 267 é a reação ao impacto, não um golpe de 2 s com janela) e o ataque no ar é o `StateButtSlam` (pulo e queda): pedem outro encaixe.
