@@ -4,40 +4,56 @@
 <meta charset="utf-8">
 <title>WotM Mod kit: model facing</title>
 <style>
-  html, body { margin: 0; height: 100%; background: #1b1d22; color: #e6e6e6; font: 14px/1.4 "Segoe UI", system-ui, sans-serif; overflow: hidden; }
+  /* the mod kit's look (tools/modkit_web/style.css): the game's menus */
+  :root { --ui: "Bahnschrift", "DIN Alternate", "Roboto Condensed", "Arial Narrow", system-ui, sans-serif; --text: "Segoe UI", system-ui, sans-serif;
+          --frame: rgba(222, 222, 228, .42); --line2: rgba(255, 255, 255, .22); --fg: #ece8df; --dim: #9a978f; --orange: #f08a2c; --red: #ff5534; }
+  html, body { margin: 0; height: 100%; color: var(--fg); font: 14px/1.4 var(--ui); overflow: hidden;
+               background: radial-gradient(ellipse 70% 45% at 50% 100%, rgba(255, 140, 60, .16), transparent 70%),
+                           radial-gradient(ellipse 60% 70% at 50% 30%, rgba(80, 100, 160, .14), transparent 70%), linear-gradient(#0e1119, #050608); }
   #view { position: absolute; inset: 0; }
-  .panel { position: absolute; top: 16px; left: 16px; width: 340px; background: rgba(30, 32, 38, .92); border: 1px solid #3a3d45;
-           border-radius: 8px; padding: 14px 16px; }
-  h1 { font-size: 17px; margin: 0 0 6px; }
-  p { margin: 0 0 10px; color: #b9bcc4; }
+  .panel { position: absolute; top: 16px; left: 16px; width: 350px; background: rgba(7, 8, 11, .9); border: 2px solid var(--frame);
+           border-radius: 12px; padding: 14px 16px; box-shadow: 0 8px 28px rgba(0, 0, 0, .55); max-height: calc(100% - 110px); overflow: auto; }
+  h1 { margin: 0 0 8px; font: 600 15px var(--ui); letter-spacing: .24em; text-transform: uppercase; color: var(--orange); }
+  p { margin: 0 0 10px; color: #c4c0b6; font: 13px/1.45 var(--text); }
   .row { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
-  .row span { width: 64px; flex: none; color: #8d919b; font-size: 12px; }
+  .row span { width: 64px; flex: none; color: var(--dim); font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase; }
   .row b { width: 52px; flex: none; text-align: center; font-weight: 600; }
-  button { flex: 1; background: #2c3039; color: #e6e6e6; border: 1px solid #454a55; border-radius: 5px; padding: 7px 6px; cursor: pointer; font: inherit; }
-  button:hover { background: #363b46; }
-  button:disabled, select:disabled { opacity: .45; cursor: default; }
-  .primary { background: #2f6fd6; border-color: #3b7ce6; font-weight: 600; }
-  .primary:hover { background: #3b7ce6; }
-  .rs { flex: 1; min-width: 0; accent-color: #3b7ce6; }
-  .rn { width: 58px; flex: none; background: #2c3039; color: #e6e6e6; border: 1px solid #454a55; border-radius: 5px; padding: 4px; font: inherit; }
-  select { flex: 1; min-width: 0; background: #2c3039; color: #e6e6e6; border: 1px solid #454a55; border-radius: 5px; padding: 6px; font: inherit; }
-  label { display: block; margin: 2px 0 8px; color: #b9bcc4; font-size: 13px; }
-  #steps, #status { color: #8d919b; font-size: 12px; min-height: 1.4em; margin: 4px 0 10px; }
-  #status.err { color: #ff8a80; }
-  #selName { font-weight: 600; margin: 0 0 8px; min-height: 1.4em; overflow-wrap: anywhere; }
-  #playbar { position: absolute; left: 388px; right: 16px; bottom: 16px; display: flex; gap: 8px; align-items: center;
-             background: rgba(30, 32, 38, .92); border: 1px solid #3a3d45; border-radius: 8px; padding: 8px 12px; }
+  button { flex: 1; background: rgba(18, 20, 26, .9); color: var(--fg); border: 1px solid var(--line2); border-radius: 7px; padding: 7px 6px;
+           cursor: pointer; font: 600 11.5px/1.15 var(--ui); letter-spacing: .1em; text-transform: uppercase; }
+  button:hover { border-color: var(--orange); color: #fff; box-shadow: 0 0 10px rgba(240, 138, 44, .28); }
+  button:disabled, select:disabled { opacity: .4; cursor: default; box-shadow: none; }
+  .row button { letter-spacing: .05em; }
+  .primary { background: linear-gradient(#f59a3e, #d9621a); border-color: #ffb672; color: #1b0c03; font-weight: 700; }
+  .primary:hover { background: linear-gradient(#ffad55, #e8712a); color: #120700; box-shadow: 0 0 16px rgba(255, 140, 50, .55); }
+  .rs { flex: 1; min-width: 0; accent-color: var(--orange); }
+  .rn { width: 58px; flex: none; background: rgba(0, 0, 0, .45); color: var(--fg); border: 1px solid var(--line2); border-radius: 6px; padding: 4px;
+        font: 13px var(--ui); }
+  select { flex: 1; min-width: 0; background: rgba(0, 0, 0, .45); color: var(--fg); border: 1px solid var(--line2); border-radius: 7px; padding: 6px;
+           font: 13.5px var(--ui); }
+  select option { background: #121318; }
+  label { display: block; margin: 2px 0 8px; color: #c4c0b6; font: 13px var(--text); }
+  input[type=checkbox] { accent-color: var(--orange); }
+  #steps, #status { color: var(--dim); font: 12.5px var(--text); min-height: 1.4em; margin: 4px 0 10px; }
+  #status.err { color: #ff8a72; }
+  #selName { font-weight: 600; margin: 0 0 8px; min-height: 1.4em; overflow-wrap: anywhere; color: var(--red); font-size: 15px; }
+  #playbar { position: absolute; left: 398px; right: 16px; bottom: 16px; display: flex; gap: 8px; align-items: center;
+             background: rgba(7, 8, 11, .9); border: 2px solid var(--frame); border-radius: 12px; padding: 8px 12px; }
   #playbar select { flex: 0 1 320px; }
-  #playbar button { flex: none; width: 76px; }
+  #playbar button { flex: none; width: 80px; }
   #playbar .speed { flex: none; width: 76px; }
-  #frame { flex: 1; min-width: 60px; accent-color: #3b7ce6; }
-  #frameNo { flex: none; width: 64px; text-align: right; color: #8d919b; font-size: 12px; }
-  .tag { position: absolute; bottom: 76px; padding: 4px 10px; background: rgba(30, 32, 38, .85); border-radius: 4px; color: #cfd2d8; }
+  #frame { flex: 1; min-width: 60px; accent-color: var(--orange); }
+  #frameNo { flex: none; width: 64px; text-align: right; color: var(--dim); font: 12px var(--text); }
+  .tag { position: absolute; bottom: 80px; padding: 4px 12px; background: rgba(7, 8, 11, .85); border: 1px solid var(--line2); border-radius: 12px;
+         color: var(--orange); font: 600 12px var(--ui); letter-spacing: .2em; text-transform: uppercase; }
   #labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-  .lbl { position: absolute; transform: translate(-50%, -150%); padding: 1px 6px; border-radius: 3px; white-space: nowrap;
-         background: rgba(20, 21, 25, .75); color: #e6e6e6; font-size: 12px; }
-  .lbl.strong { background: rgba(47, 111, 214, .85); font-weight: 600; }
-  #done { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(20, 21, 25, .9); font-size: 18px; }
+  .lbl { position: absolute; transform: translate(-50%, -150%); padding: 1px 6px; border-radius: 4px; white-space: nowrap;
+         background: rgba(7, 8, 11, .8); color: var(--fg); font-size: 12px; }
+  .lbl.strong { background: rgba(217, 98, 26, .9); color: #fff; font-weight: 600; }
+  #done { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(5, 6, 9, .92);
+          font: 600 18px var(--ui); letter-spacing: .14em; text-transform: uppercase; color: var(--orange); }
+  ::-webkit-scrollbar { width: 11px; height: 11px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .16); border-radius: 6px; border: 3px solid transparent; background-clip: padding-box; }
 </style>
 <script type="importmap">
 {"imports": {"three": "./vendor/three.module.min.js", "three/addons/": "./vendor/addons/"}}
@@ -88,13 +104,13 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const $ = id => document.getElementById(id);
 const view = $('view');
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });   // the page's stage shows through
 renderer.setPixelRatio(window.devicePixelRatio);
 THREE.ColorManagement.enabled = false;   // colors as written (hex, HSL), like the textures
 renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 view.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1b1d22);
+scene.background = null;
 const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 10000);
 // The game's look (as the model museum and the port draw it): texture * vertex color * (ambient + directional * max(0, n.L)),
 // the light from over the camera's shoulder, the colors as stored. The game's triangles come from PS2 strips whose winding
