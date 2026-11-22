@@ -32,7 +32,8 @@ CHAR_INSTANCE is replaced by a new one built from the .glb:
 Axes and size: a .glb with the kit's "WotM" root (`tools/monglb.py --edit`) is in the game's axes and units; any other is a
 Blender scene (Z up, facing -Y, meters) turned to face the game's +Y and scaled to the base's height (`--front`, `--scale`,
 `--height` change that). The feet go at height 0 (the rest pose's lowest point is the ground).
-Base: any monster but Congar (its code moves 8 bones by number, BoneSpring). Only the standard library: it runs inside the
+Base: any monster. On Congar the code moves 8 matrix slots by number (BoneSpring, the fur): the rig's transforms skip
+those slots. Only the standard library: it runs inside the
 mod kit. Formats: docs/FORMATS.md; guide: docs/guides/MODELS_3D.md ("New skeleton").
 """
 import base64
@@ -59,6 +60,7 @@ CONTACT_IDS = (0x802, 0x803, 0x804, 0x805, 0x816, 0x817)   # AnimContact: hands,
 FEET = (0x804, 0x805, 0x816, 0x817)
 PAPPY_IDS = (1, 2, 3, 4, 5, 6, 7)                         # AnimPappy: rotation, translation, on/off
 BONESPRING_TYPE = 0x20    # Congar: initDynamics hooks springs on atMat 4, 8, 11, 13, 20, 22, 26, 28
+SPRING_SLOTS = (4, 8, 11, 13, 20, 22, 26, 28)   # BoneSpring::update writes their translation every frame
 ALIASES = {"hand_l": 0x802, "hand_r": 0x803, "foot_l": 0x804, "foot_r": 0x805, "grabbed": 0x806, "grab": 0x807,
            "impale": 0x808, "chest": 0x809, "hold": 0x80A, "mouth": 0x80B, "head": 0x80C, "look": 0x80E,
            "extra1": 0x816, "extra2": 0x817}
@@ -135,8 +137,6 @@ class BaseInfo:
         g, img = self.game, self.game.img
         self.ci = g.main
         self.type = img.u32(self.ci) >> 18
-        if self.type == BONESPRING_TYPE:
-            raise RigError("Congar's code moves 8 of its bones by number (BoneSpring): pick another base")
         objs = sorted(o for o, (ci, _c, _s) in self.mb.skinned.items() if ci == self.ci)
         if not objs:
             raise RigError("%s: the main instance has no skinned OBJECT" % os.path.basename(path))
@@ -1113,11 +1113,16 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
     for i, (cid, c) in enumerate(ids_map):
         o.u16(mp + 4 + 4 * i, cid)
         o.u16(mp + 6 + 4 * i, c)
+    # atMat slot of each transform: Congar's BoneSprings (initDynamics) write the translation of fixed slots every frame,
+    # so on that base the tree skips them and they stay spare matrices that no node draws
+    skip = set(SPRING_SLOTS) if base.type == BONESPRING_TYPE else set()
+    mslot = [q for q in range(len(xf) + len(skip)) if q not in skip][:len(xf)]
+    nmat = max([mslot[-1] + 1] + [q + 1 for q in skip])
     na = len(anims)
     ch = o.alloc(0xC + 4 * na, 16)
     o.u16(ch, na)
     o.u16(ch + 2, nch)
-    o.u16(ch + 4, len(xf))
+    o.u16(ch + 4, nmat)
     o.ptr(ch + 8, mp)
     abits = [0] * ((nch + 7) // 8)
     for c in angular:
@@ -1169,11 +1174,13 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
         for c in range(3):
             o.f(val + 4 * r["sidx"][c], r["s0"][c])
     dirty = o.alloc(nch // 8 + 1, 4)
-    atm = o.alloc(64 * len(xf), 16)
+    atm = o.alloc(64 * nmat, 16)
+    for q in skip:
+        o.mat(atm + 64 * q, eye())
     for jt in J:
-        o.mat(atm + 64 * jt.idx, jt.local)
+        o.mat(atm + 64 * mslot[jt.idx], jt.local)
     for k, r in enumerate(RG):
-        o.mat(atm + 64 * (nj + k), r["local0"])
+        o.mat(atm + 64 * mslot[nj + k], r["local0"])
     amp = o.alloc(4 * len(outs), 4)
     for i, (_j, b, s) in enumerate(outs):
         o.ptr(amp + 4 * i, blk_addr[b] + 0x10 + 0x40 * s)
@@ -1218,7 +1225,7 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
         o.mat(a + 0x80, eye())
         mb.d[a + 0xC1 - BASE] = 0x3F
         o.u16(a + 0xC2, 1 | (4 if is_main else 0))
-        o.u32(a + 0xC4, q)
+        o.u32(a + 0xC4, mslot[q])
         for k, spec in enumerate(kid_specs):
             o.ptr(a + 0xCC + 4 * k, emit(spec))
         return a

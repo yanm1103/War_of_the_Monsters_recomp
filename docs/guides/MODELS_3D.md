@@ -94,8 +94,10 @@ The base `.NGP` keeps everything outside its main `CHAR_INSTANCE` (type code, sh
   static 0 when none does. Writing the full pose there adds the rest again for every active layer (with three active layers
   each translation comes out 4×: the body stretches).
 - **Limits:** `animPktPtr` 0..63, bone code in a vertex 0..31, `skelStack` 5, `skelMatStack` 160, hier matStack 20, animation
-  stack 16 KB (the tool warns above about 600 channels). Animation 191 is overwritten by the reticle. Congar is refused as a base:
-  `initDynamics` builds 8 BoneSprings on fixed `atMat` slots (4, 8, 11, 13, 20, 22, 26, 28). Everything else in the game reaches
+  stack 16 KB (the tool warns above about 600 channels). Animation 191 is overwritten by the reticle. On Congar
+  `initDynamics` builds 8 BoneSprings (the fur) on fixed `atMat` slots (4, 8, 11, 13, 20, 22, 26, 28), and `BoneSpring::update`
+  writes the translation of those slots every frame (anchored on locators 0x816..0x81D), whatever transform owns them; on that
+  base the rig numbers its transforms around those slots and leaves them as spare matrices no node draws. Everything else in the game reaches
   the body by id (channels, locators 0x802..0x832, attachments, animation ids < 300), and the native renderer never indexes a
   bone by number.
 

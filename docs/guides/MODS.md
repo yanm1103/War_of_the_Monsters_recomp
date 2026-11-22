@@ -168,7 +168,7 @@ animation a monster of the fight starts (`[anim] 2401 m0 fire_togera tipo 3 anim
 **Own skeleton (custom monsters).** **Import rig...** (next to **Import mesh...**) takes a `.glb` with an armature of its own and
 makes it the custom's body, on top of the base costume: the base type's code, shadow, reticle, collision grid and sounds stay, and
 the skeleton, the mesh, the animations and the locators are the `.glb`'s (`tools/ngprig.py`; rules in `MODELS_3D.md`, "New
-skeleton"). Any base but Congar (its code moves 8 of its bones by number). What the `.glb` holds:
+skeleton"). Any base, Congar too (its fur springs do not reach the new skeleton). What the `.glb` holds:
 - an armature (bone names and hierarchy are free) and the meshes weighted to it; up to 3 bones per vertex (the heaviest kept);
   a mesh parented to a bone without weights follows that bone;
 - actions named `a<id>` with the game's ids (`a090` is the idle; `tools/pose.py --list` on the base shows the ids, `docs/ANIM_IDS.md` what each one is). An id of the
