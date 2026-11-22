@@ -60,6 +60,8 @@ CONTACT_IDS = (0x802, 0x803, 0x804, 0x805, 0x816, 0x817)   # AnimContact: hands,
 FEET = (0x804, 0x805, 0x816, 0x817)
 PAPPY_IDS = (1, 2, 3, 4, 5, 6, 7)                         # AnimPappy: rotation, translation, on/off
 BONESPRING_TYPE = 0x20    # Congar: initDynamics hooks springs on atMat 4, 8, 11, 13, 20, 22, 26, 28
+ADD_IDS = {140, 150, 151, 152, 153}   # additive once (recoil, flinches): with ngpanim.LAYER_IDS, the only ids the game
+                                      # adds on top; any other id is a main animation, even without translation curves
 SPRING_SLOTS = (4, 8, 11, 13, 20, 22, 26, 28)   # BoneSpring::update writes their translation every frame
 ALIASES = {"hand_l": 0x802, "hand_r": 0x803, "foot_l": 0x804, "foot_r": 0x805, "grabbed": 0x806, "grab": 0x807,
            "impale": 0x808, "chest": 0x809, "hold": 0x80A, "mouth": 0x80B, "head": 0x80C, "look": 0x80E,
@@ -218,7 +220,7 @@ class BaseInfo:
                                "head": bytes(img.d[an - BASE:an - BASE + 0x18]),
                                "ctx": bytes(img.d[actx + 60 * k - BASE:actx + 60 * k + 60 - BASE]),
                                "loop": img.u8(actx + 60 * k + 0x29),
-                               "layer": is_layer(an)}
+                               "layer": aid in ngpanim.LAYER_IDS | ADD_IDS and is_layer(an)}
         if 90 not in self.anims:
             raise RigError("%s has no idle (90)" % os.path.basename(path))
         mp = img.u32(ch + 8)
