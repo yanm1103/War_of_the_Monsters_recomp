@@ -137,8 +137,12 @@ the punches (damage, hit window in % of the animation, startup, active and total
 the bones that hit), the same-button combos, the moves with an object in hand (damage multiplier) and the special states'
 numbers; "every combo step" shows the 10 positions of the combo. A row plays that move's animation in the 3D view above and marks
 its hit window on the frame slider. The frames come from the animation length of the monster's model divided by the move's speed
-(the hit pause and the blend back to idle are not counted). `python tools/modkit.py moves <monster>` and `moves <mod> <id>
-[--json]` print the same tables. *3D model*: "Currently using" (the model the game loads, what
+(the hit pause and the blend back to idle are not counted). With the monster's own `.CHR` (**Give it its own .CHR to edit**, the same as
+**Extract stats**) the picked move's numbers (damage, hit window, radius, stun, knockback, hit pause, speed, stamina, animation id) are fields
+under the table that save by themselves into that file, with the limits the game can take; the disc's `.CHR` is never edited. A box lists the moves of
+the file that cannot work (a hit window outside 0..1, an animation the model does not have, no bone to test the hit, a combo step that is
+empty). `python tools/modkit.py moves <monster>` and `moves <mod> <id> [--json]` print the same tables and the warnings, and
+`moves set <mod> <id> punch|object <step> <type> <field>=<value>` changes one number. *3D model*: "Currently using" (the model the game loads, what
 it was made from and the source files; the skeleton and the animations are inside the `.NGP`), **Check model...** first, then
 **Import rigged model...** / **Adjust bones...**, **Export 3D model** / **Import mesh...** / **Import animations...**, **Import
 character with animations...** (below) and **Import model files...** (copies `.NGP` + `.PTR`, and optional `.TEX`/`.RTX`, to

@@ -294,6 +294,23 @@ class MonstersMixin:
             return {"error": "no monster"}
         return modkit.monster_moves(self.disc, self.work(), self.mods, self.mod, name)
 
+    def act_monster_move_set(self, d):
+        """{"cid", "weapon", "pos" (1..10), "ptype" (0..5), "field", "value"}: changes one number of a move in the custom's own .CHR
+        (work folder) -> {"ok", "old", "new"} or {"error"}. The disc's .CHR is never edited."""
+        cid = d.get("cid")
+        if not cid:
+            return {"error": "only a custom monster's own .CHR can be edited"}
+        try:
+            pos, ptype = int(d["pos"]), int(d["ptype"])
+        except (KeyError, TypeError, ValueError):
+            return {"error": "no move picked"}
+        r = modkit.monster_move_set(self.disc, self.work(), self.mods, self.mod, cid, bool(d.get("weapon")), pos, ptype,
+                                    str(d.get("field", "")), d.get("value"))
+        if r.get("ok"):
+            self.say("Moves of %s: %sstep %d type %d, %s %g -> %g\n" % (cid, "object " if d.get("weapon") else "", pos, ptype,
+                                                                       d.get("field"), r["old"], r["new"]))
+        return r
+
     def act_monster_stats(self, d):
         cid = d["cid"]
         disc, work, mods, mod = self.disc, self.work(), self.mods, self.mod

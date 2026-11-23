@@ -494,3 +494,9 @@ table.moves.fields tbody tr:hover { background: none; }
 .chains { margin: 8px 0 4px; color: #d8d3c6; font: 12.5px/1.5 var(--text); }
 details.special { margin: 6px 0; }
 details.special summary { cursor: pointer; font: 600 12px var(--ui); letter-spacing: .16em; text-transform: uppercase; color: var(--orange2); padding: 4px 0; }
+.moveedit { margin: 12px 0 4px; }
+.moveedit h5 { margin: 0 0 8px; font: 600 12px var(--ui); letter-spacing: .16em; text-transform: uppercase; color: var(--orange2); }
+.editgrid { display: grid; grid-template-columns: max-content minmax(60px, 1fr) max-content minmax(60px, 1fr); gap: 6px 12px; align-items: center; }
+.editgrid label { font: 12px var(--text); color: #d8d3c6; white-space: nowrap; }
+.editgrid input { min-width: 0; width: 100%; box-sizing: border-box; text-align: right; }
+.moveedit .autosave { margin-top: 8px; }

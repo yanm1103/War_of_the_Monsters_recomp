@@ -181,7 +181,8 @@ async function monsterPanel(g, body, label) {
   function loadMoves() {
     if (!movesWanted || movesDone) return;
     movesDone = true;
-    movesPage(tMoves, { cid });
+    // [Give it its own .CHR]: the same as Stats & sounds > Extract stats; the page reads the table again when the task ends
+    movesPage(tMoves, { cid }, { extract: async () => { const done = kit.nextDone(); const r = await run('monster_stats', { cid }); if (r.ok) await done; } });
   }
 
   // Settings

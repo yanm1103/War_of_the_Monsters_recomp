@@ -16,6 +16,7 @@ pasta de trabalho (<mods>/_work/<mod>/, com o modkit.json dela), e o pack de um 
   python tools/modkit.py monster model my_mod fire_togera X.NGP X.PTR          # modelo proprio (esqueleto do tipo base)
   python tools/modkit.py monster stats my_mod fire_togera                     # .CHR e .AIC do tipo base para editar (so dele)
   python tools/modkit.py moves togera / moves my_mod fire_togera [--json]    # os golpes (as tabelas do modo treino), lidos do .CHR
+  python tools/modkit.py moves set my_mod fire_togera punch 1 5 damage=6   # muda um campo de um golpe no .CHR proprio do custom
   python tools/modkit.py monster sounds my_mod fire_togera                    # sons do banco do tipo base em WAV (banco so dele)
   python tools/modkit.py monster mesh export my_mod fire_togera               # malha e animacoes do traje base em .glb (Blender)
   python tools/modkit.py monster mesh check my_mod fire_togera modelo.glb    # confere o modelo antes do import (.glb; .gltf/.dae: o rigged)
@@ -1257,7 +1258,23 @@ def monster_moves(disc, work, mods, mod, name):
         return {"error": "could not read %s: %s" % (os.path.basename(chr_), ex)}
     m["label"] = label
     m["own"] = bool(work) and os.path.abspath(chr_).startswith(os.path.abspath(work))
+    if not m["own"]:
+        m["problems"] = []   # the disc's own table is not the author's: the warnings are for a file of the mod
     return m
+
+
+def monster_move_set(disc, work, mods, mod, name, weapon, pos, tipo, field, value):
+    """Muda um campo de um golpe no .CHR proprio do custom (<work>/monsters/<id>/files/). Sem um .CHR proprio (Extract stats) recusa:
+    o do disco nunca e editado. -> {"ok", "old", "new"} ou {"error"}."""
+    chr_, _ngp, _label = monster_move_files(disc, work, mods, mod, name)
+    if not chr_ or not os.path.abspath(chr_).startswith(os.path.abspath(work or os.sep + "\0")):
+        return {"error": "this monster has no .CHR of its own yet: Extract stats first (the disc's is never edited)"}
+    import chr_view
+    try:
+        old, new = chr_view.set_field(chr_, weapon, pos, tipo, field, value)
+    except ValueError as ex:
+        return {"error": str(ex)}
+    return {"ok": True, "old": old, "new": new}
 
 
 # Banco de som de cada tipo base (SoundManager::loadMonsterBank; o Goliath usa o do chefe, o Jelly e a forma final o da fase final)
@@ -2033,6 +2050,16 @@ def main(argv):
             mesh_export(disc, w, mods, args[3], args[0], args[4])
         else:
             mesh_import(disc, w, mods, args[3], args[0], args[4], glb)
+    elif args[0] == "moves" and len(args) == 8 and args[1] == "set":
+        # moves set <mod> <id> punch|object <step 1..10> <type 0..5> <field>=<value>... one field per call
+        fld, _, val = args[7].partition("=")
+        if args[4] not in ("punch", "object") or not (args[5].isdigit() and args[6].isdigit()):
+            raise SystemExit("moves set <mod> <id> punch|object <step 1..10> <type 0..5> <field>=<value>")
+        r = monster_move_set(disc, work_of("moves set", args[2]), mods, args[2], args[3], args[4] == "object", int(args[5]), int(args[6]),
+                             fld, val)
+        if r.get("error"):
+            raise SystemExit("moves set: " + r["error"])
+        print("%s %s step %s type %s: %s %s -> %s" % (args[3], args[4], args[5], args[6], fld, r["old"], r["new"]))
     elif args[0] == "moves":
         if len(args) not in (2, 3):
             raise SystemExit("moves <monster> | moves <mod> <custom id> [--json]: the move table of a game monster (togera, LIZARD) or "

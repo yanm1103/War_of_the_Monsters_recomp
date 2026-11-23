@@ -84,10 +84,17 @@ def timing(row, frames):
             "total": round(f)}
 
 
+# as chaves das linhas do chr_dump (portugues) -> as do resultado (ingles)
+RENAME = {"tipo": "ptype", "dano": "damage", "raio": "radius", "raio_padrao": "radius_default", "atord": "stun", "pausa": "pause",
+          "estamina": "stamina", "vel": "speed", "ini": "win_start", "fim": "win_end", "cont_ini": "counter_start",
+          "cont_fim": "counter_end", "kb_h": "kb_out", "kb_v": "kb_up", "dano_objeto": "object_damage", "prox": "next_ms",
+          "locs": "locators"}
+
+
 def decorate(row, mdl, weapon):
     t = TYPE_INFO[row["tipo"]]
-    out = dict(row)
-    out["loc"] = loc_names(*row["locs"])
+    out = {RENAME.get(k, k): v for k, v in row.items() if k != "loc"}
+    out["bones"] = loc_names(*row["locs"])
     out["pos"] = row["pos"] + 1
     out["type"] = t[0]
     out["button"] = t[1]
@@ -115,7 +122,7 @@ def chains(rows, weapon):
             total += nxt["mult"] if weapon else nxt["dano"]
             n += 1
         if n > 1:
-            out.append({"tipo": k, "type": TYPE_INFO[k][0], "button": TYPE_INFO[k][1], "dir": TYPE_INFO[k][2], "length": n,
+            out.append({"ptype": k, "type": TYPE_INFO[k][0], "button": TYPE_INFO[k][1], "dir": TYPE_INFO[k][2], "length": n,
                         "damage": total, "weapon": weapon})
     return out
 
@@ -180,7 +187,88 @@ def moves_of(path, ngp=None):
     res["swipes"] = [decorate(r, mdl, True) for r in srow]
     res["chains"] = chains(prow, False) + chains(srow, True)
     res["specials"] = specials_view(data, keys, name)
+    res["problems"] = problems(res)
     return res
+
+
+# Campos editaveis de um golpe: nome (o das linhas de moves_of) -> (offset na config do arquivo, 'f' float | 'i' inteiro, minimo, maximo).
+# A config do soco comeca em key + 0x10 + pos*0x3C0 + tipo*0xA0, a do golpe com objeto em key + 0x20 + pos*0x540 + tipo*0xE0
+# (chr_dump.py e docs/FORMATS.md, "Character").
+_F = {"win_start": ("f", 0, 1), "win_end": ("f", 0, 1), "counter_start": ("f", 0, 1), "counter_end": ("f", 0, 1),
+      "kb_out": ("f", -1e5, 1e5), "kb_up": ("f", -1e5, 1e5), "stun": ("f", 0, 1e4), "pause": ("f", 0, 1e4), "radius": ("f", 0, 1e4),
+      "stamina": ("f", 0, 1e4), "speed": ("f", 0.05, 20), "anim": ("i", 1, 299), "damage": ("f", 0, 1e4), "mult": ("f", 0, 100),
+      "object_damage": ("f", 0, 1e4)}
+EDIT = {
+    False: {"damage": 0x20, "win_start": 0x2C, "win_end": 0x30, "counter_start": 0x34, "counter_end": 0x38, "kb_out": 0x8C, "kb_up": 0x90,
+            "stun": 0x94, "pause": 0x98, "radius": 0xA8, "stamina": 0x18, "speed": 0x24, "anim": 0x28},
+    True: {"mult": 0x04, "object_damage": 0x08, "win_start": 0x14, "win_end": 0x18, "counter_start": 0x1C, "counter_end": 0x20,
+           "kb_out": 0x98, "kb_up": 0x94, "stun": 0x9C, "pause": 0xA0, "radius": 0xA8, "stamina": 0x00, "speed": 0x0C, "anim": 0x10},
+}
+
+
+def set_field(path, weapon, pos, tipo, field, value):
+    """Grava um campo de um golpe no .CHR (so o proprio de um custom: quem chama confere). pos 1..10, tipo 0..5 (o indice do arquivo).
+    -> (valor antigo, valor novo); ValueError com a explicacao quando o valor nao serve."""
+    import struct
+    if field not in EDIT[bool(weapon)]:
+        raise ValueError("%s is not a field of this move" % field)
+    if not (1 <= pos <= cd.TIERS and 0 <= tipo < cd.TYPES):
+        raise ValueError("combo step 1..%d, type 0..%d" % (cd.TIERS, cd.TYPES - 1))
+    kind, lo, hi = _F[field]
+    try:
+        v = int(float(value)) if kind == "i" else float(value)
+    except (TypeError, ValueError):
+        raise ValueError("%r is not a number" % (value,))
+    if v != v or not (lo <= v <= hi):
+        raise ValueError("%s goes from %g to %g" % (field, lo, hi))
+    d = bytearray(open(path, "rb").read())
+    keys = {k: (o, s) for k, o, s in cd.read_keys(d)}
+    key = cd.SWIPE_KEY if weapon else cd.PUNCH_KEY
+    if key not in keys or (not weapon and keys[key][1] != cd.PUNCH_KEY_SIZE):
+        raise ValueError("%s has no %s table (key 0x%X)" % (os.path.basename(path), "object" if weapon else "punch", key))
+    o = keys[key][0]
+    base = o + (0x20 + (pos - 1) * 0x540 + tipo * 0xE0 if weapon else 0x10 + (pos - 1) * 0x3C0 + tipo * 0xA0)
+    a = base + EDIT[bool(weapon)][field]
+    fmt = "<i" if kind == "i" else "<f"
+    old = struct.unpack_from(fmt, d, a)[0]
+    struct.pack_into(fmt, d, a, v)
+    with open(path, "wb") as f:
+        f.write(d)
+    return old, struct.unpack_from(fmt, d, a)[0]
+
+
+def problems(m):
+    """Avisos sobre os golpes que o jogo faria de um jeito que o autor nao espera: [texto]. So golpes que causam dano (um espaco de
+    enchimento do arquivo nao conta)."""
+    out = []
+    by = {(r["weapon"], r["pos"], r["ptype"]): r for r in m["punches"] + m["swipes"]}
+    # os golpes que o jogador alcanca: o 1o passo de qualquer botao e o passo seguinte de um que o encadeia (o arquivo tem casas de
+    # enchimento que nenhum combo chega a usar)
+    reach, todo = set(), [(w, 1, k) for w in (False, True) for k in range(cd.TYPES) if (w, 1, k) in by]
+    while todo:
+        key = todo.pop()
+        if key in reach:
+            continue
+        reach.add(key)
+        for k in range(cd.TYPES):
+            if by[key]["next_ms"][k] > 0 and (key[0], key[1] + 1, k) in by:
+                todo.append((key[0], key[1] + 1, k))
+    for r in m["punches"] + m["swipes"]:
+        if (r["weapon"], r["pos"], r["ptype"]) not in reach or not (r["mult"] > 0 if r["weapon"] else r["damage"] > 0):
+            continue
+        who = "%s%s step %d, %s" % ("object " if r["weapon"] else "", r["type"], r["pos"], r["button"])
+        if not 0 <= r["win_start"] < r["win_end"] <= 1:
+            out.append("%s: the hit window %g-%g must be inside 0..1 and start before it ends" % (who, r["win_start"], r["win_end"]))
+        if m["frames"] and r["timing"] is None:
+            out.append("%s: animation %d is not in the model" % (who, r["anim"]))
+        if r["bones"] == "-" and r["pos"] == 1:
+            out.append("%s: no bone tests the hit (no locator)" % who)
+        if r["radius"] <= 0 and (r["weapon"] or not m.get("default_radius")):
+            out.append("%s: radius 0 and no default: the hit sphere has no size" % who)
+        for k in range(cd.TYPES):   # a combo that points to a step that is not there
+            if r["next_ms"][k] > 0 and r["pos"] < cd.TIERS and (r["weapon"], r["pos"] + 1, k) not in by:
+                out.append("%s: chains to %s but that step is empty" % (who, TYPE_INFO[k][0]))
+    return out
 
 
 def table(m):
@@ -193,12 +281,12 @@ def table(m):
         tm = r["timing"]
         q = "   start %2d active %2d of %3d frames" % (tm["start"], tm["active"], tm["total"]) if tm else ""
         return "  %-3d %-13s %-6s anim %3d  %3.0f-%3.0f%%  %-9s r %5.1f  stun %3.0f  kb %4.0f/%-4.0f %s%s" % (
-            r["pos"], r["type"], r["button"], r["anim"], r["ini"] * 100, r["fim"] * 100, dmg, r["raio"], r["atord"], r["kb_h"], r["kb_v"],
-            r["loc"], q)
+            r["pos"], r["type"], r["button"], r["anim"], r["win_start"] * 100, r["win_end"] * 100, dmg, r["radius"], r["stun"], r["kb_out"],
+            r["kb_up"], r["bones"], q)
 
     out.append("%s: PUNCHES (damage as the game applies it)" % m["file"])
     for r in m["punches"]:
-        out.append(line(r, "dmg %4.1f" % r["dano"]))
+        out.append(line(r, "dmg %4.1f" % r["damage"]))
     out.append("WITH AN OBJECT (the damage is the object's times the multiplier)")
     for r in m["swipes"]:
         out.append(line(r, "x%.2f" % r["mult"]))
@@ -208,6 +296,9 @@ def table(m):
         out.append("%s (key %s, %s)" % (s["name"], s["key"], s["state"]))
         for f in s["fields"]:
             out.append("    %-44s %s" % (f["label"], f["value"]))
+    if m.get("problems"):
+        out.append("WARNINGS")
+        out.extend("  " + p for p in m["problems"])
     return out
 
 
