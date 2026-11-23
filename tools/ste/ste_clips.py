@@ -216,9 +216,30 @@ PROFILES = {
         56: ('THROW_OBJECT', False, 40 / 60.0, {'settle': True, 'knots': [(0, 0), (0.37, 0.25), (1, 1)]}),
         172: ('LIFTING_IDLE_OBJECT', True, None),
         170: None, 185: None, 240: None, 241: None,
-        160: None, 161: None,
-        10: None, 11: None, 12: None, 13: None, 14: None, 15: None, 16: None, 17: None, 18: None, 19: None, 20: None,
-        21: None, 22: None, 23: None, 24: None,
+        # especial (Gravity Beams): o preparo e a carga do STE; no disparo as tres cabecas ficam paradas o clipe todo (so a cauda
+        # mexe), entao ele inteiro vira o laco; o fim e o ultimo trecho dele, e o jogo mistura para o idle
+        160: ('ELECTRIC_BLAST_CHARGE', False, 1.2),
+        161: ('TRIPLE_ENERGY_BEAM', True, None),
+        162: ('TRIPLE_ENERGY_BEAM', False, 0.4, {'segs': [(0.75, 1.0, 1.0)]}),
+        # golpes (mods/_kingghidorah_ste_src/moves.json): janela de acerto do STE no comentario. A ponta da cauda passa na frente
+        # dentro da janela nos quatro de cauda (tailtip: TAIL_SNAP_02 -6 graus em 40%, TAIL_SNAP +22 em 40%, TAIL_UPPERCUT +1
+        # em 50%, TAIL_SWEEP de -62 a +53 em 40-50%)
+        10: ('JAB_RIGHT', False, None, dict(NAT, face={'from': 0.29})),          # Jab_right (cabeca D), 10-29%
+        11: ('JAB_LEFT', False, None, dict(NAT, face={'from': 0.25})),           # Jab_left (cabeca E), 14-25%
+        12: ('JAB_CENTER', False, None, dict(NAT, face={'from': 0.28})),         # Jab_center (cabeca do meio), 6-28%
+        13: ('KICK', False, None, dict(NAT, face={'from': 0.43})),               # Kick1, 30-43%
+        14: ('EARS_BOX', False, None, dict(NAT, face={'from': 0.34})),           # A combo finisher (Ears Box), 25-34%
+        15: ('TAIL_SNAP_02', False, None, dict(NAT, face={'from': 0.41})),       # Tail_Whip_1, 24-41%
+        16: ('TAIL_SNAP', False, None, dict(NAT, face={'from': 0.30})),          # Tail_Whip_2, 18-30%
+        17: ('PUNCH_LEFT', False, None, dict(NAT, face={'from': 0.44})),         # Punch_left, 32-44%
+        18: ('THUNDERHEAD', False, None, dict(NAT, face={'from': 0.35})),        # Woodsplitter (Right A), 23-35%
+        19: ('LUNGING_KICK', False, None, dict(NAT, face={'from': 0.43})),       # Lunging Kick (Right X), 31-43%
+        20: ('LUNGE_SMASH', False, None, dict(NAT, face={'from': 0.45})),        # Lunge Smash (Left A), 34-45%
+        21: ('DOUBLEKICK', False, None, dict(NAT, face={'from': 0.37})),         # Double Kick (Left X), 25-37%
+        22: ('TAIL_UPPERCUT', False, None, dict(NAT, face={'from': 0.51})),      # Tail Uppercut (Right B), 37-51%
+        23: ('OVERHEAD_KICK', False, None, dict(NAT, face={'from': 0.60})),      # Overhead Kick (Up X), 50-60%
+        24: ('TRIPLE_UPPERCUT', False, None, dict(NAT, face={'from': 0.43})),    # Triple Uppercut (Down A), 26-33% e 43%
+        25: ('TAIL_SWEEP', False, None, dict(NAT, face={'from': 0.63})),         # Tail Sweep (Down B), 32-63%
     },
 }
 

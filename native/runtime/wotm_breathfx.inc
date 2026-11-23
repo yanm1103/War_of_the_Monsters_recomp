@@ -81,7 +81,7 @@ namespace wotm_breathfx
         q.size = (L.sizeMin + (L.sizeMax - L.sizeMin) * frand(e.rng)) * scale;
         q.rot = L.rotate ? frand(e.rng) * 6.2831853f : 0.f;
         float off[3];   // (frente, lado, cima)
-        for (int k = 0; k < 3; ++k) off[k] = (2.f * frand(e.rng) - 1.f) * L.spread * scale;
+        for (int k = 0; k < 3; ++k) off[k] = ((2.f * frand(e.rng) - 1.f) * L.spread + L.offset[k]) * scale;
         float vl[3] = {(L.speed + L.speedRandom * (2.f * frand(e.rng) - 1.f)) * scale, 0.f, 0.f};
         if (L.radial != 0.f)
         {

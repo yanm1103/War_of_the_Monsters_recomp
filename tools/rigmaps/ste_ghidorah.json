@@ -1,5 +1,5 @@
 {
-  "comment": "King Ghidorah as stored in Godzilla: Save the Earth (PS2), on Raptros: Biped with three necks (L, M, R: Neck1 to Neck5, Head, Jaw), the wings on the arm chain (Clavicle, UpperArm, Forearm; the Hand is unskinned) hanging off Neck1 M, one tail of 13, two toes per foot. Raptros's wing (bone33 shoulder, bone32, bone31 wrist, finger bases 30/29/28) drives the wing; its neck (bone18, bone17, head bone16) drives each of the three necks; its small arms drive nothing. The jaws and toes have no source and only move in the STE's own clips.",
+  "comment": "King Ghidorah as stored in Godzilla: Save the Earth (PS2), on Raptros: Biped with three necks (L, M, R: Neck1 to Neck5, Head, Jaw), the wings on the arm chain (Clavicle, UpperArm, Forearm; the Hand is unskinned) hanging off Neck1 M, one tail of 13, two toes per foot. Raptros's wing (bone33 shoulder, bone32, bone31 wrist, finger bases 30/29/28) drives the wing; its neck (bone18, bone17, head bone16) drives each of the three necks; its small arms drive nothing. The jaws and toes have no source and only move in the STE's own clips. The mouths sit in the gap between snout and jaw of each head (the M one is where the beam leaves; L and R carry hand_l/hand_r, grab and hold); loc_816/817 (tail mid and tip) and loc_818/819 (middle head, chest) replace Raptros's wing points for the own .CHR.",
   "bones": {
     "Bip01_Pelvis": {"from": "bone15", "move": true},
     "Bip01_Spine": {"from": "bone45"},
@@ -34,14 +34,18 @@
            "Bip01_R_Toe01"],
   "locators": {
     "head": {"joint": "Bip01_Head_M", "at": ["Bip01_Head_M"]},
-    "mouth": {"joint": "Bip01_Head_M", "at": ["Bip01_Jaw_M"]},
-    "look": {"joint": "Bip01_Head_M", "at": ["Bip01_Jaw_M"]},
-    "hand_l": {"joint": "Bip01_L_Head", "at": ["Bip01_L_Jaw"]},
-    "grab": {"joint": "Bip01_L_Head", "at": ["Bip01_L_Jaw"]},
-    "hand_r": {"joint": "Bip01_R_Head", "at": ["Bip01_R_Jaw"]},
-    "hold": {"joint": "Bip01_R_Head", "at": ["Bip01_R_Jaw"]},
+    "mouth": {"joint": "Bip01_Head_M", "at": [-0.2, 43.6, 108.7]},
+    "look": {"joint": "Bip01_Head_M", "at": [-0.2, 43.6, 108.7]},
+    "hand_l": {"joint": "Bip01_L_Head", "at": [-11.5, 56.5, 93.7]},
+    "grab": {"joint": "Bip01_L_Head", "at": [-11.5, 56.5, 93.7]},
+    "hand_r": {"joint": "Bip01_R_Head", "at": [11.1, 56.5, 93.7]},
+    "hold": {"joint": "Bip01_R_Head", "at": [11.1, 56.5, 93.7]},
     "foot_l": {"joint": "Bip01_L_Foot", "at": ["Bip01_L_Foot"]},
     "foot_r": {"joint": "Bip01_R_Foot", "at": ["Bip01_R_Foot"]},
-    "chest": {"joint": "Bip01_Spine1", "at": ["Bip01_Spine1"]}
+    "chest": {"joint": "Bip01_Spine1", "at": ["Bip01_Spine1"]},
+    "loc_816": {"joint": "Bip01_Tail6", "at": ["Bip01_Tail6"]},
+    "loc_817": {"joint": "Bip01_Tail12", "at": ["Bip01_Tail12"]},
+    "loc_818": {"joint": "Bip01_Head_M", "at": ["Bip01_Head_M"]},
+    "loc_819": {"joint": "Bip01_Spine1", "at": ["Bip01_Spine1"]}
   }
 }

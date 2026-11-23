@@ -26,10 +26,9 @@ Mod em `mods/Mechagodzilla 3/`, fontes em `mods/_mechagodzilla3_ste_src/` (o `LE
 - **Conferir no jogo (dono):** o climb (tronco e cabeça pelo `clipBones` do rigmap), o raio saindo de dentro da boca (também no Godzilla 90s), o olho amarelo e o retrato novo (rugido, quadro 48).
 
 ## King Ghidorah (STE), o que falta
-Mod em `mods/King Ghidorah/` (custom `ghidorah_ste` sobre o Raptros), fontes e receita em `mods/_kingghidorah_ste_src/LEIAME.txt`. Já tem corpo, voo do Raptros, andar, reações, caído e pulos do STE.
-- **Golpes:** `.CHR` próprio a partir do `DRAGON.CHR` (`tools/chr_moves.py`, `moves.json` como no Mecha) com os golpes do STE (`tools/ste/ste_moves.py <iso> Ghidorah.cmp`; lista de comandos em tohokingdom.com/vg/gste/characters.htm#king_ghidorah). Hoje saem os do Raptros, com esferas de ataque enormes (escala 2x).
-- **Especial e tiro:** Gravity Beams das três bocas (o `breathFx` só tem uma boca: falta camada por localizador) e o tiro no ar.
-- **Sons, retrato, logo e narração:** como no Mecha (`ste_sounds.py`, `portrait_render.py`, logo 512x256, narrador).
+Mod em `mods/King Ghidorah/` (custom `ghidorah_ste` sobre o Raptros), fontes, receita e mapa de golpes em `mods/_kingghidorah_ste_src/LEIAME.txt`. Provisórios: logo tipográfico e narração com voz do Windows.
+- **Conferir no jogo (dono):** os três raios do especial vistos de lado (pela câmera de trás quase não aparecem; a linha do teste vai reta até 599 sem bater), os 16 golpes contra a IA (só o frente+△ foi visto acertando), os sons de ouvido, o caído e o levantar, o climb do Raptros com três pescoços.
+- **Tiro:** o □ sem alvo ao alcance solta a bola de fogo do Raptros; trocar pelo Gravity Beam curto (`shotFx`, `ste_fx.py shot`) ou pelo raio no ar (Flying Gravity Beams).
 - **Câmera no voo:** batendo asas a câmera fica colada (a do chão vem do `.CHR` a 150%; conferir de onde vem a do voo).
 
 ## Fora da ordem (até o dono escolher)

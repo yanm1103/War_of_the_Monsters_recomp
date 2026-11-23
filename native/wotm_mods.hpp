@@ -534,6 +534,7 @@ private:
         if (shot) cfg->hide = {29, 36, 80, 81};   // a explosao do tiro do Togera: clarao branco, clarao, acerto e faiscas
         if (const json::Value *x = v.get("hideBody")) cfg->hideBody = x->asBool(true);
         if (const json::Value *x = v.get("aim"); x && x->type == json::Value::Int) cfg->aim = std::clamp(float(x->asNum(30)), 0.f, 90.f);
+        if (const json::Value *x = v.get("pitch"); x && x->type == json::Value::Int) cfg->pitch = std::clamp(float(x->asNum(0)), -89.f, 89.f);
         auto num = [](const json::Value *x, float d) { return x && x->type == json::Value::Int ? float(x->asNum(d)) : d; };
         auto pair = [&](const json::Value *x, float &lo, float &hi) {
             if (x && x->type == json::Value::Arr && x->arr.size() == 2) { lo = num(&x->arr[0], lo); hi = num(&x->arr[1], hi); }
@@ -586,6 +587,8 @@ private:
                 L.lifeMin = std::max(0.01f, L.lifeMin);
                 L.lifeMax = std::max(L.lifeMin, L.lifeMax);
                 L.spread = num(l.get("spread"), 0.f);
+                if (const json::Value *o = l.get("offset"); o && o->type == json::Value::Arr)
+                    for (size_t k = 0; k < 3 && k < o->arr.size(); ++k) L.offset[k] = num(&o->arr[k], 0.f);
                 if (const json::Value *c = l.get("color"); c && c->type == json::Value::Arr)
                     for (size_t k = 0; k < 4 && k < c->arr.size(); ++k) L.color[k] = num(&c->arr[k], 1.f);
                 if (const json::Value *cp = l.get("colorPoly"); cp && cp->type == json::Value::Obj) {

@@ -506,8 +506,10 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
     155), which lands Togera's breath on the target's chest; on an own skeleton the sideways turn can fall short and the breath
     passes beside the target. With `aim`, the breath axis the game tests (+0x33D0) points at the chest (+0x3E30) of the living
     monster nearest to it within that cone (sideways and up or down) and the breath's range, and the layers follow that axis.
+  - `pitch` (degrees, + up; missing = off): before `aim`, the breath axis becomes the monster's front tilted by that much, for a
+    mouth that does not face forward in the breath pose (King Ghidorah's middle head is raised while the three beams fire).
   - `scale`: multiplies every layer's sizes, speeds and spawn area. `hide`: the presets that disappear when this monster's
-    `FireBreath` creates them (default `[8, 51, 148]`: Togera's breath core, cloud and sparks; add `80, 81`, the hit flash and
+    `FireBreath` creates them (default `[8, 51, 148]`: Togera's breath core, cloud and sparks; Raptros's fire is `53, 149`; add `80, 81`, the hit flash and
     sparks, when the layers bring their own hit).
   - each layer is an emitter: `texture` (PNG in the monster's folder or at the mod root; white with alpha is the usual, tinted by
     `color`; missing = a soft round blob), `at` (`"mouth"`, default, or `"hit"`: born where the breath hits, only while it hits
@@ -515,7 +517,9 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
     moment ago), `relative` (the particles move with the mouth, so the breath follows the head; default true at the mouth, false at
     the hit), `rate` (particles per second), `once` (true: `rate` particles at once when the layer turns on), `speed` and
     `speedRandom` (forward, ±), `radial` (outward from the spawn area's centre), `up` (world up), `life` and `size` (`[min, max]`,
-    seconds and side of the square; in a streak, its width), `spread` (half side of the spawn cube), `color` (`[r, g, b, a]`, 1 =
+    seconds and side of the square; in a streak, its width), `spread` (half side of the spawn cube), `offset` (`[forward, side,
+    up]`: where the spawn cube sits from the mouth, in game units; copies of the layers with side offsets make more mouths, like
+    King Ghidorah's three beams), `color` (`[r, g, b, a]`, 1 =
     full), `colorPoly` (`{"r": [c0, c1, ...], ...}`: each channel multiplied by c0 + c1·t + c2·t² over the particle's age t, 0 to 1)
     and `sizePoly` (the same for the size), `stretch` (`[grow, shrink]`: the streak grows until that fraction of its life and
     shrinks from the second one), `additive` (default true; false = normal blend), `rotate` (random starting rotation).

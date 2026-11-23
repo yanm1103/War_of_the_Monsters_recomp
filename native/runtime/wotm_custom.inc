@@ -1801,6 +1801,24 @@ namespace wotm_custom
         // (+0x3E30) do monstro vivo mais perto do eixo, dentro do cone (para o lado e para cima ou baixo) e do alcance
         float aimed[3];
         bool didAim = false;
+        if (cfg && cfg->pitch == cfg->pitch)   // "pitch": a frente do monstro (linha 1 da matriz do _cs) com essa inclinacao
+            if (const uint32_t cs = READ32(m + kCs))
+            {
+                const float fx = rdF(rdram, cs + 0x30), fy = rdF(rdram, cs + 0x34), h = std::sqrt(fx * fx + fy * fy);
+                const float p = cfg->pitch * 0.017453293f;
+                if (h > 1e-4f)
+                {
+                    const float ax[3] = {fx / h * std::cos(p), fy / h * std::cos(p), std::sin(p)};
+                    for (int k = 0; k < 3; ++k)
+                    {
+                        uint32_t u;
+                        std::memcpy(&u, &ax[k], 4);
+                        WRITE32(m + kBreathAxis + 4 * k, u);
+                        aimed[k] = ax[k];
+                    }
+                    didAim = true;   // o desenho segue este eixo (o da foto da RAM e o do jogo, refeito a cada quadro)
+                }
+            }
         if (cfg && cfg->aim > 0.f)
         {
             float ax[3], mu[3];

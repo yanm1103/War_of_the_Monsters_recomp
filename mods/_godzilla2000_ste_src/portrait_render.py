@@ -2,7 +2,8 @@
 # Renderiza a cabeca (fundo transparente) e grava <prefixo>_<name>.png; portrait_compose.py monta o retrato.
 # Cada tomada: {"clip": "a92", "frame": 60, "az": 45, "el": 8, "dist": 48, "name": "final", "jaw": 30, "jawAxis": "Z",
 #               "look": [dx,dy,dz], "size": 512, "lens": 50, "keyE": 6, "rimE": 7, "key": [frente, lado, cima]}
-# clip/frame: a pose (animacao do rig.glb, congelada no quadro); jaw: graus a mais na Bip01_Jaw (Z abre a boca);
+# clip/frame: a pose (animacao do rig.glb, congelada no quadro); jaw: graus a mais na Bip01_Jaw (Z abre a boca; "jawBone" e
+# "headBone" trocam os ossos);
 # az/el/dist: camera em volta do meio da cabeca (+Y e a frente do monstro: az 0 = perfil virado para a direita).
 import bpy, sys, json, math
 from mathutils import Vector, Matrix, Euler
@@ -98,7 +99,7 @@ for s in shots:
         pj.rotation_quaternion = pj.rotation_quaternion @ Euler(e).to_quaternion()
     bpy.context.view_layer.update()
 
-    head = bone_world("Bip01_Head")
+    head = bone_world(s.get("headBone", "Bip01_Head"))   # King Ghidorah: "Bip01_Head_M"
     jawp = bone_world(jawname)
     tgt = (head + jawp) * 0.5 + Vector(s.get("look", [0, 0, 0]))
     az, el, dist = math.radians(s.get("az", 90)), math.radians(s.get("el", 10)), s.get("dist", 2.0)

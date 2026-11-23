@@ -57,6 +57,12 @@ class MonsterData:
                 if struct.unpack_from('<I', md, o)[0] in anims and struct.unpack_from('<I', md, o + 4)[0] < len(self.names)
                 and struct.unpack_from('<I', md, o + 4)[0] not in anims]
         run = max(self._runs(cand), key=len)
+        # o par pode falhar num estado do meio (King Ghidorah: o LIFT2HAND nao tem entrada de animacao propria): a sequencia
+        # continua enquanto o indice do estado (+0x38) sobe de 1 em 1
+        idx = lambda s: struct.unpack_from('<I', md, s + 0x38)[0]
+        while run[-1] + 2 * STATE <= len(md) and idx(run[-1] + STATE) == idx(run[-1]) + 1 \
+                and struct.unpack_from('<I', md, run[-1] + STATE + 0x80)[0] < len(self.names):
+            run.append(run[-1] + STATE)
         self.states = [self._state(s) for s in run]
         n = max(st['ev0'] + st['nev'] for st in self.states)
         tab0 = run[-1] + STATE + 4

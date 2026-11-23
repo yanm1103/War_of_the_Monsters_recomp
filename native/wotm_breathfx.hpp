@@ -47,6 +47,7 @@ struct Layer {
     float lifeMin = 1.f, lifeMax = 1.f;
     float sizeMin = 10.f, sizeMax = 10.f;   // lado do quadrado (no risco: a largura)
     float spread = 0.f;         // meio-lado do cubo onde nasce
+    float offset[3] = {0.f, 0.f, 0.f};   // centro do cubo em relacao a boca (frente, lado, cima): outra boca, ao lado da do jogo
     float color[4] = {1.f, 1.f, 1.f, 1.f};
     Poly r, g, b, a, sizeMul;
     float grow = 0.2f, shrink = 0.6f;   // risco: cresce ate grow da vida e encolhe a partir de shrink (fracoes)
@@ -63,6 +64,10 @@ struct Config {
     // sopro: cone (graus para cada lado) em que o eixo vira para o peito do monstro mais perto na frente; 0 = o eixo do jogo. O
     // jogo mira o bafo virando a cabeca (camadas de olhar 154/155); num esqueleto proprio a virada para o lado nao chega
     float aim = 30.f;
+    // sopro: eixo do jogo trocado pela frente do monstro com esta inclinacao (graus, + para cima) antes da mira; NAN = o eixo do
+    // jogo. Para uma cabeca que nao olha para a frente na pose do sopro (King Ghidorah sobre o Raptros sopra durante o idle, com
+    // a cabeca do meio baixa)
+    float pitch = __builtin_nanf("");
     bool hides(uint32_t preset) const {
         for (int p : hide)
             if (uint32_t(p) == preset) return true;

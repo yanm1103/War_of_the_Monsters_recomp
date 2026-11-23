@@ -7,14 +7,36 @@ Neck1 a Neck5, Head, Jaw), asas na cadeia do braco (Clavicle, UpperArm, Forearm;
 cauda de 13, dois dedos por pe.
 Esqueleto: tools/rigmaps/ste_ghidorah.json. A asa do Raptros (bone33 ombro, bone32, bone31 pulso, bases dos dedos 30/29/28) move a
 asa; o pescoco dele (bone18, bone17, cabeca bone16) move os tres pescocos; os bracinhos dele nao movem nada. Mandibulas e dedos dos
-pes so se mexem nas animacoes do STE. Boca (mouth) na mandibula do meio; pegar/segurar (grab/hold, hand_l/hand_r) nas bocas das
-cabecas laterais.
+pes so se mexem nas animacoes do STE. Bocas na fenda entre focinho e mandibula de cada cabeca (o vertice mais a frente de cada uma
+no .dae): mouth na do meio, hand_l/grab na E, hand_r/hold na D. 0x816/0x817 (no Raptros, pontas das asas) viram o meio e a ponta da
+cauda, 0x818 a cabeca do meio e 0x819 o peito, como o tools/chr_moves.py espera.
 Animacoes: tools/ste/ste_clips.py <iso> Ghidorah.cmp clips.json (ID_MAP do 2000 + PROFILES['Ghidorah']), depois tools/retarget.py
 <DRAGON0.glb> ghidorah_ste.dae tools/rigmaps/ste_ghidorah.json rig.glb --height 142.5 --own clips.json --base disc/MON/DRAGON0.NGP.
 --height 142.5: a escala dos outros mods do STE (1,183 unidade do jogo por unidade do STE; o Ghidorah tem 120,5 no STE), o dobro
 do Raptros (69). O caido (80, 81, 85, 86) usa o "laid" do Raptros (LAID_*_RAPTROS: fim do 85/86 girado Rx(+-90) contra o 1o quadro
-do 87/88, como foi medido no Togera). Os golpes do Raptros (10-25) e o especial dele ficam por enquanto, retargetados.
+do 87/88, como foi medido no Togera).
 O mod: modkit.py monster new "King Ghidorah" ghidorah_ste --base raptros --costume 0 --name "KING GHIDORAH" --ai; modkit.py monster
 mesh export ... (DRAGON0.glb); monster rig ... ghidorah_ste_rig.glb; textura dragon0_t0013.png = ghidorah_ste.png x0.62 (como nos
 outros; o monster rig grava de novo a textura crua: refazer depois dele); modkit.py pack "King Ghidorah".
 monster.json: "camera" do Raptros a 150% (a 100% o corpo enche a tela; a 200% fica longe no chao).
+
+Golpes: tools/ste/ste_moves.py <iso> Ghidorah.cmp da as janelas (A = cabecas, X = chutes, B = cauda; Left = para longe, Right =
+para perto). moves.json tem o mapa de botoes e os 16 golpes (ids 10-25 do PROFILES['Ghidorah']); modkit.py monster stats ... (uma
+vez), depois tools/chr_moves.py moves.json disc/RST/DRAGON.CHR --ngp <pasta de trabalho>/DRAGON0.NGP --out <pasta de
+trabalho>/DRAGON.CHR e modkit.py pack. Os quatro golpes de cauda passam a ponta pela frente dentro da janela (conferido com a
+posicao da ponta em relacao a raiz ao longo do clipe).
+Especial (Gravity Beams): "special": "togera" no monster.json. O do Raptros sopra com o corpo no idle (o 161 dele tem 10 quadros e
+o jogo passa ao 90 enquanto o fogo segue), e no idle do STE a cabeca do meio fica baixa: o sopro descia no telhado, o predio caia e
+o Ghidorah morria. O do Togera segura o 161 (TRIPLE_ENERGY_BEAM, as tres cabecas paradas o clipe todo); 160 = ELECTRIC_BLAST_CHARGE
+1,2 s; 162 = o fim do TRIPLE_ENERGY_BEAM. Raio: tools/ste/ste_fx.py <iso> breath Ghidorah.cmp ghidorah_lightning <pasta>/fx --hit
+ghidorah_lightning_hit, depois mkbreath.py copia as camadas do raio para as tres bocas ("offset" de cada camada: as bocas laterais
+em relacao a do meio na pose do disparo, em unidades do jogo) e grava breathfx_gravitybeams.json, com "pitch": 0 (eixo na frente
+do monstro, a cabeca do meio esta erguida), "aim": 45 e "hide" com o fogo do Togera e o do Raptros (53, 149).
+Sons: ste_sounds.py <iso> <pasta files/ da pasta de trabalho> sounds (depois de modkit.py monster sounds ...), depois modkit.py
+pack. Os numeros do DRAGON_S sao os do ramo do tipo 0x120 do MonsterSound (src/game/Sound.cpp): 0 pulo, 1 bater de asas, 2/18/19
+mortes, 3 dor, 4 grito (entrada e especial), 5 controle da multidao, 6 aterrissagem, 10 raio em laco, 12 grunhido, 13 planar em
+laco, 14-16 vitorias, 17 provocacao. 7, 8, 9 e 11 ficam os do Raptros.
+Retrato: mods/_godzilla2000_ste_src/portrait_render.py (Blender) com o portrait_shot.json daqui (rugido a131 no quadro 100, as tres
+cabecas; "headBone"/"jawBone" da cabeca do meio) e portrait_compose.py; modkit.py monster portrait ... portrait.png.
+Logo: mklogo.py logo.png C:\Windows\Fonts\impact.ttf (tipografico, dourado), provisorio ate haver uma arte do logo.
+Narrador: narrator_tts.ps1 (voz do Windows, "King Ghidorah!") + ffmpeg: narrator/ghidorah_ste.mp3, quebra-galho.
