@@ -21,7 +21,7 @@ Plano aprovado em `docs/investigacoes/2026-11-22/plano_malha_kit.md`. Dois camin
 - **Kit no Linux:** conferir o kit no navegador no Linux (abrir o navegador, diálogos de arquivo por zenity ou kdialog) e decidir se ele entra no AppImage.
 
 ## Mechagodzilla 3 (STE), bugs achados pelo dono
-Mod em `mods/Mechagodzilla 3/`, fontes em `mods/_mechagodzilla3_ste_src/` (o `LEIAME.txt` tem a receita e a tabela de golpes). Seguem provisórios: logo tipográfico, narração com voz do Windows e sons nunca conferidos de ouvido.
+Mod em `mods/Mechagodzilla 3/`, fontes em `mods/_mechagodzilla3_ste_src/` (o `LEIAME.txt` tem a receita e a tabela de golpes). Seguem provisórios: narração com voz do Windows e sons nunca conferidos de ouvido.
 - **Último golpe da corrente de □ não acerta (não reproduzido):** no treino contra a IA o 5º golpe (anim 14, chute alto de 90 quadros, janela 26-41%) sai e acerta, e a tira de `docs/screenshots/2026-11-23/` mostra a esfera vermelha nele. Falta o dono dizer em que situação vê o "chutinho": se é o 4º (anim 13, chute baixo) contra o boneco parado, empurrado para longe pelos três primeiros, ou outro caso.
 - **Conferir no jogo (dono):** o climb (tronco e cabeça pelo `clipBones` do rigmap), o raio saindo de dentro da boca (também no Godzilla 90s), o olho amarelo e o retrato novo (rugido, quadro 48).
 

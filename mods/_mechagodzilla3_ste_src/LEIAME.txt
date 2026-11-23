@@ -23,7 +23,8 @@ cinza. eye_yellow.py pinta de amarelo so os texels que esses triangulos usam (ne
 Retrato do HUD: render do proprio modelo, como no 2000 (mods/_godzilla2000_ste_src/portrait_render.py e portrait_compose.py) com o
 portrait_shot.json daqui (rugido a131 no quadro 48, cabeca reta e boca aberta; camera az 25), sobre um rig.glb feito de uma copia do
 .dae com o PNG ja passado pelo eye_yellow.py (olho amarelo); monster portrait ... portrait.png.
-Logo: mklogo.py <saida.png> C:\Windows\Fonts\impact.ttf (logo tipografico, nao ha imagem do logo; troque por uma arte quando houver).
+Logo: logo_source.png (o "MECHA GODZILLA" da esquerda de uma arte com dois logos, recortado) centrado num 512x256 como os logos do
+jogo (caixa de 80% x 60%, como no 90s); entra no mod pelo botao de logo do kit (modkit.monster_logo).
 Narrador: narrator_tts.ps1 (voz do Windows) + ffmpeg: narrator/mechagodzilla3_ste.mp3 e um quebra-galho; troque pela voz de um gerador.
 Sons: ste_sounds.py <iso> <pasta files/ da pasta de trabalho> sounds (depois de modkit.py monster sounds ...), depois modkit.py pack.
 Vozes MGZ_* (Mechagodzilla 3), MGZ_MISSILE_FIRE (foguete), EXPLOSION_MEDIUM_RANDOM (a explosao do Missile_impact), MGZ_CHEST_BEAM (raio).
@@ -65,4 +66,4 @@ Conferido no jogo (treino com PS2X_PAD, WOTM_ANIMLOG=1; docs/screenshots/2026-11
 (a direcao tem de ser apertada junto com o botao; no roteiro de pad, "cima" e frente e "baixo" e tras) e cada um aparece nas tiras de
 quadros com as esferas de ataque (azul) e de acerto (vermelho). Sons (audiocheck.py): cada som do LIZARD_S e do GENAMB_S do mod
 decodifica com a duracao e o envelope do WAV do STE; o jogo pede ao banco do mod (PS2X_SND_LOG=1) os sons 2, 5, 6, 7, 16, 55, 63 e 70.
-Provisorios: o logo (tipografico) e a narracao (voz do Windows).
+Provisoria: a narracao (voz do Windows).
