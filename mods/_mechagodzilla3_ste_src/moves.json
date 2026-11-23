@@ -1,5 +1,5 @@
 {
-  "comment": "Golpes do Mechagodzilla 3 (Kiryu) do STE no .CHR proprio do mechagodzilla3_ste (tools/chr_moves.py), no esquema do Godzilla 90s: hit = janela do ataque no STE (tools/ste/ste_moves.py MechaGodzilla3.cmp), dano = 3 + 0,25 x o do STE. Mapa de botoes (comandos do STE, tohokingdom.com/vg/gste/characters.htm): square = jabs + soco + chutes (Low Kick); fwd_square = Dual Slam (Double Hammerfist) e Overhand; back_square = Double Kick e Roundhouse; triangle = Tail Stab, mordida (Bite), Spin Punch; fwd_triangle = Upwards Tail Spike (Tail Uppercut) e Uppercut; back_triangle = Superior Tail Stab e Circle Sweep (Sweep Kick). Velocidade 1 em todos: acelerar so o que ficar lento no teste ('speed'). Locators: [10,11,12] do STE = perna D, [18,19,20] = perna E (a Roundhouse usa so a E).",
+  "comment": "Golpes do Mechagodzilla 3 (Kiryu) do STE no .CHR proprio do mechagodzilla3_ste (tools/chr_moves.py), no esquema do Godzilla 90s: hit = janela do ataque no STE (tools/ste/ste_moves.py MechaGodzilla3.cmp), dano = 3 + 0,25 x o do STE. Mapa de botoes (comandos do STE, tohokingdom.com/vg/gste/characters.htm): square = jabs + soco + chutes (Low Kick); fwd_square = Dual Slam (frente+X, Double Hammerfist) e Roundhouse (frente+Quadrado); back_square = Double Kick (tras+Quadrado) e Grand Slam (tras+X, Overhand), de modo que frente e tras batem com a lista do site (o X e o Quadrado do STE dividem o Quadrado do WotM, um por posicao); triangle = Tail Stab, mordida (Bite), Spin Punch; fwd_triangle = Upwards Tail Spike (Tail Uppercut) e Uppercut; back_triangle = Superior Tail Stab e Circle Sweep (Sweep Kick). Velocidade 1 em todos: acelerar so o que ficar lento no teste ('speed'). Locators: [10,11,12] do STE = perna D, [18,19,20] = perna E (a Roundhouse usa so a E).",
   "maxChain": 5,
   "stop": ["triangle", "back_square"],
   "moves": {
@@ -22,8 +22,8 @@
   },
   "chains": {
     "square":        ["jab_r", "jab_l", "punch_r", "kick_low", "kick_high"],
-    "fwd_square":    ["dbl_hammer", "overhand"],
-    "back_square":   ["double_kick", "roundhouse"],
+    "fwd_square":    ["dbl_hammer", "roundhouse"],
+    "back_square":   ["double_kick", "overhand"],
     "triangle":      ["tail_stab", "bite", "tail_stab", "spin_punch"],
     "fwd_triangle":  ["tail_uppercut", "uppercut"],
     "back_triangle": ["tail_stab_str", "kick_sweep"]

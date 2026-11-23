@@ -34,7 +34,9 @@ trabalho>/LIZARD.CHR e modkit.py pack "Mechagodzilla 3". O mapa de botoes esta n
 
 Golpes: do STE (comandos da pagina do Kiryu, tohokingdom.com/vg/gste/characters.htm, PS2) para os 6 tipos de ataque do WotM
 (□, △, frente+□, frente+△, tras+□, tras+△; o STE tem 3 botoes e mais direcoes, entao varios golpes dividem um tipo). A ordem dentro
-de cada corrente e a do moves.json.
+de cada corrente e a do moves.json. Frente e tras batem com a lista do site em todos os golpes com essas direcoes (o ✕ e o □ do STE
+dividem o □ do WotM, um por posicao); cima e baixo do STE nao existem no WotM: cima+○ vira frente+△ (Tail Uppercut) e baixo+✕ e baixo+□
+(Uppercut, Circle Sweep) ficam na 2a posicao de frente+△ e tras+△.
   STE (botao)                       golpe do STE (animacao)        no WotM                 id
   Low Kick (□)                      QUICK_LOW_KICK                 □, 4o golpe             13
   (Kick2)                           QUICK_HIGH_KICK                □, 5o golpe             14
@@ -43,9 +45,9 @@ de cada corrente e a do moves.json.
   Bite (fim de combo)               LUNGEBITE                      △, 2o                   19
   Spin Punch (cima+✕)               SPIN_PUNCH                     △, 4o                   23
   Dual Slam (frente+✕)              DOUBLE_HAMMERFIST              frente+□, 1o            16
-  Grand Slam (tras+✕)               OVERHAND                       frente+□, 2o            15
+  Roundhouse (frente+□)             ROUNDHOUSE                     frente+□, 2o            17
   Double Kick (tras+□)              DOUBLE_KICK                    tras+□, 1o              18
-  Roundhouse (frente+□)             ROUNDHOUSE                     tras+□, 2o              17
+  Grand Slam (tras+✕)               OVERHAND                       tras+□, 2o              15
   Upwards Tail Spike (cima+○)       TAIL_UPPERCUT                  frente+△, 1o            12
   Uppercut (baixo+✕)                UPPERCUT                       frente+△, 2o            22
   Superior Tail Stab (tras+○)       TAILSTAB_STRONG                tras+△, 1o              24
