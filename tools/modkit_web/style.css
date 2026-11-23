@@ -521,6 +521,21 @@ details.special summary { cursor: pointer; font: 600 12px var(--ui); letter-spac
 .pickrow { padding: 9px 12px; cursor: pointer; border-bottom: 1px solid var(--line); font: 600 13px var(--ui); letter-spacing: .1em; text-transform: uppercase; }
 .pickrow:hover { background: rgba(240, 138, 44, .1); }
 .pickrow.on { background: rgba(240, 138, 44, .2); }
+/* the move buttons as pictures (moves.js glyph): an arrow for FORWARD / BACK, then a white fist in a ring (red HEAVY, blue LIGHT); the icons are masks */
+.mvic { display: inline-block; flex: none; background: currentColor; -webkit-mask: center / contain no-repeat; mask: center / contain no-repeat; }
+.mvglyph { display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; margin: 0 6px; color: #fff; }
+.mvglyph .dir { width: 1.15em; height: 1.15em; color: #e8e4d8; }
+.mvbtn { display: inline-flex; align-items: center; justify-content: center; width: 1.9em; height: 1.9em; box-sizing: border-box; border-radius: 50%;
+         border: 2.5px solid; background: rgba(255, 255, 255, .06); }
+.mvbtn.heavy { border-color: #e5392c; }
+.mvbtn.light { border-color: #3d8bfd; }
+.mvbtn .mvic { width: 74%; height: 74%; color: #fff; }
+.pickrow .grab { width: 1.5em; height: 1.5em; vertical-align: middle; margin-right: 8px; color: #fff; }
+.chains .chain { margin-left: 14px; white-space: nowrap; }
+.chains .chain .mvglyph { margin-left: 0; }
+.editgrid label.then { display: flex; align-items: center; white-space: nowrap; }
+.editgrid label.then .mvglyph { margin-right: 0; }
+.moveedit h5 .mvglyph { margin: 0 10px 0 8px; font-size: 14px; }
 .moveedit { margin: 4px 0 4px; }
 .moveedit h5:first-child { margin-top: 0; }
 .moveedit h5 { margin: 18px 0 8px; font: 600 12px var(--ui); letter-spacing: .16em; text-transform: uppercase; color: var(--orange2); }

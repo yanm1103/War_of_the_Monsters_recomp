@@ -9,6 +9,28 @@ const BUTTONS = { LIGHT: 'LIGHT', HEAVY: 'HEAVY' };
 const DIRS = { 8: 'FORWARD + ', 2: 'BACK + ', 5: '' };
 const moveName = r => (DIRS[r.dir] || '') + BUTTONS[r.button];
 
+// The buttons as pictures (Phosphor icons in vendor/phosphor, drawn as a mask so CSS colors them): a white fist in a ring, red for
+// HEAVY and blue for LIGHT, with an arrow before it for FORWARD (up) and BACK (down); the grab is an open hand. The name stays as the hover text.
+const ICONS = { fist: 'hand-fist-fill', hand: 'hand-fill', up: 'arrow-up-bold', down: 'arrow-down-bold' };
+function icon(name, cls) {
+  const i = el('i', 'mvic' + (cls ? ' ' + cls : ''));
+  const u = 'url(vendor/phosphor/' + ICONS[name] + '.svg)';
+  i.style.webkitMaskImage = u;
+  i.style.maskImage = u;
+  return i;
+}
+function glyph(button, dir) {
+  const g = el('span', 'mvglyph');
+  g.title = (DIRS[dir] || '') + BUTTONS[button];
+  if (dir === 8) g.appendChild(icon('up', 'dir'));
+  if (dir === 2) g.appendChild(icon('down', 'dir'));
+  const b = el('span', 'mvbtn ' + button.toLowerCase());
+  b.appendChild(icon('fist'));
+  g.appendChild(b);
+  return g;
+}
+const moveGlyph = r => glyph(r.button, r.dir);
+
 const COLS = {
   pos: ['Pos', 'The step of the combo: 1 is the first move; the next step comes if the combo input is accepted (the COMBOS list says which buttons chain).'],
   move: ['Move', 'The button (and direction) that starts it. LIGHT is Square, HEAVY is Triangle.'],
@@ -40,7 +62,8 @@ const FIELDS = [
   ['anim', 'Animation id', 'Which animation of the model the move plays (1 to 299).'],
 ];
 // after a move, how long (ms) before a move of each type may follow it in the combo; 0 means that type cannot follow
-const NEXT = [[5, 'LIGHT'], [3, 'FORWARD + LIGHT'], [4, 'BACK + LIGHT'], [0, 'HEAVY'], [1, 'FORWARD + HEAVY'], [2, 'BACK + HEAVY']];
+const NEXT = [[5, 'LIGHT', 'LIGHT', 5], [3, 'FORWARD + LIGHT', 'LIGHT', 8], [4, 'BACK + LIGHT', 'LIGHT', 2],
+              [0, 'HEAVY', 'HEAVY', 5], [1, 'FORWARD + HEAVY', 'HEAVY', 8], [2, 'BACK + HEAVY', 'HEAVY', 2]];
 
 const fix = (v, n = 0) => (Number.isFinite(v) ? v.toFixed(n).replace(/\.0+$/, '') : '-');
 
@@ -62,7 +85,11 @@ function table(rows, weapon, onPick, showPos) {
       dmg: weapon ? '×' + fix(r.mult, 2) : fix(r.damage, 1),
       win: fix(r.win_start * 100) + '–' + fix(r.win_end * 100) + '%',
     };
-    for (const k of keys) tr.appendChild(el('td', left(k), String(cells[k])));
+    for (const k of keys) {
+      const td = el('td', left(k));
+      if (k === 'move') td.appendChild(moveGlyph(r)); else td.textContent = String(cells[k]);
+      tr.appendChild(td);
+    }
     tr.onclick = () => {
       for (const o of body.children) o.classList.remove('on');
       tr.classList.add('on');
@@ -242,7 +269,9 @@ export async function movesPage(page, args, hooks = {}) {
     function drawEdit(r) {
       edit.innerHTML = '';
       if (!r) return;
-      edit.appendChild(el('h5', '', 'Move: ' + (r.weapon ? 'with an object, ' : '') + moveName(r) + ', step ' + r.pos));
+      const h = el('h5', '', 'Move' + (r.weapon ? ' with an object' : '') + ':');
+      h.append(moveGlyph(r), 'step ' + r.pos);
+      edit.appendChild(h);
       edit.appendChild(statCards(r, !!r.weapon, names, m.default_radius));
       if (!m.own) { edit.appendChild(notOwn()); return; }
       const grid = el('div', 'editgrid');
@@ -259,10 +288,11 @@ export async function movesPage(page, args, hooks = {}) {
       }
       // the combo: which move may follow this one, and after how many ms (0 = none)
       const nx = el('div', 'editgrid');
-      for (const [k, name] of NEXT) {
+      for (const [k, name, btn, dir] of NEXT) {
         const f = 'next_' + k, label = 'Then ' + name;
         const inp = el('input'); inp.type = 'text'; inp.value = fix(r.next_ms[k], 0);
-        const lab = el('label', '', label);
+        const lab = el('label', 'then');
+        lab.append('Then ', glyph(btn, dir));
         const tip = 'The combo: ms before a ' + name + ' move may follow this one (0: it cannot). The move that follows is the next step of the combo.';
         lab.title = tip; inp.title = tip;
         inp.onchange = () => saveMove(r, f, label, inp, status);
@@ -291,7 +321,9 @@ export async function movesPage(page, args, hooks = {}) {
         const keep = list.find(s => s.name === state.sp) || list[0];
         const rows = [];
         for (const s of list) {
-          const d = el('div', 'pickrow' + (s === keep ? ' on' : ''), s.name);
+          const d = el('div', 'pickrow' + (s === keep ? ' on' : ''));
+          if (/^GRAB/.test(s.name)) d.appendChild(icon('hand', 'grab'));   // the grab and its throw: an open hand
+          d.append(s.name);
           d.onclick = () => { state.sp = s.name; for (const o of rows) o.classList.toggle('on', o === d); drawKey(s); };
           rows.push(d);
           out.appendChild(d);
@@ -309,8 +341,13 @@ export async function movesPage(page, args, hooks = {}) {
       out.appendChild(table(rows, weapon, pick, all.checked));
       const ch = m.chains.filter(c => c.weapon === weapon);
       if (ch.length) {
-        out.appendChild(el('div', 'chains', 'COMBOS (the same button again): ' + ch.map(c =>
-          moveName(c) + ' × ' + c.length + ' = ' + (weapon ? '×' + fix(c.damage, 2) + ' total' : fix(c.damage, 1) + ' damage')).join('   ·   ')));
+        const line = el('div', 'chains', 'COMBOS (the same button again):');
+        for (const c of ch) {
+          const part = el('span', 'chain');
+          part.append(moveGlyph(c), ' × ' + c.length + ' = ' + (weapon ? '×' + fix(c.damage, 2) + ' total' : fix(c.damage, 1) + ' damage'));
+          line.appendChild(part);
+        }
+        out.appendChild(line);
       }
       if (!weapon && m.default_radius) out.appendChild(el('div', 'dim', '* radius 0 in the file: the monster\'s default fist (' + fix(m.default_radius, 1) + ') is used.'));
       if (weapon) out.appendChild(el('div', 'dim', 'With an object in hand, the damage is the object\'s own times this multiplier.'));

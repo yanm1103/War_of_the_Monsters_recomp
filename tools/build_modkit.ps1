@@ -44,7 +44,8 @@ $orient = @('--add-data', "$(Join-Path $repo 'tools\orientpage.html');orient",
             '--add-data', "$(Join-Path $vendor 'three.module.min.js');orient/vendor",
             '--add-data', "$(Join-Path $vendor 'addons\loaders\GLTFLoader.js');orient/vendor/addons/loaders",
             '--add-data', "$(Join-Path $vendor 'addons\controls\OrbitControls.js');orient/vendor/addons/controls",
-            '--add-data', "$(Join-Path $vendor 'addons\utils\BufferGeometryUtils.js');orient/vendor/addons/utils")
+            '--add-data', "$(Join-Path $vendor 'addons\utils\BufferGeometryUtils.js');orient/vendor/addons/utils",
+            '--add-data', "$(Join-Path $vendor 'phosphor\*.svg');orient/vendor/phosphor")   # the move icons of the Moves view (moves.js)
 # o kit no navegador (tools/modkit_web.py): a pagina vai em modkit_web/ (o three.js e o de orient/vendor)
 $web = Get-ChildItem (Join-Path $repo 'tools\modkit_web') -File | ForEach-Object { '--add-data', "$($_.FullName);modkit_web" }
 $web += '--add-data', "$(Join-Path $repo 'tools\anim_ids.json');modkit_web"
@@ -83,5 +84,6 @@ $npLic = if ($np) { Get-ChildItem $np.FullName -Recurse -File | Where-Object { $
 if (-not $npLic) { Fail 'licenca do numpy nao achada no dist-info' }
 Copy-Item $npLic.FullName (Join-Path $lic 'numpy-LICENSE.txt')
 Copy-Item (Join-Path $vendor 'LICENSE') (Join-Path $lic 'three.js-LICENSE.txt')
+Copy-Item (Join-Path $vendor 'phosphor\LICENSE') (Join-Path $lic 'Phosphor-Icons-LICENSE.txt')
 
 Write-Host ("WotM_ModKit.exe: {0:N1} MB  ({1})" -f ((Get-Item $exe).Length / 1MB), $exe)

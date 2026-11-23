@@ -138,7 +138,9 @@ The numbers are the training mode's, read from its `.CHR` (its own in `files/`, 
 the punches (damage, hit window in % of the animation, startup, active and total frames at 60 per second, radius, stun, knockback,
 the bones that hit), the same-button combos, the moves with an object in hand (damage multiplier) and the special states'
 numbers. A select on the left picks what the list holds (Punches, With an object, Other moves, Specials); "every combo step" shows the 10
-positions of the combo. A move of the list plays its animation in the 3D view and marks
+positions of the combo. The buttons are pictures, not words: a white fist in a red ring is HEAVY (Triangle) and in a blue ring LIGHT
+(Square), an arrow up before it means FORWARD + and an arrow down BACK +; the grab and its throw (Other moves) have an open hand. The name
+is the hover text. The icons are Phosphor Icons (`tools/level_editor/web/vendor/phosphor/`, MIT, drawn as CSS masks). A move of the list plays its animation in the 3D view and marks
 its hit window on the frame slider, and draws the move's hit sphere (the radius of the table) at each bone that tests the hit, red while the
 hit window is open and dim outside it; the **hit spheres** box in the header turns that on and off (kept between runs). The spheres
 hang from the empties `loc_<hex id>` that the animation preview's `.glb` carries on the locator bones (`monglb.py`, `locators=True`). The frames come from the animation length of the monster's model divided by the move's speed
