@@ -35,10 +35,11 @@ const COLS = {
   move: ['Move', 'The button (and direction) that starts it. LIGHT is Square, HEAVY is Triangle. The arrow opens the moves that may follow it in the combo.'],
   dmg: ['Damage', 'The damage the move requests. With an object it is a multiplier of the object\'s own damage.'],
   win: ['Hit frames', 'The frames of the move (60 per second, at the move\'s speed, counted from its start) where the game tests the hit. Estimated from the animation.'],
-  total: ['Combo', 'The damage of the whole combo up to this move (with an object: the multipliers added).'],
+  total: ['Total', 'The running total of the combo: the damage of this move plus every move before it in the combo. The Damage column is this move\'s own hit. ' +
+                   '(With an object: the multipliers added.)'],
   sat: ['Length (est.)', 'Estimated from the animation: its length in frames (60 per second) at the move\'s speed. The training mode measures it in a fight and ' +
                   'gets other numbers: the hit pause, the blend back to idle, being hit or blocked and the AI\'s own timing come on top.'],
-  radius: ['Radius', 'Radius of the sphere swept along the bone each frame; a hit needs it to touch a body.'],
+  radius: ['Radius', 'Radius of the sphere swept along the bone each frame; a hit needs it to touch a body. A radius of 0 in the file uses the monster\'s default fist.'],
   stun: ['Stun', 'Above 100 the victim is stunned (cannot act for a moment).'],
   kb: ['Knockback', 'Out / up. Anything other than 0 knocks the victim down.'],
   loc: ['Hits with', 'The bones that test the hit (the fist, the foot, the tail tip...).'],
@@ -134,14 +135,40 @@ function tree(rows, weapon, state, onPick) {
   return { el: root, nodes };
 }
 
+// what the views hold, on hover of the select
+const VIEW_TIPS = {
+  punch: 'The punches of each button and the combos they chain into.',
+  weapon: 'The moves with an object in hand: the damage is the object\'s own times the multiplier.',
+  other: 'Butt slam, ram attack, the grab\'s range and the throw. The damage of the hits inside a grab, of the getting-up attack, the counter window and the taunt ' +
+         'are in the game\'s code for each monster type, not in the .CHR.',
+  special: 'The game\'s own numbers of each special state (the training mode\'s MOVE LIST describes them in words).',
+};
+// The animation each state of Other moves and Specials plays in the 3D view. The ids are the same for every monster (docs/ANIM_IDS.md): the
+// butt slam's drop, the ram's impact, the grab's reach, the throw at the target, crowd control's loop on the ground; any other special plays the
+// special's active loop (160 is its windup, 162 its winddown).
+const STATE_ANIM = { 'BUTT SLAM': 262, 'RAM ATTACK': 267, 'GRAB': 170, 'GRAB: THROW': 55, 'CROWD CONTROL': 164 };
+const animOfState = (s, view) => STATE_ANIM[s.name] || (view === 'special' ? 161 : 0);
+
+// What holds the middle column and the 3D view (the veil over them) while something loads: counts the jobs running
+let busyN = 0;
+function busy(d) {
+  busyN = Math.max(0, busyN + d);
+  const o = document.querySelector('.movesview');
+  if (o) o.classList.toggle('busy', busyN > 0);
+}
+async function withBusy(p) {
+  busy(1);
+  try { return await p; } finally { busy(-1); }
+}
+
 // the picked move's numbers, big (the middle column): one card each, with what it is on hover
-function statCards(r, weapon, names, defaultRadius, via) {
+function statCards(r, weapon, names, via) {
   const tm = r.timing;
   const cards = [
     [weapon ? 'Damage ×' : 'Damage', COLS.dmg[1], weapon ? '×' + fix(r.mult, 2) : fix(r.damage, 1)],
     [COLS.win[0], COLS.win[1], hitFrames(r), tm ? 'of ' + tm.total + ' · ' + fix(r.win_start * 100) + '–' + fix(r.win_end * 100) + '% of the animation' : 'of the animation (no model)'],
     [COLS.sat[0], COLS.sat[1], tm ? String(tm.total) : '-', tm ? 'frames, at ×' + fix(r.speed, 2) : 'no model'],
-    [COLS.radius[0], COLS.radius[1], fix(r.radius, 1) + (r.radius_default ? '*' : ''), r.radius_default ? 'the default fist: ' + fix(defaultRadius, 1) : ''],
+    [COLS.radius[0], COLS.radius[1], fix(r.radius, 1), r.radius_default ? 'the monster\'s default fist' : ''],
     [COLS.stun[0], COLS.stun[1], fix(r.stun), r.stun > 100 ? 'stuns' : ''],
     [COLS.kb[0], COLS.kb[1], (r.kb_out || r.kb_up) ? fix(r.kb_out) + ' / ' + fix(r.kb_up) : '-', (r.kb_out || r.kb_up) ? 'out / up: knocks down' : ''],
     ['Hit pause', 'How long the game freezes the two monsters on a hit.', fix(r.pause) + ' ms'],
@@ -220,13 +247,16 @@ function fieldTable(s, own, save, open) {
 export async function movesPage(page, args, hooks = {}) {
   // what the page shows, kept over a reload: the view, the picked move (its path in the combo tree), the open arrows
   const state = { view: 'punch', pickPath: null, open: new Set(), seeded: false, sp: null, note: null, scroll: [0, 0] };
+  // empties the page but for the loading veil (openMoves puts it there)
+  const clear = () => { for (const c of [...page.children]) if (!c.classList.contains('mvveil')) c.remove(); };
   async function load() {
-    page.innerHTML = '';
-    page.appendChild(el('div', 'dim', 'Reading the move table…'));
-    const m = await kit.api('do/monster_moves', args);
-    page.innerHTML = '';
-    if (m.error) { page.appendChild(el('div', 'dim', 'No move table: ' + m.error + '.')); return; }
-    if (m.note) { page.appendChild(el('div', 'dim', m.note)); return; }
+    clear();
+    busy(1);
+    let m;
+    try { m = await kit.api('do/monster_moves', args); } finally { busy(-1); }
+    clear();
+    if (m.error) { page.appendChild(el('div', 'dim msg', 'No move table: ' + m.error + '.')); return; }
+    if (m.note) { page.appendChild(el('div', 'dim msg', m.note)); return; }
     await draw(m);
   }
 
@@ -240,7 +270,7 @@ export async function movesPage(page, args, hooks = {}) {
 
     // middle column, top: where the numbers come from, the copy button, the warnings
     if (!m.own && hooks.extract) {
-      const b = button('Give it its own .CHR to edit', async () => { b.disabled = true; await hooks.extract(); load(); });
+      const b = button('Give it its own .CHR to edit', async () => { b.disabled = true; await withBusy(hooks.extract()); load(); });
       b.title = 'Extract stats: copies the base type\'s .CHR and .AIC to this monster\'s files (the same as Stats & sounds)';
       mid.appendChild(b);
     }
@@ -255,8 +285,7 @@ export async function movesPage(page, args, hooks = {}) {
     }
     const noteBox = el('div');
     const edit = el('div', 'moveedit');
-    const intro = el('div', 'dim mvfoot', 'From ' + m.label + (m.own ? ' (this monster\'s own .CHR: the numbers can be changed)' : ' (the base type\'s .CHR)') +
-      '. The numbers are the game\'s; the frames are an estimate' + (m.frames ? '' : ' (no model: no frames)') + ' at 60 per second. A move on the left plays in the 3D view.');
+    const intro = el('div', 'dim mvfoot', 'From ' + m.label + (m.own ? ': this monster\'s own .CHR' : ': the base type\'s .CHR') + (m.frames ? '' : '. No model: no frames.'));
     mid.append(noteBox, edit, intro);
 
     // left column: the view, then the list
@@ -271,26 +300,31 @@ export async function movesPage(page, args, hooks = {}) {
     // the animation plays at the move's speed, so its frames are the game's (viewer.js); the window and the sphere come with it
     const hitOf = r => [r.timing ? [r.win_start, r.win_end, r.timing.start, r.timing.start + r.timing.active] : [r.win_start, r.win_end],
                         { locators: r.locators, radius: r.radius }, r.speed];
-    const pick = (r, path, via) => { state.pickPath = path; playMove(r.anim, ...hitOf(r)); drawEdit(r, path, via); };
+    // the middle column fills at once; the 3D view plays the move, and the veil holds both until it is there
+    const pick = (r, path, via) => { state.pickPath = path; drawEdit(r, path, via); return withBusy(playMove(r.anim, ...hitOf(r))); };
+    // a special or an other move plays the animation the game uses for it (no hit window or sphere)
+    const pickState = (s, view) => { state.sp = s.name; drawKey(s); return withBusy(playMove(animOfState(s, view), null, null, 1)); };
     // writes a number and draws the page again from the file (the list, the frames, the warnings follow it)
     async function reread(note) {
       state.note = note;
       state.scroll = [out.scrollTop, mid.scrollTop];
-      page.innerHTML = '';
-      const m2 = await kit.api('do/monster_moves', args);
-      if (m2.error) { page.appendChild(el('div', 'dim', 'No move table: ' + m2.error + '.')); return; }
+      clear();
+      busy(1);
+      let m2;
+      try { m2 = await kit.api('do/monster_moves', args); } finally { busy(-1); }
+      if (m2.error) { page.appendChild(el('div', 'dim msg', 'No move table: ' + m2.error + '.')); return; }
       await draw(m2);
       out.scrollTop = state.scroll[0];
       mid.scrollTop = state.scroll[1];
     }
     async function saveMove(r, f, label, inp, status) {
       status.className = 'autosave busy'; status.textContent = 'Saving…';
-      const res = await kit.api('do/monster_move_set', { ...args, weapon: !!r.weapon, pos: r.pos, ptype: r.ptype, field: f, value: inp.value });
+      const res = await withBusy(kit.api('do/monster_move_set', { ...args, weapon: !!r.weapon, pos: r.pos, ptype: r.ptype, field: f, value: inp.value }));
       if (res.error) { status.className = 'autosave err'; status.textContent = res.error.split(f).join(label); inp.value = fix(r[f], 3); return; }
       reread('✓ Saved: ' + label + ' ' + fix(res.old, 3) + ' → ' + fix(res.new, 3) + ' (Build mod puts it in the game)');
     }
     async function saveKey(f, inp) {
-      const res = await kit.api('do/monster_key_set', { ...args, key: f.key, off: f.off, value: inp.value });
+      const res = await withBusy(kit.api('do/monster_key_set', { ...args, key: f.key, off: f.off, value: inp.value }));
       if (res.error) { inp.value = String(f.value); keyNote(res.error, true); return; }
       reread('✓ Saved: ' + f.label + ' ' + fix(res.old, 3) + ' → ' + fix(res.new, 3) + ' (Build mod puts it in the game)');
     }
@@ -313,8 +347,7 @@ export async function movesPage(page, args, hooks = {}) {
       });
       h.append('step ' + r.pos);
       edit.appendChild(h);
-      edit.appendChild(statCards(r, !!r.weapon, names, m.default_radius, via));
-      if (doesNothing(r)) edit.appendChild(el('div', 'dim', 'This step does no damage: it is a filler slot of the .CHR (no bone tests a hit), not a move the combo plays.'));
+      edit.appendChild(statCards(r, !!r.weapon, names, via));
       if (!m.own) { edit.appendChild(notOwn()); return; }
       const grid = el('div', 'editgrid');
       const status = el('div', 'autosave', 'Changes save by themselves.');
@@ -354,37 +387,30 @@ export async function movesPage(page, args, hooks = {}) {
       out.innerHTML = '';
       noteBox.innerHTML = '';
       const v = view.value;
+      view.title = VIEW_TIPS[v];
       if (v === 'special' || v === 'other') {
         edit.innerHTML = '';
-        setMoveHit(null, null);   // these states have no animation of their own here: no hit window or sphere of the last move
         const list = v === 'special' ? m.specials : m.others;
-        if (!list.length) { out.appendChild(el('div', 'dim', v === 'special' ? 'No special move key in this .CHR.' : 'No other moves in this .CHR.')); return; }
+        if (!list.length) { out.appendChild(el('div', 'dim', v === 'special' ? 'No special move key in this .CHR.' : 'No other moves in this .CHR.')); setMoveHit(null, null); return; }
         const keep = list.find(s => s.name === state.sp) || list[0];
         const rows = [];
         for (const s of list) {
           const d = el('div', 'pickrow' + (s === keep ? ' on' : ''));
           if (/^GRAB/.test(s.name)) d.appendChild(icon('hand', 'grab'));   // the grab and its throw: an open hand
           d.append(s.name);
-          d.onclick = () => { state.sp = s.name; for (const o of rows) o.classList.toggle('on', o === d); drawKey(s); };
+          d.onclick = () => { for (const o of rows) o.classList.toggle('on', o === d); pickState(s, v); };
           rows.push(d);
           out.appendChild(d);
         }
-        out.appendChild(el('div', 'dim', v === 'special'
-          ? 'The game\'s own numbers of each special state (the training mode\'s MOVE LIST describes them in words).'
-          : 'Butt slam, ram attack, the grab\'s range and the throw. The damage of the hits inside a grab, of the getting-up attack, the counter window and the taunt are in the game\'s code for each monster type, not in the .CHR.'));
-        drawKey(keep);
+        pickState(keep, v);   // the first one (or the one picked before) plays at once
         if (state.note) { keyNote(state.note, false); state.note = null; }
         return;
       }
       const weapon = v === 'weapon';
       const rows = weapon ? m.swipes : m.punches;
-      if (!rows.length) { out.appendChild(el('div', 'dim', 'No moves of this kind in the .CHR.')); edit.innerHTML = ''; return; }
+      if (!rows.length) { out.appendChild(el('div', 'dim', 'No moves of this kind in the .CHR.')); edit.innerHTML = ''; setMoveHit(null, null); return; }
       const T = tree(rows, weapon, state, pick);
       out.appendChild(T.el);
-      out.appendChild(el('div', 'dim', 'Each button starts a combo; the arrow opens the moves that may follow a move (the same button first). ' +
-        'The last column adds the damage up along the combo.'));
-      if (!weapon && m.default_radius) out.appendChild(el('div', 'dim', 'A radius marked * is 0 in the file: the monster\'s default fist (' + fix(m.default_radius, 1) + ') is used.'));
-      if (weapon) out.appendChild(el('div', 'dim', 'With an object in hand, the damage is the object\'s own times this multiplier.'));
       // the move picked before (this view's), still on after a change; else the first one, so the 3D view plays something
       const keep = state.pickPath && state.pickPath.startsWith(weapon ? 'w:' : 'p:') && T.nodes.get(state.pickPath);
       if (keep) { keep.line.classList.add('on'); drawEdit(keep.r, state.pickPath, keep.via); setMoveHit(...hitOf(keep.r)); } else T.nodes.values().next().value.line.click();
@@ -412,15 +438,20 @@ export async function openMoves({ args, group, g, hooks = {}, restore }) {
   const page = el('div', 'mvlm');
   const right = el('div', 'mvright');
   const v = el('div', 'v3d'), ab = el('div');
-  right.append(v, ab);
+  // the veils: a spinner over the middle column and over the 3D view (the list stays usable), shown while the view is `busy`
+  right.append(v, ab, el('div', 'mvveil'));
+  page.appendChild(el('div', 'mvveil'));
   grid.append(page, right);
   ov.append(head, grid);
+  busyN = 0;
   document.body.appendChild(ov);
+  busy(1);
   // Escape closes it, unless a dialog of the kit is on top
   const onKey = e => { const md = document.getElementById('modal'); if (e.key === 'Escape' && !(md && md.style.display === 'flex')) close(); };
   document.addEventListener('keydown', onKey);
   done.then(() => { document.removeEventListener('keydown', onKey); ov.remove(); if (restore) restore(); });
   await stage(v, ab, group, g, { moves: true });   // the animation bar is ready before the first move plays
+  busy(-1);
   await movesPage(page, args, hooks);
   return done;
 }

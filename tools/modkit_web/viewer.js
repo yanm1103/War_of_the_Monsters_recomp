@@ -8,7 +8,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 let renderer = null, scene, camera, controls, current = null, box = null, token = 0, ro = null, grid = null;
 const loader = new GLTFLoader();
 const clock = new THREE.Clock();
-const play = { mixer: null, dur: 0, t: 0, playing: true, speed: 1, rate: 1, onFrame: null };   // speed: the slow-motion choice; rate: the move's own speed
+const play = { mixer: null, dur: 0, t: 0, playing: true, speed: 1, rate: 1, id: 0, onFrame: null };   // speed: the slow-motion choice; rate: the move's own speed
 const FPS = 60;
 
 // The game's look (as the model museum and the port draw it): texture * vertex color * (ambient + directional * max(0, n.L)),
@@ -375,10 +375,19 @@ export async function animBar(el, group, stillUrl, opts = {}) {
     // speed: the move's own (frames and playback follow the game's)
     async play(id, win, spheres, speed) {
       const k = firstK.get(id);
-      if (k === undefined) return false;
       hit = null;   // the old window must not show on the new animation while it loads
+      if (k === undefined) {   // the model has no such animation: it stands still rather than keep playing the last one
+        sel.value = '';
+        play.rate = 1;
+        play.id = 0;
+        await load('');
+        markHit();
+        clearSpheres();
+        return false;
+      }
       sel.value = String(k);
       play.rate = speed > 0 ? speed : 1;
+      play.id = id;
       await load(String(k));
       hit = win || null;
       markHit();
@@ -402,6 +411,6 @@ export async function animBar(el, group, stillUrl, opts = {}) {
 }
 window.kitViewer = {
   shown: () => !!current && !!box && box.isConnected,
-  playing: () => ({ dur: play.dur, t: play.t, mixer: !!play.mixer }),
+  playing: () => ({ dur: play.dur, t: play.t, mixer: !!play.mixer, id: play.id, rate: play.rate }),   // (for tests)
   spheres: () => (sph ? sph.meshes.map(m => ({ visible: m.visible, color: m.material.color.getHex(), r: m.scale.x, w: m.getWorldPosition(new THREE.Vector3()).toArray() })) : []),
 };

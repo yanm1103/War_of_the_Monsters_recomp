@@ -509,15 +509,22 @@ details.special summary { cursor: pointer; font: 600 12px var(--ui); letter-spac
 .mvhead h3 { flex: 1; margin: 0; font: 600 16px var(--ui); letter-spacing: .26em; text-transform: uppercase; color: var(--orange); }
 .mvgrid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 36%); gap: 14px; }
 .mvlm { min-height: 0; min-width: 0; display: grid; grid-template-columns: minmax(350px, .75fr) minmax(0, 1.25fr); gap: 16px; }
-.mvlm > .dim:only-child { grid-column: 1 / -1; }
-.mvleft { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.mvlm > .dim.msg { grid-column: 1 / -1; }
+.mvleft { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .mvleft .movesout { flex: 1; overflow: auto; }
 .mvleft table.moves { font-size: 14px; }
 .mvleft table.moves td { padding: 7px 10px; }
 .mvbar { flex: none; }
-.mvmid { overflow: auto; min-height: 0; min-width: 0; padding-right: 6px; }
+.mvmid { grid-column: 2; grid-row: 1; overflow: auto; min-height: 0; min-width: 0; padding-right: 6px; }
 .mvmid > button { margin-bottom: 8px; }
-.mvright { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.mvright { position: relative; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+/* the loading veil over the middle column and the 3D view: blocks them and shows a spinner while the view is busy (moves.js busy) */
+.mvveil { display: none; z-index: 20; align-items: center; justify-content: center; border-radius: 10px; background: rgba(7, 8, 11, .62); cursor: progress; }
+.movesview.busy .mvveil { display: flex; }
+.mvveil::before { content: ''; width: 38px; height: 38px; border-radius: 50%; border: 3px solid var(--line2); border-top-color: var(--orange); animation: mvspin .8s linear infinite; }
+@keyframes mvspin { to { transform: rotate(360deg); } }
+.mvright > .mvveil { position: absolute; inset: 0; }
+.mvlm > .mvveil { grid-column: 2; grid-row: 1; }
 .mvright .v3d { flex: 1 1 auto; height: auto; min-height: 0; }
 .mvfoot { margin-top: 18px; }
 .mvcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-bottom: 16px; }
@@ -551,7 +558,7 @@ details.special summary { cursor: pointer; font: 600 12px var(--ui); letter-spac
 .trow .tn { flex: none; width: 64px; text-align: right; white-space: nowrap; }
 .trow .ttg { flex: none; width: 18px; text-align: center; color: var(--orange2); cursor: pointer; user-select: none; }
 .trow .ttg.none { visibility: hidden; cursor: default; }
-.trow .tstep { color: var(--dim); font-size: 11.5px; margin-left: 2px; white-space: nowrap; }
+.trow .tstep { color: var(--fg); font-size: 12.5px; margin-left: 2px; white-space: nowrap; }
 .trow.zero { opacity: .45; }
 .editgrid label.then { display: flex; align-items: center; white-space: nowrap; }
 .editgrid label.then .mvglyph { margin-right: 0; }

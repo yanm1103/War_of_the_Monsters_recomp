@@ -154,7 +154,8 @@ hit window as two fractions of the animation (0 to 1), which are the fields. Wit
 under the cards that save by themselves into that file, with the limits the game can take, and so are the six delays that say which move may
 follow it in the combo (**Combo: what may follow**, ms, 0 = none); the disc's `.CHR` is never edited. The view **Other moves** has the butt slam
 (stamina and the shockwave rings), the ram attack, the grab's range and the throw's damage, with the training mode's descriptions, and **Specials**
-the numbers of the special states, all of them fields too (the list holds one entry per state; their animations are not played, so no sphere is drawn). The damage of the hits inside a grab, the getting-up attack, the counter window and the
+the numbers of the special states, all of them fields too (the list holds one entry per state, and each plays the animation the game uses for it in the 3D view, with no hit window or sphere: the butt slam's drop, the ram's impact, the grab's reach, the throw, the crowd control loop and, for any other special, its active loop; the ids are the same for every monster, see `ANIM_IDS.md`).
+A veil with a spinner holds the middle column and the 3D view while something loads (the table, an animation, a saved change). The damage of the hits inside a grab, the getting-up attack, the counter window and the
 taunt are in the game's code for each monster type, not in the `.CHR`, so the kit does not show them. A box lists the moves of
 the file that cannot work (a hit window outside 0..1, an animation the model does not have, no bone to test the hit, a combo step that is
 empty). `python tools/modkit.py moves <monster>` and `moves <mod> <id> [--json]` print the same tables and the warnings, and
