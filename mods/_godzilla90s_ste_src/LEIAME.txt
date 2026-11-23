@@ -6,7 +6,8 @@ tools/ste/ste_clips.py <iso> Godzilla90s.cmp (ID_MAP do 2000 + PROFILES['Godzill
 (0.988 x altura 98.6 / 99.2).
 O mod: modkit.py monster new "Godzilla 90s" godzilla90s_ste --base togera --costume 0 --name "GODZILLA 90S" --ai;
 modkit.py monster rig ... godzilla90s_ste_rig.glb; textura lizard0_t0013.png = godzilla90s_ste.png x0.62 (como no 2000);
-retrato = o do Godzilla (prototype) (mods/Godzilla, que e o 90s); monster portrait ... portrait.png.
+retrato do HUD = render do proprio modelo, como no 2000 (portrait_render.py e portrait_compose.py de mods/_godzilla2000_ste_src),
+com o portrait_shot.json daqui (rugido a208 no quadro 0, boca aberta mais 22 graus); monster portrait ... portrait.png.
 Narrador: narrator/godzilla_90s.mp3 do mod Godzilla copiado como narrator/godzilla_90s_ste.mp3. Logo: logo_source.png centrado num
 512x256 como os logos do jogo (caixa de 80% x 60%).
 Sons: no STE o Godzilla 90s usa as mesmas amostras do 2000 (GODZILLA90 * = amostras 419-431, 445, 446); entram os mesmos sons:

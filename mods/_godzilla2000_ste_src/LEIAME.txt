@@ -2,7 +2,11 @@ Mod "Godzilla 2000" (custom godzilla_ste): o Godzilla 2000 de Godzilla: Save the
 .dae/.png: tools/ste/export_dae.py (malha do Godzilla2k.cmp). rig.glb: tools/retarget.py <LIZARD0.glb> godzilla2000_ste.dae
 tools/rigmaps/ste_godzilla2000.json rig.glb --size 0.988 --own clips.json, com clips.json de tools/ste/ste_clips.py (ID_MAP).
 O mod: modkit.py monster new "Godzilla 2000" godzilla_ste --base togera --costume 0 --name "GODZILLA 2000" --ai;
-modkit.py monster rig ... godzilla2000_ste_rig.glb; textura lizard0_t0013.png x0.62; retrato do Godzilla 2000.
+modkit.py monster rig ... godzilla2000_ste_rig.glb; textura lizard0_t0013.png x0.62.
+Retrato do HUD: render do proprio modelo (rig.glb) no Blender, no estilo dos retratos do disco (cabeca rugindo em 3/4 virada para a
+direita, contorno branco, metade direita "rage", gravado de ponta-cabeca): blender -b -P portrait_render.py -- godzilla2000_ste_rig.glb
+<saida> portrait_shot.json (taunt a92 no quadro 60, boca aberta mais 30 graus), depois portrait_compose.py <saida>_final.png
+portrait.png e modkit.py monster portrait "Godzilla 2000" godzilla_ste portrait.png.
 Narrador: o do Godzilla 2000 do mod Godzilla (narrator/godzilla_2000.mp3 copiado como narrator/godzilla_2000_ste.mp3).
 Sons: ste_sounds.py <iso> <pasta files/ da pasta de trabalho> sounds (tools/ste/ste_sound.py); sounds/ = os WAVs que ele grava
 (lizard_s_NNN = banco proprio LIZARD_S, genamb_s_NNN = banco comum proprio GENAMB_S), depois modkit.py pack "Godzilla 2000".
