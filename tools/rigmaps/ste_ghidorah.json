@@ -1,0 +1,47 @@
+{
+  "comment": "King Ghidorah as stored in Godzilla: Save the Earth (PS2), on Raptros: Biped with three necks (L, M, R: Neck1 to Neck5, Head, Jaw), the wings on the arm chain (Clavicle, UpperArm, Forearm; the Hand is unskinned) hanging off Neck1 M, one tail of 13, two toes per foot. Raptros's wing (bone33 shoulder, bone32, bone31 wrist, finger bases 30/29/28) drives the wing; its neck (bone18, bone17, head bone16) drives each of the three necks; its small arms drive nothing. The jaws and toes have no source and only move in the STE's own clips.",
+  "bones": {
+    "Bip01_Pelvis": {"from": "bone15", "move": true},
+    "Bip01_Spine": {"from": "bone45"},
+    "Bip01_Spine1": {"from": "bone43"},
+    "Bip01_L_Clavicle": {"from": "bone33"},
+    "Bip01_L_UpperArm": {"from": "bone32"},
+    "Bip01_L_Forearm": {"from": "bone31"},
+    "Bip01_L_Hand": {"from": "bone28"},
+    "Bip01_R_Clavicle": {"from": "bone42"},
+    "Bip01_R_UpperArm": {"from": "bone41"},
+    "Bip01_R_Forearm": {"from": "bone40"},
+    "Bip01_R_Hand": {"from": "bone37"},
+    "Bip01_L_Thigh": {"from": "bone5"},
+    "Bip01_L_Calf": {"from": "bone3"},
+    "Bip01_L_Foot": {"from": "bone2", "level": true},
+    "Bip01_R_Thigh": {"from": "bone9"},
+    "Bip01_R_Calf": {"from": "bone7"},
+    "Bip01_R_Foot": {"from": "bone6", "level": true}
+  },
+  "chains": [
+    {"joints": ["Bip01_Neck1_M", "Bip01_Neck2_M", "Bip01_Neck3_M", "Bip01_Neck4_M", "Bip01_Neck5_M", "Bip01_Head_M"],
+     "from": ["bone18", "bone17", "bone16"]},
+    {"joints": ["Bip01_L_Neck1", "Bip01_L_Neck2", "Bip01_L_Neck3", "Bip01_L_Neck4", "Bip01_L_Neck5", "Bip01_L_Head"],
+     "from": ["bone18", "bone17", "bone16"]},
+    {"joints": ["Bip01_R_Neck1", "Bip01_R_Neck2", "Bip01_R_Neck3", "Bip01_R_Neck4", "Bip01_R_Neck5", "Bip01_R_Head"],
+     "from": ["bone18", "bone17", "bone16"]},
+    {"joints": ["Bip01_Tail", "Bip01_Tail1", "Bip01_Tail2", "Bip01_Tail3", "Bip01_Tail4", "Bip01_Tail5", "Bip01_Tail6",
+                "Bip01_Tail7", "Bip01_Tail8", "Bip01_Tail9", "Bip01_Tail10", "Bip01_Tail11", "Bip01_Tail12"],
+     "from": ["bone14", "bone13", "bone12", "bone11", "bone10"]}
+  ],
+  "keep": ["Bip01_L_Jaw", "Bip01_Jaw_M", "Bip01_R_Jaw", "Bip01_L_Toe0", "Bip01_L_Toe01", "Bip01_R_Toe0",
+           "Bip01_R_Toe01"],
+  "locators": {
+    "head": {"joint": "Bip01_Head_M", "at": ["Bip01_Head_M"]},
+    "mouth": {"joint": "Bip01_Head_M", "at": ["Bip01_Jaw_M"]},
+    "look": {"joint": "Bip01_Head_M", "at": ["Bip01_Jaw_M"]},
+    "hand_l": {"joint": "Bip01_L_Head", "at": ["Bip01_L_Jaw"]},
+    "grab": {"joint": "Bip01_L_Head", "at": ["Bip01_L_Jaw"]},
+    "hand_r": {"joint": "Bip01_R_Head", "at": ["Bip01_R_Jaw"]},
+    "hold": {"joint": "Bip01_R_Head", "at": ["Bip01_R_Jaw"]},
+    "foot_l": {"joint": "Bip01_L_Foot", "at": ["Bip01_L_Foot"]},
+    "foot_r": {"joint": "Bip01_R_Foot", "at": ["Bip01_R_Foot"]},
+    "chest": {"joint": "Bip01_Spine1", "at": ["Bip01_Spine1"]}
+  }
+}

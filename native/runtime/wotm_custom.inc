@@ -224,8 +224,11 @@ namespace wotm_custom
             std::string n = cu->name;
             if (n.size() > 11)   // "GOLIATH PRIME" -> "goliath": corta na ultima palavra que cabe
             {
-                const size_t sp = n.rfind(' ', 11);
-                n = n.substr(0, sp != std::string::npos && sp > 0 ? sp : 11);
+                const size_t sp = n.rfind(' ', 11), last = n.rfind(' ');
+                if (sp != std::string::npos && sp < 5 && n.size() - last - 1 <= 11)
+                    n = n.substr(last + 1);   // "KING GHIDORAH" -> "ghidorah": a 1a palavra curta nao diz quem e
+                else
+                    n = n.substr(0, sp != std::string::npos && sp > 0 ? sp : 11);
             }
             shown.clear();
             for (char ch : n)

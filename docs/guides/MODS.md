@@ -456,7 +456,8 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
 ```
 
 - `id`: lowercase letters, digits and `_` (without it, the folder name). It is what `WOTM_MATCH` accepts (`WOTM_MATCH=goliath,3,1`).
-- `name`: what the select screen and the HUD show. The HUD has 11 letters: it uses the last word that fits, in lowercase ("goliath").
+- `name`: what the select screen and the HUD show. The HUD has 11 letters: it uses the last word that fits, in lowercase ("goliath"), or
+  the name's last word when the first one has under 5 letters ("KING GHIDORAH" -> "ghidorah").
   The custom's skins show it too (the skin's own `name` is for the select screen). The game keeps one HUD name per type, set from
   the monster the camera follows: with it on a custom, the custom's name; on a monster of the game (any costume or skin of its
   own), the disc name.

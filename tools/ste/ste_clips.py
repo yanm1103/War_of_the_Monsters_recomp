@@ -24,6 +24,9 @@ FPS = 60.0
 
 LAID_UP = {'turn': [90, 0, 0], 'shift': [0, 62.3, 15.1]}        # de costas (80, 86)
 LAID_DOWN = {'turn': [-90, 0, 0], 'shift': [0, -63.3, 17.5]}    # de bruços (81, 85)
+# Raptros (base que voa), medido do mesmo jeito: desvio medio 2,6 (de costas) e 1,5 (de bruços) em 74 ossos
+LAID_UP_RAPTROS = {'turn': [90, 0, 0], 'shift': [0, 34.4, 6.8]}
+LAID_DOWN_RAPTROS = {'turn': [-90, 0, 0], 'shift': [0, -30.9, 15.8]}
 
 NAT = {'settle': True, 'maxtravel': 40.0}   # golpe inteiro: sem a deriva da raiz, avanco ate 40 unidades
 
@@ -195,6 +198,27 @@ PROFILES = {
         23: ('SPIN_PUNCH', False, None, dict(NAT, face={'from': 0.72})),           # Spin Punch (Up A), 24-44% e 52-72%
         24: ('TAILSTAB_STRONG', False, None, dict(NAT, face={'from': 0.37})),      # Tail Stab Strong (Left B), 29-37%
         25: ('KICK_SWEEP', False, None, dict(NAT, face={'from': 0.63})),           # Sweep Kick (Down X), 23-63%
+    },
+    # King Ghidorah, sobre o Raptros (voa): o caido e o do Raptros (LAID_*_RAPTROS); sem bracos, pega e joga com as bocas. Os ids
+    # que o STE nao tem (o voo 110-114, o agarrar, o pisao) ficam com o Raptros retargetado.
+    'Ghidorah': {
+        130: ('ROAR', False, None),
+        71: ('BLOCKHIT_F_STAND', False, None),
+        77: ('BLOCKHIT_F_STAND', False, None),
+        80: ('KOED_FACEUP_IDLE', False, None, {'laid': LAID_UP_RAPTROS}),
+        81: ('KOED_FACEDOWN_IDLE', False, None, {'laid': LAID_DOWN_RAPTROS}),
+        85: ('KOED_FACEDOWN_IDLE', False, None, {'laid': LAID_DOWN_RAPTROS, 'still': True}),
+        86: ('KOED_FACEUP_IDLE', False, None, {'laid': LAID_UP_RAPTROS, 'still': True}),
+        120: ('KOED_SLUMP', False, None),
+        52: ('THROW_1HAND', False, 1.0, {'settle': True, 'knots': [(0, 0), (0.45, 0.50), (1, 1)]}),
+        54: ('THROW_1HAND', False, 0.4, {'settle': True, 'knots': [(0, 0), (0.50, 0.50), (1, 1)]}),
+        55: ('THROW_OBJECT', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.37, 0.25), (1, 1)]}),
+        56: ('THROW_OBJECT', False, 40 / 60.0, {'settle': True, 'knots': [(0, 0), (0.37, 0.25), (1, 1)]}),
+        172: ('LIFTING_IDLE_OBJECT', True, None),
+        170: None, 185: None, 240: None, 241: None,
+        160: None, 161: None,
+        10: None, 11: None, 12: None, 13: None, 14: None, 15: None, 16: None, 17: None, 18: None, 19: None, 20: None,
+        21: None, 22: None, 23: None, 24: None,
     },
 }
 

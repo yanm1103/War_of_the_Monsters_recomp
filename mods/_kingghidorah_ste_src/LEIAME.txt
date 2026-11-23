@@ -1,0 +1,20 @@
+Mod "King Ghidorah" (custom ghidorah_ste): o King Ghidorah de Godzilla: Save the Earth sobre o Raptros, que da o voo (StateFly:
+decolar 30, bater asas 113/114, planar 110/111) e o resto do que o STE nao tem. Mesmo esquema do Mechagodzilla 3
+(mods/_mechagodzilla3_ste_src/LEIAME.txt), com outro tipo base. ISO do STE: a mesma dos outros; abaixo <iso>.
+
+Corpo: tools/ste/export_dae.py <iso> Ghidorah.cmp <pasta> --name ghidorah_ste (.dae/.png aqui). Biped com tres pescocos (L, M, R:
+Neck1 a Neck5, Head, Jaw), asas na cadeia do braco (Clavicle, UpperArm, Forearm; a Hand nao tem pele) penduradas no Neck1 M, uma
+cauda de 13, dois dedos por pe.
+Esqueleto: tools/rigmaps/ste_ghidorah.json. A asa do Raptros (bone33 ombro, bone32, bone31 pulso, bases dos dedos 30/29/28) move a
+asa; o pescoco dele (bone18, bone17, cabeca bone16) move os tres pescocos; os bracinhos dele nao movem nada. Mandibulas e dedos dos
+pes so se mexem nas animacoes do STE. Boca (mouth) na mandibula do meio; pegar/segurar (grab/hold, hand_l/hand_r) nas bocas das
+cabecas laterais.
+Animacoes: tools/ste/ste_clips.py <iso> Ghidorah.cmp clips.json (ID_MAP do 2000 + PROFILES['Ghidorah']), depois tools/retarget.py
+<DRAGON0.glb> ghidorah_ste.dae tools/rigmaps/ste_ghidorah.json rig.glb --height 142.5 --own clips.json --base disc/MON/DRAGON0.NGP.
+--height 142.5: a escala dos outros mods do STE (1,183 unidade do jogo por unidade do STE; o Ghidorah tem 120,5 no STE), o dobro
+do Raptros (69). O caido (80, 81, 85, 86) usa o "laid" do Raptros (LAID_*_RAPTROS: fim do 85/86 girado Rx(+-90) contra o 1o quadro
+do 87/88, como foi medido no Togera). Os golpes do Raptros (10-25) e o especial dele ficam por enquanto, retargetados.
+O mod: modkit.py monster new "King Ghidorah" ghidorah_ste --base raptros --costume 0 --name "KING GHIDORAH" --ai; modkit.py monster
+mesh export ... (DRAGON0.glb); monster rig ... ghidorah_ste_rig.glb; textura dragon0_t0013.png = ghidorah_ste.png x0.62 (como nos
+outros; o monster rig grava de novo a textura crua: refazer depois dele); modkit.py pack "King Ghidorah".
+monster.json: "camera" do Raptros a 150% (a 100% o corpo enche a tela; a 200% fica longe no chao).

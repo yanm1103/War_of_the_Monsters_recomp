@@ -1,0 +1,10 @@
+{
+  "id": "ghidorah_ste",
+  "name": "KING GHIDORAH",
+  "base": "raptros",
+  "costume": 0,
+  "files": true,
+  "ai": true,
+  "costumeName": "KING GHIDORAH",
+  "camera": { "from": "raptros", "scale": 150 }
+}
