@@ -181,8 +181,8 @@ the `wotm_mainmenu.inc` panel, pause item in `wotm_pausemenu.inc`, menu flow in 
   animation point. Before the window opens, the fist sphere is drawn dimmed at each locator of the hit, in the owner's color, for any monster.
   **With an object in hand** (`Monster::m_pickup`), the table becomes the one for object attacks (`StateBatSwipe`, the `SwipeConfig` at
   Monster +0xAE90 +0x20 + pos·0x480 + tipo·0xC0, same buttons and same layout start; position +0x2D48, type +0x2D4C, window +0x2DC0):
-  WEAPON HIT n, and the damage column carries the object's damage multiplier ("x1.5": +0x90 when the object is a bat, `Pickup` +0xA0 == 8,
-  `collisTestBatAttack`; +0xB0 for the others, `getDamageMod`). Specials are not included. Log: `[treino] soco slot ...` or
+  WEAPON HIT n, and the damage column carries the object's damage multiplier ("x0.7": config +0x90 for any object; `collisTestBatAttack` reads it
+  for a bat, and `getDamageMod` of the others reads state +0xB0, which is the same field). Specials are not included. Log: `[treino] soco slot ...` or
   `[treino] golpe com objeto slot ...` for the first 12 readings before the window.
   Picture: `docs/screenshots/2026-10-25/2026-10-25_modo_treino_tabela_socos.png`.
 - **MOVE LIST** (pause item, `wotm_mainmenu.inc`): native panel with P1's monster move list, built from the configs in RAM

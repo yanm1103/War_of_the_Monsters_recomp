@@ -754,8 +754,9 @@ namespace wotm_train
 
     // Golpes com objeto (StateBatSwipe, Monster +0xAE90): configs em +0x20 + pos*0x480 + tipo*0xC0 (SwipeConfig de 0xC0, o mesmo
     // comeco de layout da PunchConfig), pos +0x2D48, tipo +0x2D4C, inCollisionWindow +0x2DC0. O tipo vem do mesmo curMappedAction do
-    // soco (StateBatSwipe::transitionOK). O dano e um multiplicador do dano do objeto (LevelPickups::s_info): +0x90 quando o objeto e
-    // um bastao (Pickup +0xA0 == 8, collisTestBatAttack), +0xB0 nos outros (getDamageMod, pelo collisTestCloseRangeAttack).
+    // soco (StateBatSwipe::transitionOK). O dano e um multiplicador do dano do objeto (LevelPickups::s_info), na config +0x90 para
+    // qualquer objeto: o bastao (collisTestBatAttack) o le dali e o getDamageMod dos outros le state+0xB0 + pos*0x480 + tipo*0xC0, que
+    // e config+0x90 (a config comeca em state+0x20). O +0xB0 da config e outra coisa: o atraso em ms ate o proximo golpe do tipo 2.
     constexpr uint32_t kSwipeCfgs = 0x20u, kSwipeTierStride = 0x480u, kSwipeTypeStride = 0xC0u, kSwipeTier = 0x2D48u, kSwipeType = 0x2D4Cu,
                        kSwipeInWindow = 0x2DC0u, kMonsterPickup = 0x68A4u, kPickupKind = 0xA0u, kPickupKindBat = 8u;
 
@@ -769,7 +770,7 @@ namespace wotm_train
         return ok(p, kPickupKind + 4u) ? p : 0;
     }
 
-    PunchCfg readSwipeCfg(const uint8_t *rdram, uint32_t m, int tier, int type, bool bat)
+    PunchCfg readSwipeCfg(const uint8_t *rdram, uint32_t m, int tier, int type, [[maybe_unused]] bool bat)
     {
         PunchCfg p;
         if (tier < 0 || tier >= kPunchTiers || type < 0 || type >= kPunchTypes)
@@ -783,7 +784,7 @@ namespace wotm_train
         p.stun = rdf(rdram, c + 0x6C);
         p.radius = rdf(rdram, c + 0x74);
         p.loc[0] = int(rd32(rdram, c + 0x7C));
-        p.dmg = rdf(rdram, c + (bat ? 0x90u : 0xB0u));
+        p.dmg = rdf(rdram, c + 0x90u);
         p.valid = std::isfinite(p.ini + p.fim + p.dmg + p.radius) && !(p.anim <= 0 && p.dmg == 0.f);
         return p;
     }

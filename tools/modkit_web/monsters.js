@@ -5,6 +5,7 @@
 import { meshBlocks, currentModel } from './mesh.js';
 import { panelFrame, tabs, block, el, button, autosave } from './panel.js';
 import { fightCamera } from './viewer.js';
+import { movesPage } from './moves.js';
 import { costumeRadios, skinDialog } from './skins.js';
 
 const $ = id => document.getElementById(id);
@@ -170,11 +171,18 @@ async function monsterPanel(g, body, label) {
   const key = 'monsters/' + cid;
   const run = async (action, b) => { kit.workFocus = [key]; return kit.run(action, b); };
   let camOn = false, camReady = false;   // the Camera tab is showing: the 3D view looks through the fight camera
-  const pages = tabs(form, ['Settings', 'Camera', '3D model', 'Stats & sounds'], 'wotm.monsterTab', t => {
+  let movesWanted = false, movesDone = false;   // the Moves tab was shown: its table is read once, when the tab first shows
+  const pages = tabs(form, ['Settings', 'Camera', 'Moves', '3D model', 'Stats & sounds'], 'wotm.monsterTab', t => {
     camOn = t === 'Camera';
     if (camOn) { if (camReady) showFightCam(); } else fightCamera(null);
+    if (t === 'Moves') { movesWanted = true; if (camReady) loadMoves(); }
   });
-  const [tSet, tCam, tModel, tStats] = pages;
+  const [tSet, tCam, tMoves, tModel, tStats] = pages;
+  function loadMoves() {
+    if (!movesWanted || movesDone) return;
+    movesDone = true;
+    movesPage(tMoves, { cid });
+  }
 
   // Settings
   const name = el('input');
@@ -232,6 +240,7 @@ async function monsterPanel(g, body, label) {
   tCam.append(tip(row('Camera', cam.box), 'Camera'), row('', camNote), row('', autosave([cam.from, cam.scale], saveAll)));
   camReady = true;
   if (camOn) showFightCam();
+  loadMoves();
 
   tSet.append(row('Base', el('span', '', p.base)), row('Name', name),
     tip(row('Narrator', narr), 'Narrator'), tip(row('Special move', special), 'Special move'),

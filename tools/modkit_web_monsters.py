@@ -3,6 +3,7 @@ monster..., the monster's panel (name, camera, narrator, rules, special, CPUs, H
 sounds, mesh, rig, rigged model and Adjust bones), duplicate and delete."""
 import json
 import os
+import re
 import tempfile
 
 import modkit
@@ -281,6 +282,17 @@ class MonstersMixin:
         cid, ps = d["cid"], d.get("paths") or []
         work, mods, mod = self.work(), self.mods, self.mod
         return {"ok": self.run_fn("Importing the model of %s..." % cid, lambda: modkit.monster_model(work, mods, mod, cid, list(ps)))}
+
+    def act_monster_moves(self, d):
+        """{"cid"} (a custom) or {"group": "MON/LIZARD0"} (a costume of a game monster): the move table of that monster, read from
+        its .CHR (its own in the work folder, else the base type's) with the frames of its animations (tools/chr_view.py)."""
+        name = d.get("cid")
+        if not name:
+            m = re.match(r"[A-Za-z]+", os.path.basename(d.get("group", "")))
+            name = m.group() if m else ""
+        if not name:
+            return {"error": "no monster"}
+        return modkit.monster_moves(self.disc, self.work(), self.mods, self.mod, name)
 
     def act_monster_stats(self, d):
         cid = d["cid"]

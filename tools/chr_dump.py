@@ -217,13 +217,59 @@ def punch_table(data, keys):
             rows.append({
                 'pos': t, 'tipo': k, 'anim': anim,
                 'loc': '+'.join(loc_name(v) for v in locs if v >= 0x7D0) or '-',
+                'locs': locs,
                 'ini': f32(data, b + 0x2C), 'fim': f32(data, b + 0x30),
                 'cont_ini': f32(data, b + 0x34), 'cont_fim': f32(data, b + 0x38),
                 'dano': dmg, 'raio': r if r > 0 or default_r is None else default_r, 'raio_padrao': r <= 0,
                 'kb_h': f32(data, b + 0x8C), 'kb_v': f32(data, b + 0x90),
                 'atord': f32(data, b + 0x94), 'pausa': f32(data, b + 0x98),
+                'estamina': f32(data, b + 0x18), 'vel': f32(data, b + 0x24),
+                'prox': [f32(data, b + 0x54 + 4 * j) for j in range(TYPES)],   # ms ate o proximo golpe, por tipo (0 = nao pode)
             })
     return rows, default_r
+
+
+# Golpes com objeto (StateBatSwipe), chave 0xFE3: 10 posicoes x 6 tipos, 0xE0 bytes cada, a partir de key + 0x20 + pos*0x540 +
+# tipo*0xE0 (o charreset::readKey os copia para a SwipeConfig do Monster +0xAE90: 0xC0 por tipo, 0x480 por posicao). Os campos
+# (offset na config do arquivo -> campo da SwipeConfig): +0x10 animacao (+0x00), +0x14/+0x18 janela do golpe (+0x0C/+0x10),
+# +0x1C/+0x20 janela do contra-ataque (+0x14/+0x18), +0x00 stamina (+0x08), +0x0C velocidade da animacao (+0x04), +0x04
+# multiplicador de dano (+0x90: o do bastao e o getDamageMod dos outros objetos, que le state+0xB0 = config+0x90), +0x08 dano ao
+# proprio objeto (+0x94, damageToPickup), +0x98/+0x94 knockback (+0x64/+0x68), +0x9C atordoamento (+0x6C), +0xA0 pausa (+0x70),
+# +0xA8 raio da esfera (+0x74), +0xAC/+0xB0 localizadores (+0x7C/+0x80), +0x4C..+0x60 ms ate o proximo golpe por tipo (+0xA8..).
+SWIPE_KEY = 0xFE3
+SWIPE_TIERS = 10
+
+
+def swipe_table(data, keys):
+    """Linhas da tabela dos golpes com objeto (dicts), na ordem posicao, tipo; [] sem a chave 0xFE3 (formato antigo)."""
+    by_id = {k: (o, s) for k, o, s in keys}
+    if SWIPE_KEY not in by_id:
+        return []
+    o, size = by_id[SWIPE_KEY]
+    rows = []
+    for t in range(SWIPE_TIERS):
+        for k in range(TYPES):
+            b = o + 0x20 + t * 0x540 + k * 0xE0
+            if b + 0xB4 > o + size:
+                return rows
+            anim = i32(data, b + 0x10)
+            mult = f32(data, b + 0x04)
+            if anim <= 0 and mult == 0:
+                continue
+            locs = [i32(data, b + 0xAC), i32(data, b + 0xB0)]
+            rows.append({
+                'pos': t, 'tipo': k, 'anim': anim,
+                'loc': '+'.join(loc_name(v) for v in locs if v >= 0x7D0) or '-',
+                'locs': locs,
+                'ini': f32(data, b + 0x14), 'fim': f32(data, b + 0x18),
+                'cont_ini': f32(data, b + 0x1C), 'cont_fim': f32(data, b + 0x20),
+                'mult': mult, 'dano_objeto': f32(data, b + 0x08), 'raio': f32(data, b + 0xA8),
+                'kb_h': f32(data, b + 0x98), 'kb_v': f32(data, b + 0x94),
+                'atord': f32(data, b + 0x9C), 'pausa': f32(data, b + 0xA0),
+                'estamina': f32(data, b + 0x00), 'vel': f32(data, b + 0x0C),
+                'prox': [f32(data, b + 0x4C + 4 * j) for j in range(TYPES)],
+            })
+    return rows
 
 
 def main():

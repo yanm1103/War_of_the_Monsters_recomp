@@ -477,3 +477,20 @@ img.hud.logo { background: repeating-conic-gradient(#2c2c2c 0 25%, #3a3a3a 0 50%
 .v3d.fightcam::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; height: 100%; aspect-ratio: 16 / 9;
                        transform: translateX(-50%); border-left: 1px dashed rgba(240, 138, 44, .55);
                        border-right: 1px dashed rgba(240, 138, 44, .55); pointer-events: none; }
+/* the Moves tab (moves.js): the monster's move table; a row plays its animation above */
+.movesout { margin-top: 8px; overflow-x: auto; }
+table.moves { border-collapse: collapse; width: 100%; font: 12px var(--text); }
+table.moves th.l { text-align: left; }
+table.moves th { position: sticky; top: 0; background: var(--inset); color: var(--orange); font: 600 11px var(--ui); letter-spacing: .12em;
+                 text-transform: uppercase; text-align: right; padding: 5px 8px; white-space: nowrap; border-bottom: 1px solid var(--line2); }
+table.moves td { padding: 4px 8px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
+table.moves td.l { text-align: left; }
+table.moves tbody tr { cursor: pointer; }
+table.moves tbody tr:hover { background: rgba(240, 138, 44, .1); }
+table.moves tbody tr.on { background: rgba(240, 138, 44, .2); }
+table.moves tr.first td { border-top: 1px solid var(--line2); }
+table.moves.fields tbody tr { cursor: default; }
+table.moves.fields tbody tr:hover { background: none; }
+.chains { margin: 8px 0 4px; color: #d8d3c6; font: 12.5px/1.5 var(--text); }
+details.special { margin: 6px 0; }
+details.special summary { cursor: pointer; font: 600 12px var(--ui); letter-spacing: .16em; text-transform: uppercase; color: var(--orange2); padding: 4px 0; }

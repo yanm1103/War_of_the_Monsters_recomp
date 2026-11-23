@@ -132,7 +132,13 @@ own files or the disc costume); *Special rules* (the `kind`) only shows when `mo
 number, 10 to 1000 %; the type's own camera keeps its distance); while the tab shows, the 3D view looks through POV 0 of that camera
 (the `.CHR` camera key 0xFC6 as the port reads it: position `m_00`, looking at `m_20`, the vertical field of view at `+0x4C`, all
 scaled), over a ground grid and with the game's 16:9 screen marked; the game's camera also turns with the speed and the ground.
-*3D model*: "Currently using" (the model the game loads, what
+*Moves*: the monster's move table, the numbers of the training mode read from its `.CHR` (its own in `files/`, else the base type's):
+the punches (damage, hit window in % of the animation, startup, active and total frames at 60 per second, radius, stun, knockback,
+the bones that hit), the same-button combos, the moves with an object in hand (damage multiplier) and the special states'
+numbers; "every combo step" shows the 10 positions of the combo. A row plays that move's animation in the 3D view above and marks
+its hit window on the frame slider. The frames come from the animation length of the monster's model divided by the move's speed
+(the hit pause and the blend back to idle are not counted). `python tools/modkit.py moves <monster>` and `moves <mod> <id>
+[--json]` print the same tables. *3D model*: "Currently using" (the model the game loads, what
 it was made from and the source files; the skeleton and the animations are inside the `.NGP`), **Check model...** first, then
 **Import rigged model...** / **Adjust bones...**, **Export 3D model** / **Import mesh...** / **Import animations...**, **Import
 character with animations...** (below) and **Import model files...** (copies `.NGP` + `.PTR`, and optional `.TEX`/`.RTX`, to

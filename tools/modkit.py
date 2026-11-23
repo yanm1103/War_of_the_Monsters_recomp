@@ -15,6 +15,7 @@ pasta de trabalho (<mods>/_work/<mod>/, com o modkit.json dela), e o pack de um 
   python tools/modkit.py monster portrait my_mod fire_togera retrato.png       # retrato do HUD (2:1)
   python tools/modkit.py monster model my_mod fire_togera X.NGP X.PTR          # modelo proprio (esqueleto do tipo base)
   python tools/modkit.py monster stats my_mod fire_togera                     # .CHR e .AIC do tipo base para editar (so dele)
+  python tools/modkit.py moves togera / moves my_mod fire_togera [--json]    # os golpes (as tabelas do modo treino), lidos do .CHR
   python tools/modkit.py monster sounds my_mod fire_togera                    # sons do banco do tipo base em WAV (banco so dele)
   python tools/modkit.py monster mesh export my_mod fire_togera               # malha e animacoes do traje base em .glb (Blender)
   python tools/modkit.py monster mesh check my_mod fire_togera modelo.glb    # confere o modelo antes do import (.glb; .gltf/.dae: o rigged)
@@ -1222,6 +1223,43 @@ def monster_stats(disc, work, mods, mod, cid):
         os.path.join(work, "monsters", cid, "files"), pack_hint(mod)))
 
 
+def monster_move_files(disc, work, mods, mod, name):
+    """(.CHR, .NGP, rotulo) de onde ler os golpes de um monstro: o custom <name> (o .CHR e o modelo proprios da pasta files/ do
+    trabalho, senao os do tipo base e do traje dele) ou um monstro do jogo pelo nome/prefixo ("togera", "LIZARD"). O .NGP pode ser
+    None (sem modelo, sem quadros); o .CHR None quando o tipo nao tem um (o port nao o aceita)."""
+    data = _json_obj(os.path.join(monster_dir(mods, mod, name), "monster.json")) if mod else None
+    if data:
+        files = os.path.join(work, "monsters", name, "files")
+        names = sorted(os.listdir(files)) if os.path.isdir(files) else []
+        own_chr = [n for n in names if n.upper().endswith(".CHR")]
+        own_ngp = [n for n in names if n.upper().endswith(".NGP")]
+        prefix = base_prefix(str(data.get("base", "")))
+        co = data.get("costume", 0)
+        co = co if isinstance(co, int) and 0 <= co <= 3 else 0
+        chr_ = os.path.join(files, own_chr[0]) if own_chr else (disc_file(disc, "RST/%s.CHR" % prefix) if prefix else None)
+        ngp = os.path.join(files, own_ngp[0]) if own_ngp else (disc_file(disc, "MON/%s%d.NGP" % (prefix, co)) if prefix else None)
+        return chr_, ngp, "%s (%s)" % (name, os.path.basename(chr_) if chr_ else "no .CHR")
+    prefix = base_prefix(name)
+    if not prefix:
+        return None, None, name
+    return disc_file(disc, "RST/%s.CHR" % prefix), disc_file(disc, "MON/%s0.NGP" % prefix), prefix
+
+
+def monster_moves(disc, work, mods, mod, name):
+    """Os golpes de um monstro (chr_view.moves_of) com os quadros do modelo dele. -> dict, ou {"error": ...}."""
+    chr_, ngp, label = monster_move_files(disc, work, mods, mod, name)
+    if not chr_ or not os.path.isfile(chr_):
+        return {"error": "no .CHR for %s" % label}
+    import chr_view
+    try:
+        m = chr_view.moves_of(chr_, ngp if ngp and os.path.isfile(ngp) else None)
+    except Exception as ex:  # noqa: BLE001 - um .CHR quebrado nao pode derrubar a aba
+        return {"error": "could not read %s: %s" % (os.path.basename(chr_), ex)}
+    m["label"] = label
+    m["own"] = bool(work) and os.path.abspath(chr_).startswith(os.path.abspath(work))
+    return m
+
+
 # Banco de som de cada tipo base (SoundManager::loadMonsterBank; o Goliath usa o do chefe, o Jelly e a forma final o da fase final)
 MONSTER_BANKS = {"MONKEY": "APE_S", "ROBOT": "ROBOT_S", "LIZARD": "LIZARD_S", "SHOGUN": "SHOGUN_S", "MANTIS": "MANTIS_S",
                  "ENERGY": "ENERGY_S", "LAVA": "LAVA_S", "DRAGON": "DRAGON_S", "ROCK": "ROKMAN_S", "ALIEN": "ALIEN_S",
@@ -1948,13 +1986,13 @@ def main(argv):
                 raise SystemExit("%s needs a value" % argv[i])
             opts[argv[i][2:]] = argv[i + 1]
             i += 2
-        elif argv[i] in ("--inject", "--ai", "--no-textures", "--page", "--adjust", "--embed"):
+        elif argv[i] in ("--inject", "--ai", "--no-textures", "--page", "--adjust", "--embed", "--json"):
             opts[argv[i][2:]] = True
             i += 1
         else:
             args.append(argv[i])
             i += 1
-    if not args or args[0] not in ("export", "pack", "check", "revert", "skin", "monster", "level"):
+    if not args or args[0] not in ("export", "pack", "check", "revert", "skin", "monster", "level", "moves"):
         print(__doc__)
         return 1
     disc = opts.get("disc") or default_disc()
@@ -1995,6 +2033,16 @@ def main(argv):
             mesh_export(disc, w, mods, args[3], args[0], args[4])
         else:
             mesh_import(disc, w, mods, args[3], args[0], args[4], glb)
+    elif args[0] == "moves":
+        if len(args) not in (2, 3):
+            raise SystemExit("moves <monster> | moves <mod> <custom id> [--json]: the move table of a game monster (togera, LIZARD) or "
+                             "of a custom (its own .CHR, else the base's), with the frames of its animations")
+        mod = args[1] if len(args) == 3 else None
+        m = monster_moves(disc, opts.get("work") or (work_dir(mods, mod) if mod else ""), mods, mod, args[-1])
+        if m.get("error"):
+            raise SystemExit("moves: " + m["error"])
+        import chr_view
+        print(json.dumps(m, indent=1) if opts.get("json") else "\n".join(chr_view.table(m)))
     elif args[0] == "level":
         if len(args) != 4 or args[1] != "prop" or "stage" not in opts:
             raise SystemExit("level prop <mod> <in.glb> --stage CENTRAL [--name TORRE] [--units blender|game] [--scale S | --height H] "

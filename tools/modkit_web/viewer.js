@@ -210,6 +210,19 @@ async function swapModel(url, still) {
   return play.dur;
 }
 
+// the animation bar of the model on show (animBar below), for the Moves tab: playMove(animId, [from, to]) plays that animation of
+// the model and marks the part of it (fractions of its length) where the move hits
+let animCtl = null;
+export async function playMove(id, win) { return animCtl ? animCtl.play(id, win) : false; }
+// the name of an animation id: the monster's own name for the combo slot it plays (prefix = the monster type, "LIZARD"), else
+// what the id is in general
+export async function animName(id, prefix) {
+  const n = await names();
+  const c = n && n.combos && (n.combos[prefix] || {})[id];
+  if (c && c.short) return c.short;
+  return n && n.ids && n.ids[id] ? n.ids[id].name : '';
+}
+
 let animIds;
 async function names() {
   if (animIds === undefined) animIds = await fetch('anim_ids.json').then(r => (r.ok ? r.json() : null)).catch(() => null);
@@ -264,7 +277,17 @@ export async function animBar(el, group, stillUrl) {
     sel.appendChild(og);
   }
   const frames = () => Math.max(0, Math.round(play.dur * FPS));
-  play.onFrame = t => { if (document.activeElement !== fr) fr.value = Math.round(t * FPS); fn.textContent = Math.round(t * FPS) + ' / ' + frames(); };
+  // the hit window of a move (Moves tab): the part of the frame slider where the game tests the hit, drawn on the slider
+  let hit = null;
+  const markHit = () => {
+    if (!hit) { fr.style.background = ''; fr.classList.remove('hitwin'); return; }
+    const a = Math.round(hit[0] * 100), b = Math.round(hit[1] * 100);
+    fr.classList.add('hitwin');
+    // a thin strip behind the slider's track: the hit part in red
+    fr.style.background = 'linear-gradient(90deg, var(--line2) 0 ' + a + '%, var(--red) ' + a + '% ' + b + '%, var(--line2) ' + b + '% 100%) center / 100% 6px no-repeat';
+  };
+  const hitText = () => (hit ? '  hit ' + Math.round(hit[0] * frames()) + '–' + Math.round(hit[1] * frames()) : '');
+  play.onFrame = t => { if (document.activeElement !== fr) fr.value = Math.round(t * FPS); fn.textContent = Math.round(t * FPS) + ' / ' + frames() + hitText(); };
   sel.onchange = async () => {
     const k = sel.value;
     pb.disabled = fr.disabled = true;
@@ -276,7 +299,23 @@ export async function animBar(el, group, stillUrl) {
     pb.textContent = 'Pause';
     fr.max = frames();
     pb.disabled = fr.disabled = k === '';
-    if (k === '') fn.textContent = '';
+    if (k === '') { fn.textContent = ''; hit = null; }
+    markHit();
+  };
+  // first table position of each animation id (ids repeat); a move of the Moves tab plays its animation by id
+  const firstK = new Map();
+  for (const a of list.anims || []) if (!firstK.has(a.id)) firstK.set(a.id, a.k);
+  animCtl = {
+    async play(id, win) {
+      const k = firstK.get(id);
+      if (k === undefined) return false;
+      hit = null;   // the old window must not show on the new animation while it loads
+      sel.value = String(k);
+      await sel.onchange();
+      hit = win || null;
+      markHit();
+      return true;
+    },
   };
   pb.onclick = () => { play.playing = !play.playing; pb.textContent = play.playing ? 'Pause' : 'Play'; };
   fr.oninput = () => { play.playing = false; pb.textContent = 'Play'; play.t = parseInt(fr.value, 10) / FPS; };
