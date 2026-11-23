@@ -16,7 +16,7 @@ Plano aprovado em `docs/investigacoes/2026-11-22/plano_malha_kit.md`. Dois camin
 - **Vídeo da malha nova:** rascunho do roteiro em `docs/investigacoes/2026-11-22/roteiro_video_malha.md`, esperando o dono aprovar o texto e decidir o modelo (Buzz ou um de licença livre), a versão gravada (release novo depois do merge) e a cena do Blender; depois, takes, áudio e montagem (pipeline da branch `tutorial-skin`).
 
 ## Mod kit
-- **Pés do Donkey Kong:** no jogo os pés do DK (37% mais largos que os do Congar) encostam parados e se cruzam andando; o jogo está fiel ao arquivo. O dono escolhe: diminuir os pés (escala por osso no map e na página de ossos, recurso novo) ou afastar os quadris. Medidas em `6d39b856:docs/investigacoes/2026-11-22/kit_navegador.md` ("Pés do DK").
+- **Pés do Donkey Kong (conferir):** o pé torto no jogo vinha das camadas (o retarget media cada camada da pose de ligação e cada uma somava ~21° a 31° nos pés; corrigido no retarget com `--base`). Falta o dono conferir andando: se os pés (37% mais largos que os do Congar) ainda se cruzarem, escolher entre diminuir os pés (escala por osso, recurso novo) ou afastar os quadris. Medidas em `6d39b856:docs/investigacoes/2026-11-22/kit_navegador.md` ("Pés do DK").
 - **Editor de golpes no kit (depois, decisão do dono):** uma aba a mais no painel do custom com a tabela de golpes do `.CHR` (animação, dano, janela de acerto, empurrão), em cima do que `tools/chr_moves.py` e `tools/chr_punch.py` já fazem pela linha de comando. Contexto em `docs/investigacoes/2026-11-22/melhorias_mod_kit_respostas.md` (dúvida 4).
 - **Kit no Linux:** conferir o kit no navegador no Linux (abrir o navegador, diálogos de arquivo por zenity ou kdialog) e decidir se ele entra no AppImage.
 

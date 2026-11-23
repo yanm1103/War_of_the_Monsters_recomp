@@ -138,6 +138,39 @@ def percentile(vals, q):
 
 # ---------------------------------------------------------------- the base monster
 
+def layer_anims(g, path):
+    """{animation address: id} of the base's layers (ngpanim.Game g of the .NGP at path, main instance): the ones the game adds
+    on top of the main animation (looking around, flinches, leans). A layer animates no translation (Togera) or only zeros
+    on translation channels that the idle keeps away from 0 (Ultra-V: deltas); a special's blends come from SPECIAL_BLENDS."""
+    img = g.img
+    tch = set()
+    for n, nd in g.nodes.items():
+        if nd.op == 17 and nd.ci == g.main:
+            tch.update(i for i in g.xform(n)["tidx"] if i >= 0)
+    all_anims = list(g.anims())
+    idle_t = {}
+    idle_an = next((an for aid, _k, _st, _et, _n, an in all_anims if aid == 90), None)
+    if idle_an is not None:
+        for _a, c in g.curves(idle_an):
+            if c.idx in tch:
+                idle_t[c.idx] = c.eval(img.f32(idle_an + 4))
+
+    def is_layer(an):
+        if not tch:
+            return False
+        tc = [c for _a, c in g.curves(an) if c.idx in tch]
+        if not tc:
+            return True
+        st, et = img.f32(an + 4), img.f32(an + 8)
+        steps = max(1, min(64, int(et - st)))
+        if any(abs(c.eval(st + (et - st) * i / steps)) > 1e-3 for c in tc for i in range(steps + 1)):
+            return False
+        return any(abs(idle_t.get(c.idx, 0.0)) > 1e-2 for c in tc)
+    m = re.match(r"[A-Z]+", os.path.basename(path).upper())
+    sp_add, sp_mix = SPECIAL_BLENDS.get(m.group() if m else "", ((), ()))
+    return {an: aid for aid, _k, _st, _et, _n, an in all_anims if aid in sp_add or (aid not in sp_mix and is_layer(an))}
+
+
 class BaseInfo:
     """What the rig takes from the base: the main instance, templates, height, locators, textures, animations."""
 
@@ -196,38 +229,16 @@ class BaseInfo:
         # animations of the main instance, first slot of each id
         ch = img.u32(self.ci + 0x20)
         actx = img.u32(self.ci + 0x10)
-        # a layer (looking around, flinches, leans) is added by the game on top of the main animation: it animates no
-        # translation (Togera) or only zeros on translation channels that the idle keeps away from 0 (Ultra-V: deltas)
-        tch, rch = set(), set()
+        rch = set()
         for n, nd in g.nodes.items():
             if nd.op == 17 and nd.ci == self.ci:
-                tch.update(i for i in g.xform(n)["tidx"] if i >= 0)
                 rch.update(i for i in g.xform(n)["ridx"] if i >= 0)
         all_anims = list(g.anims())
         # the rotations some animation moves; one that leaves some of them without a curve (Congar's roar aim pose, 166,
         # moves 5 bones) has the game keep those where the animation before left them
         rot_of = {an: {c.idx for _a, c in g.curves(an) if c.idx in rch} for *_x, an in all_anims}
         rot_used = set().union(*rot_of.values()) if rot_of else set()
-        idle_t = {}
-        idle_an = next((an for aid, _k, _st, _et, _n, an in all_anims if aid == 90), None)
-        if idle_an is not None:
-            for _a, c in g.curves(idle_an):
-                if c.idx in tch:
-                    idle_t[c.idx] = c.eval(img.f32(idle_an + 4))
-
-        def is_layer(an):
-            if not tch:
-                return False
-            tc = [c for _a, c in g.curves(an) if c.idx in tch]
-            if not tc:
-                return True
-            st, et = img.f32(an + 4), img.f32(an + 8)
-            steps = max(1, min(64, int(et - st)))
-            if any(abs(c.eval(st + (et - st) * i / steps)) > 1e-3 for c in tc for i in range(steps + 1)):
-                return False
-            return any(abs(idle_t.get(c.idx, 0.0)) > 1e-2 for c in tc)
-        m = re.match(r"[A-Z]+", os.path.basename(path).upper())
-        sp_add, sp_mix = SPECIAL_BLENDS.get(m.group() if m else "", ((), ()))
+        layer = layer_anims(g, path)
         self.anims = {}
         for aid, k, st, et, _n, an in all_anims:
             if aid in self.anims:
@@ -236,7 +247,7 @@ class BaseInfo:
                                "head": bytes(img.d[an - BASE:an - BASE + 0x18]),
                                "ctx": bytes(img.d[actx + 60 * k - BASE:actx + 60 * k + 60 - BASE]),
                                "loop": img.u8(actx + 60 * k + 0x29),
-                               "layer": aid in sp_add or (aid not in sp_mix and is_layer(an)),
+                               "layer": an in layer,
                                "partial": bool(rot_used - rot_of[an])}
         if 90 not in self.anims:
             raise RigError("%s has no idle (90)" % os.path.basename(path))

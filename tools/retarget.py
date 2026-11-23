@@ -3,7 +3,7 @@
 become the rig .glb that `modkit.py monster rig` (tools/ngprig.py) takes.
 
   python tools/retarget.py <source.glb> <model.dae|.glb|.gltf> <map.json> <out.glb> [--size F | --height H]
-                           [--front +y|-y] [--up y|z] [--clips 90,1,...] [--own clips.json]
+                           [--front +y|-y] [--up y|z] [--clips 90,1,...] [--own clips.json] [--base base.NGP]
 
 - source.glb: the base costume as the kit exports it (`modkit.py monster mesh export`, e.g. LIZARD0.glb, "WotM" root): its
   skeleton and its actions `a<id>` are the motion.
@@ -674,6 +674,34 @@ class Source:
     def world(self, i, clip, t, cache):
         return mul(self.root_inv, self.ed.world(i, clip, t, cache))
 
+    def layer_poses(self, base_ngp):
+        """{id: {node: world}} for each layer of the base .NGP the export came from (tools/ngprig.py layer_anims): the pose
+        the layer is added to, with its channels at 0. The export shows a layer as that pose plus the layer, the channels it
+        leaves alone at the base's stored pose (atMat), which is not always the bind pose (Congar's feet, ~30 degrees off);
+        measured from the bind pose, a layer would carry that difference and the game would add it on top of every move."""
+        import bonelabels
+        import ngprig
+        g = ngpanim.Game(base_ngp)
+        node_of = {}
+        for i, nd in enumerate(self.ed.nodes):
+            n = g.by_name.get(bonelabels.canonical(nd.get("name") or ""))
+            if n is not None:
+                node_of[i] = n
+        ids = [a[0] for a in g.anims()]
+        out = {}
+        for an, aid in ngprig.layer_anims(g, base_ngp).items():
+            if ids.count(aid) != 1:   # a repeated id is exported as a<id>_<k>, which the retarget does not take as a layer
+                continue
+            ctxs = g.contexts()
+            c = ctxs[g.main]
+            for _a, cv in g.curves(an):
+                if 0 <= cv.idx < c.nch:
+                    c.val[cv.idx] = 0.0
+                    c.dirty.add(cv.idx)
+            w = g.walk(ctxs)
+            out[aid] = {i: ngpanim.tr(w[n][1]) for i, n in node_of.items() if n in w}
+        return out
+
 
 # ---------------------------------------------------------------- the retarget
 
@@ -693,10 +721,10 @@ def turn_matrix(spec):
 
 
 def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front=None, clips=None, own=None, log=print,
-          up=None, turn=None, rest=None):
+          up=None, turn=None, rest=None, base=None):
     """map_path: a map file, "auto" or the map itself (a dict). rest: a dict to fill with the posed rest instead of writing
     out_path (the page's preview, tools/orientpage.py): "joints" [{"name", "parent", "pos", "kept"}], "tris" at the posed rest
-    in the game's axes and units, "cfg" the map."""
+    in the game's axes and units, "cfg" the map. base: the .NGP src was exported from (its layers, Source.layer_poses)."""
     src = src_path if isinstance(src_path, Source) else Source(src_path)        # loaded ones too (the page's previews)
     mdl = model_path if not isinstance(model_path, str) else load_model(model_path, up)
     src_path, model_path = src.path, mdl.path
@@ -1009,6 +1037,13 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
     for i in korder:
         p = kparent[i]
         Lk[i] = mul(inv(A[p]), A[i]) if p is not None else A[i]
+    layer_pose = {}
+    if base:   # the layers turn from the pose they are added to, not from the bind pose
+        try:
+            layer_pose = src.layer_poses(base)
+        except (OSError, ValueError, ngpanim.AnimError) as e:
+            raise RetargetError("base %s: %s" % (os.path.basename(base), e))
+        log("%d layers measured from the pose the game adds them to (%s)" % (len(layer_pose), os.path.basename(base)))
     want = want_names = None
     if isinstance(clips, (list, tuple, set)):   # clip names ("a001", "a000_26"): the page's animation preview
         want_names = set(clips)
@@ -1023,13 +1058,15 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
             continue
         tracks = {i: ([], []) for i in korder}   # joint -> (quats, positions) local
         pscale = {}                              # prop -> scale per frame
+        lp = layer_pose.get(int(m.group(1))) if m and re.fullmatch(r"a\d+", nm) else None
+        ref = {b: lp.get(b, rest_src[b]) if lp else rest_src[b] for b in rest_src}   # what the source bone turns from
         for f in range(frames):
             t = f / FPS
             cache = {}
             D = {}
             for b in rest_src:
                 W = src.world(b, clip, t, cache)
-                D[b] = (quat_of(mul(rot3(W), tmat(rot3(rest_src[b])))), pos(W))
+                D[b] = (quat_of(mul(rot3(W), tmat(rot3(ref[b])))), pos(W))
             Wt = {}
             for i in korder:
                 p = kparent[i]
@@ -1040,7 +1077,7 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
                 else:
                     R = rot3(mul(Wt[p], Lk[i])) if p is not None else rot3(A[i])
                 if i in move_k:
-                    d = [a - c for a, c in zip(D[bb["a"]][1], pos(rest_src[bb["a"]]))]
+                    d = [a - c for a, c in zip(D[bb["a"]][1], pos(ref[bb["a"]]))]
                     P = [a + move_k[i] * c for a, c in zip(pos(A[i]), d)]
                 elif p is not None:
                     P = apply(Wt[p], pos(Lk[i]))
@@ -1329,13 +1366,15 @@ def main(argv):
                                    "z up)")
     ap.add_argument("--clips", help="only these animation ids (e.g. 90,1)")
     ap.add_argument("--own", help="the model's own clips (JSON) in place of the source's with the same id")
+    ap.add_argument("--base", help="the .NGP the source was exported from: its layers turn from the pose the game adds "
+                                   "them to")
     argv = list(argv)
     for k, x in enumerate(argv[:-1]):   # "--front -y": argparse would read -y as an option
         if x == "--front" and argv[k + 1] in ("-y", "+y"):
             argv[k:k + 2] = ["--front=" + argv[k + 1], ""]
     a = ap.parse_args([x for x in argv if x != ""])
     try:
-        build(a.source, a.model, a.map, a.out, a.size, a.height, a.front, a.clips, a.own, up=a.up, turn=a.turn)
+        build(a.source, a.model, a.map, a.out, a.size, a.height, a.front, a.clips, a.own, up=a.up, turn=a.turn, base=a.base)
     except (RetargetError, ngpanim.AnimError, OSError, KeyError, ValueError) as e:
         print("error: %s" % e, file=sys.stderr)
         return 1

@@ -1532,7 +1532,8 @@ def rigged_check(disc, work, mods, mod, cid, model, kind="monster"):
     try:
         out = os.path.join(tmp, "check_rig.glb")
         try:
-            retarget.build(src, model, use_map, out, size=1.0, front=front, log=lambda s: rep.info("fit: %s" % s))
+            retarget.build(src, model, use_map, out, size=1.0, front=front, log=lambda s: rep.info("fit: %s" % s),
+                           base=disc_file(disc, stem + ".NGP"))
         except retarget.RetargetError as e:
             rep.err("Import rigged model: %s" % e)
             return rep
@@ -1591,7 +1592,8 @@ def rigged_import(disc, work, mods, mod, cid, model, turn=None, page=False, size
         use_map = mp if os.path.isfile(mp) else "auto"
         if use_map != "auto":
             print("bone map: %s (delete it to make a new one)" % mp)
-        retarget.build(src, model, use_map, out, size=size, front=front, turn=turn or None, log=print)
+        retarget.build(src, model, use_map, out, size=size, front=front, turn=turn or None, log=print,
+                       base=disc_file(disc, stem + ".NGP"))
     except retarget.RetargetError as e:
         raise SystemExit("rigged import: %s" % e)
     res = rig_import(disc, work, mods, mod, cid, out, kind=kind)
