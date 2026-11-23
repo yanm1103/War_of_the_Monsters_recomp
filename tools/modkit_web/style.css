@@ -494,17 +494,44 @@ table.moves.fields tbody tr:hover { background: none; }
 .chains { margin: 8px 0 4px; color: #d8d3c6; font: 12.5px/1.5 var(--text); }
 details.special { margin: 6px 0; }
 details.special summary { cursor: pointer; font: 600 12px var(--ui); letter-spacing: .16em; text-transform: uppercase; color: var(--orange2); padding: 4px 0; }
-/* the move table in a costume's panel (work.js): a section under the animation list */
-details.costmoves { margin: 10px 0 4px; }
-details.costmoves > summary { cursor: pointer; font: 600 12px var(--ui); letter-spacing: .16em; text-transform: uppercase; color: var(--orange2); padding: 6px 0; }
-.moveedit { margin: 12px 0 4px; }
-.moveedit h5 { margin: 0 0 8px; font: 600 12px var(--ui); letter-spacing: .16em; text-transform: uppercase; color: var(--orange2); }
+/* the full-screen Moves view (moves.js, openMoves): the moves on the left, the picked move's numbers in the middle, the 3D view on the right */
+.movesview { position: fixed; inset: 10px; z-index: 25; display: flex; flex-direction: column; padding: 12px 16px; background: #07080b;
+             border: 2px solid var(--frame); border-radius: 14px; box-shadow: 0 0 0 100vmax rgba(3, 4, 7, .72), 0 16px 50px rgba(0, 0, 0, .75); }
+.mvhead { display: flex; align-items: center; gap: 18px; flex: none; margin-bottom: 10px; }
+.mvhead h3 { flex: 1; margin: 0; font: 600 16px var(--ui); letter-spacing: .26em; text-transform: uppercase; color: var(--orange); }
+.mvgrid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 36%); gap: 14px; }
+.mvlm { min-height: 0; min-width: 0; display: grid; grid-template-columns: minmax(240px, .65fr) minmax(0, 1.35fr); gap: 16px; }
+.mvlm > .dim:only-child { grid-column: 1 / -1; }
+.mvleft { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.mvleft .movesout { flex: 1; overflow: auto; }
+.mvleft table.moves { font-size: 14px; }
+.mvleft table.moves td { padding: 7px 10px; }
+.mvbar { flex: none; }
+.mvmid { overflow: auto; min-height: 0; min-width: 0; padding-right: 6px; }
+.mvmid > button { margin-bottom: 8px; }
+.mvright { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.mvright .v3d { flex: 1 1 auto; height: auto; min-height: 0; }
+.mvfoot { margin-top: 18px; }
+.mvcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-bottom: 16px; }
+.mvcard { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 11px; border: 1px solid var(--line2); border-radius: 8px;
+          background: rgba(255, 255, 255, .03); }
+.mvcard .k { font: 600 10.5px var(--ui); letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
+.mvcard .v { font: 600 21px var(--ui); color: var(--fg); overflow-wrap: anywhere; }
+.mvcard .s { font: 11.5px var(--text); color: var(--dim); }
+.pickrow { padding: 9px 12px; cursor: pointer; border-bottom: 1px solid var(--line); font: 600 13px var(--ui); letter-spacing: .1em; text-transform: uppercase; }
+.pickrow:hover { background: rgba(240, 138, 44, .1); }
+.pickrow.on { background: rgba(240, 138, 44, .2); }
+.moveedit { margin: 4px 0 4px; }
+.moveedit h5:first-child { margin-top: 0; }
+.moveedit h5 { margin: 18px 0 8px; font: 600 12px var(--ui); letter-spacing: .16em; text-transform: uppercase; color: var(--orange2); }
 .editgrid { display: grid; grid-template-columns: max-content minmax(60px, 1fr) max-content minmax(60px, 1fr); gap: 6px 12px; align-items: center; }
 .editgrid label { font: 12px var(--text); color: #d8d3c6; white-space: nowrap; }
 .editgrid input { min-width: 0; width: 100%; box-sizing: border-box; text-align: right; }
 .moveedit .autosave { margin-top: 8px; }
 table.moves.fields input { width: 100%; min-width: 56px; box-sizing: border-box; text-align: right; padding: 3px 6px; }
-table.moves.rings input { width: 68px; min-width: 0; }
+table.moves.rings input { width: 100%; min-width: 0; }
+table.moves.rings th, table.moves.rings td { padding-left: 4px; padding-right: 4px; }
+table.moves.rings td:not(.l) { width: 12%; }
 table.moves.fields td.l:first-child { width: 1%; white-space: nowrap; }
 .keynote { margin: 4px 0 8px; }
 label.check[hidden] { display: none !important; }

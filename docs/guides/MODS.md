@@ -132,25 +132,28 @@ own files or the disc costume); *Special rules* (the `kind`) only shows when `mo
 number, 10 to 1000 %; the type's own camera keeps its distance); while the tab shows, the 3D view looks through POV 0 of that camera
 (the `.CHR` camera key 0xFC6 as the port reads it: position `m_00`, looking at `m_20`, the vertical field of view at `+0x4C`, all
 scaled), over a ground grid and with the game's 16:9 screen marked; the game's camera also turns with the speed and the ground.
-*Moves*: the monster's move table, the numbers of the training mode read from its `.CHR` (its own in `files/`, else the base type's):
+*Moves* is not a page of the panel: picking it opens a full-screen view over the kit (**Close** or Escape goes back to the tab that was
+open), in three columns: the monster's moves on the left, the picked move's numbers in the middle and the 3D model playing it on the right.
+The numbers are the training mode's, read from its `.CHR` (its own in `files/`, else the base type's):
 the punches (damage, hit window in % of the animation, startup, active and total frames at 60 per second, radius, stun, knockback,
 the bones that hit), the same-button combos, the moves with an object in hand (damage multiplier) and the special states'
-numbers; "every combo step" shows the 10 positions of the combo. A row plays that move's animation in the 3D view above and marks
+numbers. A select on the left picks what the list holds (Punches, With an object, Other moves, Specials); "every combo step" shows the 10
+positions of the combo. A move of the list plays its animation in the 3D view and marks
 its hit window on the frame slider, and draws the move's hit sphere (the radius of the table) at each bone that tests the hit, red while the
-hit window is open and dim outside it; the **hit spheres** box next to "every combo step" turns that on and off (kept between runs). The spheres
+hit window is open and dim outside it; the **hit spheres** box in the header turns that on and off (kept between runs). The spheres
 hang from the empties `loc_<hex id>` that the animation preview's `.glb` carries on the locator bones (`monglb.py`, `locators=True`). The frames come from the animation length of the monster's model divided by the move's speed
 (the hit pause and the blend back to idle are not counted, and the training mode's frame data, measured in a fight, differs from these estimates). With the monster's own `.CHR` (**Give it its own .CHR to edit**, the same as
 **Extract stats**) the picked move's numbers (damage, hit window, radius, stun, knockback, hit pause, speed, stamina, animation id) are fields
-under the table that save by themselves into that file, with the limits the game can take, and so are the six delays that say which move may
+under the cards that save by themselves into that file, with the limits the game can take, and so are the six delays that say which move may
 follow it in the combo (**Combo: what may follow**, ms, 0 = none); the disc's `.CHR` is never edited. The view **Other moves** has the butt slam
 (stamina and the shockwave rings), the ram attack, the grab's range and the throw's damage, with the training mode's descriptions, and **Specials**
-the numbers of the special states, all of them fields too. The damage of the hits inside a grab, the getting-up attack, the counter window and the
+the numbers of the special states, all of them fields too (the list holds one entry per state; their animations are not played, so no sphere is drawn). The damage of the hits inside a grab, the getting-up attack, the counter window and the
 taunt are in the game's code for each monster type, not in the `.CHR`, so the kit does not show them. A box lists the moves of
 the file that cannot work (a hit window outside 0..1, an animation the model does not have, no bone to test the hit, a combo step that is
 empty). `python tools/modkit.py moves <monster>` and `moves <mod> <id> [--json]` print the same tables and the warnings, and
 `moves set <mod> <id> punch|object <step> <type> <field>=<value>` changes one number of a move (`next_0`..`next_5` are the combo delays) and
-`moves set <mod> <id> key <0xKEY> <0xOFFSET> <value>` one of the Other moves or Specials. The same table (read only) is in the panel of every
-costume of a game monster, in the section "Moves of this monster". *3D model*: "Currently using" (the model the game loads, what
+`moves set <mod> <id> key <0xKEY> <0xOFFSET> <value>` one of the Other moves or Specials. The same view (read only) opens from the button
+**Moves of this monster...** in the panel of every costume of a game monster. *3D model*: "Currently using" (the model the game loads, what
 it was made from and the source files; the skeleton and the animations are inside the `.NGP`), **Check model...** first, then
 **Import rigged model...** / **Adjust bones...**, **Export 3D model** / **Import mesh...** / **Import animations...**, **Import
 character with animations...** (below) and **Import model files...** (copies `.NGP` + `.PTR`, and optional `.TEX`/`.RTX`, to

@@ -3,10 +3,10 @@
 // checkerboard, sound as a waveform) and what can be done with the files (open, replace, save, revert, remove).
 // kit.work.panels: other parts of the page register a panel for a group kind (a skin's or a monster's properties).
 import { listSelect } from './select.js';
-import { showModel, animBar } from './viewer.js';
+import { showModel } from './viewer.js';
 import { pic, fileIcon } from './disc.js';
-import { stageTitle } from './panel.js';
-import { movesPage } from './moves.js';
+import { stage } from './panel.js';
+import { openMoves } from './moves.js';
 
 const MODEL_EXT = ['.glb', '.gltf', '.dae', '.ngp'];
 
@@ -296,17 +296,13 @@ async function preview() {
     for (const [t, fn] of items) { const b = el('button', '', t); b.type = 'button'; b.onclick = fn; acts.appendChild(b); }
     wrap.append(v, ab, acts);
     body.appendChild(wrap);
-    const still = 'api/model.glb?group=' + encodeURIComponent(g.key) + '&t=' + Date.now();
-    showModel(v, still, true);
-    stageTitle(v, g);   // after: showModel empties the box
-    animBar(ab, g.key, still);
-    // the monster's move table (the .CHR of its type), read when the section is first opened
-    const mv = el('details', 'costmoves');
-    mv.appendChild(el('summary', '', 'Moves of this monster'));
-    const mvBody = el('div', 'tabpage');
-    mv.appendChild(mvBody);
-    mv.addEventListener('toggle', () => { if (mv.open && !mvBody.dataset.done) { mvBody.dataset.done = '1'; movesPage(mvBody, { group: g.key }); } });
-    wrap.appendChild(mv);
+    stage(v, ab, g.key, g);
+    // the monster's move table (the .CHR of its type) in the full-screen Moves view, read only
+    const mb = el('button', '', 'Moves of this monster…');
+    mb.type = 'button';
+    mb.title = 'The moves of this monster (damage, hit window, radius, stun, knockback...) in a full-screen view, with the 3D model playing them';
+    mb.onclick = () => openMoves({ args: { group: g.key }, group: g.key, g, restore: () => stage(v, ab, g.key, g) });
+    acts.appendChild(mb);
     label.textContent = (g.sub || g.label) + ': ' + allf.length + ' file(s). Edited textures show on the model (Refresh after saving one). Open it in the list to pick a file.';
     return;
   }

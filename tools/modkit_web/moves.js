@@ -1,8 +1,8 @@
-// The Moves tab of a monster's panel: its move table, the numbers of the game's training mode (damage, hit window, radius, stun,
-// knockback, which bones hit) read from its .CHR, with the length of each move in frames. A row plays the move's animation in the
-// 3D view above and marks where it hits; with the monster's own .CHR, the picked move's numbers can be changed right there.
-// Server side: tools/chr_view.py (monster_moves, monster_move_set).
-import { el, button } from './panel.js';
+// The Moves view of a monster: a full-screen page over the kit (openMoves) in three columns: the list of its moves on the left,
+// the numbers of the picked one in the middle (the game's training-mode data: damage, hit window, radius, stun, knockback, which
+// bones hit, the length in frames; with the monster's own .CHR they can be changed right there), the 3D model playing it on the right
+// with the hit sphere drawn on its bones. Server side: tools/chr_view.py (monster_moves, monster_move_set).
+import { el, button, stage } from './panel.js';
 import { playMove, setMoveHit, animName, hitSpheresOn, setHitSpheres } from './viewer.js';
 
 const BUTTONS = { LIGHT: 'LIGHT', HEAVY: 'HEAVY' };
@@ -44,27 +44,23 @@ const NEXT = [[5, 'LIGHT'], [3, 'FORWARD + LIGHT'], [4, 'BACK + LIGHT'], [0, 'HE
 
 const fix = (v, n = 0) => (Number.isFinite(v) ? v.toFixed(n).replace(/\.0+$/, '') : '-');
 
-function table(rows, weapon, names, onPick, showPos) {
+// the list of moves (the left column): pos only with every combo step, then the move, its damage and its hit window
+function table(rows, weapon, onPick, showPos) {
   const t = el('table', 'moves');
   const head = el('tr');
-  const keys = ['pos', 'move', 'dmg', 'win', 'sat', 'radius', 'stun', 'kb', 'loc', 'anim'].filter(k => showPos || k !== 'pos');
-  const left = k => (k === 'move' || k === 'loc' || k === 'anim' ? 'l' : '');
+  const keys = ['pos', 'move', 'dmg', 'win'].filter(k => showPos || k !== 'pos');
+  const left = k => (k === 'move' ? 'l' : '');
   for (const k of keys) { const th = el('th', left(k), COLS[k][0]); th.title = COLS[k][1]; head.appendChild(th); }
   t.appendChild(el('thead')).appendChild(head);
   const body = el('tbody');
   t.appendChild(body);
   for (const r of rows) {
-    const tm = r.timing;
     const tr = el('tr', r.pos === 1 ? 'first' : '');
     tr.dataset.id = (r.weapon ? 'w' : 'p') + r.pos + '.' + r.ptype;
     const cells = {
       pos: r.pos, move: moveName(r),
       dmg: weapon ? '×' + fix(r.mult, 2) : fix(r.damage, 1),
       win: fix(r.win_start * 100) + '–' + fix(r.win_end * 100) + '%',
-      sat: tm ? tm.start + ' · ' + tm.active + ' · ' + tm.total : '-',
-      radius: fix(r.radius, 1) + (r.radius_default ? '*' : ''), stun: fix(r.stun),
-      kb: (r.kb_out || r.kb_up) ? fix(r.kb_out) + ' / ' + fix(r.kb_up) : '-', loc: r.bones,
-      anim: r.anim + (names[r.anim] ? '  ' + names[r.anim] : ''),
     };
     for (const k of keys) tr.appendChild(el('td', left(k), String(cells[k])));
     tr.onclick = () => {
@@ -75,6 +71,33 @@ function table(rows, weapon, names, onPick, showPos) {
     body.appendChild(tr);
   }
   return t;
+}
+
+// the picked move's numbers, big (the middle column): one card each, with what it is on hover
+function statCards(r, weapon, names, defaultRadius) {
+  const tm = r.timing;
+  const cards = [
+    [weapon ? 'Damage ×' : 'Damage', COLS.dmg[1], weapon ? '×' + fix(r.mult, 2) : fix(r.damage, 1)],
+    [COLS.win[0], COLS.win[1], fix(r.win_start * 100) + '–' + fix(r.win_end * 100) + '%'],
+    [COLS.sat[0], COLS.sat[1], tm ? tm.start + ' · ' + tm.active + ' · ' + tm.total : '-', tm ? 'startup · active · total' : 'no model'],
+    [COLS.radius[0], COLS.radius[1], fix(r.radius, 1) + (r.radius_default ? '*' : ''), r.radius_default ? 'the default fist: ' + fix(defaultRadius, 1) : ''],
+    [COLS.stun[0], COLS.stun[1], fix(r.stun), r.stun > 100 ? 'stuns' : ''],
+    [COLS.kb[0], COLS.kb[1], (r.kb_out || r.kb_up) ? fix(r.kb_out) + ' / ' + fix(r.kb_up) : '-', (r.kb_out || r.kb_up) ? 'out / up: knocks down' : ''],
+    ['Hit pause', 'How long the game freezes the two monsters on a hit.', fix(r.pause) + ' ms'],
+    ['Speed', 'The animation\'s speed: 1 is its own pace.', '×' + fix(r.speed, 2)],
+    ['Stamina', 'What the move takes from the stamina meter.', fix(r.stamina, 1)],
+    [COLS.loc[0], COLS.loc[1], r.bones || '-'],
+    [COLS.anim[0], COLS.anim[1], String(r.anim), names[r.anim] || ''],
+  ];
+  const box = el('div', 'mvcards');
+  for (const [k, tip, v, sub] of cards) {
+    const c = el('div', 'mvcard');
+    c.title = tip;
+    c.append(el('span', 'k', k), el('b', 'v', v));
+    if (sub) c.appendChild(el('span', 's', sub));
+    box.appendChild(c);
+  }
+  return box;
 }
 
 // a group of numbers of one state (a special, the butt slam...): each one a field when the monster has its own .CHR, else plain text.
@@ -130,10 +153,10 @@ function fieldTable(s, own, save, open) {
   return d;
 }
 
-// page: the tab's element; args: {cid} (a custom monster) or {group} (a costume of a game monster);
-// hooks.extract(): gives the monster its own .CHR (Extract stats) and resolves when it is done
+// page: the element that gets the list (left) and the numbers (middle); args: {cid} (a custom monster) or {group} (a costume of a
+// game monster); hooks.extract(): gives the monster its own .CHR (Extract stats) and resolves when it is done
 export async function movesPage(page, args, hooks = {}) {
-  const state = { view: 'punch', all: false, pick: null, note: null };   // what the page shows, kept over a reload
+  const state = { view: 'punch', all: false, pick: null, sp: null, note: null, scroll: [0, 0] };   // what the page shows, kept over a reload
   async function load() {
     page.innerHTML = '';
     page.appendChild(el('div', 'dim', 'Reading the move table…'));
@@ -149,13 +172,14 @@ export async function movesPage(page, args, hooks = {}) {
     const prefix = (m.file || '').replace(/\.CHR$/i, '').toUpperCase();
     for (const r of [...m.punches, ...m.swipes]) if (!(r.anim in names)) names[r.anim] = await animName(r.anim, prefix);
 
-    const intro = el('div', 'dim', 'From ' + m.label + (m.own ? ' (this monster\'s own .CHR: the numbers below can be changed)' : ' (the base type\'s .CHR)') +
-      '. The numbers are the game\'s; the frames are an estimate' + (m.frames ? '' : ' (no model: no frames)') + ' at 60 per second. A row plays that move above.');
-    page.appendChild(intro);
+    const left = el('div', 'mvleft'), mid = el('div', 'mvmid');
+    page.append(left, mid);
+
+    // middle column, top: where the numbers come from, the copy button, the warnings
     if (!m.own && hooks.extract) {
       const b = button('Give it its own .CHR to edit', async () => { b.disabled = true; await hooks.extract(); load(); });
       b.title = 'Extract stats: copies the base type\'s .CHR and .AIC to this monster\'s files (the same as Stats & sounds)';
-      page.appendChild(b);
+      mid.appendChild(b);
     }
     if (m.problems && m.problems.length) {
       const w = el('div', 'warnbox');
@@ -164,35 +188,39 @@ export async function movesPage(page, args, hooks = {}) {
       for (const p of m.problems.slice(0, 12)) ul.appendChild(el('li', '', p));
       if (m.problems.length > 12) ul.appendChild(el('li', '', '… and ' + (m.problems.length - 12) + ' more'));
       w.appendChild(ul);
-      page.appendChild(w);
+      mid.appendChild(w);
     }
+    const noteBox = el('div');
+    const edit = el('div', 'moveedit');
+    const intro = el('div', 'dim mvfoot', 'From ' + m.label + (m.own ? ' (this monster\'s own .CHR: the numbers can be changed)' : ' (the base type\'s .CHR)') +
+      '. The numbers are the game\'s; the frames are an estimate' + (m.frames ? '' : ' (no model: no frames)') + ' at 60 per second. A move on the left plays in the 3D view.');
+    mid.append(noteBox, edit, intro);
 
+    // left column: the view, then the list
     const view = el('select');
     for (const [v, t] of [['punch', 'Punches'], ['weapon', 'With an object'], ['other', 'Other moves'], ['special', 'Specials']]) { const o = el('option', '', t); o.value = v; view.appendChild(o); }
     view.value = state.view;
     const all = el('input'); all.type = 'checkbox'; all.checked = state.all;
     const allL = el('label', 'check'); allL.append(all, document.createTextNode(' every combo step'));
-    // the hit sphere of the picked move on its bones in the 3D view (red inside the hit window, dim outside); the choice is kept
-    const sphOn = el('input'); sphOn.type = 'checkbox'; sphOn.checked = hitSpheresOn();
-    const sphL = el('label', 'check'); sphL.append(sphOn, document.createTextNode(' hit spheres'));
-    sphL.title = 'Draws the hit sphere of the picked move at each bone that tests the hit, on the playing animation: red while the hit window is open, dim outside it.';
-    sphOn.onchange = () => setHitSpheres(sphOn.checked);
-    const bar = el('div', 'inline');
-    bar.append(view, allL, sphL);
+    allL.title = 'Shows the 10 steps of each button\'s combo, not only the first move.';
+    const bar = el('div', 'inline mvbar');
+    bar.append(view, allL);
     const out = el('div', 'movesout');
-    const edit = el('div', 'moveedit');
-    page.append(bar, out, edit);
+    left.append(bar, out);
 
     const rowsAll = () => [...m.punches, ...m.swipes];
     const hitOf = r => [[r.win_start, r.win_end], { locators: r.locators, radius: r.radius }];
     const pick = r => { state.pick = (r.weapon ? 'w' : 'p') + r.pos + '.' + r.ptype; playMove(r.anim, ...hitOf(r)); drawEdit(r); };
-    // writes a number and draws the page again from the file (the table, the frames, the warnings follow it)
+    // writes a number and draws the page again from the file (the list, the frames, the warnings follow it)
     async function reread(note) {
       state.note = note;
+      state.scroll = [out.scrollTop, mid.scrollTop];
       page.innerHTML = '';
       const m2 = await kit.api('do/monster_moves', args);
       if (m2.error) { page.appendChild(el('div', 'dim', 'No move table: ' + m2.error + '.')); return; }
       await draw(m2);
+      out.scrollTop = state.scroll[0];
+      mid.scrollTop = state.scroll[1];
     }
     async function saveMove(r, f, label, inp, status) {
       status.className = 'autosave busy'; status.textContent = 'Saving…';
@@ -206,16 +234,17 @@ export async function movesPage(page, args, hooks = {}) {
       reread('✓ Saved: ' + f.label + ' ' + fix(res.old, 3) + ' → ' + fix(res.new, 3) + ' (Build mod puts it in the game)');
     }
     const keyNote = (text, bad) => {
-      let n = out.querySelector('.keynote');
-      if (!n) { n = el('div', 'autosave keynote'); out.prepend(n); }
-      n.className = 'autosave keynote ' + (bad ? 'err' : 'ok');
-      n.textContent = text;
+      noteBox.innerHTML = '';
+      noteBox.appendChild(el('div', 'autosave keynote ' + (bad ? 'err' : 'ok'), text));
     };
+    const notOwn = () => el('div', 'dim', 'The disc\'s numbers are not edited. ' + (hooks.extract ? '[Give it its own .CHR to edit] above makes a copy for this monster.' : ''));
+
     function drawEdit(r) {
       edit.innerHTML = '';
       if (!r) return;
       edit.appendChild(el('h5', '', 'Move: ' + (r.weapon ? 'with an object, ' : '') + moveName(r) + ', step ' + r.pos));
-      if (!m.own) { edit.appendChild(el('div', 'dim', 'The disc\'s numbers are not edited. ' + (hooks.extract ? '[Give it its own .CHR to edit] above makes a copy for this monster.' : ''))); return; }
+      edit.appendChild(statCards(r, !!r.weapon, names, m.default_radius));
+      if (!m.own) { edit.appendChild(notOwn()); return; }
       const grid = el('div', 'editgrid');
       const status = el('div', 'autosave', 'Changes save by themselves.');
       if (state.note) { status.className = 'autosave ok'; status.textContent = state.note; state.note = null; }   // the page was drawn again after the save
@@ -239,29 +268,45 @@ export async function movesPage(page, args, hooks = {}) {
         inp.onchange = () => saveMove(r, f, label, inp, status);
         nx.append(lab, inp);
       }
-      edit.append(grid, el('h5', '', 'Combo: what may follow'), nx, status);
+      edit.append(el('h5', '', 'Change it'), grid, el('h5', '', 'Combo: what may follow'), nx, status);
+    }
+    // a special or one of the other moves (the numbers of a state of the .CHR): its fields
+    function drawKey(s) {
+      edit.innerHTML = '';
+      if (!m.own) edit.appendChild(notOwn());
+      edit.appendChild(fieldTable(s, m.own, saveKey, true));
     }
 
     function show() {
       state.view = view.value; state.all = all.checked;
       out.innerHTML = '';
+      noteBox.innerHTML = '';
       const v = view.value;
       allL.hidden = v === 'special' || v === 'other';
       if (v === 'special' || v === 'other') {
         edit.innerHTML = '';
+        setMoveHit(null, null);   // these states have no animation of their own here: no hit window or sphere of the last move
         const list = v === 'special' ? m.specials : m.others;
-        if (!list.length) out.appendChild(el('div', 'dim', v === 'special' ? 'No special move key in this .CHR.' : 'No other moves in this .CHR.'));
-        for (const s of list) out.appendChild(fieldTable(s, m.own, saveKey, v === 'other'));
+        if (!list.length) { out.appendChild(el('div', 'dim', v === 'special' ? 'No special move key in this .CHR.' : 'No other moves in this .CHR.')); return; }
+        const keep = list.find(s => s.name === state.sp) || list[0];
+        const rows = [];
+        for (const s of list) {
+          const d = el('div', 'pickrow' + (s === keep ? ' on' : ''), s.name);
+          d.onclick = () => { state.sp = s.name; for (const o of rows) o.classList.toggle('on', o === d); drawKey(s); };
+          rows.push(d);
+          out.appendChild(d);
+        }
         out.appendChild(el('div', 'dim', v === 'special'
           ? 'The game\'s own numbers of each special state (the training mode\'s MOVE LIST describes them in words).'
           : 'Butt slam, ram attack, the grab\'s range and the throw. The damage of the hits inside a grab, of the getting-up attack, the counter window and the taunt are in the game\'s code for each monster type, not in the .CHR.'));
+        drawKey(keep);
         if (state.note) { keyNote(state.note, false); state.note = null; }
         return;
       }
       const weapon = v === 'weapon';
       const rows = (weapon ? m.swipes : m.punches).filter(r => all.checked || r.pos === 1);
       if (!rows.length) { out.appendChild(el('div', 'dim', 'No moves of this kind in the .CHR.')); edit.innerHTML = ''; return; }
-      out.appendChild(table(rows, weapon, names, pick, all.checked));
+      out.appendChild(table(rows, weapon, pick, all.checked));
       const ch = m.chains.filter(c => c.weapon === weapon);
       if (ch.length) {
         out.appendChild(el('div', 'chains', 'COMBOS (the same button again): ' + ch.map(c =>
@@ -269,14 +314,44 @@ export async function movesPage(page, args, hooks = {}) {
       }
       if (!weapon && m.default_radius) out.appendChild(el('div', 'dim', '* radius 0 in the file: the monster\'s default fist (' + fix(m.default_radius, 1) + ') is used.'));
       if (weapon) out.appendChild(el('div', 'dim', 'With an object in hand, the damage is the object\'s own times this multiplier.'));
-      // the move picked before (this view's), still on after a change
+      // the move picked before (this view's), still on after a change; else the first one, so the 3D view plays something
       const keep = rowsAll().find(r => ((r.weapon ? 'w' : 'p') + r.pos + '.' + r.ptype) === state.pick && r.weapon === weapon);
       const tr = keep && out.querySelector('tr[data-id="' + state.pick + '"]');
-      if (tr) { tr.classList.add('on'); drawEdit(keep); setMoveHit(...hitOf(keep)); } else edit.innerHTML = '';
+      if (tr) { tr.classList.add('on'); drawEdit(keep); setMoveHit(...hitOf(keep)); } else out.querySelector('tbody tr').click();
     }
     view.onchange = show;
     all.onchange = show;
     show();
   }
   await load();
+}
+
+// The full-screen Moves view over the kit: args = {cid} | {group} of the monster, group = the work folder group whose model shows
+// (the costume's or the custom's), g = that group (its name over the model), restore() = puts the 3D view back where it was.
+// Resolves when it is closed.
+export async function openMoves({ args, group, g, hooks = {}, restore }) {
+  const ov = el('div', 'movesview');
+  const head = el('div', 'mvhead');
+  const sphOn = el('input'); sphOn.type = 'checkbox'; sphOn.checked = hitSpheresOn();
+  const sphL = el('label', 'check'); sphL.append(sphOn, document.createTextNode(' hit spheres'));
+  sphL.title = 'Draws the hit sphere of the picked move at each bone that tests the hit, on the playing animation: red while the hit window is open, dim outside it.';
+  sphOn.onchange = () => setHitSpheres(sphOn.checked);
+  let close;
+  const done = new Promise(r => { close = r; });
+  head.append(el('h3', '', 'Moves' + (g && g.title ? ': ' + g.title : '')), sphL, button('Close ✕', () => close()));
+  const grid = el('div', 'mvgrid');
+  const page = el('div', 'mvlm');
+  const right = el('div', 'mvright');
+  const v = el('div', 'v3d'), ab = el('div');
+  right.append(v, ab);
+  grid.append(page, right);
+  ov.append(head, grid);
+  document.body.appendChild(ov);
+  // Escape closes it, unless a dialog of the kit is on top
+  const onKey = e => { const md = document.getElementById('modal'); if (e.key === 'Escape' && !(md && md.style.display === 'flex')) close(); };
+  document.addEventListener('keydown', onKey);
+  done.then(() => { document.removeEventListener('keydown', onKey); ov.remove(); if (restore) restore(); });
+  await stage(v, ab, group, g);   // the animation bar is ready before the first move plays
+  await movesPage(page, args, hooks);
+  return done;
 }

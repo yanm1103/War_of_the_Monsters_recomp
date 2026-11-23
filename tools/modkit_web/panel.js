@@ -21,6 +21,16 @@ export function stageTitle(v, g) {
   } else if (g.title) v.appendChild(name);
 }
 
+// the model of a work folder group in the box v (the kit's export: the game's axes) with its name over it and the animation bar in ab.
+// The 3D renderer is one for the whole page: whatever shows another view of it (the full-screen Moves) calls this again after.
+export function stage(v, ab, groupKey, g) {
+  const still = 'api/model.glb?group=' + encodeURIComponent(groupKey) + '&t=' + Date.now();
+  showModel(v, still, true);
+  stageTitle(v, g);   // after: showModel empties the box
+  ab.innerHTML = '';
+  return animBar(ab, groupKey, still);
+}
+
 export function panelFrame(body, groupKey, g) {
   const wrap = el('div', 'panel');
   const top = el('div', 'pvtop');
@@ -32,10 +42,8 @@ export function panelFrame(body, groupKey, g) {
   const form = el('div', 'props');
   wrap.append(top, bar, form);
   body.appendChild(wrap);
-  const still = 'api/model.glb?group=' + encodeURIComponent(groupKey) + '&t=' + Date.now();
-  showModel(v, still, true);   // the kit's export: the game's axes
-  stageTitle(v, g);   // after: showModel empties the box
-  animBar(ab, groupKey, still);
+  stage(v, ab, groupKey, g);
+  form.restore3d = () => stage(v, ab, groupKey, g);   // after a full-screen view borrowed the renderer
   makeSplit(bar, top, { axis: 'y', key: 'wotm.v3dH', min: 140, max: () => wrap.clientHeight - 150 });
   return form;
 }
@@ -56,6 +64,7 @@ export function tabs(parent, labels, key, onShow) {
   }
   show(Math.max(0, labels.indexOf(localStorage.getItem(key))));
   pages.shown = () => { if (onShow) onShow(labels[btns.findIndex(b => b.classList.contains('on'))]); };
+  pages.show = label => show(Math.max(0, labels.indexOf(label)));
   return pages;
 }
 

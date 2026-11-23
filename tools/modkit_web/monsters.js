@@ -5,7 +5,7 @@
 import { meshBlocks, currentModel } from './mesh.js';
 import { panelFrame, tabs, block, el, button, autosave } from './panel.js';
 import { fightCamera } from './viewer.js';
-import { movesPage } from './moves.js';
+import { openMoves } from './moves.js';
 import { costumeRadios, skinDialog } from './skins.js';
 
 const $ = id => document.getElementById(id);
@@ -171,19 +171,27 @@ async function monsterPanel(g, body, label) {
   const key = 'monsters/' + cid;
   const run = async (action, b) => { kit.workFocus = [key]; return kit.run(action, b); };
   let camOn = false, camReady = false;   // the Camera tab is showing: the 3D view looks through the fight camera
-  let movesWanted = false, movesDone = false;   // the Moves tab was shown: its table is read once, when the tab first shows
-  const pages = tabs(form, ['Settings', 'Camera', 'Moves', '3D model', 'Stats & sounds'], 'wotm.monsterTab', t => {
+  // The Moves tab is not a page: picking it opens the full-screen Moves view (moves.js) over the panel, and closing that view
+  // goes back to the tab that was open. The 3D renderer is lent to the view and put back in the panel when it closes.
+  let lastTab = null, opening = false, ready = false;
+  const pages = tabs(form, ['Settings', 'Camera', 'Moves', '3D model', 'Stats & sounds'], 'wotm.monsterTab', async t => {
+    if (t === 'Moves') {
+      if (!ready) { queueMicrotask(() => pages.show('Settings')); return; }   // the last tab of the previous session was Moves: do not open it by itself
+      if (opening) return;
+      opening = true;
+      fightCamera(null);
+      // [Give it its own .CHR]: the same as Stats & sounds > Extract stats; the view reads the table again when the task ends
+      const extract = async () => { const done = kit.nextDone(); const r = await run('monster_stats', { cid }); if (r.ok) await done; };
+      await openMoves({ args: { cid }, group: g.key, g, hooks: { extract }, restore: () => form.restore3d() });
+      opening = false;
+      pages.show(lastTab || 'Settings');
+      return;
+    }
+    lastTab = t;
     camOn = t === 'Camera';
     if (camOn) { if (camReady) showFightCam(); } else fightCamera(null);
-    if (t === 'Moves') { movesWanted = true; if (camReady) loadMoves(); }
   });
-  const [tSet, tCam, tMoves, tModel, tStats] = pages;
-  function loadMoves() {
-    if (!movesWanted || movesDone) return;
-    movesDone = true;
-    // [Give it its own .CHR]: the same as Stats & sounds > Extract stats; the page reads the table again when the task ends
-    movesPage(tMoves, { cid }, { extract: async () => { const done = kit.nextDone(); const r = await run('monster_stats', { cid }); if (r.ok) await done; } });
-  }
+  const [tSet, tCam, , tModel, tStats] = pages;
 
   // Settings
   const name = el('input');
@@ -241,7 +249,7 @@ async function monsterPanel(g, body, label) {
   tCam.append(tip(row('Camera', cam.box), 'Camera'), row('', camNote), row('', autosave([cam.from, cam.scale], saveAll)));
   camReady = true;
   if (camOn) showFightCam();
-  loadMoves();
+  ready = true;
 
   tSet.append(row('Base', el('span', '', p.base)), row('Name', name),
     tip(row('Narrator', narr), 'Narrator'), tip(row('Special move', special), 'Special move'),
