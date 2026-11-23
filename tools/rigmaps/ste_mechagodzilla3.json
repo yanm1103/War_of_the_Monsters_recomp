@@ -1,5 +1,5 @@
 {
-  "comment": "Mechagodzilla 3 (Kiryu) as stored in Godzilla: Save the Earth (PS2): Biped with the neck as one joint (Neck Dont Touch), the clavicles unskinned, two fingers, one toe, tail of 15 (Tail Stiff to Tail13); the jaw is Bone01 (Bone02 is not skinned); Cannon R/L/Middle bones sit on Spine1 and stay rigid on it.",
+  "comment": "Mechagodzilla 3 (Kiryu) as stored in Godzilla: Save the Earth (PS2): Biped with the neck as one joint (Neck Dont Touch), the clavicles unskinned, two fingers, one toe, tail of 15 (Tail Stiff to Tail13); the jaw is Bone01 (Bone02 is not skinned); Cannon R/L/Middle bones sit on Spine1 and stay rigid on it. In the climb (Togera's moves) the spine and neck aim along Togera's and the head takes half its turn: the upright torso leaned back and the head tipped over. The mouth sits in the gap between the jaw and the snout, where the beam comes out.",
   "bones": {
     "Bip01_Pelvis": {"from": "bone30", "move": true},
     "Bip01_Spine": {"from": ["bone30", "bone13", 0.5]},
@@ -22,6 +22,13 @@
     "Bip01_L_Calf": {"from": "bone19"},
     "Bip01_L_Foot": {"from": "bone18", "level": true}
   },
+  "clipBones": [
+    {"clips": [100, 101, 102, 103, 104, 105, 106],
+     "bones": {"Bip01_Spine": {"aim": ["Bip01_Spine1", "bone13"]},
+               "Bip01_Spine1": {"aim": ["Bip01_Neck_Dont_Touch", "bone2"]},
+               "Bip01_Neck_Dont_Touch": {"aim": ["Bip01_Head", "bone1"]},
+               "Bip01_Head": {"from": ["bone1", "bone2", 0.5]}}}
+  ],
   "chains": [
     {"joints": ["Bip01_Tail_Stiff", "Bip01_Tail", "Bip01_Tail1", "Bip01_Tail2", "Bip01_Tail3", "Bip01_Tail4", "Bip01_Tail5",
                 "Bip01_Tail6", "Bip01_Tail7", "Bip01_Tail8", "Bip01_Tail9", "Bip01_Tail10", "Bip01_Tail11", "Bip01_Tail12",
@@ -35,6 +42,6 @@
     "grab": {"joint": "Bip01_L_Hand", "at": ["Bip01_L_Finger11"]},
     "foot_r": {"joint": "Bip01_R_Foot", "at": ["Bip01_R_Foot"]},
     "foot_l": {"joint": "Bip01_L_Foot", "at": ["Bip01_L_Foot"]},
-    "mouth": {"joint": "Bip01_Head", "at": [0, 21.5, 95.0]}
+    "mouth": {"joint": "Bip01_Head", "at": [0, 18.0, 93.0]}
   }
 }

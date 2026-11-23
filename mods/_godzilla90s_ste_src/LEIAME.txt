@@ -6,6 +6,8 @@ tools/ste/ste_clips.py <iso> Godzilla90s.cmp (ID_MAP do 2000 + PROFILES['Godzill
 (0.988 x altura 98.6 / 99.2).
 O mod: modkit.py monster new "Godzilla 90s" godzilla90s_ste --base togera --costume 0 --name "GODZILLA 90S" --ai;
 modkit.py monster rig ... godzilla90s_ste_rig.glb; textura lizard0_t0013.png = godzilla90s_ste.png x0.62 (como no 2000);
+o rig.glb e de um retarget.py anterior: so o localizador da boca (loc_80b, [0, 24.5, 88.5] no rigmap, na fenda entre a mandibula
+e o focinho) foi trocado depois no .glb; rodar o retarget.py de hoje muda tambem as animacoes, que entao precisam ser conferidas;
 retrato do HUD = render do proprio modelo, como no 2000 (portrait_render.py e portrait_compose.py de mods/_godzilla2000_ste_src),
 com o portrait_shot.json daqui (rugido a208 no quadro 0, boca aberta mais 22 graus); monster portrait ... portrait.png.
 Narrador: narrator/godzilla_90s.mp3 do mod Godzilla copiado como narrator/godzilla_90s_ste.mp3. Logo: logo_source.png centrado num

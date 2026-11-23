@@ -1,5 +1,5 @@
 {
-  "comment": "Godzilla 90s as stored in Godzilla: Save the Earth (PS2): Biped without Neck2 and without forearm twist bones, two fingers and one toe, tail of 15; the same joints as the Godzilla 2000 of the same game; the mouth sits at its own snout.",
+  "comment": "Godzilla 90s as stored in Godzilla: Save the Earth (PS2): Biped without Neck2 and without forearm twist bones, two fingers and one toe, tail of 15; the same joints as the Godzilla 2000 of the same game; the mouth sits in the gap between its jaw and its snout, where the breath comes out.",
   "bones": {
     "Bip01_Pelvis": {"from": "bone30", "move": true},
     "Bip01_Spine": {"from": ["bone30", "bone13", 0.5]},
@@ -36,6 +36,6 @@
     "grab": {"joint": "Bip01_L_Hand", "at": ["Bip01_L_Finger11"]},
     "foot_r": {"joint": "Bip01_R_Foot", "at": ["Bip01_R_Foot"]},
     "foot_l": {"joint": "Bip01_L_Foot", "at": ["Bip01_L_Foot"]},
-    "mouth": {"joint": "Bip01_Head", "at": [0, 26.6, 90.0]}
+    "mouth": {"joint": "Bip01_Head", "at": [0, 24.5, 88.5]}
   }
 }

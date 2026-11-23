@@ -6,7 +6,9 @@ Corpo: tools/ste/export_dae.py <iso> MechaGodzilla3.cmp <pasta> --name mechagodz
 dorsais, cabeca) pegam o osso da palavra que vem depois do bloco da submalha no descritor (ste_model.rigid_bone); o numero da submalha
 dava ossos errados e as pecas ficavam soltas no ar quando o corpo se mexia.
 Esqueleto: tools/rigmaps/ste_mechagodzilla3.json (Biped com o pescoco numa junta so, clavículas sem pele, 2 dedos, 1 dedo do pe, cauda
-de 15; a mandibula e a Bone01; as Cannon R/L/Middle ficam rigidas na Spine1).
+de 15; a mandibula e a Bone01; as Cannon R/L/Middle ficam rigidas na Spine1). No climb (100-106, do Togera) o "clipBones" mira a
+coluna e o pescoco pelos do Togera e da a cabeca metade da virada dela: o tronco reto do Mecha recebia a virada de um tronco deitado
+e tombava para tras, com a cabeca dobrada. A boca ("mouth", de onde sai o raio) fica na fenda entre a mandibula e o focinho.
 Animacoes: tools/ste/ste_clips.py <iso> MechaGodzilla3.cmp clips.json (ID_MAP do 2000 + PROFILES['MechaGodzilla3']; sem GRAB, STOMP e
 THROW_2HAND no STE, esses ids ficam com o Togera retargetado), depois tools/retarget.py <LIZARD0.glb> mechagodzilla3_ste.dae
 tools/rigmaps/ste_mechagodzilla3.json rig.glb --size 1.10 --own clips.json. --size 1.10: a escala do Godzilla 2000 (0.988) vezes a razao
@@ -14,9 +16,13 @@ das alturas dos dois no STE (111 / 99.2). O especial e a PLASMA_CANNON ("Absolut
 trecho 0-30% (levanta o braco), o disparo (161) o trecho 35-80%, quase parado, em vai-e-volta.
 O mod: modkit.py monster new "Mechagodzilla 3" mechagodzilla3_ste --base togera --costume 0 --name "MECHAGODZILLA 3" --ai;
 modkit.py monster mesh export ... (LIZARD0.glb); monster rig ... mechagodzilla3_ste_rig.glb; textura lizard0_t0013.png = mechagodzilla3_ste.png
-x0.62 (como no 2000; o alfa fica: o STE usa 0 a 128 e as costuras do pescoco sao alfa 0).
+x0.62 (como no 2000; o alfa fica: o STE usa 0 a 128 e as costuras do pescoco sao alfa 0), depois eye_yellow.py <.dae> lizard0_t0013.png
+(o monster rig grava de novo a textura crua: refazer os dois passos depois dele).
+Olho: no STE e uma submalha propria (8 triangulos rigidos na cabeca) desenhada com uma cor que o export nao leva; os texels dela sao
+cinza. eye_yellow.py pinta de amarelo so os texels que esses triangulos usam (nenhum outro triangulo do modelo os amostra).
 Retrato do HUD: render do proprio modelo, como no 2000 (mods/_godzilla2000_ste_src/portrait_render.py e portrait_compose.py) com o
-portrait_shot.json daqui (rugido a131 no quadro 36, mandibula Bone01); monster portrait ... portrait.png.
+portrait_shot.json daqui (rugido a131 no quadro 48, cabeca reta e boca aberta; camera az 25), sobre um rig.glb feito de uma copia do
+.dae com o PNG ja passado pelo eye_yellow.py (olho amarelo); monster portrait ... portrait.png.
 Logo: mklogo.py <saida.png> C:\Windows\Fonts\impact.ttf (logo tipografico, nao ha imagem do logo; troque por uma arte quando houver).
 Narrador: narrator_tts.ps1 (voz do Windows) + ffmpeg: narrator/mechagodzilla3_ste.mp3 e um quebra-galho; troque pela voz de um gerador.
 Sons: ste_sounds.py <iso> <pasta files/ da pasta de trabalho> sounds (depois de modkit.py monster sounds ...), depois modkit.py pack.

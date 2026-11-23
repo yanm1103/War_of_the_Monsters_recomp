@@ -294,7 +294,10 @@ of the tree; `tools/automap.py`) and writes it next to `rig.glb` as `rig_map.jso
 comes from the file (`--up y|z` when it lies down) and a Y-up model faces -Y once stood up (`--front +y` turns it around). The map can
 start from another one (`{"extends": "biped_togera.json", ...}`) and change only the tail, add a `mouth` locator where the
 fire comes out or close a jaw the model's bind pose leaves open (`"turn"`). Each joint keeps the tilt it has in the model's
-bind pose, so a foot that is not flat there stays tilted in every move; the Biped map lays the feet flat (`"level"`). The base's layers (looking around, flinches) keep only rotations, as the game adds them on top of the main
+bind pose, so a foot that is not flat there stays tilted in every move; the Biped map lays the feet flat (`"level"`). A joint
+turns as its base bone turns from rest, so a body shaped otherwise can read wrong in some moves (an upright torso with a short neck
+leans back and tips the head over in the climb of a forward-leaning lizard); `"clipBones"` gives those animation ids other sources
+or aims a segment along the base's (`tools/rigmaps/ste_mechagodzilla3.json`, the climb). The base's layers (looking around, flinches) keep only rotations, as the game adds them on top of the main
 animation (`MODELS_3D.md`, "New skeleton"). The game lights monsters brightly: a texture made for another game may need
 darkening to keep its look.
 The model can also bring moves of its own: `--own clips.json` replaces the base's animation with the same id (a walk, a

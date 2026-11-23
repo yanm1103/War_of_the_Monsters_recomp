@@ -27,6 +27,12 @@ become the rig .glb that `modkit.py monster rig` (tools/ngprig.py) takes.
     stays on the joint above it (fingers closed into a fist, a mouth left open): no channels of its own.
   - "chains": [{"joints": [...], "from": [...]}]: two chains of different lengths (tails), matched by their position along
     the chain.
+  - "clipBones": [{"clips": [100, 101, ...], "bones": {joint: {"from": bone | [bone_a, bone_b, f], "aim": [child_joint,
+    child_bone]}}}]: in those animation ids the joint turns as these source bones turn instead of its "bones" entry (rest,
+    "move" and "align" stay), and "aim" then turns it, at every frame, so that the direction to child_joint is the source's
+    direction from its bone to child_bone. For poses that read wrong on a body shaped otherwise: an upright torso and a
+    short neck that take a forward-leaning lizard's turn up in the climb lean back and tip the head over; aiming the spine
+    and neck along the source's keeps them on the wall, and [head, neck, 0.5] halves the head's turn.
   - "locators": {alias or loc_<hex>: {"joint": joint, "at": [x, y, z] | [joint, ...]}}: a point in the model's units (before
     the size) or the mean of some joints. Every locator of the source that the map does not name goes on the joint its
     source bone maps to (or the nearest mapped ancestor), with the source offset scaled.
@@ -792,6 +798,27 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
         else:
             bones[jid(name)] = {"a": src.node(f[0]), "b": src.node(f[1]), "f": float(f[2]), "move": bool(spec.get("move")),
                                 "align": spec.get("align"), "level": bool(spec.get("level")), "turn": spec.get("turn")}
+    clip_bones = {}   # animation id -> {joint: (a, b, f, aim)}: "clipBones", the joint turns otherwise in those clips
+    for cb in cfg.get("clipBones", []):
+        over = {}
+        for name, spec in cb.get("bones", {}).items():
+            j = jid(name)
+            if j not in bones:
+                raise RetargetError("map: clipBones joint %s has no \"from\" in \"bones\"" % name)
+            f = spec.get("from")
+            if f is None:
+                a, b, w = bones[j]["a"], bones[j]["b"], bones[j]["f"]
+            elif isinstance(f, str):
+                a, b, w = src.node(f), None, 0.0
+            else:
+                a, b, w = src.node(f[0]), src.node(f[1]), float(f[2])
+            aim = None
+            if spec.get("aim"):
+                cj, cbone = jid(spec["aim"][0]), src.node(spec["aim"][1])
+                aim = (cj, bones[j]["a"], cbone)
+            over[j] = (a, b, w, aim)
+        for aid in cb.get("clips", []):
+            clip_bones.setdefault(int(aid), {}).update(over)
     src_of = {}   # source bone -> model joint (for the locators)
     for j, b in bones.items():
         if b["b"] is None:
@@ -1029,7 +1056,9 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
 
     # ---- motion
     rest_src = {}
-    for b in {x for bb in bones.values() for x in (bb["a"], bb["b"]) if x is not None}:
+    for b in {x for bb in bones.values() for x in (bb["a"], bb["b"]) if x is not None} | \
+            {x for over in clip_bones.values() for t in over.values() for x in t[:2] + (t[3][1:] if t[3] else ())
+             if x is not None}:
         rest_src[b] = src.rest[b]
     move_k = {}
     for j, b in bones.items():
@@ -1040,6 +1069,11 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
     for i in korder:
         p = kparent[i]
         Lk[i] = mul(inv(A[p]), A[i]) if p is not None else A[i]
+    for over in clip_bones.values():
+        for j, t in over.items():
+            if t[3] and kparent.get(t[3][0]) != j:
+                raise RetargetError("map: clipBones %s aims at %s, which is not a kept child of it" % (
+                    J[j]["name"], J[t[3][0]]["name"]))
     layer_pose = {}
     if base:   # the layers turn from the pose they are added to, not from the bind pose
         try:
@@ -1063,6 +1097,7 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
         pscale = {}                              # prop -> scale per frame
         lp = layer_pose.get(nm)
         ref = {b: lp.get(b, rest_src[b]) if lp else rest_src[b] for b in rest_src}   # what the source bone turns from
+        over = clip_bones.get(int(m.group(1)), {}) if m else {}
         for f in range(frames):
             t = f / FPS
             cache = {}
@@ -1075,8 +1110,12 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
                 p = kparent[i]
                 bb = bones.get(i)
                 if bb is not None:
-                    q = D[bb["a"]][0] if bb["b"] is None else slerp(D[bb["a"]][0], D[bb["b"]][0], bb["f"])
+                    ra, rb, rf, aim = over[i] if i in over else (bb["a"], bb["b"], bb["f"], None)
+                    q = D[ra][0] if rb is None else slerp(D[ra][0], D[rb][0], rf)
                     R = mul(quat_col(q), rot3(A[i]))
+                    if aim:   # the segment to the child joint along the source's bone -> child bone, at every frame
+                        cj, sa, sb = aim
+                        R = mul(rot_between(apply(R, pos(Lk[cj]), 0.0), [x - y for x, y in zip(D[sb][1], D[sa][1])]), R)
                 else:
                     R = rot3(mul(Wt[p], Lk[i])) if p is not None else rot3(A[i])
                 if i in move_k:
