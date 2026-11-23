@@ -31,3 +31,30 @@ Tiro ("shotFx"): ste_fx.py <iso> shot MechaGodzilla3.cmp finger_rocket <pasta>/f
 Golpes: as animacoes inteiras do STE nos ids 10-25 (PROFILES['MechaGodzilla3']) e um .CHR proprio feito de moves.json: modkit.py monster
 stats ... (uma vez), depois tools/chr_moves.py moves.json disc/RST/LIZARD.CHR --ngp <pasta de trabalho>/LIZARD0.NGP --out <pasta de
 trabalho>/LIZARD.CHR e modkit.py pack "Mechagodzilla 3". O mapa de botoes esta no comentario do moves.json.
+
+Golpes: do STE (comandos da pagina do Kiryu, tohokingdom.com/vg/gste/characters.htm, PS2) para os 6 tipos de ataque do WotM
+(□, △, frente+□, frente+△, tras+□, tras+△; o STE tem 3 botoes e mais direcoes, entao varios golpes dividem um tipo). A ordem dentro
+de cada corrente e a do moves.json.
+  STE (botao)                       golpe do STE (animacao)        no WotM                 id
+  Low Kick (□)                      QUICK_LOW_KICK                 □, 4o golpe             13
+  (Kick2)                           QUICK_HIGH_KICK                □, 5o golpe             14
+  jabs e socos (✕)                  JAB_RIGHT, JAB_LEFT, PUNCH_RIGHT  □, 1o ao 3o         10, 11, 20
+  Tail Stab (○)                     TAIL_STAB                      △, 1o e 3o              21
+  Bite (fim de combo)               LUNGEBITE                      △, 2o                   19
+  Spin Punch (cima+✕)               SPIN_PUNCH                     △, 4o                   23
+  Dual Slam (frente+✕)              DOUBLE_HAMMERFIST              frente+□, 1o            16
+  Grand Slam (tras+✕)               OVERHAND                       frente+□, 2o            15
+  Double Kick (tras+□)              DOUBLE_KICK                    tras+□, 1o              18
+  Roundhouse (frente+□)             ROUNDHOUSE                     tras+□, 2o              17
+  Upwards Tail Spike (cima+○)       TAIL_UPPERCUT                  frente+△, 1o            12
+  Uppercut (baixo+✕)                UPPERCUT                       frente+△, 2o            22
+  Superior Tail Stab (tras+○)       TAILSTAB_STRONG                tras+△, 1o              24
+  Circle Sweep (baixo+□)            KICK_SWEEP                     tras+△, 2o              25
+  Rocket Pack (R1, 3 tiros)         finger_rocket                  □ sem adversario ao alcance (tiro padrao)
+  Absolute Zero Cannon (Rage ✕+○)   PLASMA_CANNON                  especial (○+△ com o medidor cheio)
+Sem equivalente no WotM e fora do mod: Flying Kicks, Cruise Assault, Plasma Sword, Mouth Cannon, Jet Sweep, voo e Shoulder Rocket Charge.
+Conferido no jogo (treino com PS2X_PAD, WOTM_ANIMLOG=1; docs/screenshots/2026-11-23/): os 16 ids tocam pelas combinacoes da tabela
+(a direcao tem de ser apertada junto com o botao; no roteiro de pad, "cima" e frente e "baixo" e tras) e cada um aparece nas tiras de
+quadros com as esferas de ataque (azul) e de acerto (vermelho). Sons (audiocheck.py): cada som do LIZARD_S e do GENAMB_S do mod
+decodifica com a duracao e o envelope do WAV do STE; o jogo pede ao banco do mod (PS2X_SND_LOG=1) os sons 2, 5, 6, 7, 16, 55, 63 e 70.
+Provisorios: o logo (tipografico) e a narracao (voz do Windows).
