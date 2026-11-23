@@ -159,6 +159,43 @@ PROFILES = {
         24: ('TAIL_UPPERCUT', False, None, dict(NAT, face={'from': 0.37})),      # Tail_uppercut, 26-37%
         22: ('UPPERCUT', False, None, dict(NAT, face={'from': 0.34})),           # Uppercut, 25-34%
     },
+    # Mechagodzilla 3 (Kiryu): o mesmo corpo de Biped, sem GRAB/STOMP/THROW_2HAND (ficam com o Togera retargetado).
+    'MechaGodzilla3': {
+        130: ('VICTORY_1', False, None),
+        120: ('SLUMP_FORWARD', False, None),
+        49: ('CATCH_1HAND_OOF', False, 0.5, {'settle': True}),
+        42: ('LIFT_2HAND', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.87, 0.42), (1, 0.60)]}),
+        55: ('THROW_OBJECT', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.37, 0.25), (1, 1)]}),
+        56: ('THROW_OBJECT', False, 40 / 60.0, {'settle': True, 'knots': [(0, 0), (0.37, 0.25), (1, 1)]}),
+        172: ('LIFTING_IDLE', True, None),
+        170: None,
+        185: None,
+        240: None,
+        241: None,
+        177: ('DROP', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.5, 0.15), (1, 0.32)]}),
+        186: ('DROP', False, 1.0, {'settle': True, 'knots': [(0, 0), (0.5, 0.15), (1, 0.32)]}),
+        # especial (Absolute Zero Cannon): a PLASMA_CANNON do STE levanta o braco em ~0-30% (preparo) e fica na pose do disparo
+        # (35-80%, quase parada) enquanto o raio sai
+        160: ('PLASMA_CANNON', False, 1.0, {'segs': [(0.0, 0.30, 1.0)]}),
+        161: ('PLASMA_CANNON', True, 1.2, {'segs': [(0.35, 0.80, 1.0)], 'pingpong': True}),
+        # golpes (mods/_mechagodzilla3_ste_src/moves.json): janela de acerto do STE no comentario
+        10: ('JAB_RIGHT', False, None, dict(NAT, face={'from': 0.32})),            # Jab_right, 16-32%
+        11: ('JAB_LEFT', False, None, dict(NAT, face={'from': 0.34})),             # Jab_left, 16-34%
+        12: ('TAIL_UPPERCUT', False, None, dict(NAT, face={'from': 0.44})),        # Tail Uppercut (Up B), 30-44%
+        13: ('QUICK_LOW_KICK', False, None, dict(NAT, face={'from': 0.50})),       # Kick1, 34-50%
+        14: ('QUICK_HIGH_KICK', False, None, dict(NAT, face={'from': 0.41})),      # Kick2, 26-41%
+        15: ('OVERHAND', False, None, dict(NAT, face={'from': 0.51})),             # Overhand (Left A), 39-51%
+        16: ('DOUBLE_HAMMERFIST', False, None, dict(NAT, face={'from': 0.35})),    # Double Hammerfist (Right A), 29-35%
+        17: ('ROUNDHOUSE', False, None, dict(NAT, face={'from': 0.62})),           # Roundhouse (Right X), 51-62%
+        18: ('DOUBLE_KICK', False, None, dict(NAT, face={'from': 0.47})),          # Double Kick (Left X), 37-47%
+        19: ('LUNGEBITE', False, None, dict(NAT, face={'from': 0.54})),            # Bite (combo finisher), 38-54%
+        20: ('PUNCH_RIGHT', False, None, dict(NAT, face={'from': 0.41})),          # Punch2, 22-41%
+        21: ('TAIL_STAB', False, None, dict(NAT, face={'from': 0.36})),            # Tail Stab, 11-36%
+        22: ('UPPERCUT', False, None, dict(NAT, face={'from': 0.46})),             # Uppercut (Down A), 40-46%
+        23: ('SPIN_PUNCH', False, None, dict(NAT, face={'from': 0.72})),           # Spin Punch (Up A), 24-44% e 52-72%
+        24: ('TAILSTAB_STRONG', False, None, dict(NAT, face={'from': 0.37})),      # Tail Stab Strong (Left B), 29-37%
+        25: ('KICK_SWEEP', False, None, dict(NAT, face={'from': 0.63})),           # Sweep Kick (Down X), 23-63%
+    },
 }
 
 

@@ -1,0 +1,33 @@
+Mod "Mechagodzilla 3" (custom mechagodzilla3_ste): o Mechagodzilla 3 (Kiryu) de Godzilla: Save the Earth sobre o Togera, com as
+animacoes, os golpes, o raio, o foguete e os sons do STE, no mesmo esquema do Godzilla 2000 e do 90s (mods/_godzilla2000_ste_src/LEIAME.txt).
+ISO do STE: a mesma dos outros (D:\Roms\PS2SMB\DVD\SLUS_208.09.GODZILLA - SAVE THE EARTH.iso); abaixo <iso>.
+
+Corpo: tools/ste/export_dae.py <iso> MechaGodzilla3.cmp <pasta> --name mechagodzilla3_ste (.dae/.png aqui). As pecas rigidas (aletas
+dorsais, cabeca) pegam o osso da palavra que vem depois do bloco da submalha no descritor (ste_model.rigid_bone); o numero da submalha
+dava ossos errados e as pecas ficavam soltas no ar quando o corpo se mexia.
+Esqueleto: tools/rigmaps/ste_mechagodzilla3.json (Biped com o pescoco numa junta so, clavículas sem pele, 2 dedos, 1 dedo do pe, cauda
+de 15; a mandibula e a Bone01; as Cannon R/L/Middle ficam rigidas na Spine1).
+Animacoes: tools/ste/ste_clips.py <iso> MechaGodzilla3.cmp clips.json (ID_MAP do 2000 + PROFILES['MechaGodzilla3']; sem GRAB, STOMP e
+THROW_2HAND no STE, esses ids ficam com o Togera retargetado), depois tools/retarget.py <LIZARD0.glb> mechagodzilla3_ste.dae
+tools/rigmaps/ste_mechagodzilla3.json rig.glb --size 1.10 --own clips.json. --size 1.10: a escala do Godzilla 2000 (0.988) vezes a razao
+das alturas dos dois no STE (111 / 99.2). O especial e a PLASMA_CANNON ("Absolute Zero Cannon (Rage)" no STE): o preparo (160) e o
+trecho 0-30% (levanta o braco), o disparo (161) o trecho 35-80%, quase parado, em vai-e-volta.
+O mod: modkit.py monster new "Mechagodzilla 3" mechagodzilla3_ste --base togera --costume 0 --name "MECHAGODZILLA 3" --ai;
+modkit.py monster mesh export ... (LIZARD0.glb); monster rig ... mechagodzilla3_ste_rig.glb; textura lizard0_t0013.png = mechagodzilla3_ste.png
+x0.62 (como no 2000; o alfa fica: o STE usa 0 a 128 e as costuras do pescoco sao alfa 0).
+Retrato do HUD: render do proprio modelo, como no 2000 (mods/_godzilla2000_ste_src/portrait_render.py e portrait_compose.py) com o
+portrait_shot.json daqui (rugido a131 no quadro 36, mandibula Bone01); monster portrait ... portrait.png.
+Logo: mklogo.py <saida.png> C:\Windows\Fonts\impact.ttf (logo tipografico, nao ha imagem do logo; troque por uma arte quando houver).
+Narrador: narrator_tts.ps1 (voz do Windows) + ffmpeg: narrator/mechagodzilla3_ste.mp3 e um quebra-galho; troque pela voz de um gerador.
+Sons: ste_sounds.py <iso> <pasta files/ da pasta de trabalho> sounds (depois de modkit.py monster sounds ...), depois modkit.py pack.
+Vozes MGZ_* (Mechagodzilla 3), MGZ_MISSILE_FIRE (foguete), EXPLOSION_MEDIUM_RANDOM (a explosao do Missile_impact), MGZ_CHEST_BEAM (raio).
+Raio ("breathFx" do monster.json): tools/ste/ste_fx.py <iso> breath MechaGodzilla3.cmp Mecha2k_cannon <pasta>/fx --hit Mecha2k_cannon_hit
+(o Absolute Zero Cannon; o Mouth Cannon do STE e o mgz2k_breath, relampagos "elec"). O ste_fx tira a media dos graficos "poly" e
+"lininterp" (taxa, tamanho, velocidade), que antes saiam 0; os numeros que ainda precisaram de mao (fumaca com velocidade 10000 que no
+STE corre ate o fim do raio, tamanhos "Normalized") estao em breathfx_absolutezero.json, que e o que vai para o monster.json, com
+"hide": [8, 51, 148, 80, 81].
+Tiro ("shotFx"): ste_fx.py <iso> shot MechaGodzilla3.cmp finger_rocket <pasta>/fx --impact Missile_impact --launch mecha_finger_release
+(a explosao vem do fx.bdp); shotfx_rocket.json e o resultado com os tamanhos ajustados. "fireColor" #60B0FF.
+Golpes: as animacoes inteiras do STE nos ids 10-25 (PROFILES['MechaGodzilla3']) e um .CHR proprio feito de moves.json: modkit.py monster
+stats ... (uma vez), depois tools/chr_moves.py moves.json disc/RST/LIZARD.CHR --ngp <pasta de trabalho>/LIZARD0.NGP --out <pasta de
+trabalho>/LIZARD.CHR e modkit.py pack "Mechagodzilla 3". O mapa de botoes esta no comentario do moves.json.

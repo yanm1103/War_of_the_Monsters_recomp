@@ -115,14 +115,30 @@ def graph(v):
     """('const', [x]) ou ('poly', [c0, c1, ...])."""
     kind = v[0][1] if v and v[0][0] == 'name' else 'const'
     nums = [float(x) for x in ' '.join(x for t, x in v if t == 'lit').split()] if v else []
-    if kind == 'poly' and nums:
+    if kind in ('poly', 'polynomial') and nums:
         return 'poly', nums[1:1 + int(nums[0]) + 1]
+    if kind == 'lininterp' and nums:   # N pares (t, valor)
+        n = int(nums[0])
+        return 'lin', [(nums[1 + 2 * i], nums[2 + 2 * i]) for i in range(n)]
     return 'const', nums[:1] or [0.0]
+
+
+def graph_mean(v):
+    """O valor medio de um grafico sobre a idade normalizada 0..1 (taxa, tamanho, velocidade que variam no tempo)."""
+    kind, vals = graph(v)
+    if kind == 'poly':
+        return sum(c / (i + 1) for i, c in enumerate(vals))
+    if kind == 'lin':
+        t0, t1 = vals[0][0], vals[-1][0]
+        area = sum((vals[i + 1][0] - vals[i][0]) * (vals[i + 1][1] + vals[i][1]) / 2 for i in range(len(vals) - 1))
+        return area / (t1 - t0) if t1 > t0 else vals[0][1]
+    return vals[0]
 
 
 def layer_of(em, scale_tex):
     a = dict(em)
-    g = lambda k, d=0.0: graph(a[k])[1][0] if k in a and graph(a[k])[0] == 'const' else d
+    g = lambda k, d=0.0: graph_mean(a[k]) if k in a else d
+    gc = lambda k, d=1.0: graph(a[k])[1][0] if k in a and graph(a[k])[0] == 'const' else d   # cor: o polinomio vai em colorPoly
     poly = lambda k: graph(a[k])[1] if k in a and graph(a[k])[0] == 'poly' else None
     flags = ' '.join(x for t, x in a.get('flags.particle.def', []))
     tex = next((x for t, x in a.get('textures.name', []) if t == 'lit'), '')
@@ -141,7 +157,7 @@ def layer_of(em, scale_tex):
         'life': [g('graph.p_lifetime.min'), g('graph.p_lifetime.max')],
         'size': [g('graph.p_size.min'), g('graph.p_size.max')],
         'spread': g('graph.start_area.x'),
-        'color': [g('graph.vertex_color.' + c, 1.0) for c in 'rgba'],
+        'color': [gc('graph.vertex_color.' + c) for c in 'rgba'],
         'additive': '+AdditiveAlpha' in flags,
     }
     for c in 'rgba':
@@ -227,6 +243,13 @@ def main():
                 for k, v in em:
                     print('    %-30s %s' % (k, fmt(v)))
         return
+    if a.bundle.lower() != 'fx.bdp':   # efeitos comuns (explosoes, fumaca) vem do fx.bdp quando o bundle do monstro nao os tem
+        fb = Bundle(vol.get('fx.bdp'))
+        fen = entry_names(fb)
+        for e in fb.entries:
+            t, nm = fen.get(e['id'], (None, ''))
+            if t == TYPE_EDF:
+                edfs.setdefault(clean(nm), fb.chunk(e).decode('latin1'))
     key = next((k for k in edfs if k.lower() == a.edf.lower()), None)
     if not key or not a.out:
         sys.exit('efeito %r nao achado (use list)' % a.edf)

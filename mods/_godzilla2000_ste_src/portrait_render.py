@@ -26,6 +26,17 @@ for m in bpy.data.materials:
             n.inputs["Roughness"].default_value = 0.55
             if "Specular IOR Level" in n.inputs:
                 n.inputs["Specular IOR Level"].default_value = 0.35
+    # recortes da textura: o alfa do STE vai de 0 a 128 (128 = opaco); alfa x 2 no Principled (Mechagodzilla 3: pecas transparentes)
+    nt = m.node_tree
+    tex = next((n for n in nt.nodes if n.type == "TEX_IMAGE"), None)
+    bsdf = next((n for n in nt.nodes if n.type == "BSDF_PRINCIPLED"), None)
+    if tex is not None and bsdf is not None:
+        mul = nt.nodes.new("ShaderNodeMath")
+        mul.operation = "MULTIPLY"
+        mul.use_clamp = True
+        mul.inputs[1].default_value = 2.0
+        nt.links.new(tex.outputs["Alpha"], mul.inputs[0])
+        nt.links.new(mul.outputs[0], bsdf.inputs["Alpha"])
     m.use_backface_culling = False
 
 scn.render.engine = "BLENDER_EEVEE"
@@ -77,7 +88,8 @@ for s in shots:
     scn.frame_set(int(s.get("frame", 0)))
     arm.animation_data.action = None  # congela a pose do quadro (o render reaplicaria a animacao)
     jaw = s.get("jaw", 0)
-    pj = arm.pose.bones.get("Bip01_Jaw")
+    jawname = s.get("jawBone", "Bip01_Jaw")   # Mechagodzilla 3: "Bone01"
+    pj = arm.pose.bones.get(jawname)
     if pj is not None and jaw:
         pj.rotation_mode = "QUATERNION"
         ax = s.get("jawAxis", "Z")
@@ -87,7 +99,7 @@ for s in shots:
     bpy.context.view_layer.update()
 
     head = bone_world("Bip01_Head")
-    jawp = bone_world("Bip01_Jaw")
+    jawp = bone_world(jawname)
     tgt = (head + jawp) * 0.5 + Vector(s.get("look", [0, 0, 0]))
     az, el, dist = math.radians(s.get("az", 90)), math.radians(s.get("el", 10)), s.get("dist", 2.0)
     off = Vector((math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el))) * dist

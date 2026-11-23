@@ -1,0 +1,31 @@
+{
+  "comment": "Golpes do Mechagodzilla 3 (Kiryu) do STE no .CHR proprio do mechagodzilla3_ste (tools/chr_moves.py), no esquema do Godzilla 90s: hit = janela do ataque no STE (tools/ste/ste_moves.py MechaGodzilla3.cmp), dano = 3 + 0,25 x o do STE. Mapa de botoes (comandos do STE, tohokingdom.com/vg/gste/characters.htm): square = jabs + soco + chutes (Low Kick); fwd_square = Dual Slam (Double Hammerfist) e Overhand; back_square = Double Kick e Roundhouse; triangle = Tail Stab, mordida (Bite), Spin Punch; fwd_triangle = Upwards Tail Spike (Tail Uppercut) e Uppercut; back_triangle = Superior Tail Stab e Circle Sweep (Sweep Kick). Velocidade 1 em todos: acelerar so o que ficar lento no teste ('speed'). Locators: [10,11,12] do STE = perna D, [18,19,20] = perna E (a Roundhouse usa so a E).",
+  "maxChain": 5,
+  "stop": ["triangle", "back_square"],
+  "moves": {
+    "jab_r":          {"anim": 10, "hit": [0.16, 0.32], "damage": 4.25, "locators": ["hand_r"], "radius": 18, "stun": 20, "pause": 40, "stamina": 5},
+    "jab_l":          {"anim": 11, "hit": [0.16, 0.34], "damage": 4.25, "locators": ["hand_l"], "radius": 18, "stun": 20, "pause": 40, "stamina": 5},
+    "punch_r":        {"anim": 20, "hit": [0.22, 0.41], "damage": 5.0, "locators": ["hand_r"], "radius": 18, "stun": 20, "pause": 45, "stamina": 5},
+    "kick_low":       {"anim": 13, "hit": [0.34, 0.50], "damage": 4.5, "locators": ["foot_r"], "radius": 20, "stun": 25, "pause": 45, "stamina": 5},
+    "kick_high":      {"anim": 14, "hit": [0.26, 0.41], "damage": 4.5, "locators": ["foot_r"], "radius": 20, "stun": 25, "pause": 45, "stamina": 5},
+    "dbl_hammer":     {"anim": 16, "hit": [0.29, 0.35], "damage": 8.0, "locators": ["hand_r", "hand_l"], "radius": 22, "stun": 120, "pause": 68, "stamina": 8},
+    "overhand":       {"anim": 15, "hit": [0.39, 0.51], "damage": 8.75, "locators": ["hand_r"], "radius": 22, "stun": 16, "pause": 106, "stamina": 10, "knockback": [380, 700]},
+    "roundhouse":     {"anim": 17, "hit": [0.51, 0.62], "damage": 9.25, "locators": ["foot_l"], "radius": 24, "stun": 16, "pause": 106, "stamina": 10, "knockback": [450, 700]},
+    "double_kick":    {"anim": 18, "hit": [0.37, 0.47], "damage": 6.75, "locators": ["foot_r", "foot_l"], "radius": 22, "stun": 16, "pause": 106, "stamina": 10, "knockback": [610, 610]},
+    "bite":           {"anim": 19, "hit": [0.38, 0.54], "damage": 5.5, "locators": ["mouth"], "radius": 24, "stun": 120, "pause": 68, "stamina": 8},
+    "tail_stab":      {"anim": 21, "hit": [0.11, 0.36], "damage": 4.75, "locators": ["tail_tip", "tail_mid"], "radius": 25, "stun": 10, "pause": 45, "stamina": 5},
+    "spin_punch":     {"anim": 23, "hit": [0.52, 0.72], "damage": 5.5, "locators": ["hand_r", "hand_l"], "radius": 22, "stun": 16, "pause": 80, "stamina": 8},
+    "tail_stab_str":  {"anim": 24, "hit": [0.29, 0.37], "damage": 7.5, "locators": ["tail_tip", "tail_mid"], "radius": 25, "stun": 16, "pause": 106, "stamina": 10, "knockback": [380, 700]},
+    "tail_uppercut":  {"anim": 12, "hit": [0.30, 0.44], "damage": 9.25, "locators": ["tail_tip", "tail_mid"], "radius": 25, "stun": 16, "pause": 106, "stamina": 10, "knockback": [380, 900]},
+    "uppercut":       {"anim": 22, "hit": [0.40, 0.46], "damage": 7.0, "locators": ["hand_r"], "radius": 20, "stun": 14, "pause": 108, "stamina": 8, "knockback": [300, 750]},
+    "kick_sweep":     {"anim": 25, "hit": [0.44, 0.59], "damage": 5.25, "locators": ["foot_r"], "radius": 22, "stun": 25, "pause": 45, "stamina": 6}
+  },
+  "chains": {
+    "square":        ["jab_r", "jab_l", "punch_r", "kick_low", "kick_high"],
+    "fwd_square":    ["dbl_hammer", "overhand"],
+    "back_square":   ["double_kick", "roundhouse"],
+    "triangle":      ["tail_stab", "bite", "tail_stab", "spin_punch"],
+    "fwd_triangle":  ["tail_uppercut", "uppercut"],
+    "back_triangle": ["tail_stab_str", "kick_sweep"]
+  }
+}

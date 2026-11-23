@@ -148,6 +148,16 @@ def find_submeshes(b, e):
     return out
 
 
+def rigid_bone(c, nv, toff, nb, si):
+    """Osso de uma submalha rigida: a palavra logo depois do bloco {nv, nb, flags, 0, toff, size} do descritor (indice na tabela de
+    ossos de pele; no Mechagodzilla 3: aletas e cabeca -> Head 14 / Spine1 1). Sem o bloco, o numero da submalha."""
+    w = struct.unpack_from('<%dI' % (len(c) // 4), c, 0)
+    for j in range(len(w) - 6):
+        if w[j] == nv and w[j + 4] == toff and w[j + 3] == 0:
+            return w[j + 6] if w[j + 6] < max(nb, 1) else si
+    return si
+
+
 def decode_mesh(b, e):
     """Malha completa (todas as submalhas concatenadas). Tira de triangulos: o byte 3 da normal e o flag de
     "desenhar" (0x7f) do vertice; o triangulo (i-2,i-1,i) so existe se o flag de i estiver ligado."""
@@ -162,11 +172,12 @@ def decode_mesh(b, e):
         # formato rigido: o 4o dword do vertice e um float 0.0/1.0 (flag de desenhar) em vez de peso+2 ossos
         w4 = [struct.unpack_from('<I', t, toff + i * 16 + 12)[0] for i in range(nv)]
         rigid = all(v in (0, 0x3f800000) for v in w4) and any(v == 0x3f800000 for v in w4)
+        rb = rigid_bone(c, nv, toff, nb, si) if rigid else si
         for i in range(nv):
             x, y, z, w, a, bb = struct.unpack_from('<3fHBB', t, toff + i * 16)
             pos.append((x, y, z))
             if rigid:
-                w0.append(1.0); bi0.append(si); bi1.append(si)
+                w0.append(1.0); bi0.append(rb); bi1.append(rb)
             else:
                 w0.append(w / 4096.0); bi0.append(a); bi1.append(bb)
         o = toff + nv * 16
