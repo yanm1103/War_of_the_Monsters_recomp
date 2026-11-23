@@ -1,7 +1,7 @@
 """Exporta um monstro de Godzilla: Save the Earth (PS2) como Collada (.dae) com esqueleto, pesos e textura, no formato que
 o tools/retarget.py le (Z para cima, frente +y, pose de bind na cena, nomes de junta com '_' no lugar de espaco).
 
-  python tools/ste/export_dae.py <iso> <arquivo do VOL: Godzilla2k.cmp | godzilla2k.bdp> <pasta de saida> [--name NOME] [--mesh N]
+  python tools/ste/export_dae.py <iso> <arquivo do VOL: Godzilla2k.cmp | godzilla2k.bdp> <pasta de saida> [--name NOME] [--mesh N] [--opaque]
 
 Grava <NOME>.dae e <NOME>.png na pasta de saida (nada disso vai para o repo: sao dados do jogo). Depois:
   python tools/retarget.py <LIZARD0.glb> <NOME>.dae <mapa.json> rig.glb      # o mapa de ossos (tools/rigmaps/)
@@ -151,6 +151,9 @@ def main(argv):
     os.makedirs(out, exist_ok=True)
     png = name + '.png'
     w, h, rgba = S.decode_texture(b, b.textures()[0])
+    if '--opaque' in argv:   # alfa da paleta = 254 em tudo (o Mechagodzilla 3 tem 0 nas faixas do pescoco: o jogo as desenha opacas)
+        rgba = bytearray(rgba)
+        rgba[3::4] = bytes([254]) * (len(rgba) // 4)
     S.write_png(os.path.join(out, png), w, h, rgba)
     xml, m, sk = build(b, me, name, png)
     with open(os.path.join(out, name + '.dae'), 'w', encoding='utf-8') as f:

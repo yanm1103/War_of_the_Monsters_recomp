@@ -11,7 +11,7 @@
     {
       "texture": "fx/atomicbreath_a.png",
       "mode": "stretch",
-      "rate": 30.0,
+      "rate": 45.0,
       "speed": 1200.0,
       "speedRandom": 0.0,
       "radial": 0.0,
@@ -57,7 +57,7 @@
     {
       "texture": "fx/smoke_1.png",
       "mode": "sprite",
-      "rate": 60.0,
+      "rate": 20.0,
       "speed": 1000.0,
       "speedRandom": 200.0,
       "radial": 0.0,
@@ -69,15 +69,15 @@
         0.8
       ],
       "size": [
-        5.0,
-        8.0
+        4.0,
+        6.0
       ],
       "spread": 1.0,
       "color": [
+        0.45,
+        0.75,
         1.0,
-        1.0,
-        1.0,
-        1.0
+        0.6
       ],
       "additive": true,
       "colorPoly": {
@@ -95,7 +95,7 @@
     {
       "texture": "fx/basic.png",
       "mode": "sprite",
-      "rate": 60.0,
+      "rate": 25.0,
       "speed": 1000.0,
       "speedRandom": 220.0,
       "radial": 0.0,
@@ -107,13 +107,13 @@
         0.7
       ],
       "size": [
-        20.0,
-        20.0
+        10.0,
+        10.0
       ],
       "spread": 0.0,
       "color": [
-        1.0,
-        1.0,
+        0.6,
+        0.85,
         1.0,
         1.0
       ],
