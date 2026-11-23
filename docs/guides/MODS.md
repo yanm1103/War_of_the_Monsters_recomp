@@ -65,8 +65,13 @@ A mod is a project: at the top, **Your mod: [list] [+ New mod]** picks the mod (
 `<mods>/_work/<mod>/`; the name only has letters, digits, `_` and `-`, starting with a letter or digit). When you pick the mod, its files
 that the work folder does not have (a mod made earlier or by hand) are copied there and show up as edited; Build takes them back.
 A file removed from the work folder on purpose does not come back. The picked mod governs Extract, the right-hand list and Build; changing the mod changes the whole
-work area. Without a mod, the right-hand pane shows **New mod** and the user's mods as buttons; a mod with nothing in it shows three
+work area. Without a mod, a start screen takes the page below the header: the user's mods as a list on the left (a click opens one) and a
+**Create new mod** button on the right; **Pick a mod...** in the header's list comes back to it. A mod with nothing in it shows three
 starting points (**New skin**, **New monster**, **From the disc**), and the same three show in the preview while nothing is picked.
+
+The number of each step (1, 2, 3) is a button that hides its section to give room to the others: 1 and 2 shrink to a thin bar
+at the side (one of them always stays open; **From the disc** opens 1 again), 3 shrinks to its title line, which also gives the height
+back. Click the number again to bring it back; the choice is kept in this browser.
 
 1. **Pick from the game disc** (left): monsters by name with their portraits and costumes (Togera › Costume 1, and its sound banks),
    bosses, stages by their in-game name with their pictures, menu and screens, sound banks, music and speech. Search field (names and

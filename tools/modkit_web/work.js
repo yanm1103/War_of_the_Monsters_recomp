@@ -70,6 +70,7 @@ function card(cls, title, text, art, onclick) {
 }
 const glyph = g => el('span', 'glyph', g);
 function fromDisc() {   // the disc's list: the monsters open, the search box ready
+  kit.fold('s1', false);
   kit.disc.open(['0']);
   const f = $('discFilter');
   f.focus();

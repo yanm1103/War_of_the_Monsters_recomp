@@ -579,3 +579,43 @@ table.moves.rings td:not(.l) { width: 12%; }
 table.moves.fields td.l:first-child { width: 1%; white-space: nowrap; }
 .keynote { margin: 4px 0 8px; }
 label.check[hidden] { display: none !important; }
+
+/* ---- the start screen (no mod picked): the mods on the left, Create new mod on the right */
+#splash { display: none; flex: 1; min-height: 0; gap: 14px; padding: 8px 14px 14px; }
+body.nomod #splash { display: flex; }
+body.nomod main, body.nomod #split, body.nomod footer { display: none; }
+#splash .splashPick { flex: 1 1 0; }
+#splash .splashNew { flex: 1 1 0; }
+#splash .splashBody { flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.row.modrow { min-height: 46px; font: 600 16px var(--ui); letter-spacing: .06em; cursor: pointer; }
+.row.modrow:focus-visible { outline: 2px solid var(--orange); outline-offset: -2px; }
+button.newBig { display: flex; flex-direction: column; align-items: center; gap: 12px; width: min(420px, 100%); padding: 34px 26px;
+                border-radius: 16px; border: 2px solid var(--line2); background: var(--panel2); white-space: normal; text-align: center;
+                letter-spacing: 0; text-transform: none; }
+button.newBig:hover { border-color: var(--orange); box-shadow: 0 0 22px rgba(240, 138, 44, .35); transform: translateY(-2px); }
+button.newBig .glyph { font-size: 56px; line-height: 1; color: var(--orange); }
+button.newBig .t { font: 700 20px var(--ui); letter-spacing: .24em; text-transform: uppercase; color: var(--orange); }
+button.newBig .d { font: 400 13.5px/1.45 var(--text); color: #c4c0b6; }
+
+/* ---- the step numbers hide their section: 1 and 2 become a thin bar at the side, 3 a title line */
+section.step .num { cursor: pointer; transition: background .12s, box-shadow .12s; }
+section.step .num:hover { background: rgba(255, 255, 255, .14); box-shadow: 0 0 8px currentColor; }
+section.step .num:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+section.step.collapsed { flex: 0 0 46px !important; min-width: 0 !important; width: 46px; }
+section.step.collapsed > :not(h2) { display: none; }
+section.step.collapsed > h2 { flex: 1; flex-direction: column; align-items: center; justify-content: flex-start; gap: 14px; padding: 10px 0;
+                              border-bottom: 0; }
+section.step.collapsed > h2 > :not(.num):not(:nth-child(2)) { display: none; }
+section.step.collapsed > h2 > :nth-child(2) { writing-mode: vertical-rl; white-space: nowrap; }
+main:has(.step.collapsed) > .vsplit { display: none; }
+main:has(#discPane.collapsed) > #workPane { margin-left: 10px; }
+main:has(#workPane.collapsed) > #workPane { margin-left: 10px; }
+main:has(#workPane.collapsed) > #discPane:not(.collapsed) { flex: 1 1 auto !important; }
+/* step 3: the tasks and the messages shrink to their title lines (the page gets the height back) */
+footer.collapsed { height: auto; min-height: 0; }
+footer.collapsed .tasks { width: auto; flex: 1; }
+footer.collapsed .taskgrid, footer.collapsed #log { display: none; }
+footer.collapsed section { flex: 1; }
+footer.collapsed .tasks > h2 { border-bottom: 0; }
+footer.collapsed .logtitle { border-bottom: 0; }
+body:has(footer.collapsed) #split { display: none; }

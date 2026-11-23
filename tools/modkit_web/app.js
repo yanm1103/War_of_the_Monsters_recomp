@@ -338,6 +338,74 @@ kit.newMod = () => kit.dialog({
   },
 });
 $('newMod').onclick = () => kit.newMod();
+$('splashNew').onclick = () => kit.newMod();
+
+// ---------------------------------------------------------------- the start screen: no mod picked yet (the mods on the left,
+// Create new mod on the right); picking "Pick a mod..." in the header's list comes back here
+let splashFor;
+function showSplash(s) {
+  const on = !s.mod && !!s.mods_ok;
+  document.body.classList.toggle('nomod', on);
+  const key = s.mod_list.join('\n');
+  if (key === splashFor) return;
+  splashFor = key;
+  const box = $('splashList');
+  box.innerHTML = '';
+  if (!s.mod_list.length) {
+    const e = document.createElement('div');
+    e.className = 'empty';
+    e.textContent = 'No mods yet. Create the first one on the right.';
+    box.appendChild(e);
+    return;
+  }
+  for (const n of s.mod_list) {
+    const r = document.createElement('div');
+    r.className = 'row modrow';
+    r.tabIndex = 0;
+    const g = document.createElement('span');
+    g.className = 'ico';
+    g.textContent = '▣';
+    const l = document.createElement('span');
+    l.className = 'lbl';
+    l.textContent = n;
+    r.append(g, l);
+    const go = () => setConf({ mod: n });
+    r.onclick = go;
+    r.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
+    box.appendChild(r);
+  }
+}
+kit.onState(showSplash);
+
+// ---------------------------------------------------------------- the step numbers hide their section (more room for the others)
+// 1 and 2 shrink to a thin bar at the side, 3 to its title line; at least one of 1 and 2 stays open. Kept in this browser.
+const FOLD_KEY = 'wotm.folded';
+const folded = new Set(JSON.parse(localStorage.getItem(FOLD_KEY) || '[]'));
+const foldTarget = id => id === 's3' ? $('foot') : document.querySelector('section.step.' + id);
+function applyFolds() {
+  for (const id of ['s1', 's2', 's3']) {
+    const t = foldTarget(id);
+    const on = folded.has(id);
+    t.classList.toggle('collapsed', on);
+    const n = t.querySelector('.num');
+    if (n) n.title = on ? 'Show this section' : 'Hide this section';
+  }
+  localStorage.setItem(FOLD_KEY, JSON.stringify([...folded]));
+  window.dispatchEvent(new Event('resize'));   // the 3D views follow their box
+}
+kit.fold = (id, on) => {   // on: true hides, false shows, undefined flips
+  if (on === undefined) on = !folded.has(id);
+  if (on) { folded.add(id); if (id === 's1') folded.delete('s2'); if (id === 's2') folded.delete('s1'); } else folded.delete(id);
+  applyFolds();
+};
+for (const n of document.querySelectorAll('section.step .num')) {
+  const id = ['s1', 's2', 's3'].find(c => n.closest('section').classList.contains(c));
+  n.tabIndex = 0;
+  n.setAttribute('role', 'button');
+  n.onclick = () => kit.fold(id);
+  n.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); kit.fold(id); } };
+}
+applyFolds();
 $('quit').onclick = async () => {
   try { await kit.api('quit', {}); } catch (e) { /* already gone */ }
   events.close();
