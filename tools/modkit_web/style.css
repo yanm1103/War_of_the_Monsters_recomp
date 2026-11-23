@@ -527,12 +527,12 @@ details.special summary { cursor: pointer; font: 600 12px var(--ui); letter-spac
 .mvlm > .mvveil { grid-column: 2; grid-row: 1; }
 .mvright .v3d { flex: 1 1 auto; height: auto; min-height: 0; }
 .mvfoot { margin-top: 18px; }
-.mvcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-bottom: 16px; }
-.mvcard { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 11px; border: 1px solid var(--line2); border-radius: 8px;
-          background: rgba(255, 255, 255, .03); }
-.mvcard .k { font: 600 10.5px var(--ui); letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
-.mvcard .v { font: 600 21px var(--ui); color: var(--fg); overflow-wrap: anywhere; }
-.mvcard .s { font: 11.5px var(--text); color: var(--dim); }
+/* what the fields do not show about the picked move: plain lines, a label and its value */
+.mvfacts { margin-bottom: 4px; font: 13px/1.5 var(--text); }
+.mvfacts .fact { display: flex; gap: 14px; }
+.mvfacts .k { flex: none; width: 96px; color: var(--dim); }
+.mvfacts .v { color: var(--fg); min-width: 0; overflow-wrap: anywhere; }
+.editgrid .rv { text-align: left; padding: 0 8px; color: var(--fg); font: 13px var(--text); }
 .pickrow { padding: 9px 12px; cursor: pointer; border-bottom: 1px solid var(--line); font: 600 13px var(--ui); letter-spacing: .1em; text-transform: uppercase; }
 .pickrow:hover { background: rgba(240, 138, 44, .1); }
 .pickrow.on { background: rgba(240, 138, 44, .2); }

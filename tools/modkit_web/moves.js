@@ -34,14 +34,10 @@ const moveGlyph = r => glyph(r.button, r.dir);
 const COLS = {
   move: ['Move', 'The button (and direction) that starts it. LIGHT is Square, HEAVY is Triangle. The arrow opens the moves that may follow it in the combo.'],
   dmg: ['Damage', 'The damage the move requests. With an object it is a multiplier of the object\'s own damage.'],
-  win: ['Hit frames', 'The frames of the move (60 per second, at the move\'s speed, counted from its start) where the game tests the hit. Estimated from the animation.'],
+  win: ['Hit frames', 'The frames of the move (60 per second, at the move\'s speed, counted from its start) where the game tests the hit. Estimated from the animation: ' +
+                      'the training mode measures them in a fight and gets other numbers (the hit pause, the blend back to idle, being hit or blocked and the AI\'s own timing come on top).'],
   total: ['Total', 'The running total of the combo: the damage of this move plus every move before it in the combo. The Damage column is this move\'s own hit. ' +
                    '(With an object: the multipliers added.)'],
-  sat: ['Length (est.)', 'Estimated from the animation: its length in frames (60 per second) at the move\'s speed. The training mode measures it in a fight and ' +
-                  'gets other numbers: the hit pause, the blend back to idle, being hit or blocked and the AI\'s own timing come on top.'],
-  radius: ['Radius', 'Radius of the sphere swept along the bone each frame; a hit needs it to touch a body. A radius of 0 in the file uses the monster\'s default fist.'],
-  stun: ['Stun', 'Above 100 the victim is stunned (cannot act for a moment).'],
-  kb: ['Knockback', 'Out / up. Anything other than 0 knocks the victim down.'],
   loc: ['Hits with', 'The bones that test the hit (the fist, the foot, the tail tip...).'],
   anim: ['Animation', 'The animation id the move plays (its name from the animation list).'],
 };
@@ -73,6 +69,16 @@ const hitFrames = r => {
   return t ? t.start + '–' + (t.start + t.active) : fix(r.win_start * 100) + '–' + fix(r.win_end * 100) + '%';
 };
 const doesNothing = r => !(r.weapon ? r.mult > 0 : r.damage > 0);
+// What the game does not play as a move of its own, so the tree grays it: a step with no damage (the files are padded with them) or one that is
+// the same as the step before it for the same button (the table repeats the last move of a chain past its end; tools/chr_moves.py does it for
+// the mods). Returns why, or ''. `by` maps "pos.type" to the rows of the same kind.
+const SAME = ['anim', 'damage', 'mult', 'win_start', 'win_end', 'radius', 'stun', 'kb_out', 'kb_up', 'pause', 'speed', 'stamina'];
+function fillerWhy(r, by) {
+  if (doesNothing(r)) return 'does no damage: a filler slot of the file';
+  const q = by.get((r.pos - 1) + '.' + r.ptype);
+  if (q && SAME.every(k => q[k] === r[k]) && JSON.stringify(q.locators) === JSON.stringify(r.locators)) return 'the same as step ' + q.pos + ' of this button: a repeat that the table fills in';
+  return '';
+}
 // the order of the moves that may follow a move: the same button first, then LIGHT, FORWARD + LIGHT, BACK + LIGHT, HEAVY...
 const ORDER = NEXT.map(n => n[0]);
 
@@ -95,7 +101,8 @@ function tree(rows, weapon, state, onPick) {
   function node(r, tokens, total, via, depth, into) {
     const path = prefix + tokens.join('>');
     const wrap = el('div', 'tnode');
-    const line = el('div', 'trow' + (doesNothing(r) ? ' zero' : ''));
+    const why = fillerWhy(r, by);
+    const line = el('div', 'trow' + (why ? ' zero' : ''));
     line.style.paddingLeft = (4 + depth * 12) + 'px';
     const kids = kidsOf(r);
     const sub = el('div', 'tkids');
@@ -117,8 +124,7 @@ function tree(rows, weapon, state, onPick) {
     tl.append(tg, moveGlyph(r), el('span', 'tstep', 'step ' + r.pos));
     line.append(tl, el('span', 'tn', weapon ? '×' + fix(r.mult, 2) : fix(r.damage, 1)), el('span', 'tn', hitFrames(r)),
                 el('span', 'tn', weapon ? '×' + fix(total, 2) : fix(total, 1)));
-    line.title = moveName(r) + ', step ' + r.pos + (via ? ' · may follow after ' + via + ' ms' : '') +
-      (doesNothing(r) ? ' · does no damage: a filler slot of the file (no bone tests a hit)' : '');
+    line.title = moveName(r) + ', step ' + r.pos + (via ? ' · may follow after ' + via + ' ms' : '') + (why ? ' · ' + why : '');
     tg.textContent = '▸';
     if (kids.length) { tg.onclick = e => { e.stopPropagation(); expand(sub.hidden); }; } else tg.classList.add('none');
     line.onclick = () => { for (const n of nodes.values()) n.line.classList.remove('on'); line.classList.add('on'); onPick(r, path, via); };
@@ -161,30 +167,23 @@ async function withBusy(p) {
   try { return await p; } finally { busy(-1); }
 }
 
-// the picked move's numbers, big (the middle column): one card each, with what it is on hover
-function statCards(r, weapon, names, via) {
+// What the fields below do not show about the picked move, as plain lines (no card, nothing to click): the frames of the hit, which
+// bones test it, the animation's name and how long after the move before this one may start
+function facts(r, names, via) {
   const tm = r.timing;
-  const cards = [
-    [weapon ? 'Damage ×' : 'Damage', COLS.dmg[1], weapon ? '×' + fix(r.mult, 2) : fix(r.damage, 1)],
-    [COLS.win[0], COLS.win[1], hitFrames(r), tm ? 'of ' + tm.total + ' · ' + fix(r.win_start * 100) + '–' + fix(r.win_end * 100) + '% of the animation' : 'of the animation (no model)'],
-    [COLS.sat[0], COLS.sat[1], tm ? String(tm.total) : '-', tm ? 'frames, at ×' + fix(r.speed, 2) : 'no model'],
-    [COLS.radius[0], COLS.radius[1], fix(r.radius, 1), r.radius_default ? 'the monster\'s default fist' : ''],
-    [COLS.stun[0], COLS.stun[1], fix(r.stun), r.stun > 100 ? 'stuns' : ''],
-    [COLS.kb[0], COLS.kb[1], (r.kb_out || r.kb_up) ? fix(r.kb_out) + ' / ' + fix(r.kb_up) : '-', (r.kb_out || r.kb_up) ? 'out / up: knocks down' : ''],
-    ['Hit pause', 'How long the game freezes the two monsters on a hit.', fix(r.pause) + ' ms'],
-    ['Speed', 'The animation\'s speed: 1 is its own pace.', '×' + fix(r.speed, 2)],
-    ['Stamina', 'What the move takes from the stamina meter.', fix(r.stamina, 1)],
+  const rows = [
+    [COLS.win[0], COLS.win[1], tm ? hitFrames(r) + ' of ' + tm.total + ' frames (' + fix(r.win_start * 100) + '–' + fix(r.win_end * 100) + '% of the animation, at ×' + fix(r.speed, 2) + ')'
+                                  : fix(r.win_start * 100) + '–' + fix(r.win_end * 100) + '% of the animation (no model: no frames)'],
     [COLS.loc[0], COLS.loc[1], r.bones || '-'],
-    [COLS.anim[0], COLS.anim[1], String(r.anim), names[r.anim] || ''],
+    [COLS.anim[0], COLS.anim[1], r.anim + (names[r.anim] ? '  ' + names[r.anim] : '')],
   ];
-  if (via) cards.push(['Follows after', 'The delay of the move before it in the combo: this one may start that many ms after it.', via + ' ms', 'from the move before']);
-  const box = el('div', 'mvcards');
-  for (const [k, tip, v, sub] of cards) {
-    const c = el('div', 'mvcard');
-    c.title = tip;
-    c.append(el('span', 'k', k), el('b', 'v', v));
-    if (sub) c.appendChild(el('span', 's', sub));
-    box.appendChild(c);
+  if (via) rows.push(['Follows after', 'The delay of the move before it in the combo: this one may start that many ms after it.', via + ' ms']);
+  const box = el('div', 'mvfacts');
+  for (const [k, tip, v] of rows) {
+    const row = el('div', 'fact');
+    row.title = tip;
+    row.append(el('span', 'k', k), el('span', 'v', v));
+    box.appendChild(row);
   }
   return box;
 }
@@ -347,33 +346,37 @@ export async function movesPage(page, args, hooks = {}) {
       });
       h.append('step ' + r.pos);
       edit.appendChild(h);
-      edit.appendChild(statCards(r, !!r.weapon, names, via));
-      if (!m.own) { edit.appendChild(notOwn()); return; }
-      const grid = el('div', 'editgrid');
-      const status = el('div', 'autosave', 'Changes save by themselves.');
+      edit.appendChild(facts(r, names, via));
+      if (!m.own) edit.appendChild(notOwn());
+      // the status line: only what a save says (empty otherwise)
+      const status = el('div', 'autosave');
       if (state.note) { status.className = 'autosave ok'; status.textContent = state.note; state.note = null; }   // the page was drawn again after the save
+      // a number: a field to change when the monster has its own .CHR, else the value as text
+      const cell = (value, tip, save) => {
+        if (!m.own) { const s = el('span', 'rv', value); s.title = tip; return s; }
+        const inp = el('input'); inp.type = 'text'; inp.value = value; inp.title = tip;
+        inp.onchange = () => save(inp);
+        return inp;
+      };
+      const grid = el('div', 'editgrid');
       for (const [f, label, tip, only] of FIELDS) {
         if (only && only !== (r.weapon ? 'object' : 'punch')) continue;
-        const inp = el('input'); inp.type = 'text'; inp.value = fix(r[f], f === 'speed' || f === 'win_start' || f === 'win_end' || f === 'mult' ? 3 : 2);
         const lab = el('label', '', label);
         lab.title = tip;
-        inp.title = tip;
-        inp.onchange = () => saveMove(r, f, label, inp, status);
-        grid.append(lab, inp);
+        grid.append(lab, cell(fix(r[f], f === 'speed' || f === 'win_start' || f === 'win_end' || f === 'mult' ? 3 : 2), tip, inp => saveMove(r, f, label, inp, status)));
       }
       // the combo: which move may follow this one, and after how many ms (0 = none)
       const nx = el('div', 'editgrid');
       for (const [k, name, btn, dir] of NEXT) {
         const f = 'next_' + k, label = 'Then ' + name;
-        const inp = el('input'); inp.type = 'text'; inp.value = fix(r.next_ms[k], 0);
         const lab = el('label', 'then');
         lab.append('Then ', glyph(btn, dir));
         const tip = 'The combo: ms before a ' + name + ' move may follow this one (0: it cannot). The move that follows is the next step of the combo.';
-        lab.title = tip; inp.title = tip;
-        inp.onchange = () => saveMove(r, f, label, inp, status);
-        nx.append(lab, inp);
+        lab.title = tip;
+        nx.append(lab, cell(fix(r.next_ms[k], 0), tip, inp => saveMove(r, f, label, inp, status)));
       }
-      edit.append(el('h5', '', 'Change it'), grid, el('h5', '', 'Combo: what may follow'), nx, status);
+      edit.append(el('h5', '', 'Values'), grid, el('h5', '', 'Comboable moves after this one (ms after animation start)'), nx);
+      if (m.own) edit.appendChild(status);
     }
     // a special or one of the other moves (the numbers of a state of the .CHR): its fields
     function drawKey(s) {

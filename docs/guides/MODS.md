@@ -140,8 +140,10 @@ the bones that hit), the moves with an object in hand (damage multiplier) and th
 numbers. A select on the left picks what the list holds (Punches, With an object, Other moves, Specials). Punches and With an object are
 a tree of the combo: the six moves that start one (LIGHT, FORWARD + LIGHT, BACK + LIGHT, HEAVY, FORWARD + HEAVY, BACK + HEAVY), and the arrow of
 a move opens the moves that may follow it, the same button first (a move follows another when the other's delay for it, in ms, is above 0).
-Each row has the damage, the hit frames and the damage of the combo up to it; a grayed row does no damage (a filler slot of the file, with no
-bone that tests a hit: the files of the disc are padded with them past the end of their combos). The buttons are pictures, not words: a white fist in a red ring is HEAVY (Triangle) and in a blue ring LIGHT
+Each row has the damage, the hit frames and the damage of the combo up to it; a grayed row is a step the game does not play as a move of its
+own: it does no damage (a filler slot of the file, with no bone that tests a hit; the files of the disc are padded with them past the end of their
+combos) or it is identical to the step before it for the same button (the table repeats the last move of a chain past its end, as `chr_moves.py`
+does for a chain that is shorter than `maxChain`); its hover text says which. The buttons are pictures, not words: a white fist in a red ring is HEAVY (Triangle) and in a blue ring LIGHT
 (Square), an arrow up before it means FORWARD + and an arrow down BACK +; the grab and its throw (Other moves) have an open hand. The name
 is the hover text. The icons are Phosphor Icons (`tools/level_editor/web/vendor/phosphor/`, MIT, drawn as CSS masks). A move of the list plays its animation in the 3D view, at the move's speed, and
 the player under it counts the game's frames and paints the hit frames red on its slider (its speed select slows the playback down; the list of animations is
@@ -151,8 +153,10 @@ hang from the empties `loc_<hex id>` that the animation preview's `.glb` carries
 (the hit pause and the blend back to idle are not counted, and the training mode's frame data, measured in a fight, differs from these estimates); the file keeps the
 hit window as two fractions of the animation (0 to 1), which are the fields. With the monster's own `.CHR` (**Give it its own .CHR to edit**, the same as
 **Extract stats**) the picked move's numbers (damage, hit window, radius, stun, knockback, hit pause, speed, stamina, animation id) are fields
-under the cards that save by themselves into that file, with the limits the game can take, and so are the six delays that say which move may
-follow it in the combo (**Combo: what may follow**, ms, 0 = none); the disc's `.CHR` is never edited. The view **Other moves** has the butt slam
+(**Values**) that save by themselves into that file, with the limits the game can take, and so are the six delays that say which move may
+follow it in the combo (**Comboable moves after this one**, ms, 0 = none); without it the same values are shown as text, and the disc's `.CHR`
+is never edited. Above the values, plain lines give what the fields do not: the hit frames (of the move's length), the bones that test the hit,
+the animation's name and how long after the move before it this one may start. The view **Other moves** has the butt slam
 (stamina and the shockwave rings), the ram attack, the grab's range and the throw's damage, with the training mode's descriptions, and **Specials**
 the numbers of the special states, all of them fields too (the list holds one entry per state, and each plays the animation the game uses for it in the 3D view, with no hit window or sphere: the butt slam's drop, the ram's impact, the grab's reach, the throw, the crowd control loop and, for any other special, its active loop; the ids are the same for every monster, see `ANIM_IDS.md`).
 A veil with a spinner holds the middle column and the 3D view while something loads (the table, an animation, a saved change). The damage of the hits inside a grab, the getting-up attack, the counter window and the
