@@ -142,7 +142,8 @@ its hit window on the frame slider. The frames come from the animation length of
 under the table that save by themselves into that file, with the limits the game can take; the disc's `.CHR` is never edited. A box lists the moves of
 the file that cannot work (a hit window outside 0..1, an animation the model does not have, no bone to test the hit, a combo step that is
 empty). `python tools/modkit.py moves <monster>` and `moves <mod> <id> [--json]` print the same tables and the warnings, and
-`moves set <mod> <id> punch|object <step> <type> <field>=<value>` changes one number. *3D model*: "Currently using" (the model the game loads, what
+`moves set <mod> <id> punch|object <step> <type> <field>=<value>` changes one number. The same table (read only) is in the panel of every
+costume of a game monster, in the section "Moves of this monster". *3D model*: "Currently using" (the model the game loads, what
 it was made from and the source files; the skeleton and the animations are inside the `.NGP`), **Check model...** first, then
 **Import rigged model...** / **Adjust bones...**, **Export 3D model** / **Import mesh...** / **Import animations...**, **Import
 character with animations...** (below) and **Import model files...** (copies `.NGP` + `.PTR`, and optional `.TEX`/`.RTX`, to

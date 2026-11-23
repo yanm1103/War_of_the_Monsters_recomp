@@ -6,6 +6,7 @@ import { listSelect } from './select.js';
 import { showModel, animBar } from './viewer.js';
 import { pic, fileIcon } from './disc.js';
 import { stageTitle } from './panel.js';
+import { movesPage } from './moves.js';
 
 const MODEL_EXT = ['.glb', '.gltf', '.dae', '.ngp'];
 
@@ -299,6 +300,13 @@ async function preview() {
     showModel(v, still, true);
     stageTitle(v, g);   // after: showModel empties the box
     animBar(ab, g.key, still);
+    // the monster's move table (the .CHR of its type), read when the section is first opened
+    const mv = el('details', 'costmoves');
+    mv.appendChild(el('summary', '', 'Moves of this monster'));
+    const mvBody = el('div', 'tabpage');
+    mv.appendChild(mvBody);
+    mv.addEventListener('toggle', () => { if (mv.open && !mvBody.dataset.done) { mvBody.dataset.done = '1'; movesPage(mvBody, { group: g.key }); } });
+    wrap.appendChild(mv);
     label.textContent = (g.sub || g.label) + ': ' + allf.length + ' file(s). Edited textures show on the model (Refresh after saving one). Open it in the list to pick a file.';
     return;
   }
