@@ -40,8 +40,9 @@ export function panelFrame(body, groupKey, g) {
   return form;
 }
 
-// tabs under parent: defs = [label, ...]; returns the page elements, in order
-export function tabs(parent, labels, key) {
+// tabs under parent: defs = [label, ...]; returns the page elements, in order. onShow(label) runs on every change of tab
+// (and for the first one, right after the pages are made: pages.shown() tells it again once the caller filled them)
+export function tabs(parent, labels, key, onShow) {
   const head = el('div', 'tabs');
   const body = el('div', 'tabbody');
   parent.append(head, body);
@@ -51,9 +52,42 @@ export function tabs(parent, labels, key) {
     pages.forEach((p, j) => { p.hidden = j !== i; });
     btns.forEach((b, j) => b.classList.toggle('on', j === i));
     localStorage.setItem(key, labels[i]);
+    if (onShow) onShow(labels[i]);
   }
   show(Math.max(0, labels.indexOf(localStorage.getItem(key))));
+  pages.shown = () => { if (onShow) onShow(labels[btns.findIndex(b => b.classList.contains('on'))]); };
   return pages;
+}
+
+// settings that save themselves: save() runs on every change of the elements (text fields when they lose focus or on Enter);
+// it returns an error text or nothing. -> the status line ("Saved" for a moment, or the error)
+export function autosave(elems, save) {
+  const st = el('div', 'autosave', 'Changes save by themselves.');
+  let n = 0;
+  const run = async () => {
+    const my = ++n;
+    st.className = 'autosave busy';
+    st.textContent = 'Saving…';
+    const err = await save();
+    if (my !== n) return;
+    st.className = 'autosave ' + (err ? 'err' : 'ok');
+    st.textContent = err || '✓ Saved';
+    if (!err) setTimeout(() => { if (my === n) { st.className = 'autosave'; st.textContent = 'Changes save by themselves.'; } }, 1800);
+  };
+  for (const e of elems) {
+    e.addEventListener('change', run);
+    if (e.tagName === 'INPUT' && (!e.type || e.type === 'text')) e.addEventListener('keydown', ev => { if (ev.key === 'Enter') e.blur(); });
+  }
+  return st;
+}
+
+// a short note next to an element (the result of a check, "Saved"): shows for a few seconds; kind ok | warn | err
+export function toast(next, text, kind) {
+  const t = el('span', 'toast ' + (kind || 'ok'), text);
+  next.insertAdjacentElement('afterend', t);
+  setTimeout(() => t.classList.add('gone'), 5000);
+  setTimeout(() => t.remove(), 5600);
+  return t;
 }
 
 // one group of actions: kids are buttons (or anything for the button line); state: a line under them (text or element)

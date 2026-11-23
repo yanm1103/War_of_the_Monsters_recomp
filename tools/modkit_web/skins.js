@@ -2,13 +2,14 @@
 // place of the preview (the model with its textures, then two tabs: Settings, with the name, base costume with the disc's
 // portraits and CPUs; 3D model), and Duplicate / Delete in the right-click menu.
 import { meshBlocks, currentModel } from './mesh.js';
-import { panelFrame, tabs, block, button } from './panel.js';
+import { panelFrame, tabs, block, button, autosave } from './panel.js';
 import { pic } from './disc.js';
 
 const $ = id => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 
-// radio buttons 0..3 with each costume's portrait (only the ones the disc has, or enabled); extra: [text, value] at the end
+// radio buttons 0..3 with each costume's portrait (only the ones the disc has, or enabled); extra: [text, value, picture url]
+// at the end
 export function costumeRadios(name, prefix, value, enabled, extra) {
   const box = el('div', 'costumes');
   const ks = [0, 1, 2, 3];
@@ -31,7 +32,7 @@ export function costumeRadios(name, prefix, value, enabled, extra) {
     r.name = name;
     r.value = extra[1];
     r.checked = value === extra[1];
-    l.append(el('span', 'pic big'), r, document.createTextNode(' ' + extra[0]));
+    l.append(extra[2] ? pic(extra[2], 'files', 'big') : el('span', 'pic big'), r, document.createTextNode(' ' + extra[0]));
     box.appendChild(l);
   }
   box.value = () => { const c = box.querySelector('input:checked'); return c ? parseInt(c.value, 10) : null; };
@@ -173,22 +174,40 @@ async function skinPanel(g, body, label) {
   const name = el('input');
   name.value = d.name || '';
   const b0 = Number.isInteger(d.base) && d.base >= 0 && d.base <= 3 ? d.base : -1;
+  // a custom's skin: the last choice is "as the custom" (no base in skin.json: the custom's own costume), with its portrait
   const radios = costumeRadios('panelBase', p.prefix, p.game && b0 < 0 ? 0 : b0, p.costumes,
-    p.game ? null : ['monster.json' + (p.custom_costume !== null ? ' (' + p.custom_costume + ')' : ''), -1]);
+    p.game ? null : ['As ' + (p.custom_name || d.monster || 'the monster'), -1, p.custom_pic]);
+  const baseHint = el('div', 'dim', p.own_model
+    ? 'This skin has its own 3D model and textures: the base costume only gives the sounds.'
+    : 'The disc costume whose model, textures and sounds this skin starts from; its PNGs go over them.');
+  const baseBox = el('div');
+  baseBox.append(radios, baseHint);
   const ai = el('input');
   ai.type = 'checkbox';
   ai.checked = !!d.ai;
   const aiL = el('label', 'check');
   aiL.append(ai, document.createTextNode(' CPUs may pick this skin'));
-  const save = el('button', 'primary', 'Save');
-  save.onclick = async () => {
-    const r = await kit.api('do/skin_save', { sid, name: name.value, base: radios.value(), ai: ai.checked });
-    if (r.error) { kit.say(r.error + '\n', 'err'); return; }
-    await kit.work.reload(['skins/' + sid]);
-  };
   const [tSet, tModel] = tabs(form, ['Settings', '3D model'], 'wotm.skinTab');
-  tSet.append(row('Monster', el('span', '', (d.monster || '?') + '  (' + p.kind + ')')), row('Name', name), row('Base', radios),
-    row('', aiL), row('', save));
+  const baseRow = row('Base costume', baseBox);
+  baseRow.title = 'The disc costume the skin is made on: whatever its folder does not bring (model, textures) and its sounds.';
+  let savedBase = radios.value();
+  tSet.append(row('Monster', el('span', '', (d.monster || '?') + '  (' + p.kind + ')')), row('Name', name), baseRow, row('', aiL),
+    row('', autosave([name, radios, ai], async () => {
+      const r = await kit.api('do/skin_save', { sid, name: name.value, base: radios.value(), ai: ai.checked });
+      if (r.error) return r.error;
+      if (radios.value() !== savedBase && !p.own_model) kit.work.reload(['skins/' + sid]);   // another base: another model
+      else kit.work.refreshList();
+      savedBase = radios.value();
+      return null;
+    })));
+  if (p.custom && p.custom_model && !p.own_model) {   // a custom with a model of its own, a skin without: the game shows the base's
+    tSet.prepend(el('div', 'warnbox', 'This skin has no 3D model of its own, so in the game it shows the base type\'s disc ' +
+      'costume, not ' + (p.custom_name || 'the custom monster') + '. Copy its model to start from it (the skin\'s PNGs are replaced).'));
+    tSet.children[0].appendChild(button('Copy ' + (p.custom_name || 'its') + '\'s model', async () => {
+      kit.workFocus = ['skins/' + sid];
+      kit.run('skin_copy_model', { sid });
+    }));
+  }
   const mb = meshBlocks('skin', sid, !!p.custom);
   tModel.append(currentModel(p.mesh), mb.check);
   if (p.custom) {   // a skin of a custom monster can have a body of its own, as the custom can

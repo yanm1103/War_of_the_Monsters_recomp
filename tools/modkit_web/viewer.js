@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-let renderer = null, scene, camera, controls, current = null, box = null, token = 0, ro = null;
+let renderer = null, scene, camera, controls, current = null, box = null, token = 0, ro = null, grid = null;
 const loader = new GLTFLoader();
 const clock = new THREE.Clock();
 const play = { mixer: null, dur: 0, t: 0, playing: true, speed: 1, onFrame: null };
@@ -56,6 +56,9 @@ function setup() {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100000);
   scene.add(camera, gameLight(camera));
+  grid = new THREE.GridHelper(3000, 60, 0x6a4a30, 0x2a2622);   // the ground, in game units, seen only through the fight camera
+  grid.visible = false;
+  scene.add(grid);
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   ro = new ResizeObserver(size);
@@ -67,9 +70,46 @@ function setup() {
       play.mixer.setTime(play.t);
       if (play.onFrame) play.onFrame(play.t);
     }
-    controls.update();
+    if (!fight) controls.update();
     renderer.render(scene, camera);
   });
+}
+
+// the fight camera (monsters.js Camera tab): cam = {pos, target, fov} in game units around the monster (+Y its front, Z up;
+// the kit's models face glTF -Z, so game (x, y, z) is (x, z, -y) here), fov in radians from top to bottom; null: back to the
+// free view (drag and wheel). The model stands with its origin on the ground at the middle of the view (frame()).
+let fight = null;
+const g2t = v => new THREE.Vector3(v[0], v[2], -v[1]);
+function placeFight() {
+  if (!fight || !camera) return;
+  camera.position.copy(g2t(fight.pos));
+  camera.fov = THREE.MathUtils.radToDeg(fight.fov);   // up to down: a wider box shows more at the sides, as a wider screen does
+  camera.near = 1;
+  camera.far = 100000;
+  camera.lookAt(g2t(fight.target));
+  camera.updateProjectionMatrix();
+}
+export function fightCamera(cam) {
+  if (!renderer) setup();
+  if (cam) {
+    if (!fight) fight = { saved: { pos: camera.position.clone(), target: controls.target.clone(), fov: camera.fov } };
+    Object.assign(fight, cam);
+    controls.enabled = false;
+    grid.visible = true;
+    if (box) box.classList.add('fightcam');   // the 16:9 frame of the game's screen (style.css)
+    placeFight();
+  } else if (fight) {
+    const s = fight.saved;
+    fight = null;
+    grid.visible = false;
+    if (box) box.classList.remove('fightcam');
+    camera.position.copy(s.pos);
+    controls.target.copy(s.target);
+    camera.fov = s.fov;
+    camera.updateProjectionMatrix();
+    controls.enabled = true;
+    if (current) frame(current, true);
+  }
 }
 function size() {
   if (!box) return;
@@ -77,6 +117,7 @@ function size() {
   renderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  placeFight();
 }
 // game = the model is in the game's axes (an export of the kit: its front is glTF -Z, the game's +Y); otherwise the glTF
 // convention (a Blender export faces +Z). The camera stands on the front's side, 35 degrees off to its left.
@@ -124,6 +165,10 @@ export async function showModel(el, url, game = false) {
   if (!renderer) setup();
   const my = ++token;
   if (box !== el) { if (box) ro.unobserve(box); box = el; ro.observe(el); }
+  fight = null;   // a new model: the free view (a Camera tab sets the fight camera again)
+  controls.enabled = true;
+  grid.visible = false;
+  el.classList.remove('fightcam');
   el.innerHTML = '';
   el.appendChild(renderer.domElement);
   const msg = document.createElement('div');
@@ -138,6 +183,7 @@ export async function showModel(el, url, game = false) {
     current = g.scene;
     scene.add(current);
     frame(current, game || !!current.getObjectByName('WotM'));
+    placeFight();
     msg.remove();
   } catch (e) {
     if (my === token) msg.textContent = 'No 3D preview: ' + (e.message || e);

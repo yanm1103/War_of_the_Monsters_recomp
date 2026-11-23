@@ -85,10 +85,11 @@ starting points (**New skin**, **New monster**, **From the disc**), and the same
    model's own, posed as the game poses it (`tools/monglb.py`; without the fur springs and the blended layers). A 3D file of the work
    folder (`.glb`, `.gltf`, `.dae`, `.NGP`) shows the model itself (an `.NGP` with the PNGs of its folder over its textures). Drag
    turns the view, the wheel zooms.
-   Picking a file or a folder (the disc, Replace with..., Import...) opens the system's own dialog.
+   Picking a file or a folder (the disc, Replace with..., Import...) opens the system's own dialog, in the folder of the last pick
+   (Replace with... in the folder of the last replacement).
    Right click on the list: Play, Open in ..., **Open with...** (picks the program and asks whether it becomes the default), **Replace with...** (only with one file
-   selected: replaces it with the file you pick and writes it with the right name; JPG, BMP, TGA etc. become PNG; warns if the aspect ratio
-   changes; sound only accepts WAV), Show in folder, **Revert to original** (only shows up if there are edited files in the selection; on a group, reverts its
+   selected: replaces it with the file you pick and writes it with the right name; JPG, BMP, TGA etc. become PNG; a picture of another
+   aspect ratio is stretched to the game texture's, nearest neighbour, keeping its width; sound only accepts WAV), Show in folder, **Revert to original** (only shows up if there are edited files in the selection; on a group, reverts its
    edited files; extracts again from the disc and asks for confirmation first),
    **Save to folder...** (copies the selected files, or the whole group, to a folder) and Remove (the Del key too). Clicking a
    section only selects it: open and play apply only to files picked one by one; on a section, right click saves or removes everything.
@@ -96,7 +97,7 @@ starting points (**New skin**, **New monster**, **From the disc**), and the same
    **Messages** (the log) sits next to it, with a divider above you can drag up and down (its height is kept by the browser). One task
    runs at a time; the buttons of the others wait for it.
 
-The folders (disc and mods), the last mod, the editors, the last "Save to folder" folder and the kit's port are kept in
+The folders (disc and mods), the last mod, the editors, the volume, the last picked, replaced and "Save to folder" folders and the kit's port are kept in
 `~/.wotm_modkit.json` (in `WotM_ModKit.exe`, `modkit.json` in the game's data folder, next to `wotm.ini`); a saved folder that no
 longer exists falls back to the default. Underneath are the same functions of `modkit.py` below.
 
@@ -108,8 +109,10 @@ custom the default is the `costume` of `monster.json`), *Name*, *Id* (derived fr
 a 3D model of its own starts as a copy of that model instead (its `.NGP`, `.PTR`, `.TEX`, `.RTX`, PNGs and bone maps, named after the
 skin's base costume, all marked edited, and its `.blender.json`, so Export 3D model and Adjust bones go on from the same files); the
 base costume then gives only the sounds and what the folder lacks. In the list, the skin is its own group
-at the top (its name, "Skin for <monster>" and the base costume's portrait; the 3D view shows the skin's own model when it has one); when selected, the preview becomes the properties panel (Name, Base, CPUs may pick,
-**Save** rewrites `skin.json`; the *3D model* tab with what the skin uses now, **Check model...**, **Export 3D model**, **Import mesh...** and **Import animations...** (see "Mesh and animations from a 3D editor" below), and for a skin of a custom monster also **Import rigged model...** / **Adjust bones...** and **Import character with animations...**, which give only that skin a new body (`modkit.py skin rigged|rig <mod> <id> ...`)). Right click on the group: **Duplicate skin...** (copies the skin in the mod and in the work folder with the new
+at the top (its name, "Skin for <monster>" and its portrait: the portrait texture in its folder, else the base costume's; the 3D view shows the skin's own model when it has one); when selected, the preview becomes the properties panel (Name, *Base costume* (the disc costume the skin is made on, which gives whatever its folder lacks and its sounds; a custom's skin has a last choice, "As <custom>", with the custom's portrait: no `base` in `skin.json`, the custom's own costume), CPUs may pick;
+every change rewrites `skin.json` at once. A skin of a custom monster that has a 3D model of its own, without one itself (a skin made before, or by
+hand), shows the base type's disc costume in the game: the panel says so with **Copy <custom>'s model** (`modkit.skin_copy_model`: the
+custom's model in its place, its old PNGs out), and **Check mods** warns. The *3D model* tab with what the skin uses now, **Check model...**, **Export 3D model**, **Import mesh...** and **Import animations...** (see "Mesh and animations from a 3D editor" below), and for a skin of a custom monster also **Import rigged model...** / **Adjust bones...** and **Import character with animations...**, which give only that skin a new body (`modkit.py skin rigged|rig <mod> <id> ...`)). Right click on the group: **Duplicate skin...** (copies the skin in the mod and in the work folder with the new
 id) and **Delete skin**. With a playable monster costume group selected (e.g. "MON/SHOGUN3"), **Turn into skin...** (under its 3D view,
 in the header and on right click) creates the skin with that monster and costume and moves the group's PNGs to its folder, so the original costume stays untouched in Build; if the mod already has
 those PNGs packed in `MON/`, the window warns and offers to delete them.
@@ -120,17 +123,21 @@ name; it cannot be a playable monster's name), *Camera* (the type's own or anoth
 Jelly it defaults to Togera's at 200% and 300%), *Narrator* (the `narrator/*.mp3` the port finds), "Own look" and "CPUs may pick this monster".
 It creates the `monster.json` in `mods/<mod>/monsters/<id>/` and, with "Own look", writes `"files": true` and extracts the costume's textures to
 `monsters/<id>/files/` in the work folder: on Build the edited PNGs go to the monster's `files/` folder and apply only to it (the
-disc costume stays untouched). In the list, the monster is a group at the top (its name, "Custom monster, built on top of <base>" and its HUD portrait or the base costume's; a new portrait shows there at once); when selected, the
-preview becomes the properties panel. *Settings*: Name, Camera (with the distance from the monster to the camera), Narrator, *Special rules* (the `kind`), *Special* (the `special`), CPUs, *HUD portrait* (**Set...** copies the image to
-`portrait.png` and writes the right `portraitTex` of the costume's `.RTX`; **Remove** goes back to the costume's) and *Appearance* (its
-own files or the disc costume); each setting says what it is on hover. *3D model*: "Currently using" (the model the game loads, what
+disc costume stays untouched). In the list, the monster is a group at the top (its name, "Custom monster, built on top of <base>" and its HUD portrait: the one set with **Set...**, else the portrait texture in its files, edited or not, else the base costume's); when selected, the
+preview becomes the properties panel; every change rewrites `monster.json` at once, keeping the other keys. *Settings*: Name, Narrator, *Special move* (the `special`), CPUs, *HUD portrait* (the one the game shows; **Set...** copies the image to
+`portrait.png`, stretched to 2:1 if needed, and writes the right `portraitTex` of the costume's `.RTX`; **Remove** goes back to the costume's), *Name logo* (**Set...** copies the image to `logo.png`, stretched to 2:1 if needed, and writes `logo`; **Remove** takes it out: the name in letters) and *Appearance* (its
+own files or the disc costume); *Special rules* (the `kind`) only shows when `monster.json` has one. Each setting says what it is on hover.
+*Camera*: whose camera (the type's own or another monster's) and the distance from the monster to the camera (a slider and the
+number, 10 to 1000 %; the type's own camera keeps its distance); while the tab shows, the 3D view looks through POV 0 of that camera
+(the `.CHR` camera key 0xFC6 as the port reads it: position `m_00`, looking at `m_20`, the vertical field of view at `+0x4C`, all
+scaled), over a ground grid and with the game's 16:9 screen marked; the game's camera also turns with the speed and the ground.
+*3D model*: "Currently using" (the model the game loads, what
 it was made from and the source files; the skeleton and the animations are inside the `.NGP`), **Check model...** first, then
 **Import rigged model...** / **Adjust bones...**, **Export 3D model** / **Import mesh...** / **Import animations...**, **Import
 character with animations...** (below) and **Import model files...** (copies `.NGP` + `.PTR`, and optional `.TEX`/`.RTX`, to
 `files/`). *Stats & sounds*: **Extract stats** extracts the base type's `.CHR` and `.AIC` files to `files/`, where the edited ones
 become the monster's own; **Extract sounds** extracts the base type's sound bank as WAVs to `files/`, and on Build the replaced ones
-make the monster's own bank. **Save** rewrites `monster.json`
-keeping the other keys. Right click on the group: **New skin for this monster...**, **Duplicate monster...** and **Delete monster** (its
+make the monster's own bank. Right click on the group: **New skin for this monster...**, **Duplicate monster...** and **Delete monster** (its
 skins stay and the log warns). On an extracted costume group (playable or boss, e.g. "MON/ASSBOSS1"), right click has **Turn into
 custom monster...**, which moves the group's PNGs to the new monster.
 
@@ -227,9 +234,12 @@ weapon shown only in one move) has to be a rigid mesh parented to a bone: scalin
 any import and writes nothing: a list of `OK`, `WARNING` and `ERROR` lines in the log (`tools/meshcheck.py`). It says which import
 takes the file (**Import mesh...** when every skinned mesh is named after a piece of the monster, `obj_<address>`; **Import
 character with animations...** otherwise, and always for a model that already has its own skeleton) and then runs that import into a
-scratch folder, so its refusals show up here. A `.gltf` or `.dae` (a custom monster or a skin of one) is checked for **Import rigged
-model...**: its bones are fitted to the base's in a scratch folder (with the bone map already in the work folder, or the automatic
-one, and the facing the file states) and the result goes through the same checks. Besides those, it looks at:
+scratch folder, so its refusals show up here. A `.gltf` or `.dae`, or a `.glb` with a skeleton that did not come from the kit (no
+"WotM" root) and has none of the game's actions (`a<id>`), is a downloaded model: for a custom monster or a skin of one it is
+checked for **Import rigged model...**: its bones are fitted to the base's in a scratch folder (with the bone map already in the
+work folder, or the automatic one, and the facing the file states) and the result goes through the same checks. While it runs, a
+moving bar shows under the button; at the end a note next to it says OK, or how many errors and warnings (the lines are in
+Messages). Besides those, it looks at:
 - textures: each material's image, inside the `.glb` or next to it, with format and size; a missing image or one that is not PNG
   is drawn white (a JPEG becomes PNG on import);
 - meshes: triangles only, vertices without weights, vertices on more than 3 bones (the heaviest 3 are kept), no UV under an
@@ -339,7 +349,8 @@ python tools/modkit.py skin mesh export my_mod green          # the same for a s
 - The game still loads the disc's `.TEX`/`.RTX`; the native drawing swaps the image at draw time
   (`native/wotm_texmods.hpp`). That is why the PNG can have **any resolution** (HD textures): object UVs are normalized, and
   screen quads (bar portraits, font) scale the region by the ratio between the PNG and the original texture. Keep the
-  original's aspect ratio (`check` warns).
+  original's aspect ratio: `pack` writes a PNG of another ratio stretched to it (nearest neighbour, the width kept; the work folder
+  file stays as it is) and **Replace with...** stretches it at once; `check` warns about one already in a mod.
 - It works in any folder of the mod (the file name is enough) and for every palette that uses the texture.
 - Alpha: the PNG uses the same scale as the original texture, as the export writes it. Most of the game's textures go from 0 to 0xFF (twice
   the GS opaque 0x80); in them the PNG alpha is taken raw, 255 = 0xFF, and the log says "alfa cru, 255 = 0xFF". In the ones that stop at 0x80,

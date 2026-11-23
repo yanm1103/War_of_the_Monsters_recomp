@@ -166,7 +166,16 @@ class SkinsMixin:
         custom = None if game else modkit.find_customs(self.mods).get(mkey)
         prefix = modkit.MONSTERS[game] if game else (custom["prefix"] if custom else None)
         kind = "playable" if game else ("custom, %s" % custom["mod"] if custom else "custom monster the kit does not know")
+        cpic = None
+        if custom:   # the "as the custom" choice of Base: its portrait (Set..., its own .RTX portrait, or its disc costume's)
+            cid, cpre, cco = custom["id"], custom["prefix"], custom["costume"]
+            cpic = (("api/hud?cid=" + cid) if custom["mod"] == self.mod and self.portrait_of(cid) else
+                    self.folder_portrait("monsters/%s/files" % cid, cpre, cco) or "api/portrait?prefix=%s&k=%d" % (cpre, cco))
+        own = os.path.isdir(os.path.join(self.work(), "skins", sid)) and any(
+            n.upper().endswith(".NGP") for n in os.listdir(os.path.join(self.work(), "skins", sid)))
         return {"sid": sid, "data": data, "kind": kind, "game": bool(game), "prefix": prefix, "custom": bool(custom),
+                "custom_name": custom["name"] if custom else None, "custom_pic": cpic, "own_model": own,
+                "custom_model": bool(custom and modkit._custom_model_dir(self.work(), self.mods, self.mod, custom)),
                 "costumes": self.costumes_of(prefix) if prefix else [0, 1, 2, 3],
                 "custom_costume": custom["costume"] if custom else None,
                 "mesh": self.mesh_status("skin", sid, os.path.join(self.work(), "skins", sid))}
@@ -192,6 +201,12 @@ class SkinsMixin:
             return {"error": "Could not save the skin: %s" % ex}
         self.say("Skin %s saved: %s\n" % (sid, json.dumps(data)))
         return {"ok": True}
+
+    def act_skin_copy_model(self, d):
+        sid = d["sid"]
+        work, mods, mod = self.work(), self.mods, self.mod
+        return {"ok": self.run_fn("Copying the custom monster's model into skin %s..." % sid,
+                                  lambda: modkit.skin_copy_model(work, mods, mod, sid))}
 
     def act_skin_duplicate(self, d):
         sid, new = d["sid"], (d.get("new") or "").strip()
@@ -257,10 +272,19 @@ class SkinsMixin:
                                   lambda: modkit.mesh_export(disc, work, mods, mod, kind, tid))}
 
     def act_mesh_check(self, d):
+        """Check model...: the report goes to the log; its counts stay for do/check_result (the page's note next to the button)."""
         kind, tid, p = d["kind"], d["tid"], d["path"]
         disc, work, mods, mod = self.disc, self.work(), self.mods, self.mod
-        return {"ok": self.run_fn("Checking %s for %s..." % (os.path.basename(p), tid),
-                                  lambda: modkit.mesh_check(disc, work, mods, mod, kind, tid, p))}
+        self.last_check = None
+
+        def fn():
+            self.last_check = {"error": True}   # stays if the check stops on the way
+            rep = modkit.mesh_check(disc, work, mods, mod, kind, tid, p)
+            self.last_check = {"errors": rep.count("ERROR"), "warnings": rep.count("WARNING")}
+        return {"ok": self.run_fn("Checking %s for %s..." % (os.path.basename(p), tid), fn)}
+
+    def act_check_result(self, d):
+        return getattr(self, "last_check", None) or {}
 
     def act_mesh_import(self, d):
         """{"kind", "tid", "path", "what": mesh|anims, "as_rig"?}: a mesh that is a new body answers {"route": "rig", "why"}

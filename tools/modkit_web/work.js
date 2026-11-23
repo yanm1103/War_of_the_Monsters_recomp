@@ -217,7 +217,7 @@ function selectedGroup() {   // the group, when the selection is one group alone
   return data.groups.find(g => 'grp:' + g.key === ids[0]) || null;
 }
 
-async function load(focus) {
+async function load(focus, listOnly) {   // listOnly: the rows again, the preview (a panel being edited) stays
   const n = ++reqN;
   const r = await kit.api('do/work', { edited_only: $('onlyEdited').checked });
   if (n !== reqN) return;
@@ -238,7 +238,7 @@ async function load(focus) {
     const d = [...$('workTree').children].find(x => x.classList.contains('sel'));
     if (d) d.scrollIntoView({ block: 'nearest' });
   }
-  preview();
+  if (!listOnly) preview();
 }
 
 // ---------------------------------------------------------------- preview
@@ -382,6 +382,7 @@ async function replaceSelected() {
   stop();
   const r = await kit.api('do/replace', { rel: f.rel, src });
   if (r.error) kit.say(r.error + '\n', 'err');
+  kit.setState(await kit.api('state'));   // the folder it came from: the next Replace with... starts there
   await load();
   sel.set([f.rel]);
   paintSel();
@@ -516,9 +517,10 @@ export function initWork() {
       load();
     }
   });
-  kit.onTaskDone(() => { const f = kit.workFocus; kit.workFocus = null; load(f); });
+  // after a task the list comes again; kit.keepPreview (a task that changes nothing on show, e.g. Check model) keeps the panel
+  kit.onTaskDone(() => { const f = kit.workFocus, keep = kit.keepPreview; kit.workFocus = null; kit.keepPreview = false; load(f, keep); });
   kit.work = {
-    reload: load, rows: () => rows.map(r => r.id), selectedGroup, selectedFiles,
+    reload: load, refreshList: () => load(null, true), rows: () => rows.map(r => r.id), selectedGroup, selectedFiles,
     select(ids) { sel.set(ids); onSelect(); }, open(keys) { keys.forEach(k => open.add(k)); render(); },
     panels, menus, onSelect: f => selectListeners.push(f), preview,
   };

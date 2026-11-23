@@ -88,7 +88,7 @@ def file_note(rel):
     m = modkit.PNG_RE.match(n)
     if m:
         return ("Texture no. %d of the file %s%s. Replace it with an edited or new picture of any resolution (bigger "
-                "is sharper in the game); keep its aspect ratio (width to height), or the game shows it stretched." % (
+                "is sharper in the game); a picture of another aspect ratio (width to height) is stretched to this one." % (
                     int(m.group(3)), m.group(1).upper(), ".RTX" if m.group(2) else ".TEX"))
     mb = modkit.BNK_RE.match(n)
     if mb:
@@ -211,9 +211,31 @@ class FilesMixin:
     def monster_data(self, cid):
         return modkit._json_obj(os.path.join(modkit.monster_dir(self.mods, self.mod, cid), "monster.json")) if self.mod else {}
 
+    def folder_portrait(self, rel, prefix, costume):
+        """The HUD portrait PNG in a work folder (rel): the _rtx_ texture with the portrait's texId of the base costume's .RTX
+        (a custom's or a skin's own copy, edited or not) -> "api/hud?rel=..." with the file's time, or None."""
+        if not prefix or not self.work():
+            return None
+        if not hasattr(self, "_por_tex"):
+            self._por_tex = {}
+        k = (self.disc, prefix, costume)
+        if k not in self._por_tex:
+            self._por_tex[k] = modkit.portrait_tex(self.disc, prefix, costume)
+        tid = self._por_tex[k]
+        d = os.path.join(self.work(), *rel.split("/"))
+        if tid is None or not os.path.isdir(d):
+            return None
+        for n in sorted(os.listdir(d)):
+            m = modkit.PNG_RE.match(n)
+            if m and m.group(2) and int(m.group(3)) == tid:
+                f = os.path.join(d, n)
+                return "api/hud?rel=%s/%s&m=%d" % (rel, n, int(os.path.getmtime(f) * 1000))
+        return None
+
     def group_view(self, key, customs):
         """What a group's row shows: {"title", "sub", "tag", "pic", "logo"}; pic (portrait or level picture) and logo (the
-        monster's name logo) are the page's API addresses, or None."""
+        monster's name logo) are the page's API addresses, or None. A skin's or a custom's portrait is its own (Set..., or the
+        portrait texture in its folder) before the disc costume's."""
         from modkit_web_art import LEVEL_PICS, LOGOS
         por = lambda pre, k: "api/portrait?prefix=%s&k=%d" % (pre, k)  # noqa: E731
         logo = lambda pre: "api/art?name=logo-" + pre if pre in LOGOS else None  # noqa: E731
@@ -226,8 +248,9 @@ class FilesMixin:
             b = data.get("base")
             k = b if isinstance(b, int) and 0 <= b <= 3 else (c["costume"] if c else 0)
             who = (c["name"] if c else mon.title()) if mon else "?"
+            pic = self.folder_portrait("skins/" + sid, pre, k) or (por(pre, k) if pre else None)
             return {"title": data.get("name") or sid, "sub": "Skin for %s" % who, "tag": "skin",
-                    "pic": por(pre, k) if pre else None, "logo": None if c else logo(pre)}
+                    "pic": pic, "logo": None if c else logo(pre)}
         if key.startswith("monsters/"):
             cid = key[9:]
             data = self.monster_data(cid)
@@ -236,7 +259,8 @@ class FilesMixin:
             # the file's time in the address: a new portrait or logo is a new picture for the browser
             stamp = lambda f: "&m=%d" % int(os.path.getmtime(f) * 1000)  # noqa: E731
             pf, lf = self.portrait_of(cid), self.logo_of(cid)
-            pic = ("api/hud?cid=" + cid + stamp(pf)) if pf else por(pre, co) if pre else None
+            pic = (("api/hud?cid=" + cid + stamp(pf)) if pf else
+                   self.folder_portrait("monsters/%s/files" % cid, pre, co) or (por(pre, co) if pre else None))
             return {"title": data.get("name") or cid, "sub": "Custom monster, built on top of %s" % str(data.get("base", "?")).title(),
                     "tag": "monster", "pic": pic, "logo": ("api/hud?logo=1&cid=" + cid + stamp(lf)) if lf else None}
         d, _, n = key.rpartition("/")
@@ -417,9 +441,11 @@ class FilesMixin:
         new = modkit.png_size(dst) if ext == ".png" else None
         if new:
             msg += " (%dx%d)" % new
+        if new and orig:   # another aspect ratio: stretched to the game's (the game would stretch it anyway)
+            fitted = modkit.fit_ratio(dst, dst, orig)
+            if fitted:
+                msg += ", stretched to %dx%d to keep the game's aspect ratio (%dx%d)" % (fitted + tuple(orig))
         self.say(msg + "\n")
-        if new and orig and new[0] * orig[1] != new[1] * orig[0]:
-            self.say("WARNING: the game texture is %dx%d; a different aspect ratio looks stretched in the game\n" % orig, "warn")
         return {"ok": True}
 
     def act_save_to(self, d):

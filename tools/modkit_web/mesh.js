@@ -1,7 +1,7 @@
 // The 3D model blocks of a skin's or a custom monster's panel (panel.js): "Check your model before importing it" (Check model...),
 // "Edit the base model and import it back" (Export 3D model, Import mesh..., Import animations...) and the "Currently using"
 // lines. monsters.js adds the custom's own blocks (rigged model, entirely new character, model files) between them.
-import { block, button, el } from './panel.js';
+import { block, button, el, toast } from './panel.js';
 
 const GLB = [['glTF binary', ['*.glb', '*.GLB']]];
 const ANY3D = [['3D model', ['*.glb', '*.gltf', '*.dae', '*.GLB', '*.GLTF', '*.DAE']]];
@@ -40,14 +40,34 @@ export function meshBlocks(kind, tid, custom = kind === 'monster') {   // custom
     'animations.',
     [button('Export 3D model', () => run('mesh_export', { kind, tid })), button('Import mesh...', imp('mesh')),
      button('Import animations...', imp('anims'))]);
+  const checkBtn = button('Check model...', () => doCheck());
   const check = block('Check your model before importing it',
     'Use this before replacing the current model. It reads your file and changes nothing: the Messages box says which of the ' +
     'imports below can take it and lists what would go wrong (e.g. missing textures, meshes without weights, a model in other ' +
     'units or away from its bones).' + (custom ? ' Formats: .glb, .gltf or .dae.' : ' A skin takes the .glb of Export 3D model, edited.'),
-    [button('Check model...', async () => {
-      const start = (await kit.api('do/mesh_glb', { kind, tid, check: true })).path;
-      const p = await kit.pick('file', 'Model to check for ' + tid, start, custom ? ANY3D : GLB);
-      if (p) run('mesh_check', { kind, tid, path: p });
-    })]);
+    [checkBtn]);
+  // while it runs: a moving bar under the buttons; at the end, a note next to the button (OK, or how many errors / warnings;
+  // the lines are in Messages)
+  async function doCheck() {
+    const start = (await kit.api('do/mesh_glb', { kind, tid, check: true })).path;
+    const p = await kit.pick('file', 'Model to check for ' + tid, start, custom ? ANY3D : GLB);
+    if (!p) return;
+    kit.keepPreview = true;
+    const done = kit.nextDone();   // before the run: a check that fails at once ends before the run's answer
+    const r = await kit.run('mesh_check', { kind, tid, path: p });
+    if (!r.ok) { kit.keepPreview = false; return; }
+    const bar = el('div', 'loadbar');
+    bar.appendChild(el('span'));
+    check.appendChild(bar);
+    checkBtn.disabled = true;
+    await done;
+    bar.remove();
+    checkBtn.disabled = false;
+    const res = await kit.api('do/check_result', {});
+    const [text, k] = res.error || res.errors === undefined ? ['Could not check: see Messages', 'err']
+      : res.errors ? [res.errors + ' error' + (res.errors > 1 ? 's' : '') + (res.warnings ? ', ' + res.warnings + ' warning' + (res.warnings > 1 ? 's' : '') : '') + ': see Messages', 'err']
+      : res.warnings ? [res.warnings + ' warning' + (res.warnings > 1 ? 's' : '') + ': see Messages', 'warn'] : ['OK', 'ok'];
+    toast(checkBtn, text, k);
+  }
   return { blender, check, run };
 }

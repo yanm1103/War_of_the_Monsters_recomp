@@ -518,6 +518,24 @@ def save_state(work, state):
 
 # ---------------------------------------------------------------- pack
 
+def fit_ratio(src, out, orig):
+    """Uma textura PNG com proporcao diferente da do jogo (orig = (l, a) da textura original) vai para out esticada ate a
+    proporcao do jogo (vizinho mais proximo; a largura fica, a altura acompanha; o jogo esticaria de qualquer jeito). Devolve
+    o tamanho novo, ou None quando a proporcao ja bate (ou sem Pillow): nada e gravado."""
+    w, h = png_size(src) or (0, 0)
+    ow, oh = orig
+    if not w or not h or not ow or not oh or w * oh == h * ow:
+        return None
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    nh = max(1, round(w * oh / ow))
+    with Image.open(src) as im:
+        im.convert("RGBA").resize((w, nh), Image.Resampling.NEAREST).save(out, "PNG")
+    return (w, nh)
+
+
 def pack(disc, work, mods, mod, inject=False):
     """Leva o que mudou na pasta de trabalho (work None = work_dir(mods, mod)) para mods/<mod>/."""
     validate_mod_name(mod, "pack")
@@ -550,8 +568,12 @@ def pack(disc, work, mods, mod, inject=False):
             os.makedirs(os.path.join(dst, *d.split("/")) if d else dst, exist_ok=True)
             name = "%s%s_t%04d.png" % (stem, "_rtx" if rtx else "", tid)   # sem o _sempaleta: o nome que o jogo procura
             out_rel = (d + "/" if d else "") + name
-            shutil.copy2(p, os.path.join(dst, *out_rel.split("/")))
-            print("texture %s -> %s/%s" % (n, mod, out_rel))
+            orig = state["files"].get(rel, {}).get("size")
+            fitted = fit_ratio(p, os.path.join(dst, *out_rel.split("/")), orig) if orig else None
+            if not fitted:
+                shutil.copy2(p, os.path.join(dst, *out_rel.split("/")))
+            print("texture %s -> %s/%s%s" % (n, mod, out_rel, " (stretched to %dx%d: the game's aspect ratio, %dx%d)" % (
+                fitted + tuple(orig)) if fitted else ""))
             if inject and not d.startswith(("skins/", "monsters/")):   # PNG de skin ou custom vale so para ele
                 inject_png(disc, dst, stem, rtx, tid, p)
             continue
@@ -899,6 +921,30 @@ def skin_new(disc, work, mods, mod, monster, sid, base=None, name=None, ai=False
     print("edit the PNGs in %s, then: %s" % (os.path.join(work, "skins", sid), pack_hint(mod)))
 
 
+def skin_copy_model(work, mods, mod, sid):
+    """A skin de um custom com modelo proprio que ficou sem modelo (feita antes, ou a mao): o modelo do custom vem para a
+    pasta de trabalho da skin, como no skin new; os PNGs que ela tinha saem (eram do traje do disco)."""
+    data = list_skins(mods, mod).get(sid)
+    if not data:
+        raise SystemExit("skin copy model: no skin %r in mod %s" % (sid, mod))
+    custom = find_customs(mods).get(str(data.get("monster", "")).lower())
+    own = _custom_model_dir(work, mods, mod, custom) if custom else None
+    if not own:
+        raise SystemExit("skin copy model: %s is not of a custom monster with a 3D model of its own" % sid)
+    b = data.get("base")
+    co = b if isinstance(b, int) and 0 <= b <= 3 else custom["costume"]
+    rel = "skins/" + sid
+    d = os.path.join(work, "skins", sid)
+    st = load_state(work)
+    for n in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        if PNG_RE.match(n) or n.lower().endswith("_manifest.json"):
+            os.remove(os.path.join(d, n))
+            st["files"].pop("%s/%s" % (rel, n), None)
+    save_state(work, st)
+    _copy_model(own, work, rel, "%s%d" % (custom["prefix"], co))
+    print("skin %s now starts from %s's model; send it to the mod: %s" % (sid, custom["id"], pack_hint(mod)))
+
+
 def _custom_model_dir(work, mods, mod, custom):
     """A pasta com o modelo proprio (.NGP) de um custom (de find_customs): a de trabalho, se o custom e deste mod (tem as
     edicoes ainda sem pack), senao a files/ dele no mod. None sem modelo proprio."""
@@ -1053,8 +1099,11 @@ def monster_portrait(disc, work, mods, mod, cid, png):
     for d in (monster_dir(mods, mod, cid), os.path.join(work, "monsters", cid)):
         os.makedirs(d, exist_ok=True)
         dst = os.path.join(d, "portrait.png")
-        if os.path.abspath(dst) != os.path.abspath(png):
+        if os.path.abspath(dst) != os.path.abspath(png) and not fit_ratio(png, dst, (128, 64)):
             shutil.copyfile(png, dst)
+    if w * 64 != h * 128 and png_size(dst)[0] * 64 == png_size(dst)[1] * 128:
+        print("%dx%d stretched to %dx%d: the HUD portrait is 2:1" % ((w, h) + png_size(dst)))
+        w, h = png_size(dst)
     st = load_state(work)
     st["files"]["monsters/%s/portrait.png" % cid] = {"sha1": sha1(os.path.join(work, "monsters", cid, "portrait.png"))}
     save_state(work, st)
@@ -1064,6 +1113,41 @@ def monster_portrait(disc, work, mods, mod, cid, png):
     print("portrait of %s: %dx%d (game 128x64), texture %d of %s%d.RTX" % (cid, w, h, tid, prefix, co))
     if w * 64 != h * 128:
         print("WARNING: the HUD portrait is 2:1 (128x64); %dx%d will look stretched" % (w, h))
+
+
+def monster_logo(work, mods, mod, cid, png):
+    """Logo do nome do custom ("logo" do monster.json): copia o PNG para monsters/<id>/logo.png (no mod e na pasta de trabalho),
+    esticado ate 2:1 se precisar (os do jogo sao 256x128); png None tira o logo (volta o nome em texto)."""
+    js = os.path.join(monster_dir(mods, mod, cid), "monster.json")
+    data = _json_obj(js)
+    if not data:
+        raise SystemExit("logo: no monster.json in %s" % monster_dir(mods, mod, cid))
+    st = load_state(work)
+    rel = "monsters/%s/logo.png" % cid
+    dsts = [os.path.join(monster_dir(mods, mod, cid), "logo.png"), os.path.join(work, *rel.split("/"))]
+    if png is None:
+        lg = data.pop("logo", None)
+        for f in dsts + ([os.path.join(monster_dir(mods, mod, cid), lg)] if isinstance(lg, str) and lg else []):
+            if os.path.isfile(f):
+                os.remove(f)
+        st["files"].pop(rel, None)
+        save_state(work, st)
+        write_monster_json(mods, mod, cid, data)
+        print("logo of %s removed (the name in text)" % cid)
+        return
+    if png_size(png) is None:
+        raise SystemExit("logo: %s is not a PNG" % png)
+    for dst in dsts:
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        if os.path.abspath(dst) != os.path.abspath(png) and not fit_ratio(png, dst, (256, 128)):
+            shutil.copyfile(png, dst)
+    st["files"][rel] = {"sha1": sha1(dsts[1])}
+    save_state(work, st)
+    data["logo"] = "logo.png"
+    write_monster_json(mods, mod, cid, data)
+    w, h = png_size(png)
+    print("logo of %s: %dx%d%s (shown in the select screen and the save list)" % (
+        cid, w, h, "" if w == 2 * h else ", stretched to %dx%d (2:1)" % png_size(dsts[0])))
 
 
 def monster_model(work, mods, mod, cid, paths):
@@ -1361,7 +1445,7 @@ def mesh_check(disc, work, mods, mod, kind, tid, glb, front=None, scale=None, he
     if not src or not disc_file(disc, stem + ".PTR"):
         raise SystemExit("mesh check: %s.NGP/.PTR are not on the disc" % stem)
     owner = owner_custom(mods, mod, kind, tid)
-    if glb.lower().endswith((".gltf", ".dae")):   # only Import rigged model reads these
+    if glb.lower().endswith((".gltf", ".dae")) or (owner is not None and _downloaded_glb(glb)):   # only Import rigged model reads these
         if owner is None:
             raise SystemExit("mesh check: a skin takes the .glb of Export 3D model, edited; a %s with a skeleton of its own is a "
                              "new body, for a custom monster (Import rigged model)" % os.path.splitext(glb)[1])
@@ -1374,6 +1458,19 @@ def mesh_check(disc, work, mods, mod, kind, tid, glb, front=None, scale=None, he
     if owner is None and any("a new body goes in by Import character" in t for _lv, t in rep.items):
         print("a skin keeps its monster's skeleton: a new body is a custom monster (monster new, then Import character with animations)")
     return rep
+
+
+def _downloaded_glb(path):
+    """Um .glb com esqueleto que nao saiu do kit (sem a raiz "WotM") e cujas animacoes nao sao as do jogo (nenhuma acao a<id>):
+    um modelo baixado, que vai pelo Import rigged model (as animacoes do tipo base) e nao pelo import do esqueleto proprio."""
+    try:
+        import ngpmesh
+        j = ngpmesh.Glb(path).j
+    except Exception:  # noqa: BLE001 (unreadable: the check's own reader says why)
+        return False
+    if any(n.get("name") == "WotM" for n in j.get("nodes", [])) or not j.get("skins"):
+        return False
+    return not any(re.fullmatch(r"a\d{1,3}(_loop|_once)?", a.get("name") or "") for a in j.get("animations", []))
 
 
 def _base_export(disc, work, rel, stem):
@@ -1706,6 +1803,10 @@ def mod_files(mods, mod):
     return out
 
 
+def _has_ngp(folder):
+    return os.path.isdir(folder) and any(n.upper().endswith(".NGP") for n in os.listdir(folder))
+
+
 def check(disc, mods, only=None):
     if not os.path.isdir(mods):
         raise SystemExit("no mods folder at %s" % mods)
@@ -1741,6 +1842,10 @@ def check(disc, mods, only=None):
                 mon = key[1].split("/")[0]
                 if key[0] == "skin" and mon not in MONSTERS and mon not in customs:
                     note += " WARNING: %r is not a playable monster nor the id of a custom monster; the game skips it" % mon
+                elif key[0] == "skin" and mon in customs and not _has_ngp(os.path.dirname(p)) and _has_ngp(
+                        os.path.join(os.path.dirname(customs[mon]["path"]), "files")):
+                    note += (" WARNING: %s has a 3D model of its own and this skin has none: the game shows the base type's disc "
+                             "costume (the kit's Copy ... model button on the skin fixes it)" % mon)
                 if key[0] == "custom":
                     v = _json_obj(p)
                     if not base_prefix(str(v.get("base", ""))):

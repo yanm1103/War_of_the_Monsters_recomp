@@ -79,3 +79,34 @@ num Edge sem janela (fotos por CDP, sem erro de JS) e, no item 8, no jogo.
 6. **Check de um `.glb` baixado:** um `.glb` com esqueleto que não veio do kit é conferido para o "Import character" (esqueleto
    próprio, ações `a090`...), não para o "Import rigged model". Se o arquivo não tem ações com os ids do jogo, conferir como
    rigged faz mais sentido. Quer que o check decida pelo que o `.glb` tem (sem ações `aNNN` = rigged)?
+
+## Segunda rodada (relato do dono depois do teste)
+
+- **Ícone do Donkey Kong ainda com o Congar:** o retrato trocado era o `monkey0_rtx_t0002.png` (o retrato dentro do `.RTX` do
+  custom), e o ícone só olhava o do **Set...**. Agora o ícone do custom e o da skin usam o retrato que estiver na pasta deles
+  (a textura `_rtx_` com o texId do retrato do traje base), editado ou não; o painel mostra esse mesmo retrato. Conferido: o
+  ícone do DK e o da `skin1` vêm de `api/hud?rel=.../monkey0_rtx_t0002.png`.
+- **Replace with... na mesma pasta:** a pasta era guardada, mas a página não relia o estado. Agora relê; os outros diálogos sem
+  pasta inicial (Set..., Import...) abrem na última pasta escolhida (`pick_dir` no `modkit.json`).
+- **BASE com `monster.json (0)`:** era "sem `base` no `skin.json`: o traje do próprio custom". Virou "As DONKEY KONG", com o
+  retrato do custom; a linha chama "Base costume" e diz o que é (com modelo próprio, só os sons).
+- **Check model:** barra correndo embaixo do botão enquanto roda; no fim, um aviso ao lado do botão ("OK", ou quantos erros e
+  avisos). Conferido com o `.dae` do DK: "OK".
+- **Save do custom:** saiu. Toda mudança salva sozinha ("✓ Saved" embaixo); o mesmo na skin.
+- **Logo própria:** linha *Name logo* no Settings (**Set...** copia para `logo.png`, estica para 2:1 se precisar, grava `"logo"`;
+  **Remove**). O retrato do HUD também estica para 2:1.
+
+Respostas às dúvidas:
+1. Proporção: o **Replace with...** estica na hora (vizinho mais próximo, mantém a largura) e o **Build** estica a cópia que vai
+   para o mod (o arquivo da pasta de trabalho fica como está). Conferido: 128x64 no lugar de 256x256 sai 128x128 no mod.
+2. Aba **Camera**: a câmera e a distância saíram do Settings para ela; a vista 3D olha pela câmera da luta (POV 0 do `.CHR`:
+   posição `m_00`, olhando para `m_20`, campo de visão vertical de 1,05 rad, tudo vezes a distância), com chão quadriculado e a
+   tela 16:9 marcada. A leitura dos números foi conferida com uma foto do jogo (DK parado, câmera do Congar): monstro embaixo no
+   centro, um terço da altura, como na aba. A câmera do jogo ainda gira com a velocidade e o chão; a aba mostra a parada.
+3. Special rules escondida (aparece só se o `monster.json` tiver `kind`); "Special" virou "Special move".
+4. Editor de golpes: no `TODO.md`, para depois.
+5. Skin de custom sem modelo: acontecia com skins feitas antes desta versão do kit (a sua `skin1`) ou à mão. O kit novo não cria
+   mais; para as antigas, o painel da skin avisa e tem **Copy DONKEY KONG's model**, e o **Check mods** avisa também. O runtime
+   continua igual.
+6. Check: um `.glb` com esqueleto que não saiu do kit e não tem as animações do jogo (`a090`...) é tratado como modelo baixado
+   (conferido para o Import rigged model).

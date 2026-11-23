@@ -10,6 +10,7 @@ import { makeSplit } from './split.js';
 const $ = id => document.getElementById(id);
 const listeners = [];
 const doneListeners = [];
+const onceDone = [];
 const kit = window.kit = {
   state: null,
   actions: {},   // newSkin(), newMonster(): set by skins.js and monsters.js (the welcome cards call them)
@@ -19,6 +20,7 @@ const kit = window.kit = {
   },
   onState(f) { listeners.push(f); if (kit.state) f(kit.state); },
   onTaskDone(f) { doneListeners.push(f); },   // after each task (the lists come again)
+  nextDone() { return new Promise(r => onceDone.push(r)); },   // resolves when the running task ends
   setState(s) { kit.state = s; for (const f of listeners) f(s); },
   async pick(kind, title, initial, types) {   // the system's dialog -> a path (or a list for "files"), null when cancelled
     return (await kit.api('do/pick', { kind, title, initial, types })).path;
@@ -313,7 +315,7 @@ events.onmessage = ev => {
   if (kit.state && (it.kind === 'head' || it.kind === 'done')) {
     kit.state.busy = it.busy;
     busy(it.busy);
-    if (it.kind === 'done') { refresh(); for (const f of doneListeners) f(); }
+    if (it.kind === 'done') { refresh(); for (const f of doneListeners) f(); onceDone.splice(0).forEach(f => f()); }
   }
 };
 events.onerror = async () => {   // the server went away (Quit, or closed): say so instead of a dead page

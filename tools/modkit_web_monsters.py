@@ -131,6 +131,9 @@ class MonstersMixin:
                 "narrator": data.get("narrator", "") if isinstance(data.get("narrator"), str) else "",
                 "kind": data.get("kind") or "", "special": sb or "", "ai": bool(data.get("ai")),
                 "portrait": por, "portrait_ok": bool(por) and os.path.isfile(os.path.join(mdir, por)),
+                "logo_ok": bool(self.logo_of(cid)),
+                "own_portrait": bool(self.folder_portrait("monsters/%s/files" % cid, modkit.base_prefix(str(data.get("base", ""))),
+                                                          data.get("costume", 0) if isinstance(data.get("costume"), int) else 0)),
                 "look": look, "stats": ", ".join(chr_ + (["%d .AIC" % len(aic)] if aic else [])) or "the base's",
                 "sounds": ("%d sound(s) as WAV, %d replaced" % (len(wavs), changed)) if wavs else "the base's",
                 "mesh": self.mesh_status("monster", cid, wfiles)}
@@ -198,6 +201,61 @@ class MonstersMixin:
         disc, work, mods, mod = self.disc, self.work(), self.mods, self.mod
         return {"ok": self.run_fn("Setting the HUD portrait of %s..." % cid,
                                   lambda: modkit.monster_portrait(disc, work, mods, mod, cid, src))}
+
+    def act_camera_view(self, d):
+        """{"cid", "from", "scale"}: POV 0 of the fight camera the custom gets (wotm_custom.inc camTable: the .CHR camera key 0xFC6
+        of "from", or of its own / its base's .CHR, with the three vectors scaled) -> {"pos", "look", "target", "fov", "chr"} in
+        game units around the monster (+Y its front, Z up). pos is m_00; target m_20 (where it looks, ahead of the monster); fov
+        the scalar at +0x4C (radians). The view is a close approximation: the game's camera also follows speed and slopes."""
+        import struct
+        cid = d["cid"]
+        data = self.monster_data(cid)
+        frm = d.get("from") or ""
+        scale = 1.0
+        if frm:
+            try:
+                scale = max(10, min(1000, int(d.get("scale") or 100))) / 100.0
+            except (TypeError, ValueError):
+                scale = 1.0
+        f = None
+        if not frm:   # its own .CHR (Extract stats), else the base type's
+            fd = os.path.join(self.work(), "monsters", cid, "files")
+            own = [n for n in (os.listdir(fd) if os.path.isdir(fd) else []) if n.upper().endswith(".CHR")]
+            f = os.path.join(fd, own[0]) if own else None
+        if not f:
+            pre = modkit.base_prefix(frm or str(data.get("base", "")))
+            f = modkit.disc_file(self.disc, "RST/%s.CHR" % pre) if pre else None
+        if not f:
+            return {"error": "no .CHR for the camera"}
+        b = open(f, "rb").read()
+        o = 12
+        while o + 8 <= len(b):
+            t, s = struct.unpack_from("<II", b, o)
+            if t == 1 or s < 8:
+                break
+            if t == 0xFC6 and o + 0x10 + 0xA0 <= len(b):
+                v = [[x * scale for x in struct.unpack_from("<3f", b, o + 0x10 + 16 * k)] for k in range(3)]
+                fov = struct.unpack_from("<f", b, o + 0x10 + 0x4C)[0]
+                return {"pos": v[0], "look": v[1], "target": v[2], "fov": fov if 0.3 < fov < 2.0 else 1.05,
+                        "chr": os.path.basename(f)}
+            o += s
+        return {"error": "%s has no camera key" % os.path.basename(f)}
+
+    def act_logo_set(self, d):
+        """{"cid", "path"}: the name logo (another image format becomes PNG); {"cid", "remove": true} takes it away."""
+        cid = d["cid"]
+        work, mods, mod = self.work(), self.mods, self.mod
+        if d.get("remove"):
+            return {"ok": self.run_fn("Removing the logo of %s..." % cid, lambda: modkit.monster_logo(work, mods, mod, cid, None))}
+        src = d["path"]
+        if not src.lower().endswith(".png"):
+            try:
+                from PIL import Image
+                src = os.path.join(tempfile.mkdtemp(prefix="wotm_logo_"), "logo.png")
+                Image.open(d["path"]).convert("RGBA").save(src)
+            except Exception as ex:  # noqa: BLE001
+                return {"error": "Could not open %s: %s" % (d["path"], ex)}
+        return {"ok": self.run_fn("Setting the logo of %s..." % cid, lambda: modkit.monster_logo(work, mods, mod, cid, src))}
 
     def act_portrait_remove(self, d):
         cid = d["cid"]

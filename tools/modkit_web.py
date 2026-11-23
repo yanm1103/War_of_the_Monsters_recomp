@@ -375,7 +375,12 @@ class Kit(FilesMixin, SkinsMixin, MonstersMixin, ModelMixin, ArtMixin):
         return {"ok": True}
 
     def act_pick(self, d):
-        r = self.dialogs.ask(d.get("kind", "file"), d.get("title", ""), d.get("initial", ""), d.get("types"))
+        """The system's dialog. Without a starting place it opens in the folder of the last pick (kept in the config)."""
+        initial = d.get("initial", "") or load_conf().get("pick_dir") or ""
+        r = self.dialogs.ask(d.get("kind", "file"), d.get("title", ""), initial, d.get("types"))
+        last = r[0] if isinstance(r, list) and r else r
+        if isinstance(last, str) and last:
+            save_conf({"pick_dir": last if d.get("kind") == "dir" else os.path.dirname(last)})
         return {"path": r}
 
 
@@ -420,6 +425,14 @@ def make_handler(kit, page_dir, vendor_dir, server_ref):
                 q = {k: v[0] for k, v in parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "").items()}
                 if p == "/api/art":
                     f = kit.art(q.get("name", ""))
+                elif q.get("rel"):   # a portrait PNG of the work folder (a custom's or a skin's own .RTX portrait)
+                    try:
+                        f = kit.work_path(q["rel"])
+                    except SystemExit:
+                        f = None
+                    f = f if f and os.path.isfile(f) else None
+                    if f and q.get("part"):
+                        f = kit.portrait_part(f, q["part"])
                 else:
                     cid = q.get("cid", "")
                     f = (kit.logo_of(cid) if q.get("logo") else kit.portrait_of(cid)) if cid else None

@@ -453,3 +453,27 @@ body.dragy, body.dragy * { cursor: row-resize !important; user-select: none; }
 .state.now li { margin: 1px 0; }
 .camrow { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
 .camrow select { align-self: flex-start; }
+/* settings that save themselves (panel.js autosave), the note next to a button (toast), the check's moving bar, a warning box */
+.autosave { color: var(--dim); font: 12px var(--text); }
+.autosave.busy { color: var(--orange2); }
+.autosave.ok { color: #8fdc8f; }
+.autosave.err { color: var(--err); }
+.toast { display: inline-flex; align-items: center; margin-left: 8px; padding: 4px 10px; border-radius: 12px; font: 600 11.5px var(--ui);
+         letter-spacing: .1em; text-transform: uppercase; transition: opacity .5s; border: 1px solid; }
+.toast.ok { color: #8fdc8f; border-color: rgba(120, 220, 120, .5); background: rgba(80, 200, 80, .12); }
+.toast.warn { color: var(--warn); border-color: rgba(255, 191, 60, .5); background: rgba(255, 191, 60, .1); }
+.toast.err { color: var(--err); border-color: rgba(255, 110, 90, .5); background: rgba(255, 85, 52, .1); }
+.toast.gone { opacity: 0; }
+.loadbar { position: relative; height: 4px; margin-top: 8px; border-radius: 2px; overflow: hidden; background: rgba(255, 255, 255, .08); }
+.loadbar span { position: absolute; top: 0; bottom: 0; width: 35%; border-radius: 2px; background: var(--orange);
+                animation: loadbar 1.2s ease-in-out infinite; }
+@keyframes loadbar { from { left: -35%; } to { left: 100%; } }
+.warnbox { border: 1px solid rgba(255, 191, 60, .5); background: rgba(255, 191, 60, .08); color: #f1dfb4; border-radius: 10px;
+           padding: 10px 12px; margin: 0 0 10px; font: 12.5px/1.45 var(--text); }
+.warnbox button { display: block; margin-top: 8px; }
+img.hud.logo { background: repeating-conic-gradient(#2c2c2c 0 25%, #3a3a3a 0 50%) 0 0 / 12px 12px; }
+.costume .pic.big + input + * { white-space: nowrap; }
+/* the Camera tab (monsters.js): the game's 16:9 screen over the 3D view, which looks through the fight camera */
+.v3d.fightcam::after { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; height: 100%; aspect-ratio: 16 / 9;
+                       transform: translateX(-50%); border-left: 1px dashed rgba(240, 138, 44, .55);
+                       border-right: 1px dashed rgba(240, 138, 44, .55); pointer-events: none; }

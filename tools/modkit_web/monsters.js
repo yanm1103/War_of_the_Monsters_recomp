@@ -3,7 +3,8 @@
 // the name, camera, narrator, special rules, special, CPUs and HUD portrait; 3D model, with the check and one block per way
 // to give it a body; Stats & sounds), Duplicate / Delete.
 import { meshBlocks, currentModel } from './mesh.js';
-import { panelFrame, tabs, block, el, button } from './panel.js';
+import { panelFrame, tabs, block, el, button, autosave } from './panel.js';
+import { fightCamera } from './viewer.js';
 import { costumeRadios, skinDialog } from './skins.js';
 
 const $ = id => document.getElementById(id);
@@ -24,7 +25,9 @@ const TIPS = {
             "Empty = the base's.",
   'Special rules': 'Extra behaviour the port gives a monster on top of its base type. Only "mecha" for now: the final boss\'s ' +
                    "robot (the laser aimed through the tower camera, the shield, no jump). Empty = the base type's rules.",
-  Special: "The special move (Triangle + Circle): another monster's, or the base type's own.",
+  'Special move': "The special move (Triangle + Circle): another monster's, or the base type's own.",
+  'Name logo': 'The name drawn as a picture, shown under the model in the select screen and in the save list (like the game\'s ' +
+               'monsters). A 2:1 PNG; another shape is stretched to 2:1. Without it, the name in letters.',
 };
 function tip(r, label) { if (TIPS[label]) r.title = TIPS[label]; return r; }
 function select(options, value) {   // options: [[value, text]]
@@ -42,10 +45,23 @@ function cameraRow(L, from, scale) {
   n.step = 10;
   n.value = scale || 100;
   n.style.width = '80px';
+  const r = el('input');   // the same distance as a slider (the number takes more than 400)
+  r.type = 'range';
+  r.min = 10;
+  r.max = 400;
+  r.step = 5;
+  r.value = Math.min(400, n.value);
+  r.addEventListener('input', () => { n.value = r.value; n.dispatchEvent(new Event('input')); });
+  r.addEventListener('change', () => n.dispatchEvent(new Event('change')));
+  n.addEventListener('input', () => { r.value = Math.min(400, n.value); });
   const box = el('div', 'camrow');
   const dist = el('div', 'inline');
-  dist.append(el('span', 'dim', 'Distance from monster to camera'), n, el('span', 'dim', '%'));
-  box.append(s, dist);
+  const own = el('div', 'dim', "The base's own camera keeps its distance: pick a monster's camera (its own type too) to change it.");
+  dist.append(el('span', 'dim', 'Distance from monster to camera'), r, n, el('span', 'dim', '%'));
+  box.append(s, dist, own);
+  const sync = () => { n.disabled = r.disabled = !s.value; own.hidden = !!s.value; };
+  s.addEventListener('change', sync);
+  sync();
   return { box, from: s, scale: n };
 }
 function narratorInput(L, value) {
@@ -153,36 +169,75 @@ async function monsterPanel(g, body, label) {
   if (p.missing) { form.appendChild(el('div', 'dim', 'No monster.json in ' + p.missing)); return; }
   const key = 'monsters/' + cid;
   const run = async (action, b) => { kit.workFocus = [key]; return kit.run(action, b); };
-  const [tSet, tModel, tStats] = tabs(form, ['Settings', '3D model', 'Stats & sounds'], 'wotm.monsterTab');
+  let camOn = false, camReady = false;   // the Camera tab is showing: the 3D view looks through the fight camera
+  const pages = tabs(form, ['Settings', 'Camera', '3D model', 'Stats & sounds'], 'wotm.monsterTab', t => {
+    camOn = t === 'Camera';
+    if (camOn) { if (camReady) showFightCam(); } else fightCamera(null);
+  });
+  const [tSet, tCam, tModel, tStats] = pages;
 
   // Settings
   const name = el('input');
   name.value = p.data.name || '';
   const cam = cameraRow(L, p.camera_from, p.camera_scale);
   const narr = narratorInput(L, p.narrator);
-  const kind = select([['', "(the base's)"], ...L.kinds.map(k => [k, k])], p.kind);
   const special = select([['', "(the base's own)"], ...L.specials.map(s => [s.base, s.label])], p.special);
   const ai = el('input'); ai.type = 'checkbox'; ai.checked = p.ai;
   const aiL = el('label', 'check'); aiL.append(ai, document.createTextNode(' CPUs may pick this monster'));
+  // the HUD portrait the game shows: the one set here, else the portrait texture in its files (edited or not), else the costume's
   const hud = el('div', 'inline');
-  if (p.portrait_ok) { const im = el('img', 'hud'); im.src = 'api/hud?cid=' + encodeURIComponent(cid) + '&t=' + Date.now(); hud.appendChild(im); }
-  else hud.appendChild(el('span', 'dim', p.portrait ? p.portrait + ' (not found)' : "the costume's"));
+  const hudImg = el('img', 'hud');
+  hudImg.src = p.portrait_ok ? 'api/hud?cid=' + encodeURIComponent(cid) + '&t=' + Date.now() : (g.pic || '');
+  if (hudImg.src) hud.appendChild(hudImg);
+  hud.appendChild(el('span', 'dim', p.portrait_ok ? 'set here' : p.own_portrait ? 'the portrait texture in its files' : "the costume's"));
   hud.appendChild(button('Set...', async () => {
     const f = await kit.pick('file', 'HUD portrait of ' + cid + ' (2:1, e.g. 128x64 or 512x256)', '', IMG);
     if (f) run('portrait_set', { cid, path: f });
   }));
   if (p.portrait) hud.appendChild(button('Remove', async () => { await kit.api('do/portrait_remove', { cid }); kit.work.reload([key]); }));
-  const save = button('Save', async () => {
+  // the name logo of the select screen and the save list ("logo" of monster.json)
+  const logo = el('div', 'inline');
+  if (p.logo_ok) { const im = el('img', 'hud logo'); im.src = 'api/hud?logo=1&cid=' + encodeURIComponent(cid) + '&t=' + Date.now(); logo.appendChild(im); }
+  else logo.appendChild(el('span', 'dim', 'none: the name in letters'));
+  logo.appendChild(button('Set...', async () => {
+    const f = await kit.pick('file', 'Name logo of ' + cid + ' (2:1, e.g. 256x128 or 512x256; transparent around the letters)', '', IMG);
+    if (f) run('logo_set', { cid, path: f });
+  }));
+  if (p.logo_ok) logo.appendChild(button('Remove', () => run('logo_set', { cid, remove: true })));
+  const saveAll = async () => {
     const r = await kit.api('do/monster_save', { cid, name: name.value, camera_from: cam.from.value, camera_scale: cam.scale.value,
-                                                 narrator: narr.value, kind: kind.value, special: special.value, ai: ai.checked });
-    if (r.error) { kit.say(r.error + '\n', 'err'); return; }
-    kit.work.reload([key]);
-  }, 'primary');
+                                                 narrator: narr.value, kind: p.kind, special: special.value, ai: ai.checked });
+    if (r.error) return r.error;
+    kit.work.refreshList();
+    return null;
+  };
+  const status = autosave([name, narr, special, ai], saveAll);
   const sb = el('div', 'btns');
-  sb.append(save, button('New skin for this monster...', () => skinDialog('New skin', null, cid)));
-  tSet.append(row('Base', el('span', '', p.base)), row('Name', name), tip(row('Camera', cam.box), 'Camera'),
-    tip(row('Narrator', narr), 'Narrator'), tip(row('Special rules', kind), 'Special rules'), tip(row('Special', special), 'Special'),
-    row('', aiL), row('HUD portrait', hud), row('Appearance', el('span', 'dim', p.look)), row('', sb));
+  sb.append(button('New skin for this monster...', () => skinDialog('New skin', null, cid)));
+
+  // Camera: whose fight camera and how far, seen through it in the 3D view above (POV 0, the usual one in a fight)
+  const camNote = el('div', 'dim');
+  let camReq = 0;
+  async function showFightCam() {
+    const my = ++camReq;
+    const v = await kit.api('do/camera_view', { cid, from: cam.from.value, scale: cam.scale.value });
+    if (my !== camReq || !camOn) return;
+    if (v.error) { camNote.textContent = 'No camera preview: ' + v.error + '.'; fightCamera(null); return; }
+    fightCamera(v);
+    camNote.textContent = 'The 3D view above looks through this camera (POV 0, from ' + v.chr + '; in the game it also turns ' +
+      'with the speed and the ground). Leave the tab for the free view.';
+  }
+  cam.from.addEventListener('change', showFightCam);
+  cam.scale.addEventListener('input', showFightCam);
+  tCam.append(tip(row('Camera', cam.box), 'Camera'), row('', camNote), row('', autosave([cam.from, cam.scale], saveAll)));
+  camReady = true;
+  if (camOn) showFightCam();
+
+  tSet.append(row('Base', el('span', '', p.base)), row('Name', name),
+    tip(row('Narrator', narr), 'Narrator'), tip(row('Special move', special), 'Special move'),
+    row('', aiL), row('HUD portrait', hud), tip(row('Name logo', logo), 'Name logo'), row('Appearance', el('span', 'dim', p.look)),
+    row('', status), row('', sb));
+  if (p.kind) tSet.insertBefore(tip(row('Special rules', el('span', '', p.kind)), 'Special rules'), status.parentElement);
 
   // 3D model: what it uses now, the check, then one block per way to give it a body (the easiest first)
   const mb = meshBlocks('monster', cid);
