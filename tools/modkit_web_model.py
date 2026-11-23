@@ -20,15 +20,18 @@ def cache_dir():
     return _cache_dir
 
 
-def _overrides(folder, stem):
-    """{(is_rtx, texId): png path} of the PNGs in folder that replace stem's textures (MONKEY0 -> monkey0_t0004.png)."""
+def _overrides(folder, stem, deep=True):
+    """{(is_rtx, texId): png path} of the PNGs in folder that replace stem's textures (MONKEY0 -> monkey0_t0004.png). deep: its
+    subfolders too, as the game reads a skin's folder (skins/<id>/MON/monkey0_t0003.png); a file nearer the top wins."""
     out = {}
     if not folder or not os.path.isdir(folder):
         return out
-    for n in os.listdir(folder):
-        m = modkit.PNG_RE.match(n)
-        if m and m.group(1).lower() == stem.lower():
-            out[(bool(m.group(2)), int(m.group(3)))] = os.path.join(folder, n)
+    walk = sorted(os.walk(folder), key=lambda w: w[0].count(os.sep), reverse=True) if deep else [(folder, [], os.listdir(folder))]
+    for d, _dirs, names in walk:   # deepest first, so the top folder's PNG is the one kept
+        for n in names:
+            m = modkit.PNG_RE.match(n)
+            if m and m.group(1).lower() == stem.lower():
+                out[(bool(m.group(2)), int(m.group(3)))] = os.path.join(d, n)
     return out
 
 
@@ -40,14 +43,14 @@ def _key(*paths, extra=""):
     return h.hexdigest()[:20]
 
 
-def posed_glb(ngp, tex_path=None, rtx_path=None, png_folder=None, stem=None, anim=90):
+def posed_glb(ngp, tex_path=None, rtx_path=None, png_folder=None, stem=None, anim=90, deep=True):
     """The model of an .NGP in its idle, its textures from the .TEX/.RTX next to it (or given) and the PNGs of png_folder named
     after stem over them. -> path of the .glb (cached)."""
     import gltf
     import pose
     import tex
     stem = stem or os.path.splitext(os.path.basename(ngp))[0]
-    ov = _overrides(png_folder, stem)
+    ov = _overrides(png_folder, stem, deep)
     tex_path = tex_path or gltf.find_sibling(ngp, ".TEX")
     rtx_path = rtx_path or gltf.find_sibling(ngp, ".RTX")
     out = os.path.join(cache_dir(), _key(ngp, tex_path, rtx_path, *sorted(ov.values()), extra="%s|%s" % (stem, anim)) + ".glb")
@@ -153,7 +156,7 @@ def file_glb(path):
     if ext == ".glb":
         return path
     if ext == ".ngp":   # the PNGs next to it go over its textures, as in the game (a rig import's new textures are PNGs)
-        return posed_glb(path, png_folder=os.path.dirname(path))
+        return posed_glb(path, png_folder=os.path.dirname(path), deep=False)
     out = os.path.join(cache_dir(), _key(path, extra="file") + ".glb")
     if os.path.exists(out):
         return out
