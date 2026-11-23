@@ -17,7 +17,7 @@ pasta de trabalho (<mods>/_work/<mod>/, com o modkit.json dela), e o pack de um 
   python tools/modkit.py monster stats my_mod fire_togera                     # .CHR e .AIC do tipo base para editar (so dele)
   python tools/modkit.py monster sounds my_mod fire_togera                    # sons do banco do tipo base em WAV (banco so dele)
   python tools/modkit.py monster mesh export my_mod fire_togera               # malha e animacoes do traje base em .glb (Blender)
-  python tools/modkit.py monster mesh check my_mod fire_togera modelo.glb    # confere o .glb antes do import (nada e gravado)
+  python tools/modkit.py monster mesh check my_mod fire_togera modelo.glb    # confere o modelo antes do import (.glb; .gltf/.dae: o rigged)
   python tools/modkit.py monster mesh import my_mod fire_togera [editado.glb] # a malha editada vira o .NGP/.PTR do custom
   python tools/modkit.py monster anim import my_mod fire_togera [editado.glb] # as animacoes editadas tambem
   python tools/modkit.py monster rig my_mod lizardman rig.glb [--front +y|-y] [--scale S | --height H]   # esqueleto proprio
@@ -889,8 +889,59 @@ def skin_new(disc, work, mods, mod, monster, sid, base=None, name=None, ai=False
         return
     if not textures:
         return
+    own = _custom_model_dir(work, mods, mod, custom) if custom else None
+    if own:   # a custom with a model of its own: the skin starts as a copy of it, not of the base's disc costume
+        _copy_model(own, work, "skins/" + sid, "%s%d" % (prefix, costume))
+        print("the skin starts as a copy of %s's own model (%s); edit its PNGs or import another body in its 3D model tab, "
+              "then: %s" % (key, own, pack_hint(mod)))
+        return
     export(disc, work, ["MON/%s%d" % (prefix, costume)], dest="skins/" + sid)
     print("edit the PNGs in %s, then: %s" % (os.path.join(work, "skins", sid), pack_hint(mod)))
+
+
+def _custom_model_dir(work, mods, mod, custom):
+    """A pasta com o modelo proprio (.NGP) de um custom (de find_customs): a de trabalho, se o custom e deste mod (tem as
+    edicoes ainda sem pack), senao a files/ dele no mod. None sem modelo proprio."""
+    cands = [os.path.join(work, "monsters", custom["id"], "files")] if custom["mod"] == mod else []
+    cands.append(os.path.join(os.path.dirname(custom["path"]), "files"))
+    for d in cands:
+        if os.path.isdir(d) and any(n.upper().endswith(".NGP") for n in os.listdir(d)):
+            return d
+    return None
+
+
+def _copy_model(src, work, rel, stem):
+    """Copia o modelo de src (.NGP/.PTR/.TEX/.RTX, os PNGs das texturas e os mapas de ossos) para <work>/<rel>/ como editados, com
+    o nome do traje stem (o pack leva todos: sao o visual da skin); o .blender.json vem junto (o rig, o rigged e os PNGs dele com
+    os nomes novos), entao Export 3D model, Adjust bones e os imports seguem do mesmo .glb."""
+    d = os.path.join(work, *rel.split("/"))
+    os.makedirs(d, exist_ok=True)
+    st = load_state(work)
+    renamed = {}
+    for n in sorted(os.listdir(src)):
+        ext = os.path.splitext(n)[1].upper()
+        m = PNG_RE.match(n)
+        if ext in (".NGP", ".PTR", ".TEX", ".RTX"):
+            new = stem.upper() + ext
+        elif m:
+            new = "%s%s_t%04d.png" % (stem.lower(), "_rtx" if m.group(2) else "", int(m.group(3)))
+            renamed[n] = new
+        elif n.lower().endswith("_map.json"):
+            new = n
+        else:
+            continue
+        shutil.copyfile(os.path.join(src, n), os.path.join(d, new))
+        st["files"]["%s/%s" % (rel, new)] = {"sha1": "", "imported": True}
+    save_state(work, st)
+    old = _json_obj(os.path.join(src, BLENDER_REC))
+    rec = {k: old[k] for k in ("rig", "rigged") if k in old}
+    if old.get("rig_pngs"):
+        rec["rig_pngs"] = [renamed.get(n, n) for n in old["rig_pngs"]]
+    if rec:
+        with open(_blender_rec(work, rel), "w", encoding="utf-8") as f:
+            json.dump(rec, f, indent=1)
+    print("%d file(s) of %s -> work folder %s/" % (len(renamed) + sum(1 for n in os.listdir(src) if os.path.splitext(n)[1].upper()
+                                                                        in (".NGP", ".PTR", ".TEX", ".RTX")), src, rel))
 
 
 # ---------------------------------------------------------------- monstros custom (MODS.md, "Monstros custom")
@@ -1213,9 +1264,9 @@ def model_import(disc, work, mods, mod, kind, tid, glb=None, what="mesh"):
         way, why = meshcheck.route(src, glb)
         if way == "rig":
             raise SystemExit("mesh import: %s: a new body. %s" % (why, (
-                "It goes in by rig import (Import rig... in the kit; modkit.py monster rig %s %s <the .glb>), on the "
+                "It goes in by rig import (Import character with animations... in the kit; modkit.py monster rig %s %s <the .glb>), on the "
                 "monster's skeleton as exported." % (mod, tid)) if kind == "monster" else (
-                "A skin only reshapes its monster's pieces; a new body is a custom monster (New monster..., then Import rig...).")))
+                "A skin only reshapes its monster's pieces; a new body is a custom monster (New monster..., then Import character with animations...).")))
         meshcheck.scan(glb, meshcheck.Report(), "mesh")
     rec["mesh" if what == "mesh" else "anims"] = glb
     for k in ("mesh", "anims"):
@@ -1269,10 +1320,19 @@ def anim_import(disc, work, mods, mod, kind, tid, glb=None):
     return model_import(disc, work, mods, mod, kind, tid, glb, "anims")
 
 
-def _rig_layers(mods, mod, cid):
-    """Ids que o especial do custom toca por cima da animacao principal (tools/ngpgraft.py LAYERS)."""
+def owner_custom(mods, mod, kind, tid):
+    """O monster.json do custom dono de um modelo: o proprio custom (kind "monster") ou o custom de uma skin ("skin"; o custom
+    pode estar em outro mod). None para a skin de um monstro do jogo."""
+    if kind == "monster":
+        return _json_obj(os.path.join(monster_dir(mods, mod, tid), "monster.json"))
+    data = list_skins(mods, mod).get(tid) or {}
+    c = find_customs(mods).get(str(data.get("monster", "")).lower())
+    return _json_obj(c["path"]) if c else None
+
+
+def _rig_layers(data):
+    """Ids que o especial do custom (seu monster.json) toca por cima da animacao principal (tools/ngpgraft.py LAYERS)."""
     import ngpgraft
-    data = _json_obj(os.path.join(monster_dir(mods, mod, cid), "monster.json"))
     return ngpgraft.LAYERS.get(base_name(str((data or {}).get("special", ""))), ())
 
 
@@ -1289,8 +1349,9 @@ def mesh_route(disc, mods, mod, kind, tid, glb):
 
 def mesh_check(disc, work, mods, mod, kind, tid, glb, front=None, scale=None, height=None):
     """Confere um .glb antes do import (tools/meshcheck.py), sem gravar nada: texturas, pesos, UV, lugar no esqueleto e o import
-    que o leva, rodado numa pasta temporaria. Skin: sempre o mesh import; custom com esqueleto proprio: o rig import; o resto,
-    pelo que o .glb tem. Devolve o Report."""
+    que o leva, rodado numa pasta temporaria. Skin de monstro do jogo: sempre o mesh import; modelo com esqueleto proprio: o rig
+    import; o resto (custom ou skin de custom), pelo que o .glb tem. .gltf/.dae: o rigged import (rigged_check). Devolve o
+    Report."""
     import meshcheck
     rel, stem = mesh_target(mods, mod, kind, tid)
     glb = os.path.abspath(glb)
@@ -1299,13 +1360,19 @@ def mesh_check(disc, work, mods, mod, kind, tid, glb, front=None, scale=None, he
     src = disc_file(disc, stem + ".NGP")
     if not src or not disc_file(disc, stem + ".PTR"):
         raise SystemExit("mesh check: %s.NGP/.PTR are not on the disc" % stem)
-    mode = "mesh" if kind == "skin" else "rig" if (_json_obj(_blender_rec(work, rel)) or {}).get("rig") else "auto"
+    owner = owner_custom(mods, mod, kind, tid)
+    if glb.lower().endswith((".gltf", ".dae")):   # only Import rigged model reads these
+        if owner is None:
+            raise SystemExit("mesh check: a skin takes the .glb of Export 3D model, edited; a %s with a skeleton of its own is a "
+                             "new body, for a custom monster (Import rigged model)" % os.path.splitext(glb)[1])
+        return rigged_check(disc, work, mods, mod, tid, glb, kind)
+    mode = ("rig" if (_json_obj(_blender_rec(work, rel)) or {}).get("rig") else "mesh" if owner is None else "auto")
     opts = {}
-    if kind == "monster":
-        opts = {"front": front, "scale": scale, "height": height, "layer_ids": _rig_layers(mods, mod, tid)}
+    if owner is not None:
+        opts = {"front": front, "scale": scale, "height": height, "layer_ids": _rig_layers(owner)}
     rep = meshcheck.check(src, glb, mode, **opts)
-    if kind == "skin" and any("a new body goes in by Import rig" in t for _lv, t in rep.items):
-        print("a skin keeps its monster's skeleton: a new body is a custom monster (monster new, then Import rig)")
+    if owner is None and any("a new body goes in by Import character" in t for _lv, t in rep.items):
+        print("a skin keeps its monster's skeleton: a new body is a custom monster (monster new, then Import character with animations)")
     return rep
 
 
@@ -1327,22 +1394,70 @@ def _base_export(disc, work, rel, stem):
     return out
 
 
-def rigged_record(work, mods, mod, cid):
-    """O ultimo "Import rigged model" do custom ({"model", "turn", "size"}, no .blender.json) ou None."""
-    rel = mesh_target(mods, mod, "monster", cid)[0]
+def rigged_record(work, mods, mod, cid, kind="monster"):
+    """O ultimo "Import rigged model" do custom ou da skin ({"model", "turn", "size"}, no .blender.json) ou None."""
+    rel = mesh_target(mods, mod, kind, cid)[0]
     rec = (_json_obj(_blender_rec(work, rel)) or {}).get("rigged")
     return rec if isinstance(rec, dict) and rec.get("model") else None
 
 
-def rigged_import(disc, work, mods, mod, cid, model, turn=None, page=False, size=1.0, adjust=False, embed=False):
+def _rigged_out(work, rel, model):
+    """Where Import rigged model writes the fitted .glb of model (and its bone map, <that>_map.json)."""
+    return os.path.join(work, *rel.split("/"), re.sub(r"[^A-Za-z0-9_.-]", "_", os.path.splitext(os.path.basename(model))[0]) + "_rig.glb")
+
+
+def rigged_check(disc, work, mods, mod, cid, model, kind="monster"):
+    """Check model... on a model with its own skeleton (.glb, .gltf, .dae) for Import rigged model, without writing in the work
+    folder: reads it, fits its bones to the base's (the bone map already in the folder, or the automatic one) in a scratch folder
+    and runs the rig import's checks on the result. The facing is the one the model says (the bones page can turn it). Returns
+    the Report."""
+    import tempfile
+    import meshcheck
+    import retarget
+    rel, stem = mesh_target(mods, mod, kind, cid)
+    rep = meshcheck.Report(print)
+    try:
+        mdl = retarget.load_model(model)
+    except Exception as e:  # noqa: BLE001 (any reader error: the file is not a model the import reads)
+        rep.err("cannot read %s: %s" % (os.path.basename(model), e))
+        return rep
+    front = "-y" if mdl.up_axis == "y" else "+y"
+    rep.info("%s: %d joints, %s up (%s); the import that takes it: Import rigged model (its bones fitted to the base's, so it plays the base's "
+             "animations)" % (os.path.basename(model), len(mdl.joints), mdl.up_axis.upper(), mdl.up_from))
+    if not mdl.joints:
+        rep.err("no skeleton in %s: Import rigged model needs a model with bones and weights" % os.path.basename(model))
+        return rep
+    src = _base_export(disc, work, rel, stem)
+    mp = os.path.splitext(_rigged_out(work, rel, model))[0] + "_map.json"
+    use_map = mp if os.path.isfile(mp) else "auto"
+    rep.info("bone map: %s" % (os.path.basename(mp) if use_map != "auto" else "automatic (the bones page shows it on import)"))
+    tmp = tempfile.mkdtemp(prefix="wotm_check_")
+    try:
+        out = os.path.join(tmp, "check_rig.glb")
+        try:
+            retarget.build(src, model, use_map, out, size=1.0, front=front, log=lambda s: rep.info("fit: %s" % s))
+        except retarget.RetargetError as e:
+            rep.err("Import rigged model: %s" % e)
+            return rep
+        meshcheck.scan(out, rep, "rig")
+        meshcheck.check_rig(out, disc_file(disc, stem + ".NGP"), rep, layer_ids=_rig_layers(owner_custom(mods, mod, kind, cid)))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    ne, nw = rep.count("ERROR"), rep.count("WARNING")
+    rep.info("check: %s" % ("no problems" if not ne and not nw else "%d errors, %d warnings" % (ne, nw)))
+    return rep
+
+
+def rigged_import(disc, work, mods, mod, cid, model, turn=None, page=False, size=1.0, adjust=False, embed=False, kind="monster"):
     """Modelo baixado que ja tem esqueleto (.glb, .gltf, .dae) -> corpo do custom com as animacoes do tipo base: confere a
     frente (page=True: a pagina 3D, tools/orientpage.py; turn: giros ja dados), faz o mapa de ossos (tools/automap.py; um
     <modelo>_rig_map.json ja na pasta, editado, vale no lugar dele), o retarget (tools/retarget.py) e o rig import.
-    adjust=True: o mesmo modelo, frente e tamanho do ultimo import (rigged_record), com a pagina direto na etapa dos ossos."""
+    adjust=True: o mesmo modelo, frente e tamanho do ultimo import (rigged_record), com a pagina direto na etapa dos ossos.
+    kind "skin": o corpo de uma skin de custom (cid = id da skin)."""
     import retarget
-    rel, stem = mesh_target(mods, mod, "monster", cid)
+    rel, stem = mesh_target(mods, mod, kind, cid)
     if adjust:
-        rec = rigged_record(work, mods, mod, cid)
+        rec = rigged_record(work, mods, mod, cid, kind)
         if not rec:
             raise SystemExit("adjust bones: %s has no rigged import to adjust (Import rigged model... first)" % cid)
         model, turn, size, page = rec["model"], rec.get("turn") or None, float(rec.get("size", 1.0)), True
@@ -1350,8 +1465,7 @@ def rigged_import(disc, work, mods, mod, cid, model, turn=None, page=False, size
     if not os.path.isfile(model):
         raise SystemExit("rigged import: %s not found" % model)
     src = _base_export(disc, work, rel, stem)
-    d = os.path.join(work, *rel.split("/"))
-    out = os.path.join(d, re.sub(r"[^A-Za-z0-9_.-]", "_", os.path.splitext(os.path.basename(model))[0]) + "_rig.glb")
+    out = _rigged_out(work, rel, model)
     mp = os.path.splitext(out)[0] + "_map.json"
     try:
         mdl = retarget.load_model(model)
@@ -1362,7 +1476,7 @@ def rigged_import(disc, work, mods, mod, cid, model, turn=None, page=False, size
             import tempfile
             import orientpage
             pv = orientpage.preview_glb(mdl, front, os.path.join(tempfile.gettempdir(), "wotm_orient_%s.glb" % cid))
-            data = _json_obj(os.path.join(monster_dir(mods, mod, cid), "monster.json")) or {}
+            data = owner_custom(mods, mod, kind, cid) or {}
             bones = orientpage.Bones(src, mdl, front, size, cfg=retarget.load_map(mp) if os.path.isfile(mp) else None)
             info = {"base": str(data.get("base", "the base")).title(), "model": os.path.basename(model)}
             if adjust:   # straight to the bones, with the facing already given
@@ -1383,7 +1497,7 @@ def rigged_import(disc, work, mods, mod, cid, model, turn=None, page=False, size
         retarget.build(src, model, use_map, out, size=size, front=front, turn=turn or None, log=print)
     except retarget.RetargetError as e:
         raise SystemExit("rigged import: %s" % e)
-    res = rig_import(disc, work, mods, mod, cid, out)
+    res = rig_import(disc, work, mods, mod, cid, out, kind=kind)
     rp = _blender_rec(work, rel)   # what "Adjust bones..." opens again
     rec = _json_obj(rp) or {}
     rec["rigged"] = {"model": model, "turn": turn or "", "size": size}
@@ -1392,16 +1506,20 @@ def rigged_import(disc, work, mods, mod, cid, model, turn=None, page=False, size
     return res
 
 
-def rig_import(disc, work, mods, mod, cid, glb, front=None, scale=None, height=None):
+def rig_import(disc, work, mods, mod, cid, glb, front=None, scale=None, height=None, kind="monster"):
     """Esqueleto proprio (tools/ngprig.py): o .glb com armature, malha, acoes a<id> e localizadores vira o corpo do custom sobre
     o traje base do disco (codigo, sombra, sons e o resto do tipo ficam). Grava .NGP/.PTR/.TEX/.RTX e os PNGs das texturas novas
     na pasta de trabalho do custom (o pack os leva) e liga "files". O mesh/anim import passam a recusar esse custom: o modelo e o
-    .glb do rig. Devolve o resumo do ngprig."""
+    .glb do rig. kind "skin": o corpo de uma skin de custom (na pasta da skin). Devolve o resumo do ngprig."""
     import tempfile
     import ngpanim
     import ngpmesh
     import ngprig
-    rel, stem = mesh_target(mods, mod, "monster", cid)
+    rel, stem = mesh_target(mods, mod, kind, cid)
+    data = owner_custom(mods, mod, kind, cid)
+    if data is None:
+        raise SystemExit("rig import: skin %s is of a monster of the game; a body with a skeleton of its own is for a custom "
+                         "monster or a skin of one" % cid)
     glb = os.path.abspath(glb)
     if not os.path.isfile(glb):
         raise SystemExit("rig import: %s not found" % glb)
@@ -1410,8 +1528,7 @@ def rig_import(disc, work, mods, mod, cid, glb, front=None, scale=None, height=N
         raise SystemExit("rig import: %s.NGP/.PTR/.TEX are not on the disc" % stem)
     import meshcheck
     meshcheck.scan(glb, meshcheck.Report(), "rig")
-    data = _json_obj(os.path.join(monster_dir(mods, mod, cid), "monster.json"))
-    layers = _rig_layers(mods, mod, cid)
+    layers = _rig_layers(data)
     tmp = tempfile.mkdtemp(prefix="wotm_rig_")
     name = os.path.basename(stem)
     try:
@@ -1439,7 +1556,8 @@ def rig_import(disc, work, mods, mod, cid, glb, front=None, scale=None, height=N
     with open(_blender_rec(work, rel), "w", encoding="utf-8") as f:
         json.dump({"rig": glb, "rig_pngs": pngs}, f, indent=1)
     special_parts(disc, work, rel, data)
-    files_on(mods, mod, cid, data)
+    if kind == "monster":
+        files_on(mods, mod, cid, data)
     print("send it to the mod: %s" % pack_hint(mod))
     return res
 
@@ -1756,7 +1874,7 @@ def main(argv):
               (args[2] == "import" or len(args) == (6 if args[2] == "check" else 5))) or (
               args[1] == "anim" and len(args) in (5, 6) and args[2] == "import")
         if not ok:
-            raise SystemExit("%s mesh export <mod> <id>\n%s mesh check <mod> <id> <model.glb>\n%s mesh import <mod> <id> "
+            raise SystemExit("%s mesh export <mod> <id>\n%s mesh check <mod> <id> <model.glb|.gltf|.dae>\n%s mesh import <mod> <id> "
                              "[edited.glb]\n%s anim import <mod> <id> [edited.glb]" % (args[0], args[0], args[0], args[0]))
         w = work_of("%s %s" % (args[0], args[1]), args[3])
         glb = args[5] if len(args) == 6 else None
@@ -1791,12 +1909,35 @@ def main(argv):
         except (lvlprop.PropError, lvlprop.ngpmesh.MeshError, lvlprop.vifpkt.FormatError) as e:
             raise SystemExit("error: %s" % e)
         print("prop %s: %s" % (name, out))
+    elif args[0] == "skin" and len(args) >= 4 and args[1] in ("rig", "rigged"):   # the body of a skin of a custom monster
+        use = ("skin rig <mod> <id> <rig.glb>\nskin rigged <mod> <id> <model.glb|.gltf|.dae> [--turn x90,z180] [--page] [--size F]"
+               "\nskin rigged <mod> <id> --adjust")
+        w = work_of("skin " + args[1], args[2])
+        if args[1] == "rig":
+            if len(args) != 5:
+                raise SystemExit(use)
+            rig_import(disc, w, mods, args[2], args[3], args[4], kind="skin")
+        elif opts.get("adjust"):
+            if len(args) != 4:
+                raise SystemExit(use)
+            rigged_import(disc, w, mods, args[2], args[3], None, adjust=True, embed=opts.get("embed", False), kind="skin")
+        else:
+            if len(args) != 5:
+                raise SystemExit(use)
+            try:
+                size = float(opts.get("size", 1.0))
+            except ValueError:
+                raise SystemExit("skin rigged: --size is a number (1 = the base's height)")
+            rigged_import(disc, w, mods, args[2], args[3], args[4], opts.get("turn"), opts.get("page", False), size,
+                          embed=opts.get("embed", False), kind="skin")
     elif args[0] == "skin":
         if len(args) != 5 or args[1] != "new":
             raise SystemExit("skin new <mod> <monster> <id> [--base N] [--name \"GREEN TOGERA\"] [--ai]\n"
                              "skin mesh export <mod> <id>\nskin mesh check <mod> <id> <model.glb>\n"
                              "skin mesh import <mod> <id> [edited.glb]\n"
-                             "skin anim import <mod> <id> [edited.glb]")
+                             "skin anim import <mod> <id> [edited.glb]\n"
+                             "skin rig <mod> <id> <rig.glb>   (a skin of a custom monster)\n"
+                             "skin rigged <mod> <id> <model.glb|.gltf|.dae> [--turn x90,z180] [--page] [--size F] | --adjust")
         base = opts.get("base")
         if base is not None:
             try:
@@ -1807,7 +1948,7 @@ def main(argv):
     elif args[0] == "monster":
         use = ("monster new <mod> <id> --base <monster> [--costume N] [--name \"X\"] [--ai] [--camera togera:200 | --camera none] "
                "[--narrator <name>] [--no-textures]\nmonster portrait <mod> <id> <png>\nmonster model <mod> <id> <.NGP> <.PTR> [.TEX] [.RTX]"
-               "\nmonster stats <mod> <id>\nmonster sounds <mod> <id>\nmonster mesh export <mod> <id>\nmonster mesh check <mod> <id> <model.glb>"
+               "\nmonster stats <mod> <id>\nmonster sounds <mod> <id>\nmonster mesh export <mod> <id>\nmonster mesh check <mod> <id> <model.glb|.gltf|.dae>"
                "\nmonster mesh import <mod> <id> [edited.glb]"
                "\nmonster anim import <mod> <id> [edited.glb]\nmonster rig <mod> <id> <rig.glb> [--front +y|-y] "
                "[--scale S | --height H]\nmonster rigged <mod> <id> <model.glb|.gltf|.dae> [--turn x90,z180] [--page] [--size F]"

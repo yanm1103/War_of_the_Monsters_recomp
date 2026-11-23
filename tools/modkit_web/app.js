@@ -158,8 +158,72 @@ document.addEventListener('mousedown', e => {
     setupOpen(false);
 });
 
+// ---------------------------------------------------------------- setup: sounds (volume, play on click) and editors
+// the volume and "play sounds on click" show in Setup and under a sound's preview: every copy follows the same setting
+function showSound(s) {
+  const v = Math.round((s.volume === undefined ? 1 : s.volume) * 100);
+  for (const r of document.querySelectorAll('input.volume')) if (document.activeElement !== r) r.value = v;
+  for (const n of document.querySelectorAll('.volnum')) n.textContent = v + '%';
+  for (const c of document.querySelectorAll('input.autoplay')) c.checked = s.autoplay !== false;
+  $('player').volume = v / 100;
+}
+document.addEventListener('input', e => {
+  if (!e.target.matches('input.volume')) return;
+  const v = parseInt(e.target.value, 10);
+  for (const r of document.querySelectorAll('input.volume')) if (r !== e.target) r.value = v;
+  for (const n of document.querySelectorAll('.volnum')) n.textContent = v + '%';
+  $('player').volume = v / 100;
+  if (kit.state) kit.state.volume = v / 100;
+});
+document.addEventListener('change', async e => {
+  if (e.target.matches('input.volume')) kit.api('conf', { volume: parseInt(e.target.value, 10) / 100 });
+  if (e.target.matches('input.autoplay')) {
+    for (const c of document.querySelectorAll('input.autoplay')) c.checked = e.target.checked;
+    if (kit.state) kit.state.autoplay = e.target.checked;
+    kit.api('conf', { autoplay: e.target.checked });
+  }
+});
+// the program per file type: textures and sounds always, plus any other type picked once with "Open with..."
+const EDITOR_NAMES = { '.png': 'Textures (.png)', '.wav': 'Sounds (.wav)' };
+let editorsFor = null;
+function showEditors(s) {
+  const eds = s.editors || {};
+  const key = JSON.stringify(eds);
+  if (key === editorsFor) return;
+  editorsFor = key;
+  const box = $('editors');
+  box.innerHTML = '';
+  const exts = ['.png', '.wav', ...Object.keys(eds).filter(e => e !== '.png' && e !== '.wav').sort()];
+  for (const e of exts) {
+    const l = document.createElement('label');
+    l.textContent = EDITOR_NAMES[e] || e + ' files';
+    const row = document.createElement('div');
+    row.className = 'field';
+    const i = document.createElement('input');
+    i.spellcheck = false;
+    i.value = eds[e] || '';
+    i.placeholder = e === '.wav' ? 'play in the kit' : "the system's default";
+    const save = async v => { kit.setState(Object.assign(kit.state, { editors: (await kit.api('do/editors', { set: { [e]: v } })).editors })); };
+    i.onchange = () => save(i.value);
+    const pick = document.createElement('button');
+    pick.className = 'pick';
+    pick.textContent = '…';
+    pick.title = 'Pick the program for ' + e + ' files';
+    pick.onclick = async () => { const v = await kit.pick('file', 'Program to open ' + e + ' files', i.value, [['Programs', ['*.exe']]]); if (v) save(v); };
+    const clear = document.createElement('button');
+    clear.className = 'pick';
+    clear.textContent = 'Clear';
+    clear.title = "Back to the system's default";
+    clear.onclick = () => save('');
+    row.append(i, pick, clear);
+    box.append(l, row);
+  }
+}
+
 // ---------------------------------------------------------------- paths and mod
 function showState(s) {
+  showSound(s);
+  showEditors(s);
   for (const k of ['disc', 'mods']) if (document.activeElement !== $(k)) $(k).value = s[k] || '';
   $('disc').classList.toggle('bad', !s.disc_ok);
   $('mods').classList.toggle('bad', !s.mods_ok);

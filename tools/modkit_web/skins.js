@@ -1,8 +1,8 @@
 // Skins (MODS.md, "Skins"): New skin..., Turn into skin... (an extracted costume's PNGs become a skin), the skin's panel in
 // place of the preview (the model with its textures, then two tabs: Settings, with the name, base costume with the disc's
 // portraits and CPUs; 3D model), and Duplicate / Delete in the right-click menu.
-import { meshBlocks } from './mesh.js';
-import { panelFrame, tabs } from './panel.js';
+import { meshBlocks, currentModel } from './mesh.js';
+import { panelFrame, tabs, block, button } from './panel.js';
 import { pic } from './disc.js';
 
 const $ = id => document.getElementById(id);
@@ -50,13 +50,27 @@ export function skinDialog(title, lock, preset) {
     box.appendChild(el('h3', '', title));
     const first = await kit.api('do/skin_form', {});
     const choices = first.choices;
-    const mon = el('input');
-    mon.setAttribute('list', 'monChoices');
-    mon.spellcheck = false;
-    const dl = el('datalist');
-    dl.id = 'monChoices';
-    for (const c of choices) { const o = el('option'); o.value = c.label; dl.appendChild(o); }
-    mon.disabled = !!lock;
+    // the monsters as a list (the game's, then the custom ones the mods have), and a last entry to type the id of a custom
+    // monster the kit does not find
+    const OTHER = '\u0000other';
+    const pickMon = el('select');
+    const og1 = el('optgroup'), og2 = el('optgroup');
+    og1.label = 'Monsters of the game';
+    og2.label = 'Custom monsters in the mods';
+    for (const c of choices) { const o = el('option', '', c.label); o.value = c.label; (c.game ? og1 : og2).appendChild(o); }
+    pickMon.appendChild(og1);
+    if (og2.children.length) pickMon.appendChild(og2);
+    const oOther = el('option', '', 'Another custom monster (type its id)...');
+    oOther.value = OTHER;
+    pickMon.appendChild(oOther);
+    const otherId = el('input');
+    otherId.spellcheck = false;
+    otherId.placeholder = 'id of the custom monster (lowercase letters, digits and _)';
+    otherId.hidden = true;
+    const mon = { get value() { return pickMon.value === OTHER ? otherId.value : pickMon.value; } };
+    const dl = el('span');
+    dl.append(otherId);
+    pickMon.disabled = !!lock;
     const hint = el('div', 'dim');
     const baseBox = el('div');
     const name = el('input'), sid = el('input');
@@ -75,7 +89,9 @@ export function skinDialog(title, lock, preset) {
     bs.append(cancel, ok);
     const aiL = el('label', 'check');
     aiL.append(ai, document.createTextNode(' CPUs may pick this skin'));
-    box.append(row('Monster', mon, dl), row('', hint), row('Base costume', baseBox), row('Name', name), row('Id', sid),
+    const monBox = el('div', 'inline');
+    monBox.append(pickMon, dl);
+    box.append(row('Monster', monBox), row('', hint), row('Base costume', baseBox), row('Name', name), row('Id', sid),
       row('', el('div', 'dim', 'Folder name and what the save keeps: lowercase letters, digits and _')), row('', aiL), err, bs);
     const st = { res: null, prefix: '?', autoName: true, autoId: true, radios: null, n: 0 };
     sid.value = first.free_id || 'skin1';
@@ -105,7 +121,12 @@ export function skinDialog(title, lock, preset) {
       err.textContent = r2.error || '';
       ok.disabled = !!r2.error;
     }
-    mon.addEventListener('input', () => check('monster'));
+    pickMon.addEventListener('change', () => {
+      otherId.hidden = pickMon.value !== OTHER;
+      if (!otherId.hidden) otherId.focus();
+      check('monster');
+    });
+    otherId.addEventListener('input', () => check('monster'));
     name.addEventListener('input', () => { st.autoName = false; check('name'); });
     sid.addEventListener('input', () => { st.autoId = false; check('id'); });
     box.onsubmit = async e => {
@@ -119,9 +140,13 @@ export function skinDialog(title, lock, preset) {
       kit.workFocus = r.focus;
       close(body);
     };
-    if (lock) mon.value = (choices.find(c => c.game && c.key === lock.key) || { label: lock.key }).label;
-    else if (preset) mon.value = (choices.find(c => !c.game && c.key === preset) || { label: preset }).label;
-    else mon.value = choices.length ? choices[0].label : '';
+    const setMon = (c, id) => {   // a choice of the list, or the "another" entry with that id
+      if (c) pickMon.value = c.label;
+      else { pickMon.value = OTHER; otherId.value = id; otherId.hidden = false; }
+    };
+    if (lock) setMon(choices.find(c => c.game && c.key === lock.key), lock.key);
+    else if (preset) setMon(choices.find(c => !c.game && c.key === preset), preset);
+    else if (choices.length) setMon(choices[0]);
     await check('monster');
     name.focus();
   });
@@ -140,7 +165,7 @@ async function turnIntoSkin(g) {
 
 async function skinPanel(g, body, label) {
   const sid = g.key.slice(6);
-  label.textContent = 'Skin ' + sid + ': its PNGs are in the work folder (skins/' + sid + '); open the section to edit them. "Build mod" sends the edited ones to the mod\'s skins/' + sid + '.';
+  label.textContent = '';
   const form = panelFrame(body, g.key, g);
   const p = await kit.api('do/skin_props', { sid });
   if (p.missing) { form.appendChild(el('div', 'dim', 'No skin.json in ' + p.missing)); return; }
@@ -164,8 +189,30 @@ async function skinPanel(g, body, label) {
   const [tSet, tModel] = tabs(form, ['Settings', '3D model'], 'wotm.skinTab');
   tSet.append(row('Monster', el('span', '', (d.monster || '?') + '  (' + p.kind + ')')), row('Name', name), row('Base', radios),
     row('', aiL), row('', save));
-  const mb = meshBlocks('skin', sid);
-  tModel.append(el('div', 'state', 'Now: ' + p.mesh.text), mb.blender, mb.check);
+  const mb = meshBlocks('skin', sid, !!p.custom);
+  tModel.append(currentModel(p.mesh), mb.check);
+  if (p.custom) {   // a skin of a custom monster can have a body of its own, as the custom can
+    const rigged = [button('Import rigged model...', async () => {
+      const f = await kit.pick('file', 'Model with a skeleton for skin ' + sid, '', [['Rigged model', ['*.glb', '*.gltf', '*.dae', '*.GLB', '*.GLTF', '*.DAE']]]);
+      if (f) mb.run('rigged', { kind: 'skin', cid: sid, path: f });
+    })];
+    if (p.mesh.rigged) rigged.push(button('Adjust bones...', () => mb.run('rigged', { kind: 'skin', cid: sid, adjust: true })));
+    tModel.append(
+      block('Replace with an already rigged model',
+        'Formats: .glb, .gltf or .dae, with bones and weights (e.g. a model from another game or a 3D site). Its bones are ' +
+        'fitted to the base type\'s, so it plays the base\'s animations; only this skin uses the new body. After the import, ' +
+        '[Adjust bones...] reopens the bones page to fix the fit and imports it again.',
+        rigged, p.mesh.rigged ? 'Imported from ' + p.mesh.rigged : null),
+      mb.blender,
+      block('Import an entirely new character',
+        'A .glb with its own armature, a weighted mesh and actions named by animation id (e.g. a090 = idle), for this skin ' +
+        'only. The fight data stays the custom monster\'s.',
+        [button('Import character with animations...', async () => {
+          const start = (await kit.api('do/rig_start', { kind: 'skin', cid: sid })).path;
+          const f = await kit.pick('file', 'Character of skin ' + sid + ': .glb with armature, mesh and actions', start, [['glTF binary', ['*.glb', '*.GLB']]]);
+          if (f) mb.run('rig_import', { kind: 'skin', cid: sid, path: f });
+        })]));
+  } else tModel.append(mb.blender);
 }
 
 export function initSkins() {

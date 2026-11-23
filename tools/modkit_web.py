@@ -215,7 +215,7 @@ class Kit(FilesMixin, SkinsMixin, MonstersMixin, ModelMixin, ArtMixin):
         c = load_conf()
         return {"disc": self.disc, "disc_ok": bool(modkit.disc_ok(self.disc)), "mods": self.mods, "mods_ok": os.path.isdir(self.mods),
                 "mod": self.mod, "mod_list": self.mod_names(), "work": self.work(), "busy": self.busy,
-                "autoplay": c.get("autoplay", True), "editors": c.get("editors") or {},
+                "autoplay": c.get("autoplay", True), "volume": c.get("volume", 1.0), "editors": c.get("editors") or {},
                 "replace_dir": c.get("replace_dir") or c.get("save_dir") or os.path.expanduser("~"),
                 "save_dir": c.get("save_dir") or os.path.expanduser("~")}
 
@@ -229,6 +229,11 @@ class Kit(FilesMixin, SkinsMixin, MonstersMixin, ModelMixin, ArtMixin):
             self.mod = d["mod"] or ""
         if "autoplay" in d:
             save_conf({"autoplay": bool(d["autoplay"])})
+        if "volume" in d:
+            try:
+                save_conf({"volume": max(0.0, min(1.0, float(d["volume"])))})
+            except (TypeError, ValueError):
+                pass
         if self.mod and self.mod not in self.mod_names():
             self.mod = ""
         save_conf({"disc": self.disc, "mods": self.mods, "mod": self.mod})

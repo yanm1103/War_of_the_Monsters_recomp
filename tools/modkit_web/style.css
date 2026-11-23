@@ -51,7 +51,20 @@ input, select { background: var(--inset); color: var(--fg); border: 1px solid va
 input:focus, select:focus { border-color: var(--orange); box-shadow: 0 0 0 2px rgba(240, 138, 44, .18); }
 select option { background: #121318; color: var(--fg); }
 input.bad { border-color: var(--err); box-shadow: 0 0 0 2px rgba(255, 110, 90, .15); }
-input[type=checkbox], input[type=radio] { accent-color: var(--orange); }
+/* checkboxes and radios in the theme: dark inside, a light frame, orange when on (the browser's own are white inside) */
+input[type=checkbox], input[type=radio] { appearance: none; -webkit-appearance: none; flex: none; width: 16px; height: 16px; margin: 0;
+  padding: 0; display: inline-grid; place-content: center; background: var(--inset); border: 1.5px solid var(--frame);
+  border-radius: 4px; cursor: pointer; vertical-align: middle; transition: border-color .12s, background .12s; }
+input[type=radio] { border-radius: 50%; }
+input[type=checkbox]:hover, input[type=radio]:hover { border-color: var(--orange); }
+input[type=checkbox]:checked, input[type=radio]:checked { border-color: var(--orange); background: rgba(240, 138, 44, .18); }
+input[type=checkbox]::before { content: ''; width: 9px; height: 9px; transform: scale(0); transition: transform .1s;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0, 43% 62%); background: var(--orange); }
+input[type=radio]::before { content: ''; width: 8px; height: 8px; border-radius: 50%; transform: scale(0); transition: transform .1s;
+  background: var(--orange); }
+input[type=checkbox]:checked::before, input[type=radio]:checked::before { transform: scale(1); }
+input[type=checkbox]:focus-visible, input[type=radio]:focus-visible { box-shadow: 0 0 0 2px rgba(240, 138, 44, .35); }
+input[type=checkbox]:disabled, input[type=radio]:disabled { cursor: default; }
 input[type=range] { accent-color: var(--orange); padding: 0; border: 0; background: none; box-shadow: none; }
 
 /* ---- header: the game's title, the mod, setup */
@@ -80,6 +93,15 @@ header { position: relative; display: flex; gap: 18px; align-items: center; padd
          background: rgba(6, 7, 10, .96); border: 2px solid var(--frame); border-radius: 12px; box-shadow: 0 12px 40px rgba(0, 0, 0, .7); }
 #setup.open { display: block; }
 #setup h3 { margin: 0 0 6px; }
+#setup h4 { margin: 14px 0 6px; padding-top: 10px; border-top: 1px solid var(--line); font: 600 12.5px var(--ui); letter-spacing: .22em;
+            text-transform: uppercase; color: var(--orange2); }
+.setupHint { color: var(--dim); font: 12.5px var(--text); margin: -2px 0 8px; }
+#setup { max-height: calc(100vh - 120px); overflow: auto; }
+.field.vol { align-items: center; gap: 10px; }
+.field.vol input[type=range] { flex: 1; }
+.volnum { color: var(--dim); font: 12px var(--text); min-width: 38px; }
+#pvSoundBar .vlabel { color: var(--dim); font: 12px var(--text); margin-left: 6px; }
+#pvSoundBar input[type=range] { flex: 0 1 140px; min-width: 70px; }
 .setupMsg { color: var(--warn); font: 14px var(--text); min-height: 0; margin-bottom: 8px; }
 .setupMsg:empty { display: none; }
 .paths { display: grid; grid-template-columns: max-content 1fr; gap: 8px 12px; align-items: center; }
@@ -203,6 +225,7 @@ label.check { display: inline-flex; gap: 6px; align-items: center; font: 400 12.
                    box-shadow: 0 0 0 1px var(--line2); }
 .pvBody img { display: block; }
 .pvBody canvas { width: 100%; height: 100%; }
+.pvBody canvas.wave { height: auto; max-height: 100%; }
 .pvBody .big { color: var(--dim); font-size: 20px; }
 .pvLabel { padding: 0 12px 4px; color: var(--dim); font: 12.5px var(--text); white-space: pre-wrap; min-height: 2.8em; }
 .pvStart { width: 100%; align-self: stretch; overflow: auto; padding: 6px 4px; }
@@ -360,6 +383,8 @@ body.dragy, body.dragy * { cursor: row-resize !important; user-select: none; }
 #modal .frow .flabel { padding-top: 7px; }
 #discTree .empty { white-space: normal; }
 #preview.nofile #pvFileBar { display: none; }
+#pvSoundBar { display: none; }
+#preview.sound:not(.nofile):not(.paneled) #pvSoundBar { display: flex; }
 #workPane h2 { white-space: nowrap; }
 #workHead { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 #workTools { flex: none; display: flex; gap: 6px; }
@@ -414,3 +439,17 @@ body.dragy, body.dragy * { cursor: row-resize !important; user-select: none; }
 .sec .scount { font: 600 10.5px var(--ui); color: var(--dim); flex: none; }
 .sec .shint { font: 12px var(--text); color: var(--dim); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .split2:has(#preview.paneled) .sec .shint { display: none; }
+
+/* the preview of a file with nothing to draw (or a section): no empty picture area; a sound: its waveform (at most 200 px tall,
+   work.js) with its buttons right under it */
+#preview.noview:not(.paneled) .pvBody { display: none; }
+#preview.noview:not(.paneled) .pvLabel { padding-top: 10px; }
+#preview.sound:not(.paneled):not(.nofile) .pvBody { flex: 0 0 auto; }
+.pvLabel:empty { display: none; }
+/* the 3D model tab's "Currently using" lines */
+.state.now { margin: 0 0 10px; color: #c4c0b6; font: 12.5px/1.45 var(--text); }
+.state.now .nowhead { color: var(--orange2); font: 600 11.5px var(--ui); letter-spacing: .18em; text-transform: uppercase; margin-bottom: 3px; }
+.state.now ul { margin: 0; padding-left: 18px; }
+.state.now li { margin: 1px 0; }
+.camrow { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.camrow select { align-self: flex-start; }

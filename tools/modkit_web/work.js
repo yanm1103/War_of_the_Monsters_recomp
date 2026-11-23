@@ -242,10 +242,13 @@ async function load(focus) {
 }
 
 // ---------------------------------------------------------------- preview
+const WAVE_H = 200;   // the waveform's height at most: a tall preview pane does not make it a wall
 async function waveform(url, box) {
   const c = document.createElement('canvas');
+  c.className = 'wave';
   box.appendChild(c);
-  const w = c.width = Math.max(50, box.clientWidth), h = c.height = Math.max(50, box.clientHeight);
+  const w = c.width = Math.max(50, box.clientWidth), h = c.height = Math.max(50, Math.min(WAVE_H, $('preview').clientHeight - 150));
+  c.style.height = h + 'px';
   try {
     const buf = await (await fetch(url)).arrayBuffer();
     const ac = new OfflineAudioContext(1, 1, 44100);
@@ -276,6 +279,10 @@ async function preview() {
   if (g && panels[g.kind]) { panels[g.kind](g, body, label); return; }
   const files = selectedFiles(false), allf = selectedFiles(true);
   $('preview').classList.toggle('nofile', !files.length);   // the file buttons only with a file picked
+  $('preview').classList.toggle('sound', files.some(f => ext(f.rel) === '.wav'));   // play, stop and volume only for sounds
+  // a file with nothing to draw (.TEX, .PTR, .CHR...) or a section: no empty picture area, the text goes on top
+  const drawn = files.length && ['.png', '.wav', ...MODEL_EXT].includes(ext(files[0].rel));
+  $('preview').classList.toggle('noview', !g && (files.length ? !drawn : allf.length > 0));
   if (g && g.custom_base) {   // a costume of a monster: the model with the folder's textures on it, and what it can become
     const wrap = document.createElement('div');
     wrap.className = 'panel';
@@ -305,7 +312,7 @@ async function preview() {
       st.append(el('h4', '', 'What next?'), startCards());
       body.appendChild(st);
     }
-    label.textContent = kit.state && kit.state.mod ? 'Or pick something in the list. Double-click opens a texture in its editor ("Editors...") and plays a sound.' : '';
+    label.textContent = kit.state && kit.state.mod ? 'Or pick something in the list. Double-click opens a texture in its editor (Setup, "Editors") and plays a sound.' : '';
     return;
   }
   const f = files[0];
@@ -363,19 +370,6 @@ async function openWith() {
   const always = await kit.confirm('Open with', 'Always open ' + e + ' files with ' + exe.split(/[\\/]/).pop() + '?', 'Yes');
   await openSelected(exe, always);
   if (always) kit.setState(await kit.api('state'));
-}
-async function editorsDialog() {
-  const eds = kit.state.editors || {};
-  const exts = ['.png', '.wav', ...Object.keys(eds).filter(e => e !== '.png' && e !== '.wav').sort()];
-  const names = { '.png': 'Textures (.png)', '.wav': 'Sounds (.wav)' };
-  const v = await kit.dialog({
-    title: 'Editors',
-    text: 'Program used by "Open in editor" and double-click, per file type. Empty = the system\'s default (for sounds: play here in the kit).',
-    fields: exts.map(e => ({ key: e, label: names[e] || e, value: eds[e] || '', pick: { kind: 'file', title: 'Program to open ' + e + ' files', types: [['Programs', ['*.exe']]] }, clear: true })),
-  });
-  if (!v) return;
-  await kit.api('do/editors', { set: v });
-  kit.setState(await kit.api('state'));
 }
 async function replaceSelected() {
   const files = selectedFiles(false);
@@ -484,7 +478,7 @@ function onSelect() {
   preview();
   for (const f of selectListeners) f(selectedGroup());
   const files = selectedFiles(false);
-  if ($('autoplay').checked && files.length === 1 && ext(files[0].rel) === '.wav' && files[0].rel !== lastPlayed) play(files[0]);
+  if (kit.state && kit.state.autoplay !== false && files.length === 1 && ext(files[0].rel) === '.wav' && files[0].rel !== lastPlayed) play(files[0]);
 }
 const selectListeners = [];
 
@@ -510,10 +504,7 @@ export function initWork() {
   $('pvPlay').onclick = playSelected;
   $('pvStop').onclick = stop;
   $('pvRemove').onclick = removeSelected;
-  $('editorsBtn').onclick = editorsDialog;
-  $('autoplay').onchange = () => kit.api('conf', { autoplay: $('autoplay').checked });
   kit.onState(s => {
-    $('autoplay').checked = s.autoplay !== false;
     $('workHead').textContent = s.mod ? 'Edit ' + s.mod : 'Edit your mod';
     $('workHint').textContent = '';
     welcome();

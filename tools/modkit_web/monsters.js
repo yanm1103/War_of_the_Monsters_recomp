@@ -1,8 +1,8 @@
 // Custom monsters (MODS.md, "Custom monsters"): New monster..., Turn into custom monster... (an extracted costume becomes a
 // custom with its own files), the monster's panel in place of the preview (the model in 3D, then three tabs: Settings, with
-// the name, camera, narrator, rules, special, CPUs and HUD portrait; 3D model, with one block per way to give it a body;
-// Stats & sounds), Duplicate / Delete.
-import { meshBlocks } from './mesh.js';
+// the name, camera, narrator, special rules, special, CPUs and HUD portrait; 3D model, with the check and one block per way
+// to give it a body; Stats & sounds), Duplicate / Delete.
+import { meshBlocks, currentModel } from './mesh.js';
 import { panelFrame, tabs, block, el, button } from './panel.js';
 import { costumeRadios, skinDialog } from './skins.js';
 
@@ -16,6 +16,17 @@ function row(label, ...kids) {
   r.append(el('span', 'flabel', label), ...kids);
   return r;
 }
+// what a setting is, on hover of its whole row
+const TIPS = {
+  Camera: "The fight camera: another monster's (its height and angles), with the distance from the monster to the camera in %. " +
+          "(the base's own) = the base type's camera.",
+  Narrator: 'The line the narrator says to announce this character when it is picked: narrator/<name>.mp3 in the mods. ' +
+            "Empty = the base's.",
+  'Special rules': 'Extra behaviour the port gives a monster on top of its base type. Only "mecha" for now: the final boss\'s ' +
+                   "robot (the laser aimed through the tower camera, the shield, no jump). Empty = the base type's rules.",
+  Special: "The special move (Triangle + Circle): another monster's, or the base type's own.",
+};
+function tip(r, label) { if (TIPS[label]) r.title = TIPS[label]; return r; }
 function select(options, value) {   // options: [[value, text]]
   const s = el('select');
   for (const [v, t] of options) { const o = el('option', '', t); o.value = v; s.appendChild(o); }
@@ -31,8 +42,10 @@ function cameraRow(L, from, scale) {
   n.step = 10;
   n.value = scale || 100;
   n.style.width = '80px';
-  const box = el('div', 'inline');
-  box.append(s, el('span', 'dim', ' distance '), n, el('span', 'dim', ' %'));
+  const box = el('div', 'camrow');
+  const dist = el('div', 'inline');
+  dist.append(el('span', 'dim', 'Distance from monster to camera'), n, el('span', 'dim', '%'));
+  box.append(s, dist);
   return { box, from: s, scale: n };
 }
 function narratorInput(L, value) {
@@ -74,7 +87,8 @@ export function monsterDialog(title, lock, group) {
     bs.append(button('Cancel', () => close(null)), ok);
     box.append(row('Base type', base), row('', hint), row('Costume', coBox), row('Name', name), row('Id', cid),
       row('', el('div', 'dim', 'Folder name and what WOTM_MATCH takes: lowercase letters, digits and _, starting with a letter')),
-      row('Camera', cam.box), row('Narrator', narr), row('', el('div', 'dim', "narrator/<name>.mp3 said when it is picked; empty = the base's")));
+      tip(row('Camera', cam.box), 'Camera'), tip(row('Narrator', narr), 'Narrator'),
+      row('', el('div', 'dim', "The line the narrator says to announce this character (narrator/<name>.mp3); empty = the base's")));
     if (!lock) box.appendChild(row('', texL));
     box.append(row('', aiL), err, bs);
     const st = { autoId: true, base: null, radios: null, n: 0 };
@@ -133,7 +147,7 @@ async function turnIntoMonster(g) {
 
 async function monsterPanel(g, body, label) {
   const cid = g.key.slice(9);
-  label.textContent = 'Custom monster ' + cid + ': its PNGs are in the work folder (monsters/' + cid + '/files); open the section to edit them. "Build mod" sends the edited ones to the mod, where they are its own look (only for it).';
+  label.textContent = '';
   const form = panelFrame(body, g.key, g);
   const [L, p] = await Promise.all([getLists(), kit.api('do/monster_props', { cid })]);
   if (p.missing) { form.appendChild(el('div', 'dim', 'No monster.json in ' + p.missing)); return; }
@@ -165,33 +179,38 @@ async function monsterPanel(g, body, label) {
     kit.work.reload([key]);
   }, 'primary');
   const sb = el('div', 'btns');
-  sb.append(save, button('New skin for it...', () => skinDialog('New skin', null, cid)));
-  tSet.append(row('Base', el('span', '', p.base)), row('Name', name), row('Camera', cam.box), row('Narrator', narr), row('Rules', kind),
-    row('Special', special), row('', aiL), row('HUD portrait', hud), row('Look', el('span', 'dim', p.look)), row('', sb));
+  sb.append(save, button('New skin for this monster...', () => skinDialog('New skin', null, cid)));
+  tSet.append(row('Base', el('span', '', p.base)), row('Name', name), tip(row('Camera', cam.box), 'Camera'),
+    tip(row('Narrator', narr), 'Narrator'), tip(row('Special rules', kind), 'Special rules'), tip(row('Special', special), 'Special'),
+    row('', aiL), row('HUD portrait', hud), row('Appearance', el('span', 'dim', p.look)), row('', sb));
 
-  // 3D model: one block per way to give it a body
+  // 3D model: what it uses now, the check, then one block per way to give it a body (the easiest first)
   const mb = meshBlocks('monster', cid);
-  tModel.appendChild(el('div', 'state', 'Now: ' + p.mesh.text));
+  tModel.appendChild(currentModel(p.mesh));
   const rigged = [button('Import rigged model...', async () => {
     const f = await kit.pick('file', 'Model with a skeleton for ' + cid, '', [['Rigged model', ['*.glb', '*.gltf', '*.dae', '*.GLB', '*.GLTF', '*.DAE']]]);
     if (f) mb.run('rigged', { cid, path: f });
   })];
   if (p.mesh.rigged) rigged.push(button('Adjust bones...', () => mb.run('rigged', { cid, adjust: true })));
   tModel.append(
-    block('Downloaded model with a skeleton',
-      'A .glb, .gltf or .dae that already has bones and weights: its bones are fitted to the base type\'s, so it plays the ' +
-      'base\'s animations. Adjust bones... reopens that page to fix the fit (a foot, a hand) and imports again.',
+    mb.check,
+    block('Replace with an already rigged model',
+      'Formats: .glb, .gltf or .dae, with bones and weights (e.g. a model from another game or a 3D site). Its bones are fitted ' +
+      'to the base type\'s, so it plays the base\'s animations. After the import, [Adjust bones...] reopens the bones page to fix ' +
+      'the fit (e.g. a foot or a hand turned the wrong way, an open hand that should be a fist) and imports it again.',
       rigged, p.mesh.rigged ? 'Imported from ' + p.mesh.rigged : null),
     mb.blender,
-    block('Own skeleton',
-      'A .glb with its own armature, a weighted mesh and actions named by animation id (a090 = idle): a body with a ' +
-      'skeleton and moves made for it.',
-      [button('Import rig...', async () => {
+    block('Import an entirely new character',
+      'A .glb with its own armature, a weighted mesh and actions named by animation id (e.g. a090 = idle). The hardest way, ' +
+      'but the one for a body that is not a reshaped base: its own skeleton and animations made for it. The fight data ' +
+      '(which animation each attack plays, its damage, reach and timing) stays the base type\'s; to change it, [Extract stats] ' +
+      'in the Stats & sounds tab gives this monster its own .CHR (the guide MODS.md, "Mesh and animations from a 3D editor", ' +
+      'tells how to edit its move table).',
+      [button('Import character with animations...', async () => {
         const start = (await kit.api('do/rig_start', { cid })).path;
-        const f = await kit.pick('file', 'Rig of ' + cid + ': .glb with armature, mesh and actions', start, [['glTF binary', ['*.glb', '*.GLB']]]);
+        const f = await kit.pick('file', 'Character of ' + cid + ': .glb with armature, mesh and actions', start, [['glTF binary', ['*.glb', '*.GLB']]]);
         if (f) mb.run('rig_import', { cid, path: f });
       })]),
-    mb.check,
     block('Game model files',
       'Takes a model already in the game\'s format, made elsewhere (another mod): .NGP and .PTR, and the .TEX/.RTX if it has ' +
       'them, copied to this monster\'s files.',
@@ -203,11 +222,11 @@ async function monsterPanel(g, body, label) {
   // Stats & sounds
   tStats.append(
     block('Stats',
-      'Extracts the base type\'s .CHR and .AIC files to this monster\'s files: the edited ones become its own (the fight ' +
-      'numbers and the punch table in the .CHR, the CPU\'s AI in the .AIC).',
+      'Extracts the base type\'s .CHR (fight numbers and move list) and .AIC (how the CPU fights) to this monster\'s files. ' +
+      'The edited ones go in with [Build mod], for this monster only.',
       [button('Extract stats', () => run('monster_stats', { cid }))], 'Now: ' + p.stats),
     block('Sounds',
-      'Extracts the base type\'s sound bank as WAVs to this monster\'s files: on Build mod the replaced ones make its own bank.',
+      'Extracts the base type\'s sound bank as WAVs to this monster\'s files. The replaced ones make its own bank with [Build mod].',
       [button('Extract sounds', () => run('monster_sounds', { cid }))], 'Now: ' + p.sounds));
 }
 

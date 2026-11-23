@@ -82,8 +82,7 @@ class SkinsMixin:
         res = self.resolve_monster(d.get("monster", ""), choices)
         r["res"] = res
         r["hint"] = ("" if res is None else "unknown monster: taken as a custom monster id; no textures will be extracted"
-                     if res["kind"] == "unknown" else "custom monster on %s; default costume %d (monster.json)" % (res["prefix"], res["costume"])
-                     if res["kind"] == "custom" else "")
+                     if res["kind"] == "unknown" else self.custom_hint(res) if res["kind"] == "custom" else "")
         r["costumes"] = self.costumes_of(res["prefix"]) if res and res.get("prefix") else []
         if "name" in d:
             r["slug"] = modkit.skin_slug(d.get("name") or "")
@@ -98,6 +97,13 @@ class SkinsMixin:
         elif not (d.get("name") or "").strip():
             r["error"] = "Name: the selection shows it; it cannot be empty"
         return r
+
+    def custom_hint(self, res):
+        c = modkit.find_customs(self.mods).get(res["key"])
+        if c and self.mod and modkit._custom_model_dir(self.work(), self.mods, self.mod, c):
+            return ("custom monster with a 3D model of its own: the skin starts as a copy of it (body and textures); the base "
+                    "costume gives the sounds")
+        return "custom monster on %s; default costume %d (monster.json)" % (res["prefix"], res["costume"])
 
     def act_skin_new(self, d):
         """{"monster", "sid", "base", "name", "ai", "from_group"?}: the skin made (from_group: Turn into skin, the PNGs of an
@@ -160,7 +166,7 @@ class SkinsMixin:
         custom = None if game else modkit.find_customs(self.mods).get(mkey)
         prefix = modkit.MONSTERS[game] if game else (custom["prefix"] if custom else None)
         kind = "playable" if game else ("custom, %s" % custom["mod"] if custom else "custom monster the kit does not know")
-        return {"sid": sid, "data": data, "kind": kind, "game": bool(game), "prefix": prefix,
+        return {"sid": sid, "data": data, "kind": kind, "game": bool(game), "prefix": prefix, "custom": bool(custom),
                 "costumes": self.costumes_of(prefix) if prefix else [0, 1, 2, 3],
                 "custom_costume": custom["costume"] if custom else None,
                 "mesh": self.mesh_status("skin", sid, os.path.join(self.work(), "skins", sid))}
@@ -203,20 +209,33 @@ class SkinsMixin:
 
     # ---- the mesh row (skins and custom monsters)
     def mesh_status(self, kind, tid, folder):
+        """The 3D model tab's "Currently using" lines: the model the game loads (the .NGP holds the mesh, the skeleton and the
+        animations), what it was made from, and the source files beside it."""
         names = sorted(os.listdir(folder)) if os.path.isdir(folder) else []
         model = [n for n in names if os.path.splitext(n)[1].upper() in (".NGP", ".PTR")]
-        glb = [n for n in names if n.lower().endswith(".glb")]
-        txt = ("own model: %s" % ", ".join(model)) if model else "the base costume's"
+        glb = [n for n in names if n.lower().endswith((".glb", ".gltf", ".dae"))]
         rec = modkit._json_obj(os.path.join(folder, modkit.BLENDER_REC)) if model else {}
-        if rec.get("rig"):
-            txt += "; own skeleton: %s" % os.path.basename(rec["rig"])
-        if rec.get("anim_ids"):
-            txt += "; animations changed: %s" % ", ".join(rec["anim_ids"])
+        rigged = rec.get("rigged") if isinstance(rec.get("rigged"), dict) else None
+        lines = []
+        if model:
+            lines.append("Own model: %s (the mesh, the skeleton and the animations are all inside the .NGP)" % " + ".join(model))
+        else:
+            lines.append("The base costume's model (no own model yet)")
+        if rigged and rec.get("rig"):
+            lines.append("Made from %s: its bones fitted to the base's (the fitted copy is %s)" % (
+                os.path.basename(rigged.get("model", "")), os.path.basename(rec["rig"])))
+        elif rec.get("rig"):
+            lines.append("Made from %s, with a skeleton of its own" % os.path.basename(rec["rig"]))
+        else:
+            if rec.get("mesh"):
+                lines.append("Mesh from %s, on the base's skeleton" % os.path.basename(rec["mesh"]))
+            if rec.get("anim_ids"):
+                lines.append("Animations changed: %s" % ", ".join(rec["anim_ids"]))
         if glb:
-            txt += "; sources: %s" % ", ".join(glb)
-        out = {"text": txt}
-        if kind == "monster" and self.mod:
-            r = modkit.rigged_record(self.work(), self.mods, self.mod, tid)
+            lines.append("Source files in the work folder (Build leaves them out): %s" % ", ".join(glb))
+        out = {"lines": lines, "text": "; ".join(lines)}
+        if self.mod and (kind == "monster" or modkit.owner_custom(self.mods, self.mod, kind, tid) is not None):
+            r = modkit.rigged_record(self.work(), self.mods, self.mod, tid, kind)
             out["rigged"] = os.path.basename(r["model"]) if r else None
         return out
 
@@ -256,7 +275,8 @@ class SkinsMixin:
             if way == "rig":
                 return {"route": "rig", "why": why}
         if d.get("as_rig"):
-            return {"ok": self.run_fn("Importing the rig of %s..." % tid, lambda: modkit.rig_import(disc, work, mods, mod, tid, p))}
+            return {"ok": self.run_fn("Importing the character of %s..." % tid,
+                                      lambda: modkit.rig_import(disc, work, mods, mod, tid, p, kind=kind))}
         fn = modkit.mesh_import if what == "mesh" else modkit.anim_import
         noun = "mesh" if what == "mesh" else "animations"
         return {"ok": self.run_fn("Importing the %s of %s..." % (noun, tid), lambda: fn(disc, work, mods, mod, kind, tid, p))}

@@ -115,12 +115,10 @@ class MonstersMixin:
         npng = sum(1 for n in names if modkit.PNG_RE.match(n))
         model = [n for n in names if os.path.splitext(n)[1].upper() in (".NGP", ".PTR", ".TEX", ".RTX")]
         if not data.get("files"):
-            look = "the disc costume (no own files)"
+            look = "The base's disc costume (no files of its own)"
         else:
-            look = "%d texture(s) to edit in monsters/%s/files" % (npng, cid) + ("; own model: %s" % ", ".join(model) if model else "")
-            rig = (modkit._json_obj(os.path.join(wfiles, modkit.BLENDER_REC)) or {}).get("rig") if model else None
-            if rig:
-                look += "; own skeleton: %s" % os.path.basename(rig)
+            look = "Its own files: %d texture(s) to edit (monsters/%s/files)" % (npng, cid) + (
+                ", and its own 3D model (3D model tab)" if model else "")
         chr_ = [n for n in names if n.upper().endswith(".CHR")]
         aic = [n for n in names if n.upper().endswith(".AIC")]
         wavs = [n for n in names if modkit.BNK_RE.match(n)]
@@ -133,8 +131,8 @@ class MonstersMixin:
                 "narrator": data.get("narrator", "") if isinstance(data.get("narrator"), str) else "",
                 "kind": data.get("kind") or "", "special": sb or "", "ai": bool(data.get("ai")),
                 "portrait": por, "portrait_ok": bool(por) and os.path.isfile(os.path.join(mdir, por)),
-                "look": look, "stats": ", ".join(chr_ + (["%d .AIC" % len(aic)] if aic else [])) or "stats: the base's",
-                "sounds": ("%d sound(s) as WAV, %d replaced" % (len(wavs), changed)) if wavs else "sounds: the base's",
+                "look": look, "stats": ", ".join(chr_ + (["%d .AIC" % len(aic)] if aic else [])) or "the base's",
+                "sounds": ("%d sound(s) as WAV, %d replaced" % (len(wavs), changed)) if wavs else "the base's",
                 "mesh": self.mesh_status("monster", cid, wfiles)}
 
     def act_monster_save(self, d):
@@ -238,26 +236,31 @@ class MonstersMixin:
         return {"ok": self.run_fn("Extracting the base's sounds for %s..." % cid,
                                   lambda: modkit.monster_sounds(disc, work, mods, mod, cid))}
 
+    # Import character with animations, Import rigged model and Adjust bones: a custom ({"cid"}) or a skin of one ({"kind": "skin",
+    # "cid": the skin's id})
     def act_rig_import(self, d):
-        cid, p = d["cid"], d["path"]
+        cid, p, kind = d["cid"], d["path"], d.get("kind", "monster")
         disc, work, mods, mod = self.disc, self.work(), self.mods, self.mod
-        return {"ok": self.run_fn("Importing the rig of %s..." % cid, lambda: modkit.rig_import(disc, work, mods, mod, cid, p))}
+        return {"ok": self.run_fn("Importing the character of %s..." % cid,
+                                  lambda: modkit.rig_import(disc, work, mods, mod, cid, p, kind=kind))}
 
     def act_rig_start(self, d):
-        """Where Import rig's dialog starts: the last rig."""
-        rec = modkit._json_obj(os.path.join(self.work(), "monsters", d["cid"], "files", modkit.BLENDER_REC)) or {}
+        """Where the character import's dialog starts: the last one imported."""
+        rel = "skins/" + d["cid"] if d.get("kind") == "skin" else "monsters/%s/files" % d["cid"]
+        rec = modkit._json_obj(os.path.join(self.work(), *rel.split("/"), modkit.BLENDER_REC)) or {}
         return {"path": rec.get("rig") or ""}
 
     def act_rigged(self, d):
         """Import rigged model (path) or Adjust bones (adjust): modkit.py in a process of its own (the retarget and the rig import
         are pure Python); the bones page shows inside the kit's page ([page] line of --embed)."""
         cid, mod = d["cid"], self.mod
+        kind = "skin" if d.get("kind") == "skin" else "monster"
         common = ["--work", self.work()] + self.paths() + ["--embed"]
         if d.get("adjust"):
-            return {"ok": self.run("Adjusting the bones of %s..." % cid, ["monster", "rigged", mod, cid, "--adjust"] + common)}
+            return {"ok": self.run("Adjusting the bones of %s..." % cid, [kind, "rigged", mod, cid, "--adjust"] + common)}
         p = d["path"]
         return {"ok": self.run("Importing the rigged model %s into %s..." % (os.path.basename(p), cid),
-                               ["monster", "rigged", mod, cid, p, "--page"] + common)}
+                               [kind, "rigged", mod, cid, p, "--page"] + common)}
 
     def act_monster_duplicate(self, d):
         cid, new = d["cid"], (d.get("new") or "").strip()

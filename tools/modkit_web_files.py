@@ -87,8 +87,9 @@ def file_note(rel):
     n = os.path.basename(rel)
     m = modkit.PNG_RE.match(n)
     if m:
-        return "Texture %d of %s%s. Save it at any resolution, keeping the aspect ratio." % (
-            int(m.group(3)), m.group(1).upper(), ".RTX" if m.group(2) else ".TEX")
+        return ("Texture no. %d of the file %s%s. Replace it with an edited or new picture of any resolution (bigger "
+                "is sharper in the game); keep its aspect ratio (width to height), or the game shows it stretched." % (
+                    int(m.group(3)), m.group(1).upper(), ".RTX" if m.group(2) else ".TEX"))
     mb = modkit.BNK_RE.match(n)
     if mb:
         return "Sound %d of bank %s.BNK%s" % (int(mb.group(2)), mb.group(1).upper(),
@@ -104,8 +105,11 @@ def file_note(rel):
         return "Source: an image editor's project. It stays in the work folder and Build does not send it to the game."
     notes = {".ngp": "The 3D model in the game's format (mesh, skeleton, animations). Build sends it to the mod.",
              ".ptr": "Goes with the .NGP of the same name: the list the game uses to load that model. Build sends it to the mod.",
-             ".tex": "The game's texture file for the model of the same name. The textures to edit are its PNGs.",
-             ".rtx": "The game's texture file for the model of the same name. The textures to edit are its PNGs.",
+             ".tex": "The game's texture file for the model of the same name: the pictures painted on the 3D model. The "
+                     "textures to edit are its PNGs.",
+             ".rtx": "The game's resident texture file for the model of the same name: the color palettes of the .TEX's "
+                     "pictures and the pictures shown outside the 3D model, such as the HUD portrait. The textures to edit are its "
+                     "PNGs (the _rtx_ ones).",
              ".chr": "The monster's fight numbers and punch table (game format).",
              ".aic": "How the CPU fights with this monster (game format).",
              ".bnk": "A sound bank in the game's format, built from the WAVs.",
@@ -229,9 +233,12 @@ class FilesMixin:
             data = self.monster_data(cid)
             pre = modkit.base_prefix(data.get("base")) if isinstance(data.get("base"), str) else None
             co = data.get("costume", 0) if isinstance(data.get("costume"), int) else 0
-            pic = ("api/hud?cid=" + cid) if self.portrait_of(cid) else por(pre, co) if pre else None
-            return {"title": data.get("name") or cid, "sub": "Custom monster, built on %s" % str(data.get("base", "?")).title(),
-                    "tag": "monster", "pic": pic, "logo": ("api/hud?logo=1&cid=" + cid) if self.logo_of(cid) else None}
+            # the file's time in the address: a new portrait or logo is a new picture for the browser
+            stamp = lambda f: "&m=%d" % int(os.path.getmtime(f) * 1000)  # noqa: E731
+            pf, lf = self.portrait_of(cid), self.logo_of(cid)
+            pic = ("api/hud?cid=" + cid + stamp(pf)) if pf else por(pre, co) if pre else None
+            return {"title": data.get("name") or cid, "sub": "Custom monster, built on top of %s" % str(data.get("base", "?")).title(),
+                    "tag": "monster", "pic": pic, "logo": ("api/hud?logo=1&cid=" + cid + stamp(lf)) if lf else None}
         d, _, n = key.rpartition("/")
         for prefix, name, banks in MONSTERS + BOSSES:
             if d == "MON" and n[:-1] == prefix and n[-1:].isdigit():
@@ -334,7 +341,7 @@ class FilesMixin:
         return {"info": file_info(p) if os.path.exists(p) else "", "note": file_note(d.get("rel", ""))}
 
     def act_open_files(self, d):
-        """Opens files in the program set for their type in "Editors..." (or the system's)."""
+        """Opens files in the program set for their type in Setup, "Editors" (or the system's)."""
         eds = self.editors()
         for rel in (d.get("rels") or [])[:8]:
             p = self.work_path(rel)

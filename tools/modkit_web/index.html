@@ -22,7 +22,7 @@
     <div class="field" id="modBar"><select id="mod"></select><button id="newMod" title="Start a new mod">+ New mod</button></div>
   </div>
   <span class="grow"></span>
-  <button id="setupBtn" class="ghost" title="Game disc and mods folder"><span class="gear">&#9881;</span> Setup<span class="dot"></span></button>
+  <button id="setupBtn" class="ghost" title="Game disc, mods folder, sounds and editors"><span class="gear">&#9881;</span> Setup<span class="dot"></span></button>
   <button id="quit" class="ghost" title="Close the mod kit">Quit</button>
   <div id="setup">
     <h3>Setup</h3>
@@ -33,6 +33,16 @@
       <label for="mods">Mods folder</label>
       <div class="field"><input id="mods" spellcheck="false"><button class="pick" data-pick="mods" title="Pick the mods folder">&hellip;</button></div>
     </div>
+    <h4>Sounds</h4>
+    <div class="paths">
+      <label for="volSetup">Volume</label>
+      <div class="field vol"><input type="range" id="volSetup" class="volume" min="0" max="100" step="1"><span class="volnum"></span></div>
+      <span></span>
+      <label class="check"><input type="checkbox" class="autoplay" id="autoplaySetup"> Play sounds on click</label>
+    </div>
+    <h4>Editors</h4>
+    <div class="setupHint">The program that opens each kind of file (the Open in editor button and double-click). Empty: the system's default program (for sounds: play in the kit).</div>
+    <div class="paths" id="editors"></div>
     <div class="buttons"><button id="setupClose">Close</button></div>
   </div>
 </header>
@@ -40,7 +50,7 @@
   <section id="discPane" class="step s1">
     <h2><span class="num">1</span><span>Pick from the game disc</span></h2>
     <div class="bar"><input id="discFilter" placeholder="Search: a monster, a level, a sound..." spellcheck="false"></div>
-    <div class="hint">Double-click extracts it to your mod. Ctrl or Shift picks several.</div>
+    <div class="hint">Double-click to extract it to your mod's work folder. Ctrl+click or Shift+click picks several to extract at once.</div>
     <div class="tree" id="discTree" tabindex="0"></div>
     <div class="bar end"><button class="task needmod primary" id="extract">Extract to my mod &raquo;</button></div>
   </section>
@@ -57,12 +67,15 @@
       <div class="preview" id="preview">
         <div class="pvBody" id="pvBody"></div>
         <div class="pvLabel" id="pvLabel"></div>
+        <div class="bar" id="pvSoundBar">
+          <button id="pvPlay">&#9654; Play</button><button id="pvStop">&#9632; Stop</button>
+          <span class="vlabel">Volume</span><input type="range" class="volume" min="0" max="100" step="1" title="Volume (also in Setup)"><span class="volnum"></span>
+          <span class="grow"></span><label class="check"><input type="checkbox" class="autoplay"> play sounds on click</label>
+        </div>
         <div class="bar" id="pvFileBar">
           <button id="pvOpen">Open in editor</button><button id="pvReveal">Show in folder</button>
-          <button id="pvPlay">&#9654; Play</button><button id="pvStop">&#9632; Stop</button><span class="grow"></span><button id="pvRemove" class="danger">Remove</button>
+          <span class="grow"></span><button id="pvRemove" class="danger">Remove</button>
         </div>
-        <div class="bar"><label class="check"><input type="checkbox" id="autoplay"> play sounds on click</label><span class="grow"></span>
-          <button id="editorsBtn">Editors&hellip;</button></div>
       </div>
     </div>
   </section>

@@ -148,12 +148,12 @@ def anim_glb(ngp, k, png_folder=None, stem=None):
 
 def file_glb(path):
     """A 3D file of the work folder as a .glb for the page: .glb as it is, .gltf/.dae through the kit's reader (its rest mesh,
-    textured), .NGP in its idle."""
+    textured), .NGP in its idle with the folder's PNGs."""
     ext = os.path.splitext(path)[1].lower()
     if ext == ".glb":
         return path
-    if ext == ".ngp":
-        return posed_glb(path)
+    if ext == ".ngp":   # the PNGs next to it go over its textures, as in the game (a rig import's new textures are PNGs)
+        return posed_glb(path, png_folder=os.path.dirname(path))
     out = os.path.join(cache_dir(), _key(path, extra="file") + ".glb")
     if os.path.exists(out):
         return out
@@ -186,8 +186,12 @@ class ModelMixin:
             co = b if isinstance(b, int) and 0 <= b <= 3 else (custom["costume"] if custom else 0)
             if not prefix:
                 return None
+            folder = os.path.join(work, "skins", sid)
+            own = sorted(n for n in (os.listdir(folder) if os.path.isdir(folder) else []) if n.upper().endswith(".NGP"))
+            if own:   # a model of its own (Import mesh, a custom's copy, an imported body)
+                return os.path.join(folder, own[0]), None, None, folder, os.path.splitext(own[0])[0]
             stem = "%s%d" % (prefix, co)
-            return self._disc_model(stem) + (os.path.join(work, "skins", sid), stem)
+            return self._disc_model(stem) + (folder, stem)
         if key.startswith("monsters/"):
             cid = key[9:]
             files = os.path.join(work, "monsters", cid, "files")

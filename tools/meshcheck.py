@@ -243,7 +243,7 @@ def _scan_textures(glb, glb_path, rep, used_mats, mode):
                     iname, w, h, w * h * 4 * 4 // 3 >> 20, BIG_TEX))
         if mode == "mesh" and not tm:
             rep.warn("material %s is not one of the monster's textures (tex<id>): Import mesh draws it with the piece's own "
-                     "texture; an image of its own goes in by Import rig" % mname)
+                     "texture; an image of its own goes in by Import character" % mname)
     if total:
         rep.info("textures: about %.1f MB of video memory" % (total / 1048576.0))
 
@@ -394,7 +394,7 @@ def check_mesh(glb, base_path, rep):
         if nm not in pieces:
             if "skin" in n:
                 rep.warn("mesh %s is not one of the monster's pieces (%s): Import mesh leaves it out (a new body goes in by "
-                         "Import rig)" % (nm or "(no name)", ", ".join(sorted(pieces))))
+                         "Import character)" % (nm or "(no name)", ", ".join(sorted(pieces))))
             continue
         seen += 1
         warns = []
@@ -412,7 +412,7 @@ def check_mesh(glb, base_path, rep):
 
 def _plain(msg):
     if "has no weight on a bone of the palette" in msg:
-        return msg + " (each piece follows only its own bones: a new body, or weights on other bones, go in by Import rig)"
+        return msg + " (each piece follows only its own bones: a new body, or weights on other bones, go in by Import character)"
     return msg
 
 
@@ -432,15 +432,15 @@ def check_rig(glb_path, base_path, rep, front=None, scale=None, height=None, lay
         shutil.rmtree(tmp, ignore_errors=True)
     for ln in lines:
         if ln.startswith("warning: "):
-            rep.warn("Import rig: %s" % ln[len("warning: "):])
+            rep.warn("Import character: %s" % ln[len("warning: "):])
         elif ln.startswith("wrote ") and ".RTX: " in ln:
-            rep.info("Import rig would make: %s" % ln.split(".RTX: ", 1)[1])
+            rep.info("Import character would make: %s" % ln.split(".RTX: ", 1)[1])
         elif ln.startswith(("rig ", "skeleton:")):
-            rep.info("Import rig: %s" % ln)
+            rep.info("Import character: %s" % ln)
     if failed:
-        rep.err("Import rig: %s" % failed)
+        rep.err("Import character: %s" % failed)
     else:
-        rep.ok("Import rig takes it")
+        rep.ok("Import character takes it")
 
 
 def check(base_path, glb_path, mode="auto", log=print, **rig_opts):
@@ -451,8 +451,8 @@ def check(base_path, glb_path, mode="auto", log=print, **rig_opts):
         return rep
     if mode == "auto":
         mode = pick_mode(glb, base_path)
-        rep.info("goes in by %s" % ("Import mesh (every mesh with a skin is a piece of the monster)" if mode == "mesh" else
-                                    "Import rig (a new body, on the monster's skeleton or on one of its own)"))
+        rep.info("the import that takes it: %s" % ("Import mesh (every mesh with a skin is a piece of the monster)" if mode == "mesh" else
+                                    "Import character (a new body, on the monster's skeleton or on one of its own)"))
     scan(glb_path, rep, mode, glb)
     if not _mesh_nodes(glb):
         return rep

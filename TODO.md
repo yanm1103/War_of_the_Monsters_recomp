@@ -17,6 +17,7 @@ Plano aprovado em `docs/investigacoes/2026-11-22/plano_malha_kit.md`. Dois camin
 
 ## Mod kit
 - **Pés do Donkey Kong:** no jogo os pés do DK (37% mais largos que os do Congar) encostam parados e se cruzam andando; o jogo está fiel ao arquivo. O dono escolhe: diminuir os pés (escala por osso no map e na página de ossos, recurso novo) ou afastar os quadris. Medidas em `6d39b856:docs/investigacoes/2026-11-22/kit_navegador.md` ("Pés do DK").
+- **Dúvidas da lista de melhorias do kit:** seis perguntas ao dono no fim de `docs/investigacoes/2026-11-22/melhorias_mod_kit_respostas.md` (proporção da textura, aba 3D da câmera, Special rules, editor de golpes, skin de custom sem arquivos no runtime, check de `.glb` baixado).
 - **Kit no Linux:** conferir o kit no navegador no Linux (abrir o navegador, diálogos de arquivo por zenity ou kdialog) e decidir se ele entra no AppImage.
 
 ## Fora da ordem (até o dono escolher)
