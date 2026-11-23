@@ -32,13 +32,12 @@ function glyph(button, dir) {
 const moveGlyph = r => glyph(r.button, r.dir);
 
 const COLS = {
-  pos: ['Pos', 'The step of the combo: 1 is the first move; the next step comes if the combo input is accepted (the COMBOS list says which buttons chain).'],
-  move: ['Move', 'The button (and direction) that starts it. LIGHT is Square, HEAVY is Triangle.'],
+  move: ['Move', 'The button (and direction) that starts it. LIGHT is Square, HEAVY is Triangle. The arrow opens the moves that may follow it in the combo.'],
   dmg: ['Damage', 'The damage the move requests. With an object it is a multiplier of the object\'s own damage.'],
-  win: ['Hit window', 'Part of the animation, in %, where the game tests the hit.'],
-  sat: ['Frames (est.)', 'Estimated from the animation (60 frames per second, at the move\'s speed): startup (to the first hit test) · active (frames with a ' +
-                  'hit test) · total length. The training mode measures these in a fight and gets other numbers: the hit pause, the blend back to idle, ' +
-                  'being hit or blocked and the AI\'s own timing come on top.'],
+  win: ['Hit frames', 'The frames of the move (60 per second, at the move\'s speed, counted from its start) where the game tests the hit. Estimated from the animation.'],
+  total: ['Combo', 'The damage of the whole combo up to this move (with an object: the multipliers added).'],
+  sat: ['Length (est.)', 'Estimated from the animation: its length in frames (60 per second) at the move\'s speed. The training mode measures it in a fight and ' +
+                  'gets other numbers: the hit pause, the blend back to idle, being hit or blocked and the AI\'s own timing come on top.'],
   radius: ['Radius', 'Radius of the sphere swept along the bone each frame; a hit needs it to touch a body.'],
   stun: ['Stun', 'Above 100 the victim is stunned (cannot act for a moment).'],
   kb: ['Knockback', 'Out / up. Anything other than 0 knocks the victim down.'],
@@ -50,8 +49,8 @@ const COLS = {
 const FIELDS = [
   ['damage', 'Damage', 'The damage the move requests.', 'punch'],
   ['mult', 'Damage ×', 'The multiplier of the held object\'s own damage.', 'object'],
-  ['win_start', 'Hit from', 'Where in the animation (0 to 1) the hit test starts.'],
-  ['win_end', 'Hit until', 'Where in the animation (0 to 1) the hit test ends.'],
+  ['win_start', 'Hit from (0–1)', 'Where in the animation (0 to 1) the hit test starts; the frames of the card above follow it.'],
+  ['win_end', 'Hit until (0–1)', 'Where in the animation (0 to 1) the hit test ends.'],
   ['radius', 'Radius', 'Radius of the hit sphere; 0 uses the monster\'s default fist (punches only).'],
   ['stun', 'Stun', 'Above 100 the victim is stunned.'],
   ['kb_out', 'Knockback out', 'How far the victim is thrown away from the attacker; anything other than 0 knocks down.'],
@@ -67,46 +66,81 @@ const NEXT = [[5, 'LIGHT', 'LIGHT', 5], [3, 'FORWARD + LIGHT', 'LIGHT', 8], [4, 
 
 const fix = (v, n = 0) => (Number.isFinite(v) ? v.toFixed(n).replace(/\.0+$/, '') : '-');
 
-// the list of moves (the left column): pos only with every combo step, then the move, its damage and its hit window
-function table(rows, weapon, onPick, showPos) {
-  const t = el('table', 'moves');
-  const head = el('tr');
-  const keys = ['pos', 'move', 'dmg', 'win'].filter(k => showPos || k !== 'pos');
-  const left = k => (k === 'move' ? 'l' : '');
-  for (const k of keys) { const th = el('th', left(k), COLS[k][0]); th.title = COLS[k][1]; head.appendChild(th); }
-  t.appendChild(el('thead')).appendChild(head);
-  const body = el('tbody');
-  t.appendChild(body);
-  for (const r of rows) {
-    const tr = el('tr', r.pos === 1 ? 'first' : '');
-    tr.dataset.id = (r.weapon ? 'w' : 'p') + r.pos + '.' + r.ptype;
-    const cells = {
-      pos: r.pos, move: moveName(r),
-      dmg: weapon ? '×' + fix(r.mult, 2) : fix(r.damage, 1),
-      win: fix(r.win_start * 100) + '–' + fix(r.win_end * 100) + '%',
+// the frames where the move tests the hit, from its start, at its speed ("13–29"); the % of the animation when there is no model
+const hitFrames = r => {
+  const t = r.timing;
+  return t ? t.start + '–' + (t.start + t.active) : fix(r.win_start * 100) + '–' + fix(r.win_end * 100) + '%';
+};
+const doesNothing = r => !(r.weapon ? r.mult > 0 : r.damage > 0);
+// the order of the moves that may follow a move: the same button first, then LIGHT, FORWARD + LIGHT, BACK + LIGHT, HEAVY...
+const ORDER = NEXT.map(n => n[0]);
+
+// The combo as a tree (the left column): the six moves that start a combo; the arrow of a move opens the moves that may follow it
+// (the next step of the combo, the same button first), and so on down. A move that comes after another one needs that move's
+// delay (next_ms) above 0. Rows are built when opened. state: {open: Set of paths, seeded}; onPick(row, path, ms) when one is picked.
+// Returns {el, nodes}: nodes maps a path ("p:1.5>2.5" = the step 1 type 5, then the step 2 type 5) to {line, r, via}.
+function tree(rows, weapon, state, onPick) {
+  const by = new Map(rows.map(r => [r.pos + '.' + r.ptype, r]));
+  const prefix = weapon ? 'w:' : 'p:';
+  const root = el('div', 'mvtree');
+  const head = el('div', 'trow thead');
+  for (const [k, cls] of [['move', 'tl'], ['dmg', 'tn'], ['win', 'tn'], ['total', 'tn']]) { const c = el('span', cls, COLS[k][0]); c.title = COLS[k][1]; head.appendChild(c); }
+  root.appendChild(head);
+  const nodes = new Map();
+  const kidsOf = r => ORDER.filter(k => r.next_ms[k] > 0 && by.has((r.pos + 1) + '.' + k))
+    .sort((a, b) => (a === r.ptype ? 0 : 1) - (b === r.ptype ? 0 : 1)).map(k => by.get((r.pos + 1) + '.' + k));
+  const open = state.open;
+
+  function node(r, tokens, total, via, depth, into) {
+    const path = prefix + tokens.join('>');
+    const wrap = el('div', 'tnode');
+    const line = el('div', 'trow' + (doesNothing(r) ? ' zero' : ''));
+    line.style.paddingLeft = (4 + depth * 12) + 'px';
+    const kids = kidsOf(r);
+    const sub = el('div', 'tkids');
+    let built = false;
+    const tg = el('span', 'ttg');
+    const expand = on => {
+      if (on && !built) {
+        built = true;
+        for (const c of kids) {
+          const v = c.weapon ? c.mult : c.damage;
+          node(c, [...tokens, c.pos + '.' + c.ptype], total + (v > 0 ? v : 0), r.next_ms[c.ptype], depth + 1, sub);
+        }
+      }
+      sub.hidden = !on;
+      tg.textContent = on ? '▾' : '▸';
+      if (on) open.add(path); else open.delete(path);
     };
-    for (const k of keys) {
-      const td = el('td', left(k));
-      if (k === 'move') td.appendChild(moveGlyph(r)); else td.textContent = String(cells[k]);
-      tr.appendChild(td);
-    }
-    tr.onclick = () => {
-      for (const o of body.children) o.classList.remove('on');
-      tr.classList.add('on');
-      onPick(r);
-    };
-    body.appendChild(tr);
+    const tl = el('span', 'tl');
+    tl.append(tg, moveGlyph(r), el('span', 'tstep', 'step ' + r.pos));
+    line.append(tl, el('span', 'tn', weapon ? '×' + fix(r.mult, 2) : fix(r.damage, 1)), el('span', 'tn', hitFrames(r)),
+                el('span', 'tn', weapon ? '×' + fix(total, 2) : fix(total, 1)));
+    line.title = moveName(r) + ', step ' + r.pos + (via ? ' · may follow after ' + via + ' ms' : '') +
+      (doesNothing(r) ? ' · does no damage: a filler slot of the file (no bone tests a hit)' : '');
+    tg.textContent = '▸';
+    if (kids.length) { tg.onclick = e => { e.stopPropagation(); expand(sub.hidden); }; } else tg.classList.add('none');
+    line.onclick = () => { for (const n of nodes.values()) n.line.classList.remove('on'); line.classList.add('on'); onPick(r, path, via); };
+    nodes.set(path, { line, r, via });
+    wrap.append(line, sub);
+    into.appendChild(wrap);
+    sub.hidden = true;
+    if (kids.length && open.has(path)) expand(true);
   }
-  return t;
+
+  const starts = ORDER.filter(k => by.has('1.' + k)).map(k => by.get('1.' + k));
+  if (!state.seeded && starts.length) { state.seeded = true; open.add(prefix + '1.' + starts[0].ptype); }   // the first one open, so the tree shows
+  for (const r of starts) { const v = weapon ? r.mult : r.damage; node(r, ['1.' + r.ptype], v > 0 ? v : 0, 0, 0, root); }
+  return { el: root, nodes };
 }
 
 // the picked move's numbers, big (the middle column): one card each, with what it is on hover
-function statCards(r, weapon, names, defaultRadius) {
+function statCards(r, weapon, names, defaultRadius, via) {
   const tm = r.timing;
   const cards = [
     [weapon ? 'Damage ×' : 'Damage', COLS.dmg[1], weapon ? '×' + fix(r.mult, 2) : fix(r.damage, 1)],
-    [COLS.win[0], COLS.win[1], fix(r.win_start * 100) + '–' + fix(r.win_end * 100) + '%'],
-    [COLS.sat[0], COLS.sat[1], tm ? tm.start + ' · ' + tm.active + ' · ' + tm.total : '-', tm ? 'startup · active · total' : 'no model'],
+    [COLS.win[0], COLS.win[1], hitFrames(r), tm ? 'of ' + tm.total + ' · ' + fix(r.win_start * 100) + '–' + fix(r.win_end * 100) + '% of the animation' : 'of the animation (no model)'],
+    [COLS.sat[0], COLS.sat[1], tm ? String(tm.total) : '-', tm ? 'frames, at ×' + fix(r.speed, 2) : 'no model'],
     [COLS.radius[0], COLS.radius[1], fix(r.radius, 1) + (r.radius_default ? '*' : ''), r.radius_default ? 'the default fist: ' + fix(defaultRadius, 1) : ''],
     [COLS.stun[0], COLS.stun[1], fix(r.stun), r.stun > 100 ? 'stuns' : ''],
     [COLS.kb[0], COLS.kb[1], (r.kb_out || r.kb_up) ? fix(r.kb_out) + ' / ' + fix(r.kb_up) : '-', (r.kb_out || r.kb_up) ? 'out / up: knocks down' : ''],
@@ -116,6 +150,7 @@ function statCards(r, weapon, names, defaultRadius) {
     [COLS.loc[0], COLS.loc[1], r.bones || '-'],
     [COLS.anim[0], COLS.anim[1], String(r.anim), names[r.anim] || ''],
   ];
+  if (via) cards.push(['Follows after', 'The delay of the move before it in the combo: this one may start that many ms after it.', via + ' ms', 'from the move before']);
   const box = el('div', 'mvcards');
   for (const [k, tip, v, sub] of cards) {
     const c = el('div', 'mvcard');
@@ -183,7 +218,8 @@ function fieldTable(s, own, save, open) {
 // page: the element that gets the list (left) and the numbers (middle); args: {cid} (a custom monster) or {group} (a costume of a
 // game monster); hooks.extract(): gives the monster its own .CHR (Extract stats) and resolves when it is done
 export async function movesPage(page, args, hooks = {}) {
-  const state = { view: 'punch', all: false, pick: null, sp: null, note: null, scroll: [0, 0] };   // what the page shows, kept over a reload
+  // what the page shows, kept over a reload: the view, the picked move (its path in the combo tree), the open arrows
+  const state = { view: 'punch', pickPath: null, open: new Set(), seeded: false, sp: null, note: null, scroll: [0, 0] };
   async function load() {
     page.innerHTML = '';
     page.appendChild(el('div', 'dim', 'Reading the move table…'));
@@ -227,17 +263,15 @@ export async function movesPage(page, args, hooks = {}) {
     const view = el('select');
     for (const [v, t] of [['punch', 'Punches'], ['weapon', 'With an object'], ['other', 'Other moves'], ['special', 'Specials']]) { const o = el('option', '', t); o.value = v; view.appendChild(o); }
     view.value = state.view;
-    const all = el('input'); all.type = 'checkbox'; all.checked = state.all;
-    const allL = el('label', 'check'); allL.append(all, document.createTextNode(' every combo step'));
-    allL.title = 'Shows the 10 steps of each button\'s combo, not only the first move.';
     const bar = el('div', 'inline mvbar');
-    bar.append(view, allL);
+    bar.append(view);
     const out = el('div', 'movesout');
     left.append(bar, out);
 
-    const rowsAll = () => [...m.punches, ...m.swipes];
-    const hitOf = r => [[r.win_start, r.win_end], { locators: r.locators, radius: r.radius }];
-    const pick = r => { state.pick = (r.weapon ? 'w' : 'p') + r.pos + '.' + r.ptype; playMove(r.anim, ...hitOf(r)); drawEdit(r); };
+    // the animation plays at the move's speed, so its frames are the game's (viewer.js); the window and the sphere come with it
+    const hitOf = r => [r.timing ? [r.win_start, r.win_end, r.timing.start, r.timing.start + r.timing.active] : [r.win_start, r.win_end],
+                        { locators: r.locators, radius: r.radius }, r.speed];
+    const pick = (r, path, via) => { state.pickPath = path; playMove(r.anim, ...hitOf(r)); drawEdit(r, path, via); };
     // writes a number and draws the page again from the file (the list, the frames, the warnings follow it)
     async function reread(note) {
       state.note = note;
@@ -266,13 +300,21 @@ export async function movesPage(page, args, hooks = {}) {
     };
     const notOwn = () => el('div', 'dim', 'The disc\'s numbers are not edited. ' + (hooks.extract ? '[Give it its own .CHR to edit] above makes a copy for this monster.' : ''));
 
-    function drawEdit(r) {
+    // path: the combo that leads to the move ("p:1.5>2.5"), drawn as its buttons in a row; via: the ms the move before allows
+    function drawEdit(r, path, via) {
       edit.innerHTML = '';
       if (!r) return;
-      const h = el('h5', '', 'Move' + (r.weapon ? ' with an object' : '') + ':');
-      h.append(moveGlyph(r), 'step ' + r.pos);
+      const h = el('h5', '', 'Combo' + (r.weapon ? ' with an object' : '') + ':');
+      const rows = r.weapon ? m.swipes : m.punches;
+      path.slice(2).split('>').forEach((key, i) => {
+        const q = rows.find(x => x.pos + '.' + x.ptype === key);
+        if (i) h.appendChild(el('span', 'sep', '›'));
+        if (q) h.appendChild(moveGlyph(q));
+      });
+      h.append('step ' + r.pos);
       edit.appendChild(h);
-      edit.appendChild(statCards(r, !!r.weapon, names, m.default_radius));
+      edit.appendChild(statCards(r, !!r.weapon, names, m.default_radius, via));
+      if (doesNothing(r)) edit.appendChild(el('div', 'dim', 'This step does no damage: it is a filler slot of the .CHR (no bone tests a hit), not a move the combo plays.'));
       if (!m.own) { edit.appendChild(notOwn()); return; }
       const grid = el('div', 'editgrid');
       const status = el('div', 'autosave', 'Changes save by themselves.');
@@ -308,11 +350,10 @@ export async function movesPage(page, args, hooks = {}) {
     }
 
     function show() {
-      state.view = view.value; state.all = all.checked;
+      state.view = view.value;
       out.innerHTML = '';
       noteBox.innerHTML = '';
       const v = view.value;
-      allL.hidden = v === 'special' || v === 'other';
       if (v === 'special' || v === 'other') {
         edit.innerHTML = '';
         setMoveHit(null, null);   // these states have no animation of their own here: no hit window or sphere of the last move
@@ -336,28 +377,19 @@ export async function movesPage(page, args, hooks = {}) {
         return;
       }
       const weapon = v === 'weapon';
-      const rows = (weapon ? m.swipes : m.punches).filter(r => all.checked || r.pos === 1);
+      const rows = weapon ? m.swipes : m.punches;
       if (!rows.length) { out.appendChild(el('div', 'dim', 'No moves of this kind in the .CHR.')); edit.innerHTML = ''; return; }
-      out.appendChild(table(rows, weapon, pick, all.checked));
-      const ch = m.chains.filter(c => c.weapon === weapon);
-      if (ch.length) {
-        const line = el('div', 'chains', 'COMBOS (the same button again):');
-        for (const c of ch) {
-          const part = el('span', 'chain');
-          part.append(moveGlyph(c), ' × ' + c.length + ' = ' + (weapon ? '×' + fix(c.damage, 2) + ' total' : fix(c.damage, 1) + ' damage'));
-          line.appendChild(part);
-        }
-        out.appendChild(line);
-      }
-      if (!weapon && m.default_radius) out.appendChild(el('div', 'dim', '* radius 0 in the file: the monster\'s default fist (' + fix(m.default_radius, 1) + ') is used.'));
+      const T = tree(rows, weapon, state, pick);
+      out.appendChild(T.el);
+      out.appendChild(el('div', 'dim', 'Each button starts a combo; the arrow opens the moves that may follow a move (the same button first). ' +
+        'The last column adds the damage up along the combo.'));
+      if (!weapon && m.default_radius) out.appendChild(el('div', 'dim', 'A radius marked * is 0 in the file: the monster\'s default fist (' + fix(m.default_radius, 1) + ') is used.'));
       if (weapon) out.appendChild(el('div', 'dim', 'With an object in hand, the damage is the object\'s own times this multiplier.'));
       // the move picked before (this view's), still on after a change; else the first one, so the 3D view plays something
-      const keep = rowsAll().find(r => ((r.weapon ? 'w' : 'p') + r.pos + '.' + r.ptype) === state.pick && r.weapon === weapon);
-      const tr = keep && out.querySelector('tr[data-id="' + state.pick + '"]');
-      if (tr) { tr.classList.add('on'); drawEdit(keep); setMoveHit(...hitOf(keep)); } else out.querySelector('tbody tr').click();
+      const keep = state.pickPath && state.pickPath.startsWith(weapon ? 'w:' : 'p:') && T.nodes.get(state.pickPath);
+      if (keep) { keep.line.classList.add('on'); drawEdit(keep.r, state.pickPath, keep.via); setMoveHit(...hitOf(keep.r)); } else T.nodes.values().next().value.line.click();
     }
     view.onchange = show;
-    all.onchange = show;
     show();
   }
   await load();
@@ -388,7 +420,7 @@ export async function openMoves({ args, group, g, hooks = {}, restore }) {
   const onKey = e => { const md = document.getElementById('modal'); if (e.key === 'Escape' && !(md && md.style.display === 'flex')) close(); };
   document.addEventListener('keydown', onKey);
   done.then(() => { document.removeEventListener('keydown', onKey); ov.remove(); if (restore) restore(); });
-  await stage(v, ab, group, g);   // the animation bar is ready before the first move plays
+  await stage(v, ab, group, g, { moves: true });   // the animation bar is ready before the first move plays
   await movesPage(page, args, hooks);
   return done;
 }

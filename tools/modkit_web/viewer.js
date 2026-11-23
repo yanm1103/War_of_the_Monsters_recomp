@@ -8,7 +8,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 let renderer = null, scene, camera, controls, current = null, box = null, token = 0, ro = null, grid = null;
 const loader = new GLTFLoader();
 const clock = new THREE.Clock();
-const play = { mixer: null, dur: 0, t: 0, playing: true, speed: 1, onFrame: null };
+const play = { mixer: null, dur: 0, t: 0, playing: true, speed: 1, rate: 1, onFrame: null };   // speed: the slow-motion choice; rate: the move's own speed
 const FPS = 60;
 
 // The game's look (as the model museum and the port draw it): texture * vertex color * (ambient + directional * max(0, n.L)),
@@ -66,7 +66,7 @@ function setup() {
     const dt = clock.getDelta();
     if (!box || !box.isConnected) return;
     if (play.mixer && play.dur) {
-      if (play.playing) play.t = (play.t + dt * play.speed) % play.dur;
+      if (play.playing) play.t = (play.t + dt * play.speed * play.rate) % play.dur;
       play.mixer.setTime(play.t);
       if (play.onFrame) play.onFrame(play.t);
     }
@@ -215,8 +215,8 @@ async function swapModel(url, still) {
 // that animation of the model, marks the part of it (fractions of its length) where the move hits and, when the spheres are on,
 // draws the hit sphere at each locator bone (the empties "loc_<hex id>" of the export): bright inside the hit window, dim outside
 let animCtl = null;
-export async function playMove(id, win, spheres) { return animCtl ? animCtl.play(id, win, spheres) : false; }
-export function setMoveHit(win, spheres) { if (animCtl) animCtl.setHit(win, spheres); }
+export async function playMove(id, win, spheres, speed) { return animCtl ? animCtl.play(id, win, spheres, speed) : false; }
+export function setMoveHit(win, spheres, speed) { if (animCtl) animCtl.setHit(win, spheres, speed); }
 
 // the hit spheres: on by default, the choice is kept
 let spheresOn = localStorage.getItem('wotm.hitSpheres') !== '0';
@@ -274,28 +274,41 @@ async function names() {
 }
 
 // the animation list under a model's box: group = the work folder group whose model shows; stillUrl = its still model
-export async function animBar(el, group, stillUrl) {
-  const bar = document.createElement('div');
-  bar.className = 'animbar';
-  const sel = document.createElement('select');
+// opts.moves: the bar of the full-screen Moves view, where the picked move chooses the animation: no list of animations, the speed
+// takes its place. Otherwise: the list and the speed on a line, play and the frame slider under it. The frame text is always the last
+// line, so its length never changes the slider.
+export async function animBar(el, group, stillUrl, opts = {}) {
+  const mk = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
+  const bar = mk('div', 'animbar');
+  const sel = mk('select');   // (not in the page when opts.moves: the moves pick the animation by id)
   const o0 = document.createElement('option');
   o0.value = '';
   o0.textContent = 'Standing still (idle, frame 0)';
   sel.appendChild(o0);
-  const pb = document.createElement('button');
+  const pb = mk('button', 'pp');   // play / pause: one icon that toggles
   pb.type = 'button';
-  pb.textContent = 'Pause';
   pb.disabled = true;
-  const fr = document.createElement('input');
+  const ppIc = mk('i', 'mvic');
+  pb.appendChild(ppIc);
+  const setPP = playing => {
+    const u = 'url(vendor/phosphor/' + (playing ? 'pause' : 'play') + '-fill.svg)';
+    ppIc.style.webkitMaskImage = u;
+    ppIc.style.maskImage = u;
+    pb.title = playing ? 'Pause' : 'Play';
+  };
+  setPP(true);
+  const fr = mk('input');
   fr.type = 'range';
   fr.min = 0;
   fr.max = 0;
   fr.disabled = true;
-  const fn = document.createElement('span');
-  fn.className = 'dim';
-  const sp = document.createElement('select');
+  const fn = mk('div', 'fn dim');
+  const sp = mk('select', 'spd');
+  sp.title = 'Playback speed';
   for (const v of [1, 0.5, 0.25]) { const o = document.createElement('option'); o.value = v; o.textContent = v + '×'; sp.appendChild(o); }
-  bar.append(sel, pb, fr, fn, sp);
+  const line = (...kids) => { const r = mk('div', 'arow'); r.append(...kids); return r; };
+  if (opts.moves) bar.append(line(sp, pb, fr), fn);
+  else bar.append(line(sel, sp), line(pb, fr), fn);
   el.appendChild(bar);
   const [list, ids] = await Promise.all([kit.api('do/anims', { group }), names()]);
   const groups = (ids && ids.groups) || [{ key: 'other', label: 'Animations' }];
@@ -320,61 +333,71 @@ export async function animBar(el, group, stillUrl) {
     for (const [k, t] of items) { const o = document.createElement('option'); o.value = k; o.textContent = t; og.appendChild(o); }
     sel.appendChild(og);
   }
-  const frames = () => Math.max(0, Math.round(play.dur * FPS));
+  // frames are the game's when a move plays (play.rate = the move's speed: the game runs the animation that much faster or slower),
+  // else the animation's own
+  const frames = () => Math.max(0, Math.round(play.dur * FPS / play.rate));
   // the hit window of a move (Moves tab): the part of the frame slider where the game tests the hit, drawn on the slider
   let hit = null;
   const markHit = () => {
-    if (!hit) { fr.style.background = ''; fr.classList.remove('hitwin'); return; }
+    if (!hit) { fr.style.removeProperty('--track'); fr.classList.remove('hitwin'); return; }
     const a = Math.round(hit[0] * 100), b = Math.round(hit[1] * 100);
     fr.classList.add('hitwin');
-    // a thin strip behind the slider's track: the hit part in red
-    fr.style.background = 'linear-gradient(90deg, var(--line2) 0 ' + a + '%, var(--red) ' + a + '% ' + b + '%, var(--line2) ' + b + '% 100%) center / 100% 6px no-repeat';
+    // the slider's track (style.css) with the hit part in red
+    fr.style.setProperty('--track', 'linear-gradient(90deg, var(--line2) 0 ' + a + '%, var(--red) ' + a + '% ' + b + '%, var(--line2) ' + b + '% 100%)');
   };
-  const hitText = () => (hit ? '  hit ' + Math.round(hit[0] * frames()) + '–' + Math.round(hit[1] * frames()) : '');
+  // hit = [from, to] as fractions of the animation, plus the same two as frame numbers when the caller has them (the Moves view's card)
+  const hitText = () => (hit ? ' · hit frames ' + (hit.length > 3 ? hit[2] + '–' + hit[3] : Math.round(hit[0] * frames()) + '–' + Math.round(hit[1] * frames())) : '');
+  const nowFrame = t => Math.round(t * FPS / play.rate);
   play.onFrame = t => {
-    if (document.activeElement !== fr) fr.value = Math.round(t * FPS);
-    fn.textContent = Math.round(t * FPS) + ' / ' + frames() + hitText();
+    if (document.activeElement !== fr) fr.value = nowFrame(t);
+    fn.textContent = 'frame ' + nowFrame(t) + ' of ' + frames() + hitText();
     tickSpheres(t);
   };
-  sel.onchange = async () => {
-    const k = sel.value;
+  // shows the animation of the table position k ('' = standing still); the list follows when it is there
+  async function load(k) {
     pb.disabled = fr.disabled = true;
     fn.textContent = k === '' ? '' : 'Loading…';
     try {
       await swapModel(k === '' ? null : 'api/anim.glb?group=' + encodeURIComponent(group) + '&k=' + k + '&t=' + Date.now(), stillUrl);
     } catch (e) { fn.textContent = String(e.message || e); return; }
     play.playing = true;
-    pb.textContent = 'Pause';
+    setPP(true);
     fr.max = frames();
     pb.disabled = fr.disabled = k === '';
     if (k === '') { fn.textContent = ''; hit = null; }
     markHit();
-  };
+  }
+  sel.onchange = () => { play.rate = 1; return load(sel.value); };
   // first table position of each animation id (ids repeat); a move of the Moves tab plays its animation by id
   const firstK = new Map();
   for (const a of list.anims || []) if (!firstK.has(a.id)) firstK.set(a.id, a.k);
   animCtl = {
-    async play(id, win, spheres) {
+    // speed: the move's own (frames and playback follow the game's)
+    async play(id, win, spheres, speed) {
       const k = firstK.get(id);
       if (k === undefined) return false;
       hit = null;   // the old window must not show on the new animation while it loads
       sel.value = String(k);
-      await sel.onchange();
+      play.rate = speed > 0 ? speed : 1;
+      await load(String(k));
       hit = win || null;
       markHit();
       attachSpheres(win, spheres);
       return true;
     },
-    // the same animation with other numbers (a radius or a window changed in the Moves tab)
-    setHit(win, spheres) {
+    // the same animation with other numbers (a radius, a window or the speed changed in the Moves tab)
+    setHit(win, spheres, speed) {
       hit = win || null;
+      if (speed > 0 && speed !== play.rate) { play.rate = speed; fr.max = frames(); }
       markHit();
       if (play.mixer) attachSpheres(win, spheres);
     },
   };
-  pb.onclick = () => { play.playing = !play.playing; pb.textContent = play.playing ? 'Pause' : 'Play'; };
-  fr.oninput = () => { play.playing = false; pb.textContent = 'Play'; play.t = parseInt(fr.value, 10) / FPS; };
+  pb.onclick = () => { play.playing = !play.playing; setPP(play.playing); };
+  fr.oninput = () => { play.playing = false; setPP(false); play.t = parseInt(fr.value, 10) * play.rate / FPS; };
   sp.onchange = () => { play.speed = parseFloat(sp.value); };
+  play.speed = 1;
+  play.rate = 1;
   return bar;
 }
 window.kitViewer = {

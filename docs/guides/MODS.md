@@ -135,16 +135,21 @@ scaled), over a ground grid and with the game's 16:9 screen marked; the game's c
 *Moves* is not a page of the panel: picking it opens a full-screen view over the kit (**Close** or Escape goes back to the tab that was
 open), in three columns: the monster's moves on the left, the picked move's numbers in the middle and the 3D model playing it on the right.
 The numbers are the training mode's, read from its `.CHR` (its own in `files/`, else the base type's):
-the punches (damage, hit window in % of the animation, startup, active and total frames at 60 per second, radius, stun, knockback,
-the bones that hit), the same-button combos, the moves with an object in hand (damage multiplier) and the special states'
-numbers. A select on the left picks what the list holds (Punches, With an object, Other moves, Specials); "every combo step" shows the 10
-positions of the combo. The buttons are pictures, not words: a white fist in a red ring is HEAVY (Triangle) and in a blue ring LIGHT
+the punches (damage, the frames where the hit is tested, length in frames at 60 per second, radius, stun, knockback,
+the bones that hit), the moves with an object in hand (damage multiplier) and the special states'
+numbers. A select on the left picks what the list holds (Punches, With an object, Other moves, Specials). Punches and With an object are
+a tree of the combo: the six moves that start one (LIGHT, FORWARD + LIGHT, BACK + LIGHT, HEAVY, FORWARD + HEAVY, BACK + HEAVY), and the arrow of
+a move opens the moves that may follow it, the same button first (a move follows another when the other's delay for it, in ms, is above 0).
+Each row has the damage, the hit frames and the damage of the combo up to it; a grayed row does no damage (a filler slot of the file, with no
+bone that tests a hit: the files of the disc are padded with them past the end of their combos). The buttons are pictures, not words: a white fist in a red ring is HEAVY (Triangle) and in a blue ring LIGHT
 (Square), an arrow up before it means FORWARD + and an arrow down BACK +; the grab and its throw (Other moves) have an open hand. The name
-is the hover text. The icons are Phosphor Icons (`tools/level_editor/web/vendor/phosphor/`, MIT, drawn as CSS masks). A move of the list plays its animation in the 3D view and marks
-its hit window on the frame slider, and draws the move's hit sphere (the radius of the table) at each bone that tests the hit, red while the
+is the hover text. The icons are Phosphor Icons (`tools/level_editor/web/vendor/phosphor/`, MIT, drawn as CSS masks). A move of the list plays its animation in the 3D view, at the move's speed, and
+the player under it counts the game's frames and paints the hit frames red on its slider (its speed select slows the playback down; the list of animations is
+not there, since the move picks the animation). It also draws the move's hit sphere (the radius of the table) at each bone that tests the hit, red while the
 hit window is open and dim outside it; the **hit spheres** box in the header turns that on and off (kept between runs). The spheres
 hang from the empties `loc_<hex id>` that the animation preview's `.glb` carries on the locator bones (`monglb.py`, `locators=True`). The frames come from the animation length of the monster's model divided by the move's speed
-(the hit pause and the blend back to idle are not counted, and the training mode's frame data, measured in a fight, differs from these estimates). With the monster's own `.CHR` (**Give it its own .CHR to edit**, the same as
+(the hit pause and the blend back to idle are not counted, and the training mode's frame data, measured in a fight, differs from these estimates); the file keeps the
+hit window as two fractions of the animation (0 to 1), which are the fields. With the monster's own `.CHR` (**Give it its own .CHR to edit**, the same as
 **Extract stats**) the picked move's numbers (damage, hit window, radius, stun, knockback, hit pause, speed, stamina, animation id) are fields
 under the cards that save by themselves into that file, with the limits the game can take, and so are the six delays that say which move may
 follow it in the combo (**Combo: what may follow**, ms, 0 = none); the disc's `.CHR` is never edited. The view **Other moves** has the butt slam
@@ -293,7 +298,7 @@ Messages). Besides those, it looks at:
    `Left`/`Right`, `_l`/`_r` in the name)
    gets the same change. The model is redrawn at the rest the retarget will give it. The bar at the bottom plays an
    animation of the monster on both, named by kind (walk, idle, attacks with the buttons that play them, the special...;
-   "layer" marks the ones the game adds on top of another): play and pause, a frame slider and the speed (1×, 0.5×, 0.25×).
+   "layer" marks the ones the game adds on top of another): the list and the speed (1×, 0.5×, 0.25×), then play and pause (one icon that toggles) and a frame slider, with the frame text under them.
    The model's comes from the same retarget as the import, so a turn set while it plays (a foot that points inward on the
    walk) shows as soon as the model is redrawn, on the same frame; the bones move with it. A layer plays here alone, without the animation
    it goes on in the game, and a joint that the import holds still in an animation that leaves it out moves here as the

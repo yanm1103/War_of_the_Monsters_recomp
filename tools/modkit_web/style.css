@@ -281,11 +281,19 @@ label.check { display: inline-flex; gap: 6px; align-items: center; font: 400 12.
 img.hud { max-width: 128px; max-height: 64px; background: #111; border-radius: 4px; }
 .props select { max-width: 280px; }
 .props .btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
-.animbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.animbar select:first-child { flex: 1 1 200px; min-width: 0; }
-.animbar input[type=range] { flex: 1 1 100px; }
-.animbar button { padding: 6px 9px; width: 70px; }
-.animbar span { color: var(--dim); font: 12px var(--text); }
+.animbar { display: flex; flex-direction: column; gap: 6px; }
+.animbar .arow { display: flex; gap: 6px; align-items: center; }
+.animbar select { flex: 1 1 200px; min-width: 0; }
+.animbar select.spd { flex: none; width: 74px; }
+.animbar input[type=range] { flex: 1 1 100px; min-width: 0; -webkit-appearance: none; appearance: none; height: 20px; cursor: pointer; }
+/* the track is ours so the hit window of a move can be painted on it (--track, set by viewer.js markHit) */
+.animbar input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: var(--track, var(--line2)); }
+.animbar input[type=range]::-moz-range-track { height: 6px; border-radius: 3px; background: var(--track, var(--line2)); }
+.animbar input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 16px; margin-top: -5px; border-radius: 3px; background: var(--orange); border: 0; }
+.animbar input[type=range]::-moz-range-thumb { width: 10px; height: 16px; border-radius: 3px; background: var(--orange); border: 0; }
+.animbar button.pp { flex: none; width: 38px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.animbar button.pp .mvic { width: 16px; height: 16px; }
+.animbar .fn { color: var(--dim); font: 12px var(--text); min-height: 1.3em; }
 
 /* tabs and blocks of a skin's or a custom monster's panel */
 .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); flex: none; }
@@ -500,7 +508,7 @@ details.special summary { cursor: pointer; font: 600 12px var(--ui); letter-spac
 .mvhead { display: flex; align-items: center; gap: 18px; flex: none; margin-bottom: 10px; }
 .mvhead h3 { flex: 1; margin: 0; font: 600 16px var(--ui); letter-spacing: .26em; text-transform: uppercase; color: var(--orange); }
 .mvgrid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 36%); gap: 14px; }
-.mvlm { min-height: 0; min-width: 0; display: grid; grid-template-columns: minmax(240px, .65fr) minmax(0, 1.35fr); gap: 16px; }
+.mvlm { min-height: 0; min-width: 0; display: grid; grid-template-columns: minmax(350px, .75fr) minmax(0, 1.25fr); gap: 16px; }
 .mvlm > .dim:only-child { grid-column: 1 / -1; }
 .mvleft { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .mvleft .movesout { flex: 1; overflow: auto; }
@@ -531,11 +539,25 @@ details.special summary { cursor: pointer; font: 600 12px var(--ui); letter-spac
 .mvbtn.light { border-color: #3d8bfd; }
 .mvbtn .mvic { width: 74%; height: 74%; color: #fff; }
 .pickrow .grab { width: 1.5em; height: 1.5em; vertical-align: middle; margin-right: 8px; color: #fff; }
-.chains .chain { margin-left: 14px; white-space: nowrap; }
-.chains .chain .mvglyph { margin-left: 0; }
+/* the combo tree (moves.js tree): a row per move, an arrow to open what may follow it, the numbers on the right */
+.mvtree { font: 13.5px var(--text); }
+.trow { display: flex; align-items: center; gap: 6px; padding: 3px 6px 3px 4px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.trow:hover { background: rgba(240, 138, 44, .1); }
+.trow.on { background: rgba(240, 138, 44, .2); }
+.trow.thead { position: sticky; top: 0; z-index: 1; background: var(--inset); color: var(--orange); cursor: default; padding-top: 5px; padding-bottom: 5px;
+              font: 600 11px var(--ui); letter-spacing: .12em; text-transform: uppercase; border-bottom-color: var(--line2); }
+.trow.thead:hover { background: var(--inset); }
+.trow .tl { flex: 1; display: flex; align-items: center; min-width: 0; }
+.trow .tn { flex: none; width: 64px; text-align: right; white-space: nowrap; }
+.trow .ttg { flex: none; width: 18px; text-align: center; color: var(--orange2); cursor: pointer; user-select: none; }
+.trow .ttg.none { visibility: hidden; cursor: default; }
+.trow .tstep { color: var(--dim); font-size: 11.5px; margin-left: 2px; white-space: nowrap; }
+.trow.zero { opacity: .45; }
 .editgrid label.then { display: flex; align-items: center; white-space: nowrap; }
 .editgrid label.then .mvglyph { margin-right: 0; }
-.moveedit h5 .mvglyph { margin: 0 10px 0 8px; font-size: 14px; }
+.moveedit h5 .mvglyph { margin: 0 4px; font-size: 14px; }
+.moveedit h5 .sep { color: var(--dim); margin: 0 2px; }
+.moveedit h5 .mvglyph:last-of-type { margin-right: 12px; }
 .moveedit { margin: 4px 0 4px; }
 .moveedit h5:first-child { margin-top: 0; }
 .moveedit h5 { margin: 18px 0 8px; font: 600 12px var(--ui); letter-spacing: .16em; text-transform: uppercase; color: var(--orange2); }

@@ -23,12 +23,12 @@ export function stageTitle(v, g) {
 
 // the model of a work folder group in the box v (the kit's export: the game's axes) with its name over it and the animation bar in ab.
 // The 3D renderer is one for the whole page: whatever shows another view of it (the full-screen Moves) calls this again after.
-export function stage(v, ab, groupKey, g) {
+export function stage(v, ab, groupKey, g, opts) {
   const still = 'api/model.glb?group=' + encodeURIComponent(groupKey) + '&t=' + Date.now();
   showModel(v, still, true);
   stageTitle(v, g);   // after: showModel empties the box
   ab.innerHTML = '';
-  return animBar(ab, groupKey, still);
+  return animBar(ab, groupKey, still, opts);   // opts.moves: the bar of the Moves view (viewer.js)
 }
 
 export function panelFrame(body, groupKey, g) {
