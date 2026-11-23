@@ -3,7 +3,7 @@
 // 3D view above and marks where it hits; with the monster's own .CHR, the picked move's numbers can be changed right there.
 // Server side: tools/chr_view.py (monster_moves, monster_move_set).
 import { el, button } from './panel.js';
-import { playMove, animName } from './viewer.js';
+import { playMove, setMoveHit, animName, hitSpheresOn, setHitSpheres } from './viewer.js';
 
 const BUTTONS = { LIGHT: 'LIGHT', HEAVY: 'HEAVY' };
 const DIRS = { 8: 'FORWARD + ', 2: 'BACK + ', 5: '' };
@@ -133,14 +133,20 @@ export async function movesPage(page, args, hooks = {}) {
     view.value = state.view;
     const all = el('input'); all.type = 'checkbox'; all.checked = state.all;
     const allL = el('label', 'check'); allL.append(all, document.createTextNode(' every combo step'));
+    // the hit sphere of the picked move on its bones in the 3D view (red inside the hit window, dim outside); the choice is kept
+    const sphOn = el('input'); sphOn.type = 'checkbox'; sphOn.checked = hitSpheresOn();
+    const sphL = el('label', 'check'); sphL.append(sphOn, document.createTextNode(' hit spheres'));
+    sphL.title = 'Draws the hit sphere of the picked move at each bone that tests the hit, on the playing animation: red while the hit window is open, dim outside it.';
+    sphOn.onchange = () => setHitSpheres(sphOn.checked);
     const bar = el('div', 'inline');
-    bar.append(view, allL);
+    bar.append(view, allL, sphL);
     const out = el('div', 'movesout');
     const edit = el('div', 'moveedit');
     page.append(bar, out, edit);
 
     const rowsAll = () => [...m.punches, ...m.swipes];
-    const pick = r => { state.pick = (r.weapon ? 'w' : 'p') + r.pos + '.' + r.ptype; playMove(r.anim, [r.win_start, r.win_end]); drawEdit(r); };
+    const hitOf = r => [[r.win_start, r.win_end], { locators: r.locators, radius: r.radius }];
+    const pick = r => { state.pick = (r.weapon ? 'w' : 'p') + r.pos + '.' + r.ptype; playMove(r.anim, ...hitOf(r)); drawEdit(r); };
     function drawEdit(r) {
       edit.innerHTML = '';
       if (!r) return;
@@ -196,7 +202,7 @@ export async function movesPage(page, args, hooks = {}) {
       // the move picked before (this view's), still on after a change
       const keep = rowsAll().find(r => ((r.weapon ? 'w' : 'p') + r.pos + '.' + r.ptype) === state.pick && r.weapon === weapon);
       const tr = keep && out.querySelector('tr[data-id="' + state.pick + '"]');
-      if (tr) { tr.classList.add('on'); drawEdit(keep); } else edit.innerHTML = '';
+      if (tr) { tr.classList.add('on'); drawEdit(keep); setMoveHit(...hitOf(keep)); } else edit.innerHTML = '';
     }
     view.onchange = show;
     all.onchange = show;

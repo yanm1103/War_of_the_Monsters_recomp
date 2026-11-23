@@ -136,7 +136,9 @@ scaled), over a ground grid and with the game's 16:9 screen marked; the game's c
 the punches (damage, hit window in % of the animation, startup, active and total frames at 60 per second, radius, stun, knockback,
 the bones that hit), the same-button combos, the moves with an object in hand (damage multiplier) and the special states'
 numbers; "every combo step" shows the 10 positions of the combo. A row plays that move's animation in the 3D view above and marks
-its hit window on the frame slider. The frames come from the animation length of the monster's model divided by the move's speed
+its hit window on the frame slider, and draws the move's hit sphere (the radius of the table) at each bone that tests the hit, red while the
+hit window is open and dim outside it; the **hit spheres** box next to "every combo step" turns that on and off (kept between runs). The spheres
+hang from the empties `loc_<hex id>` that the animation preview's `.glb` carries on the locator bones (`monglb.py`, `locators=True`). The frames come from the animation length of the monster's model divided by the move's speed
 (the hit pause and the blend back to idle are not counted). With the monster's own `.CHR` (**Give it its own .CHR to edit**, the same as
 **Extract stats**) the picked move's numbers (damage, hit window, radius, stun, knockback, hit pause, speed, stamina, animation id) are fields
 under the table that save by themselves into that file, with the limits the game can take; the disc's `.CHR` is never edited. A box lists the moves of

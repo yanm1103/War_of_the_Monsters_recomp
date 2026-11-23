@@ -140,12 +140,12 @@ def anim_glb(ngp, k, png_folder=None, stem=None):
     stem = stem or os.path.splitext(os.path.basename(ngp))[0]
     ov = _overrides(png_folder, stem)
     tex_path, rtx_path = (os.path.splitext(ngp)[0] + e for e in (".TEX", ".RTX"))
-    out = os.path.join(cache_dir(), _key(ngp, tex_path, rtx_path, *sorted(ov.values()), extra="anim|%s|%d" % (stem, k)) + ".glb")
+    out = os.path.join(cache_dir(), _key(ngp, tex_path, rtx_path, *sorted(ov.values()), extra="anim+loc|%s|%d" % (stem, k)) + ".glb")
     if os.path.exists(out):
         return out
     with _lock, _OverLib(ov):
         ex = monglb.Exporter(ngp)
-        ex.export(out, [int(k)], 60.0)
+        ex.export(out, [int(k)], 60.0, locators=True)
     return out
 
 

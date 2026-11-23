@@ -217,13 +217,16 @@ class Exporter:
         frames = [self.mdl.pose(aid, f * 60.0 / fps, k=k) for f in range(n)]
         return aid, frames, [f / fps for f in range(n)]
 
-    def export(self, out, keys, fps=60.0, split=False, anim_dir=None, uv_layer=None):
+    def export(self, out, keys, fps=60.0, split=False, anim_dir=None, uv_layer=None, locators=False):
         """keys: indices k das animacoes (a primeira da o valor inicial dos nos). split=True: o .glb principal leva so a
         primeira animacao e a lista de todas; cada animacao vai num .glb proprio em <out sem .glb>/aNNN.glb, com os mesmos
         nomes de no (o viewer carrega quando o visitante escolhe). anim_dir: outra pasta (ao lado de out) para essas animacoes;
-        os trajes de um monstro dao animacoes iguais byte a byte, entao podem dividir uma pasta (--anim-dir LIZARD)."""
+        os trajes de um monstro dao animacoes iguais byte a byte, entao podem dividir uma pasta (--anim-dir LIZARD).
+        locators=True: um no vazio "loc_<id em hex>" por localizador (ATTACHPT: 0x802 mao esquerda...), filho do osso que o carrega,
+        para a aba Moves do kit desenhar a esfera do golpe onde o jogo a testa."""
         g, img = self.g, self.img
         fx_kind = {}
+        xfp = {}   # transformacao -> (pai, osso (instancia, saida) ou None), dos quadros (so com locators)
 
         def frame_from(normal):
             """mathfMatrixFromNormal: linhas X, n, Z (vetores-linha) com n na linha 1."""
@@ -285,6 +288,9 @@ class Exporter:
                 gf = nframes
                 nframes += 1
                 seen = {}
+                if locators:
+                    for xn, x in items.xforms.items():
+                        xfp.setdefault(xn, (x.parent, (x.ctx.ci, x.out) if x.out is not None and x.ctx else None))
                 for it in items:
                     node, m, ctx = it
                     self.gs_of.setdefault(node, it.gs)
@@ -341,6 +347,41 @@ class Exporter:
                     bone_node[b] = add_node({"name": bone_name(b)}, 0)
                 rest = []
             pending = rest
+
+        if locators:
+            import ngpanim
+            gm = ngpanim.Game(self.path)
+
+            def bone_of(n):   # o osso da transformacao n ou o do pai mais proximo que tem um
+                while n is not None:
+                    par, b = xfp.get(n, (None, None))
+                    if b is not None and b in bone_node:
+                        return b
+                    n = par
+                return None
+            loc_seen = set()
+
+            def locs_under(n, depth=0):
+                if depth > 40 or not img.ok(n):
+                    return
+                for arr, cnt in gm._kids(n, img.u32(n) & 63):
+                    for k in range(min(cnt, 4096)):
+                        c = img.u32(arr + 4 * k)
+                        if not img.ok(c) or c in gm.nodes:
+                            continue
+                        if img.u32(c) & 63 == 40:
+                            lid = img.u32(c) >> 18
+                            if lid and lid not in loc_seen:
+                                loc_seen.add(lid)
+                                yield lid
+                        else:
+                            yield from locs_under(c, depth + 1)
+            for n in sorted(xfp):
+                b = bone_of(n)
+                if b is None:
+                    continue
+                for lid in locs_under(n):
+                    add_node({"name": "loc_%x" % lid}, bone_node[b])
 
         # Malha skinned com matriz de objeto M (o jogo faz pele(v) * M, ex.: Agamo) ou que some em parte dos quadros
         # (ex.: Zorgulon traje 3): o glTF ignora a matriz do no de uma malha com pele, entao M vira um no "off_<obj>"

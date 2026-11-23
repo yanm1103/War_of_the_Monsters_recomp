@@ -141,6 +141,7 @@ function frame(obj, game) {
   controls.update();
 }
 function drop() {
+  sph = null;   // its meshes hang from the model's bones and go with it
   if (current) {
     scene.remove(current);
     current.traverse(o => {
@@ -210,10 +211,53 @@ async function swapModel(url, still) {
   return play.dur;
 }
 
-// the animation bar of the model on show (animBar below), for the Moves tab: playMove(animId, [from, to]) plays that animation of
-// the model and marks the part of it (fractions of its length) where the move hits
+// the animation bar of the model on show (animBar below), for the Moves tab: playMove(animId, [from, to], {locators, radius}) plays
+// that animation of the model, marks the part of it (fractions of its length) where the move hits and, when the spheres are on,
+// draws the hit sphere at each locator bone (the empties "loc_<hex id>" of the export): bright inside the hit window, dim outside
 let animCtl = null;
-export async function playMove(id, win) { return animCtl ? animCtl.play(id, win) : false; }
+export async function playMove(id, win, spheres) { return animCtl ? animCtl.play(id, win, spheres) : false; }
+export function setMoveHit(win, spheres) { if (animCtl) animCtl.setHit(win, spheres); }
+
+// the hit spheres: on by default, the choice is kept
+let spheresOn = localStorage.getItem('wotm.hitSpheres') !== '0';
+let sph = null;   // {win: [from, to], meshes: [THREE.Mesh]} of the model on show
+export const hitSpheresOn = () => spheresOn;
+export function setHitSpheres(on) {
+  spheresOn = !!on;
+  localStorage.setItem('wotm.hitSpheres', on ? '1' : '0');
+  if (sph) for (const m of sph.meshes) m.visible = spheresOn;
+}
+function clearSpheres() {
+  if (!sph) return;
+  for (const m of sph.meshes) { m.removeFromParent(); m.geometry.dispose(); m.material.dispose(); }
+  sph = null;
+}
+// radius in game units, on the locator bones of the model on show (the model's units are the game's)
+function attachSpheres(win, spheres) {
+  clearSpheres();
+  if (!current || !spheres || !spheres.locators || !spheres.locators.length || !(spheres.radius > 0)) return;
+  current.updateMatrixWorld(true);
+  const meshes = [];
+  for (const id of spheres.locators) {
+    const node = current.getObjectByName('loc_' + id.toString(16));
+    if (!node) continue;
+    const m = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), new THREE.MeshBasicMaterial({ color: 0x4f8cf0, transparent: true, opacity: 0.2, depthTest: false }));
+    m.renderOrder = 10;
+    m.scale.setScalar(spheres.radius / (node.getWorldScale(new THREE.Vector3()).x || 1));   // the bones may carry a scale
+    m.visible = spheresOn;
+    node.add(m);
+    meshes.push(m);
+  }
+  sph = { win, meshes };
+}
+function tickSpheres(t) {
+  if (!sph || !play.dur) return;
+  const f = t / play.dur, on = sph.win && f >= sph.win[0] && f <= sph.win[1];
+  for (const m of sph.meshes) {
+    m.material.color.setHex(on ? 0xff5534 : 0x4f8cf0);
+    m.material.opacity = on ? 0.55 : 0.18;
+  }
+}
 // the name of an animation id: the monster's own name for the combo slot it plays (prefix = the monster type, "LIZARD"), else
 // what the id is in general
 export async function animName(id, prefix) {
@@ -287,7 +331,11 @@ export async function animBar(el, group, stillUrl) {
     fr.style.background = 'linear-gradient(90deg, var(--line2) 0 ' + a + '%, var(--red) ' + a + '% ' + b + '%, var(--line2) ' + b + '% 100%) center / 100% 6px no-repeat';
   };
   const hitText = () => (hit ? '  hit ' + Math.round(hit[0] * frames()) + '–' + Math.round(hit[1] * frames()) : '');
-  play.onFrame = t => { if (document.activeElement !== fr) fr.value = Math.round(t * FPS); fn.textContent = Math.round(t * FPS) + ' / ' + frames() + hitText(); };
+  play.onFrame = t => {
+    if (document.activeElement !== fr) fr.value = Math.round(t * FPS);
+    fn.textContent = Math.round(t * FPS) + ' / ' + frames() + hitText();
+    tickSpheres(t);
+  };
   sel.onchange = async () => {
     const k = sel.value;
     pb.disabled = fr.disabled = true;
@@ -306,7 +354,7 @@ export async function animBar(el, group, stillUrl) {
   const firstK = new Map();
   for (const a of list.anims || []) if (!firstK.has(a.id)) firstK.set(a.id, a.k);
   animCtl = {
-    async play(id, win) {
+    async play(id, win, spheres) {
       const k = firstK.get(id);
       if (k === undefined) return false;
       hit = null;   // the old window must not show on the new animation while it loads
@@ -314,7 +362,14 @@ export async function animBar(el, group, stillUrl) {
       await sel.onchange();
       hit = win || null;
       markHit();
+      attachSpheres(win, spheres);
       return true;
+    },
+    // the same animation with other numbers (a radius or a window changed in the Moves tab)
+    setHit(win, spheres) {
+      hit = win || null;
+      markHit();
+      if (play.mixer) attachSpheres(win, spheres);
     },
   };
   pb.onclick = () => { play.playing = !play.playing; pb.textContent = play.playing ? 'Pause' : 'Play'; };
@@ -325,4 +380,5 @@ export async function animBar(el, group, stillUrl) {
 window.kitViewer = {
   shown: () => !!current && !!box && box.isConnected,
   playing: () => ({ dur: play.dur, t: play.t, mixer: !!play.mixer }),
+  spheres: () => (sph ? sph.meshes.map(m => ({ visible: m.visible, color: m.material.color.getHex(), r: m.scale.x, w: m.getWorldPosition(new THREE.Vector3()).toArray() })) : []),
 };
