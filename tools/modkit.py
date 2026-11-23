@@ -17,6 +17,7 @@ pasta de trabalho (<mods>/_work/<mod>/, com o modkit.json dela), e o pack de um 
   python tools/modkit.py monster stats my_mod fire_togera                     # .CHR e .AIC do tipo base para editar (so dele)
   python tools/modkit.py moves togera / moves my_mod fire_togera [--json]    # os golpes (as tabelas do modo treino), lidos do .CHR
   python tools/modkit.py moves set my_mod fire_togera punch 1 5 damage=6   # muda um campo de um golpe no .CHR proprio do custom
+  python tools/modkit.py moves set my_mod fire_togera key 0xFB8 0x28 12     # um numero de uma chave (especiais, butt slam, investida...)
   python tools/modkit.py monster sounds my_mod fire_togera                    # sons do banco do tipo base em WAV (banco so dele)
   python tools/modkit.py monster mesh export my_mod fire_togera               # malha e animacoes do traje base em .glb (Blender)
   python tools/modkit.py monster mesh check my_mod fire_togera modelo.glb    # confere o modelo antes do import (.glb; .gltf/.dae: o rigged)
@@ -1277,6 +1278,20 @@ def monster_move_set(disc, work, mods, mod, name, weapon, pos, tipo, field, valu
     return {"ok": True, "old": old, "new": new}
 
 
+def monster_key_set(disc, work, mods, mod, name, key, off, value):
+    """Muda um numero de uma chave do .CHR proprio do custom (os dos especiais e dos outros golpes que a aba Moves mostra).
+    -> {"ok", "old", "new"} ou {"error"}; mesma regra de monster_move_set: o .CHR do disco nunca e editado."""
+    chr_, _ngp, _label = monster_move_files(disc, work, mods, mod, name)
+    if not chr_ or not work or not os.path.abspath(chr_).startswith(os.path.abspath(work)):
+        return {"error": "this monster has no .CHR of its own yet: Extract stats first (the disc's is never edited)"}
+    import chr_view
+    try:
+        old, new = chr_view.set_key_field(chr_, int(key), int(off), value)
+    except (ValueError, TypeError) as ex:
+        return {"error": str(ex)}
+    return {"ok": True, "old": old, "new": new}
+
+
 # Banco de som de cada tipo base (SoundManager::loadMonsterBank; o Goliath usa o do chefe, o Jelly e a forma final o da fase final)
 MONSTER_BANKS = {"MONKEY": "APE_S", "ROBOT": "ROBOT_S", "LIZARD": "LIZARD_S", "SHOGUN": "SHOGUN_S", "MANTIS": "MANTIS_S",
                  "ENERGY": "ENERGY_S", "LAVA": "LAVA_S", "DRAGON": "DRAGON_S", "ROCK": "ROKMAN_S", "ALIEN": "ALIEN_S",
@@ -2053,8 +2068,14 @@ def main(argv):
     elif args[0] == "moves" and len(args) == 8 and args[1] == "set":
         # moves set <mod> <id> punch|object <step 1..10> <type 0..5> <field>=<value>... one field per call
         fld, _, val = args[7].partition("=")
+        if args[4] == "key":   # moves set <mod> <id> key <key, e.g. 0xFB8> <offset in the key, e.g. 0x28> <value>
+            r = monster_key_set(disc, work_of("moves set", args[2]), mods, args[2], args[3], int(args[5], 0), int(args[6], 0), args[7])
+            if r.get("error"):
+                raise SystemExit("moves set: " + r["error"])
+            print("%s key %s +%s: %s -> %s" % (args[3], args[5], args[6], r["old"], r["new"]))
+            return 0
         if args[4] not in ("punch", "object") or not (args[5].isdigit() and args[6].isdigit()):
-            raise SystemExit("moves set <mod> <id> punch|object <step 1..10> <type 0..5> <field>=<value>")
+            raise SystemExit("moves set <mod> <id> punch|object <step 1..10> <type 0..5> <field>=<value> | key <0xKEY> <0xOFFSET> <value>")
         r = monster_move_set(disc, work_of("moves set", args[2]), mods, args[2], args[3], args[4] == "object", int(args[5]), int(args[6]),
                              fld, val)
         if r.get("error"):

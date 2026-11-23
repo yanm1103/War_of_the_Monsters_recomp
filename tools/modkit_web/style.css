@@ -503,3 +503,8 @@ details.costmoves > summary { cursor: pointer; font: 600 12px var(--ui); letter-
 .editgrid label { font: 12px var(--text); color: #d8d3c6; white-space: nowrap; }
 .editgrid input { min-width: 0; width: 100%; box-sizing: border-box; text-align: right; }
 .moveedit .autosave { margin-top: 8px; }
+table.moves.fields input { width: 100%; min-width: 56px; box-sizing: border-box; text-align: right; padding: 3px 6px; }
+table.moves.rings input { width: 68px; min-width: 0; }
+table.moves.fields td.l:first-child { width: 1%; white-space: nowrap; }
+.keynote { margin: 4px 0 8px; }
+label.check[hidden] { display: none !important; }

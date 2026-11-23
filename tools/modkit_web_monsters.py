@@ -311,6 +311,17 @@ class MonstersMixin:
                                                                        d.get("field"), r["old"], r["new"]))
         return r
 
+    def act_monster_key_set(self, d):
+        """{"cid", "key", "off", "value"}: one number of a special state or of the other moves (butt slam, ram, grab, throw) in the custom's
+        own .CHR -> {"ok", "old", "new"} or {"error"}."""
+        cid = d.get("cid")
+        if not cid:
+            return {"error": "only a custom monster's own .CHR can be edited"}
+        r = modkit.monster_key_set(self.disc, self.work(), self.mods, self.mod, cid, d.get("key"), d.get("off"), d.get("value"))
+        if r.get("ok"):
+            self.say("Moves of %s: key 0x%X +0x%X %g -> %g\n" % (cid, int(d["key"]), int(d["off"]), r["old"], r["new"]))
+        return r
+
     def act_monster_stats(self, d):
         cid = d["cid"]
         disc, work, mods, mod = self.disc, self.work(), self.mods, self.mod

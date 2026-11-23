@@ -144,24 +144,115 @@ def specials_view(data, keys, name):
             ko, _so, desc = fld[:3]
             if ko + 4 > size or desc.startswith("?") or "nao lido" in desc:
                 continue
-            v = cd.i32(data, o + ko) if len(fld) > 3 and fld[3] == "i" else cd.f32(data, o + ko)
+            isint = len(fld) > 3 and fld[3] == "i"
+            v = cd.i32(data, o + ko) if isint else cd.f32(data, o + ko)
             lab = desc.rstrip("?")
-            fl.append({"label": EN.get(lab, EN.get(lab.split(" (+0x")[0], lab)), "value": round(v, 4) if isinstance(v, float) else v})
+            fl.append({"label": EN.get(lab, EN.get(lab.split(" (+0x")[0], lab)), "value": round(v, 4) if isinstance(v, float) else v,
+                       "key": kid, "off": ko, "kind": "i" if isint else "f"})
         if kid == 0xFAA:   # os estaticos do HomingBug, que o jogo le dos mesmos bytes da chave
             for i, s in enumerate(cd.HOMING_BUG_STATICS):
                 if 0x28 + 4 * i + 4 <= size:
-                    fl.append({"label": "bug: " + s, "value": round(cd.f32(data, o + 0x28 + 4 * i), 4)})
+                    fl.append({"label": "bug: " + s, "value": round(cd.f32(data, o + 0x28 + 4 * i), 4), "key": kid, "off": 0x28 + 4 * i,
+                               "kind": "f"})
         if wave:
             kn, _kts, _k0, kring, _cfg, nf = wave
-            count = cd.f32(data, o + kn)
-            n = 0
-            while n < count and n < 20 and kring + nf * 4 * (n + 1) <= size:
-                n += 1
-            rings = [[round(cd.f32(data, o + kring + nf * 4 * i + 4 * j), 3) for j in range(nf)] for i in range(n)]
-            fl.append({"label": "shockwave rings (reach, damage, kill, force C, force 10%s)" % (", stun, recoil" if nf > 5 else ""),
-                       "value": rings})
+            fl.extend(ring_fields(data, o, size, kid, kn, kring, nf))
         out.append({"key": "0x%X" % kid, "state": st_name, "name": SPECIAL_NAMES.get(kid, st_name), "fields": fl})
     return out
+
+
+RING_COLS = ["reach", "damage", "kills", "force C", "force 10%", "stun", "recoil"]
+
+
+def ring_fields(data, o, size, kid, kn, kring, nf, limit=8):
+    """Os aneis da onda de choque (ShockWaveConfig) de uma chave: um campo por numero de cada anel, com "ring" e "col". O numero
+    de aneis e o float em kn; cada anel tem nf floats a partir de kring (a ordem das colunas: RING_COLS)."""
+    count = cd.f32(data, o + kn)
+    n = 0
+    while n < count and n < limit and kring + nf * 4 * (n + 1) <= size:
+        n += 1
+    return [{"label": "ring %d %s" % (i + 1, RING_COLS[j]), "value": round(cd.f32(data, o + kring + nf * 4 * i + 4 * j), 3), "key": kid,
+             "off": kring + nf * 4 * i + 4 * j, "kind": "f", "ring": i, "col": RING_COLS[j]} for i in range(n) for j in range(nf)]
+
+
+# Os outros golpes do MOVE LIST do treino que vem do .CHR (charreset::readKey; os numeros do agarrao com golpe, do levantar
+# atacando, do counter e do taunt estao no construtor de cada tipo de monstro, nao no arquivo). Cada um: id, nome, chave, e como
+# montar a dica (a do painel do treino).
+def others_view(data, keys, name):
+    """[{id, name, hint, fields: [{label, value, key, off, kind}]}]: butt slam (0xFB8), investida (0xFB4), agarrao (0xFDA, o alcance)
+    e arremesso (0xFCD)."""
+    by = {k: (o, s) for k, o, s in keys}
+    out = []
+
+    def f(kid, off, label, kind="f"):
+        o, s = by[kid]
+        if off + 4 > s:
+            return None
+        v = cd.i32(data, o + off) if kind == "i" else cd.f32(data, o + off)
+        return {"label": label, "value": round(v, 4) if kind == "f" else v, "key": kid, "off": off, "kind": kind}
+
+    def val(fl, label):
+        return next((x["value"] for x in fl if x["label"] == label), 0.0)
+
+    if 0xFB8 in by:   # butt slam: custo, onda de 7 floats por anel a partir de +0x48 (a contagem em +0x3C)
+        o, s = by[0xFB8]
+        rings = ring_fields(data, o, s, 0xFB8, 0x3C, 0x48, 7)
+        fl = [f(0xFB8, 0x28, "stamina cost")] + rings
+        n = len({r["ring"] for r in rings})
+        d0 = rings[1]["value"] if n else 0.0
+        r0 = rings[0]["value"] if n else 0.0
+        rn = rings[7 * (n - 1)]["value"] if n else 0.0
+        out.append({"id": "butt", "name": "BUTT SLAM", "fields": fl, "damage": d0, "kb": rings[3]["value"] if n else 0.0,
+                    "hint": "IN THE AIR: UP + HEAVY. %.0f DAMAGE WITHIN %.0f, THEN A SHOCKWAVE UP TO %.0f (%d RINGS). STAMINA %.0f. KNOCKS DOWN" % (
+                        d0, r0, rn, n, fl[0]["value"])})
+    if 0xFB4 in by:   # investida: dano base e por unidade de velocidade, custo
+        fl = [f(0xFB4, 0x20, "base damage"), f(0xFB4, 0x24, "damage per unit of speed"), f(0xFB4, 0x28, "stamina cost")]
+        fl = [x for x in fl if x]
+        if len(fl) == 3:
+            base, per, cost = (x["value"] for x in fl)
+            out.append({"id": "ram", "name": "RAM ATTACK", "fields": fl, "damage": base,
+                        "hint": "RUN (TAP FORWARD TWICE) + HEAVY, HOLD TO CHARGE. %.0f DAMAGE%s. STAMINA %.0f. KNOCKS DOWN" % (
+                            base, " + %.3f PER UNIT OF SPEED" % per if per > 0 else "", cost)})
+    if 0xFDA in by:
+        fl = [f(0xFDA, 0x0C, "grab range")]
+        if fl[0]:
+            out.append({"id": "grab", "name": "GRAB", "fields": fl, "damage": 0.0,
+                        "hint": "GRAB NEAR THE OPPONENT (RANGE %.0f). THEN LIGHT OR HEAVY TO HIT, GRAB OR UP + GRAB TO THROW" % fl[0]["value"]})
+    if 0xFCD in by:   # arremesso: dano do impacto no chao, por velocidade, e na parede
+        fl = [f(0xFCD, 0x28, "landing damage"), f(0xFCD, 0x2C, "landing damage per unit of speed"), f(0xFCD, 0x14, "wall damage")]
+        fl = [x for x in fl if x]
+        if len(fl) == 3:
+            ground, perv, wall = (x["value"] for x in fl)
+            out.append({"id": "throw", "name": "GRAB: THROW", "fields": fl, "damage": ground,
+                        "hint": "GRAB AGAIN WHILE GRABBING (UP + GRAB THROWS UP). LANDING %.0f%s, WALL %.0f; WHOEVER IT HITS TAKES THE SAME" % (
+                            ground, " + %.3f PER UNIT OF SPEED" % perv if perv > 0 else "", wall)})
+    return out
+
+
+def set_key_field(path, key, off, value):
+    """Grava um numero de uma chave do .CHR (os campos que specials_view e others_view mostram). So um campo que essas vistas
+    listam: nada de offset solto. -> (antigo, novo); ValueError quando nao serve."""
+    import struct
+    data = bytearray(open(path, "rb").read())
+    keys = cd.read_keys(data)
+    name = os.path.splitext(os.path.basename(path))[0]
+    fields = [x for s in specials_view(data, keys, name) + others_view(data, keys, name) for x in s["fields"]]
+    fld = next((x for x in fields if x["key"] == key and x["off"] == off), None)
+    if not fld:
+        raise ValueError("that number is not one the kit edits")
+    try:
+        v = int(float(value)) if fld["kind"] == "i" else float(value)
+    except (TypeError, ValueError):
+        raise ValueError("%r is not a number" % (value,))
+    if v != v or abs(v) > 1e7:
+        raise ValueError("the number must be between -10000000 and 10000000")
+    o = next(o for k, o, _s in keys if k == key)
+    fmt = "<i" if fld["kind"] == "i" else "<f"
+    old = struct.unpack_from(fmt, data, o + off)[0]
+    struct.pack_into(fmt, data, o + off, v)
+    with open(path, "wb") as fh:
+        fh.write(data)
+    return old, struct.unpack_from(fmt, data, o + off)[0]
 
 
 def moves_of(path, ngp=None):
@@ -177,7 +268,7 @@ def moves_of(path, ngp=None):
         mdl = pose.Model(ngp)
     res["frames"] = bool(mdl)
     if res["legacy"]:
-        res.update({"punches": [], "swipes": [], "chains": [], "specials": [],
+        res.update({"punches": [], "swipes": [], "chains": [], "specials": [], "others": [],
                     "note": "OGRE and SPIDER use the old key numbering: the move table is not read for them."})
         return res
     prow, default_r = cd.punch_table(data, keys)
@@ -187,6 +278,7 @@ def moves_of(path, ngp=None):
     res["swipes"] = [decorate(r, mdl, True) for r in srow]
     res["chains"] = chains(prow, False) + chains(srow, True)
     res["specials"] = specials_view(data, keys, name)
+    res["others"] = others_view(data, keys, name)
     res["problems"] = problems(res)
     return res
 
@@ -198,12 +290,17 @@ _F = {"win_start": ("f", 0, 1), "win_end": ("f", 0, 1), "counter_start": ("f", 0
       "kb_out": ("f", -1e5, 1e5), "kb_up": ("f", -1e5, 1e5), "stun": ("f", 0, 1e4), "pause": ("f", 0, 1e4), "radius": ("f", 0, 1e4),
       "stamina": ("f", 0, 1e4), "speed": ("f", 0.05, 20), "anim": ("i", 1, 299), "damage": ("f", 0, 1e4), "mult": ("f", 0, 100),
       "object_damage": ("f", 0, 1e4)}
+_NEXT_P, _NEXT_S = 0x54, 0x4C   # the six delays (ms) to the next move, by its type: where they start in a punch / an object config
 EDIT = {
     False: {"damage": 0x20, "win_start": 0x2C, "win_end": 0x30, "counter_start": 0x34, "counter_end": 0x38, "kb_out": 0x8C, "kb_up": 0x90,
             "stun": 0x94, "pause": 0x98, "radius": 0xA8, "stamina": 0x18, "speed": 0x24, "anim": 0x28},
     True: {"mult": 0x04, "object_damage": 0x08, "win_start": 0x14, "win_end": 0x18, "counter_start": 0x1C, "counter_end": 0x20,
            "kb_out": 0x98, "kb_up": 0x94, "stun": 0x9C, "pause": 0xA0, "radius": 0xA8, "stamina": 0x00, "speed": 0x0C, "anim": 0x10},
 }
+for _k in range(cd.TYPES):   # next_0..next_5: after this move, the ms before a move of that type may follow (0 = it cannot)
+    EDIT[False]["next_%d" % _k] = _NEXT_P + 4 * _k
+    EDIT[True]["next_%d" % _k] = _NEXT_S + 4 * _k
+    _F["next_%d" % _k] = ("f", 0, 1e5)
 
 
 def set_field(path, weapon, pos, tipo, field, value):

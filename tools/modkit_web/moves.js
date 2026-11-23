@@ -38,6 +38,8 @@ const FIELDS = [
   ['stamina', 'Stamina cost', 'What the move takes from the stamina meter.'],
   ['anim', 'Animation id', 'Which animation of the model the move plays (1 to 299).'],
 ];
+// after a move, how long (ms) before a move of each type may follow it in the combo; 0 means that type cannot follow
+const NEXT = [[5, 'LIGHT'], [3, 'FORWARD + LIGHT'], [4, 'BACK + LIGHT'], [0, 'HEAVY'], [1, 'FORWARD + HEAVY'], [2, 'BACK + HEAVY']];
 
 const fix = (v, n = 0) => (Number.isFinite(v) ? v.toFixed(n).replace(/\.0+$/, '') : '-');
 
@@ -74,20 +76,56 @@ function table(rows, weapon, names, onPick, showPos) {
   return t;
 }
 
-function fieldTable(s) {
+// a group of numbers of one state (a special, the butt slam...): each one a field when the monster has its own .CHR, else plain text.
+// The shockwave rings (fields with a "ring") are a table of their own. save(field, input) writes one number.
+function fieldTable(s, own, save, open) {
   const d = el('details', 'special');
-  d.appendChild(el('summary', '', s.name + '  (' + s.state + ')'));
-  const t = el('table', 'moves fields');
-  const b = el('tbody');
-  for (const f of s.fields) {
-    const tr = el('tr');
-    tr.appendChild(el('td', 'l', f.label));
-    const rings = Array.isArray(f.value);
-    tr.appendChild(el('td', 'l', rings ? f.value.map(r => '[' + r.join(', ') + ']').join('  ') : String(f.value)));
-    b.appendChild(tr);
+  d.open = !!open;
+  d.appendChild(el('summary', '', s.name + (s.state ? '  (' + s.state + ')' : '')));
+  if (s.hint) d.appendChild(el('div', 'dim', s.hint));
+  const cell = (f, td) => {
+    if (!own) { td.textContent = String(f.value); return; }
+    const inp = el('input'); inp.type = 'text'; inp.value = String(f.value);
+    inp.onchange = () => save(f, inp);
+    td.appendChild(inp);
+  };
+  const plain = s.fields.filter(f => !('ring' in f)), rings = s.fields.filter(f => 'ring' in f);
+  if (plain.length) {
+    const t = el('table', 'moves fields');
+    const b = el('tbody');
+    for (const f of plain) {
+      const tr = el('tr');
+      tr.appendChild(el('td', 'l', f.label));
+      const td = el('td', 'l');
+      cell(f, td);
+      tr.appendChild(td);
+      b.appendChild(tr);
+    }
+    t.appendChild(b);
+    d.appendChild(t);
   }
-  t.appendChild(b);
-  d.appendChild(t);
+  if (rings.length) {
+    const cols = [...new Set(rings.map(f => f.col))];
+    const t = el('table', 'moves fields rings');
+    const h = el('tr');
+    h.appendChild(el('th', 'l', 'Shockwave ring'));
+    for (const c of cols) h.appendChild(el('th', '', c));
+    t.appendChild(el('thead')).appendChild(h);
+    const b = el('tbody');
+    for (const i of [...new Set(rings.map(f => f.ring))]) {
+      const tr = el('tr');
+      tr.appendChild(el('td', 'l', String(i + 1)));
+      for (const c of cols) {
+        const f = rings.find(x => x.ring === i && x.col === c);
+        const td = el('td');
+        if (f) cell(f, td);
+        tr.appendChild(td);
+      }
+      b.appendChild(tr);
+    }
+    t.appendChild(b);
+    d.appendChild(t);
+  }
   return d;
 }
 
@@ -129,7 +167,7 @@ export async function movesPage(page, args, hooks = {}) {
     }
 
     const view = el('select');
-    for (const [v, t] of [['punch', 'Punches'], ['weapon', 'With an object'], ['special', 'Specials']]) { const o = el('option', '', t); o.value = v; view.appendChild(o); }
+    for (const [v, t] of [['punch', 'Punches'], ['weapon', 'With an object'], ['other', 'Other moves'], ['special', 'Specials']]) { const o = el('option', '', t); o.value = v; view.appendChild(o); }
     view.value = state.view;
     const all = el('input'); all.type = 'checkbox'; all.checked = state.all;
     const allL = el('label', 'check'); allL.append(all, document.createTextNode(' every combo step'));
@@ -147,6 +185,31 @@ export async function movesPage(page, args, hooks = {}) {
     const rowsAll = () => [...m.punches, ...m.swipes];
     const hitOf = r => [[r.win_start, r.win_end], { locators: r.locators, radius: r.radius }];
     const pick = r => { state.pick = (r.weapon ? 'w' : 'p') + r.pos + '.' + r.ptype; playMove(r.anim, ...hitOf(r)); drawEdit(r); };
+    // writes a number and draws the page again from the file (the table, the frames, the warnings follow it)
+    async function reread(note) {
+      state.note = note;
+      page.innerHTML = '';
+      const m2 = await kit.api('do/monster_moves', args);
+      if (m2.error) { page.appendChild(el('div', 'dim', 'No move table: ' + m2.error + '.')); return; }
+      await draw(m2);
+    }
+    async function saveMove(r, f, label, inp, status) {
+      status.className = 'autosave busy'; status.textContent = 'Saving…';
+      const res = await kit.api('do/monster_move_set', { ...args, weapon: !!r.weapon, pos: r.pos, ptype: r.ptype, field: f, value: inp.value });
+      if (res.error) { status.className = 'autosave err'; status.textContent = res.error.split(f).join(label); inp.value = fix(r[f], 3); return; }
+      reread('✓ Saved: ' + label + ' ' + fix(res.old, 3) + ' → ' + fix(res.new, 3) + ' (Build mod puts it in the game)');
+    }
+    async function saveKey(f, inp) {
+      const res = await kit.api('do/monster_key_set', { ...args, key: f.key, off: f.off, value: inp.value });
+      if (res.error) { inp.value = String(f.value); keyNote(res.error, true); return; }
+      reread('✓ Saved: ' + f.label + ' ' + fix(res.old, 3) + ' → ' + fix(res.new, 3) + ' (Build mod puts it in the game)');
+    }
+    const keyNote = (text, bad) => {
+      let n = out.querySelector('.keynote');
+      if (!n) { n = el('div', 'autosave keynote'); out.prepend(n); }
+      n.className = 'autosave keynote ' + (bad ? 'err' : 'ok');
+      n.textContent = text;
+    };
     function drawEdit(r) {
       edit.innerHTML = '';
       if (!r) return;
@@ -161,31 +224,37 @@ export async function movesPage(page, args, hooks = {}) {
         const lab = el('label', '', label);
         lab.title = tip;
         inp.title = tip;
-        inp.onchange = async () => {
-          status.className = 'autosave busy'; status.textContent = 'Saving…';
-          const res = await kit.api('do/monster_move_set', { ...args, weapon: !!r.weapon, pos: r.pos, ptype: r.ptype, field: f, value: inp.value });
-          if (res.error) { status.className = 'autosave err'; status.textContent = res.error.split(f).join(label); inp.value = fix(r[f], 3); return; }
-          state.note = '✓ Saved: ' + label + ' ' + fix(res.old, 3) + ' → ' + fix(res.new, 3) + ' (Build mod puts it in the game)';
-          page.innerHTML = '';
-          const m2 = await kit.api('do/monster_moves', args);
-          if (m2.error) { page.appendChild(el('div', 'dim', 'No move table: ' + m2.error + '.')); return; }
-          await draw(m2);
-        };
+        inp.onchange = () => saveMove(r, f, label, inp, status);
         grid.append(lab, inp);
       }
-      edit.append(grid, status);
+      // the combo: which move may follow this one, and after how many ms (0 = none)
+      const nx = el('div', 'editgrid');
+      for (const [k, name] of NEXT) {
+        const f = 'next_' + k, label = 'Then ' + name;
+        const inp = el('input'); inp.type = 'text'; inp.value = fix(r.next_ms[k], 0);
+        const lab = el('label', '', label);
+        const tip = 'The combo: ms before a ' + name + ' move may follow this one (0: it cannot). The move that follows is the next step of the combo.';
+        lab.title = tip; inp.title = tip;
+        inp.onchange = () => saveMove(r, f, label, inp, status);
+        nx.append(lab, inp);
+      }
+      edit.append(grid, el('h5', '', 'Combo: what may follow'), nx, status);
     }
 
     function show() {
       state.view = view.value; state.all = all.checked;
       out.innerHTML = '';
       const v = view.value;
-      allL.hidden = v === 'special';
-      if (v === 'special') {
+      allL.hidden = v === 'special' || v === 'other';
+      if (v === 'special' || v === 'other') {
         edit.innerHTML = '';
-        if (!m.specials.length) out.appendChild(el('div', 'dim', 'No special move key in this .CHR.'));
-        for (const s of m.specials) out.appendChild(fieldTable(s));
-        out.appendChild(el('div', 'dim', 'The game\'s own numbers of each special state (the training mode\'s MOVE LIST describes them in words).'));
+        const list = v === 'special' ? m.specials : m.others;
+        if (!list.length) out.appendChild(el('div', 'dim', v === 'special' ? 'No special move key in this .CHR.' : 'No other moves in this .CHR.'));
+        for (const s of list) out.appendChild(fieldTable(s, m.own, saveKey, v === 'other'));
+        out.appendChild(el('div', 'dim', v === 'special'
+          ? 'The game\'s own numbers of each special state (the training mode\'s MOVE LIST describes them in words).'
+          : 'Butt slam, ram attack, the grab\'s range and the throw. The damage of the hits inside a grab, of the getting-up attack, the counter window and the taunt are in the game\'s code for each monster type, not in the .CHR.'));
+        if (state.note) { keyNote(state.note, false); state.note = null; }
         return;
       }
       const weapon = v === 'weapon';

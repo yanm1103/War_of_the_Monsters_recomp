@@ -141,10 +141,15 @@ hit window is open and dim outside it; the **hit spheres** box next to "every co
 hang from the empties `loc_<hex id>` that the animation preview's `.glb` carries on the locator bones (`monglb.py`, `locators=True`). The frames come from the animation length of the monster's model divided by the move's speed
 (the hit pause and the blend back to idle are not counted). With the monster's own `.CHR` (**Give it its own .CHR to edit**, the same as
 **Extract stats**) the picked move's numbers (damage, hit window, radius, stun, knockback, hit pause, speed, stamina, animation id) are fields
-under the table that save by themselves into that file, with the limits the game can take; the disc's `.CHR` is never edited. A box lists the moves of
+under the table that save by themselves into that file, with the limits the game can take, and so are the six delays that say which move may
+follow it in the combo (**Combo: what may follow**, ms, 0 = none); the disc's `.CHR` is never edited. The view **Other moves** has the butt slam
+(stamina and the shockwave rings), the ram attack, the grab's range and the throw's damage, with the training mode's descriptions, and **Specials**
+the numbers of the special states, all of them fields too. The damage of the hits inside a grab, the getting-up attack, the counter window and the
+taunt are in the game's code for each monster type, not in the `.CHR`, so the kit does not show them. A box lists the moves of
 the file that cannot work (a hit window outside 0..1, an animation the model does not have, no bone to test the hit, a combo step that is
 empty). `python tools/modkit.py moves <monster>` and `moves <mod> <id> [--json]` print the same tables and the warnings, and
-`moves set <mod> <id> punch|object <step> <type> <field>=<value>` changes one number. The same table (read only) is in the panel of every
+`moves set <mod> <id> punch|object <step> <type> <field>=<value>` changes one number of a move (`next_0`..`next_5` are the combo delays) and
+`moves set <mod> <id> key <0xKEY> <0xOFFSET> <value>` one of the Other moves or Specials. The same table (read only) is in the panel of every
 costume of a game monster, in the section "Moves of this monster". *3D model*: "Currently using" (the model the game loads, what
 it was made from and the source files; the skeleton and the animations are inside the `.NGP`), **Check model...** first, then
 **Import rigged model...** / **Adjust bones...**, **Export 3D model** / **Import mesh...** / **Import animations...**, **Import
