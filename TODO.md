@@ -17,7 +17,7 @@ Plano aprovado em `docs/investigacoes/2026-11-22/plano_malha_kit.md`. Dois camin
 
 ## Mod kit
 - **Pés do Donkey Kong (conferir):** o pé torto no jogo vinha das camadas (o retarget media cada camada da pose de ligação e cada uma somava ~21° a 31° nos pés; corrigido no retarget com `--base`). Falta o dono conferir andando: se os pés (37% mais largos que os do Congar) ainda se cruzarem, escolher entre diminuir os pés (escala por osso, recurso novo) ou afastar os quadris. Medidas em `6d39b856:docs/investigacoes/2026-11-22/kit_navegador.md` ("Pés do DK").
-- **Aba Moves do kit, o que falta:** (1) conferir o treino com o jogo aberto depois da correção do multiplicador de objeto (`native/runtime/wotm_training.inc`, `readSwipeCfg`): o painel deve mostrar "x0.7", não "x130"; (2) conferir uma edição da aba no jogo (mudar o dano no kit, Build mod, ver no painel do treino). Contexto em `docs/investigacoes/2026-11-22/melhorias_mod_kit_respostas.md` (dúvida 4).
+- **Aba Moves do kit, o que falta:** (1) conferir o treino com o jogo aberto depois da correção do multiplicador de objeto (`native/runtime/wotm_training.inc`, `readSwipeCfg`): o painel deve mostrar "x0.6", não "x50"; (2) um soco editado no kit (dano do passo 1) visto no jogo: o butt slam e o sopro editados já apareceram no treino, mas a IA do teste não socou. Contexto em `docs/investigacoes/2026-11-22/melhorias_mod_kit_respostas.md` (dúvida 4).
 - **Kit no Linux:** conferir o kit no navegador no Linux (abrir o navegador, diálogos de arquivo por zenity ou kdialog) e decidir se ele entra no AppImage.
 
 ## Mechagodzilla 3 (STE), bugs achados pelo dono

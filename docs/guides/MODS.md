@@ -139,7 +139,7 @@ numbers; "every combo step" shows the 10 positions of the combo. A row plays tha
 its hit window on the frame slider, and draws the move's hit sphere (the radius of the table) at each bone that tests the hit, red while the
 hit window is open and dim outside it; the **hit spheres** box next to "every combo step" turns that on and off (kept between runs). The spheres
 hang from the empties `loc_<hex id>` that the animation preview's `.glb` carries on the locator bones (`monglb.py`, `locators=True`). The frames come from the animation length of the monster's model divided by the move's speed
-(the hit pause and the blend back to idle are not counted). With the monster's own `.CHR` (**Give it its own .CHR to edit**, the same as
+(the hit pause and the blend back to idle are not counted, and the training mode's frame data, measured in a fight, differs from these estimates). With the monster's own `.CHR` (**Give it its own .CHR to edit**, the same as
 **Extract stats**) the picked move's numbers (damage, hit window, radius, stun, knockback, hit pause, speed, stamina, animation id) are fields
 under the table that save by themselves into that file, with the limits the game can take, and so are the six delays that say which move may
 follow it in the combo (**Combo: what may follow**, ms, 0 = none); the disc's `.CHR` is never edited. The view **Other moves** has the butt slam

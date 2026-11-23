@@ -14,8 +14,9 @@ const COLS = {
   move: ['Move', 'The button (and direction) that starts it. LIGHT is Square, HEAVY is Triangle.'],
   dmg: ['Damage', 'The damage the move requests. With an object it is a multiplier of the object\'s own damage.'],
   win: ['Hit window', 'Part of the animation, in %, where the game tests the hit.'],
-  sat: ['Frames', 'In game frames (60 per second, the animation at the move\'s speed): startup (to the first hit test) · active (frames with a ' +
-                  'hit test) · total length. The hit pause and the blend back to idle come on top.'],
+  sat: ['Frames (est.)', 'Estimated from the animation (60 frames per second, at the move\'s speed): startup (to the first hit test) · active (frames with a ' +
+                  'hit test) · total length. The training mode measures these in a fight and gets other numbers: the hit pause, the blend back to idle, ' +
+                  'being hit or blocked and the AI\'s own timing come on top.'],
   radius: ['Radius', 'Radius of the sphere swept along the bone each frame; a hit needs it to touch a body.'],
   stun: ['Stun', 'Above 100 the victim is stunned (cannot act for a moment).'],
   kb: ['Knockback', 'Out / up. Anything other than 0 knocks the victim down.'],
