@@ -34,7 +34,8 @@ to run, including models and sounds from other games and the files the game load
 `setup_runtime.ps1` on install; `WOTM_RECOMP_DIR` or `.wotm_recomp_dir` give the runtime). Only the folders that exist in the repo are
 mirrored; the ones that exist only in `discroot\mods\` (yours, `_work`) stay as they are. Without a `mods` folder (with exactly that name: on
 Windows the path `mods` falls on the disc's `MOD\`, the IRX one) next to the ELF, the game and the launcher read the repo's `mods/`
-(`WOTM_REPO`, which `run_live.bat` and the launcher pass). Folders that start with `_` (sources, `_work`) are not mirrored and the
+(`WOTM_REPO`, which `run_live.bat` and the launcher pass). The launcher lists the mods of the runtime's `discroot\mods\` (the
+runtime from `WOTM_RECOMP_DIR` or `.wotm_recomp_dir`), the folder the game reads, so mods that exist only there show up too. Folders that start with `_` (sources, `_work`) are not mirrored and the
 game does not read them.
 
 ## Interface (the kit in a browser tab, the launcher's "Mod kit" button)

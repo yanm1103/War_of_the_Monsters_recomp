@@ -585,8 +585,8 @@ class Launcher : Form
         }
         return null;
     }
-    // A pasta mods que o jogo le (wotm_mods.inc): WOTM_MODS; senao mods\ ao lado do ELF (WOTM_DISC ou disc\ do repo, como o
-    // run_live.ps1); sem ela, mods\ do repo. null sem nenhuma.
+    // A pasta mods que o jogo le (wotm_mods.inc): WOTM_MODS; senao mods\ ao lado do ELF (WOTM_DISC, o discroot\ do runtime que o
+    // run_live.ps1 usa, ou disc\ do repo); sem ela, mods\ do repo. null sem nenhuma.
     string ModsDir()
     {
         string env = Environment.GetEnvironmentVariable("WOTM_MODS");
@@ -595,6 +595,8 @@ class Launcher : Form
         var dirs = new List<string>();
         string disc = Environment.GetEnvironmentVariable("WOTM_DISC");
         if (!string.IsNullOrEmpty(disc)) dirs.Add(Path.Combine(disc, "mods"));
+        string runtime = KnownRuntimeDir();
+        if (runtime != null) dirs.Add(Path.Combine(Path.Combine(runtime, "discroot"), "mods"));
         dirs.Add(Path.Combine(Path.Combine(exeDir, "disc"), "mods"));
         dirs.Add(Path.Combine(exeDir, "mods"));
         foreach (string d in dirs)
