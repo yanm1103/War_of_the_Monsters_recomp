@@ -675,7 +675,7 @@ class Source:
         return mul(self.root_inv, self.ed.world(i, clip, t, cache))
 
     def layer_poses(self, base_ngp):
-        """{id: {node: world}} for each layer of the base .NGP the export came from (tools/ngprig.py layer_anims): the pose
+        """{clip name: {node: world}} for each layer of the base .NGP the export came from (tools/ngprig.py layer_anims): the pose
         the layer is added to, with its channels at 0. The export shows a layer as that pose plus the layer, the channels it
         leaves alone at the base's stored pose (atMat), which is not always the bind pose (Congar's feet, ~30 degrees off);
         measured from the bind pose, a layer would carry that difference and the game would add it on top of every move."""
@@ -687,10 +687,12 @@ class Source:
             n = g.by_name.get(bonelabels.canonical(nd.get("name") or ""))
             if n is not None:
                 node_of[i] = n
-        ids = [a[0] for a in g.anims()]
+        anims = g.anims()
+        ids = [a[0] for a in anims]
+        layer = ngprig.layer_anims(g, base_ngp)
         out = {}
-        for an, aid in ngprig.layer_anims(g, base_ngp).items():
-            if ids.count(aid) != 1:   # a repeated id is exported as a<id>_<k>, which the retarget does not take as a layer
+        for aid, k, _st, _et, _n, an in anims:
+            if an not in layer:
                 continue
             ctxs = g.contexts()
             c = ctxs[g.main]
@@ -699,7 +701,8 @@ class Source:
                     c.val[cv.idx] = 0.0
                     c.dirty.add(cv.idx)
             w = g.walk(ctxs)
-            out[aid] = {i: ngpanim.tr(w[n][1]) for i, n in node_of.items() if n in w}
+            nm = "a%03d" % aid + ("_%d" % k if ids.count(aid) > 1 else "")   # the export's name (tools/monglb.py)
+            out[nm] = {i: ngpanim.tr(w[n][1]) for i, n in node_of.items() if n in w}
         return out
 
 
@@ -1058,7 +1061,7 @@ def build(src_path, model_path, map_path, out_path, size=1.0, height=None, front
             continue
         tracks = {i: ([], []) for i in korder}   # joint -> (quats, positions) local
         pscale = {}                              # prop -> scale per frame
-        lp = layer_pose.get(int(m.group(1))) if m and re.fullmatch(r"a\d+", nm) else None
+        lp = layer_pose.get(nm)
         ref = {b: lp.get(b, rest_src[b]) if lp else rest_src[b] for b in rest_src}   # what the source bone turns from
         for f in range(frames):
             t = f / FPS
