@@ -4883,12 +4883,37 @@ private:
             if (in.fudge) for (int a = 0; a < 3; ++a) out[a] = eye_[a] + (out[a] - eye_[a]) * in.fzScale;
             if (e) { e->p[0] = out[0]; e->p[1] = out[1]; e->p[2] = out[2]; e->gp = pvGen; }
         };
+        // Luz dos dois lados nas malhas importadas (tools/ngpmesh.py e ngprig.py ligam o bit 30 das flags do OBJECT, o primeiro dos
+        // `future`, que o jogo nao usa): as secoes dos monstros nao tem culling e o VU1 ilumina as duas faces com a mesma normal, entao
+        // o avesso de uma superficie aberta (a franja de pelo do Donkey Kong) sai com a normal de fora, contra todas as luzes, e fica
+        // preto. Quando o olho esta do outro lado do plano do triangulo em relacao as normais dos vertices, a cor sai da normal
+        // invertida. So nas importadas: a arte do disco conta com a luz de um lado so (as asas do Preytor vistas por tras saem claras).
+        // WOTM_ONESIDED=1 volta a luz de um lado so tambem nelas, como o VU1.
+        constexpr uint32_t kObjTwoSided = 0x40000000;
+        static const bool oneSided = std::getenv("WOTM_ONESIDED") != nullptr;
+        const bool twoSided = !oneSided && !wire && pm && md->skinned && (in.ol.lit || in.ol.pt) && !idcMode && !noVcol &&
+                              (ram.u32(it.node + 0xC) & kObjTwoSided) != 0;
         for (size_t k = 0; k + 2 < t.size(); k += 3) {
             if (in.multi && t[k].slot != slot) continue;   // so as secoes deste slot
             if (onlySub >= 0 && md->skinned && t[k].sub != onlySub) continue;
             float p[3][3];
             for (int c = 0; c < 3; ++c) posOf(t[k + c], p[c]);
             if (t[k].cull && !wire && !in.gpuCull && backFacing(p, eye_)) continue;
+            bool flip = false;   // olho do lado oposto ao das normais: a cor deste triangulo sai da normal invertida (fora do cache)
+            if (twoSided) {
+                float ns[3] = {0.f, 0.f, 0.f};
+                for (int c = 0; c < 3; ++c) {
+                    float nw[3];
+                    envNormal(t[k + c], &pm[(t[k + c].cx & 0x7F) / 4], skinM, nw);
+                    for (int a = 0; a < 3; ++a) ns[a] += nw[a];
+                }
+                const float u[3] = {p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]};
+                const float w[3] = {p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]};
+                const float fn[3] = {u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]};
+                const float side = fn[0] * (eye_[0] - p[0][0]) + fn[1] * (eye_[1] - p[0][1]) + fn[2] * (eye_[2] - p[0][2]);
+                const float nside = fn[0] * ns[0] + fn[1] * ns[1] + fn[2] * ns[2];
+                flip = side * nside < 0.f;   // o sinal de fn some no produto: nao depende do sentido do triangulo nem de espelho
+            }
             sink.tri(t[k].cull != 0);
             float eu[3], ev[3];   // UV do mapa de ambiente por vertice
             bool envOk[3] = {false, false, false};
@@ -4912,12 +4937,17 @@ private:
                     else if (v.isAdc) { gsV = false; sink.color(255, 0, 0, 255); }   // WOTM_SHOWADC
                     else if (noVcol && md->skinned) { gsV = false; sink.color(255, 255, 255, 255); }   // diagnostico
                     else {
-                        PV *e = cachedPv(v);
+                        PV *e = flip ? nullptr : cachedPv(v);
                         uint8_t col[4];
                         if (e && e->gc == pvGen) std::memcpy(col, e->col, 4);
                         else {
                             uint8_t rgb[3];
-                            vertexRgb(in.ol, it.color, pm ? &pm[(v.cx & 0x7F) / 4] : nullptr, pm ? skinM : it.m, v, rgb, in.rowLen);
+                            Vtx vf;
+                            if (flip) {
+                                vf = v;
+                                vf.nx = int8_t(-std::max<int>(v.nx, -127)); vf.ny = int8_t(-std::max<int>(v.ny, -127)); vf.nz = int8_t(-std::max<int>(v.nz, -127));
+                            }
+                            vertexRgb(in.ol, it.color, pm ? &pm[(v.cx & 0x7F) / 4] : nullptr, pm ? skinM : it.m, flip ? vf : v, rgb, in.rowLen);
                             // cor e alfa crus no modo GS (o shader faz texel * Cv / 128 e At * Av / 16384); no quadro anterior e no filme,
                             // o antigo (cor dobrada e limitada a 1,0, alfa 4a/255)
                             const float va = v.a * in.fade * (gsA ? 1.f : 4.f);

@@ -853,6 +853,7 @@ helicopters from `MON/ARMY.*` (below). The adventure keeps its own army untouche
 | `WOTM_NOSKIN`, `WOTM_BONECODES=no`, `WOTM_SKINSAN`, `WOTM_SKINFIT` | skinning variants (diagnostics) |
 | `WOTM_SHOWADC`, `WOTM_SUBPKT=n` | shows the triangles discarded by ADC in red / only one sub-packet |
 | `WOTM_NOVCOL`, `WOTM_OPAQUE`, `WOTM_ONEPASS`, `WOTM_UVISO` | turn off parts of the drawing |
+| `WOTM_ONESIDED=1` | imported meshes lit on one side only, like the VU1. By default a skinned `OBJECT` with the two-sided bit (bit 30 of the flags, set by `tools/ngpmesh.py` and `tools/ngprig.py`; `FORMATS.md`) seen from the side opposite to its vertex normals is lit with the normals flipped: monster sections have no culling, so the inside of an open surface (fur flaps) would face away from every light and come out black. Disc meshes keep the one-sided light (Preytor's wings seen from behind rely on it) |
 | `WOTM_NOOVER=1` | common blending with As clamped to 1 (without the extra `gsBlendOver1/2` passes) |
 | `WOTM_NOFX`, `WOTM_FXNOGRAY`, `WOTM_NOSHADOW`, `WOTM_NOFLARE` | turn off particles / gray ramp / shadows / lens flare |
 | `WOTM_FXLIVE=1` | particles read from live RAM at presentation (without the snapshot's shadow copy, `Particles::shadowRam`): compare the square at the origin of Magmo's impact |

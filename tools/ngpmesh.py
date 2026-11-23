@@ -27,6 +27,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import vifpkt  # noqa: E402
 
 BASE = 0xA00000
+# OBJECT flags (+0xC), first of the two `future` bits (unused by the game, clear in every disc file): an imported mesh, lit on
+# both sides by the native renderer (the inside of an open surface would face away from every light and come out black)
+TWO_SIDED = 1 << 30
 
 
 class MeshError(Exception):
@@ -602,7 +605,7 @@ def replace(base, obj, pkts):
     # OBJECT: numVerts (strip vertices, 13 bits) and the bounding sphere of the rest positions
     nverts = sum(len(s.idx) for p in pkts for b in p.batches for s in b.sections)
     bits = base.u32(obj + 0xC)
-    base.put32(obj + 0xC, (bits & ~(0x1FFF << 16)) | (min(nverts, 0x1FFF) << 16))
+    base.put32(obj + 0xC, (bits & ~(0x1FFF << 16)) | (min(nverts, 0x1FFF) << 16) | TWO_SIDED)
     pts = [tuple(struct.unpack("<f", struct.pack("<I", v[c]))[0] for c in range(3)) for p in pkts for b in p.batches for v in b.pos]
     lo = [min(x[c] for x in pts) for c in range(3)]
     hi = [max(x[c] for x in pts) for c in range(3)]

@@ -1119,7 +1119,7 @@ def build(base_path, glb_path, out_dir, name=None, front=None, scale=None, heigh
         o.ptr(a + 4, (mb.u32(tmpl + 4) & 0xF0000000) | start)
         nverts = sum(len(s.idx) for p in pkts for bb in p.batches for s in bb.sections)
         bits = mb.u32(tmpl + 0xC)
-        o.u32(a + 0xC, (bits & ~(0x1FFF << 16)) | (min(nverts, 0x1FFF) << 16))
+        o.u32(a + 0xC, (bits & ~(0x1FFF << 16)) | (min(nverts, 0x1FFF) << 16) | ngpmesh.TWO_SIDED)
         pts = [tuple(struct.unpack("<f", struct.pack("<I", v[c]))[0] for c in range(3)) for p in pkts for bb in p.batches
                for v in bb.pos]
         all_pts += pts
@@ -1480,7 +1480,7 @@ def rigid_object(o, mb, tmpl, base, tex_id, ctx, tris):
     o.ptr(a + 4, start)
     nverts = sum(len(s.idx) for b in pkt.batches for s in b.sections)
     bits = mb.u32(tmpl + 0xC)
-    o.u32(a + 0xC, (bits & ~(0x1FFF << 16)) | (min(nverts, 0x1FFF) << 16))
+    o.u32(a + 0xC, (bits & ~(0x1FFF << 16)) | (min(nverts, 0x1FFF) << 16) | ngpmesh.TWO_SIDED)
     ctr, rad = sphere([c[0] for t in tris for c in t])
     for c in range(3):
         o.f(a + 0x10 + 4 * c, ctr[c])
