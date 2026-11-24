@@ -9,7 +9,7 @@ namespace wotm_cursor
 {
 static Texture2D g_tex{};
 static bool g_tried = false;
-constexpr float kHeight = 0.05f;   // altura da seta, em fracao da altura da janela
+constexpr float kHeight = 0.025f;   // altura da seta, em fracao da altura da janela
 
 static bool load()
 {
