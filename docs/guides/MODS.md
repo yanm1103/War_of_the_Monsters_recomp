@@ -161,7 +161,11 @@ hit window as two fractions of the animation (0 to 1), which are the fields. Wit
 (**Values**) that save by themselves into that file, with the limits the game can take, and so are the six delays that say which move may
 follow it in the combo (**Comboable moves after this one**, ms, 0 = none); without it the same values are shown as text, and the disc's `.CHR`
 is never edited. Above the values, plain lines give what the fields do not: the hit frames (of the move's length), the bones that test the hit,
-the animation's name and how long after the move before it this one may start. The view **Other moves** has the butt slam
+the animation's name, the blend into the move (the delay of the move before it, or its own first-move delay at step 1: the game blends from the
+pose before over that time and does not test the hit meanwhile, so the line says how many frames of the hit window that hides) and the frame where
+the next move of the combo starts (the animation reaches the file's chain point, `chain_at`, with the next button already pressed; if that is before the hit window
+ends the hit is cut short, and the line says by how many frames). The warnings box says the same for a chain point before the hit window ends and for a blend that covers the whole hit
+window. The view **Other moves** has the butt slam
 (stamina and the shockwave rings), the ram attack, the grab's range and the throw's damage, with the training mode's descriptions, and **Specials**
 the numbers of the special states, all of them fields too (the list holds one entry per state, and each plays the animation the game uses for it in the 3D view, with no hit window or sphere: the butt slam's drop, the ram's impact, the grab's reach, the throw, the crowd control loop and, for any other special, its active loop; the ids are the same for every monster, see `ANIM_IDS.md`).
 A veil with a spinner holds the middle column and the 3D view while something loads (the table, an animation, a saved change). The damage of the hits inside a grab, the getting-up attack, the counter window and the

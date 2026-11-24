@@ -177,7 +177,22 @@ function facts(r, names, via) {
     [COLS.loc[0], COLS.loc[1], r.bones || '-'],
     [COLS.anim[0], COLS.anim[1], r.anim + (names[r.anim] ? '  ' + names[r.anim] : '')],
   ];
-  if (via) rows.push(['Follows after', 'The delay of the move before it in the combo: this one may start that many ms after it.', via + ' ms']);
+  // the blend into this move: the delay of the move before it (or its own "first move" delay at step 1). The game blends from the
+  // pose before over that time, and it does not test the hit while it blends
+  const blendMs = via || (r.pos === 1 && !r.weapon ? r.first_ms : 0);
+  if (blendMs) {
+    const bf = blendMs * 0.06, lost = tm ? Math.max(0, Math.min(bf, tm.start + tm.active) - tm.start) : 0;
+    rows.push(['Blend into it', 'The game blends from the pose before into this move over this time (the delay the move before it gives this one, or the move\'s own first-move delay), and does not test the hit during the blend.',
+      fix(blendMs) + ' ms (' + fix(bf, 1) + ' frames)' + (lost > 0.4 ? ': the first ' + fix(lost, 1) + ' frames of the hit window are not tested' : '')]);
+  }
+  // when the next move of the combo may start: the combo press only counts inside the hit window onward, but the next move enters when
+  // the animation passes this point (at its hit window's end, unless the file says otherwise), not after the delay
+  if (tm && tm.chain != null && r.next_ms && r.next_ms.some(x => x > 0)) {
+    const end = tm.start + tm.active, cut = end - tm.chain;
+    rows.push(['Next move starts', 'The move that follows in the combo starts when this animation reaches this frame, if its button was pressed by then (or when it is pressed, if later). Before the end of the hit window it cuts the hit short.',
+      'frame ' + tm.chain + ' of ' + tm.total + ' (' + fix(r.chain_at * 100) + '% of the animation)' +
+      (cut > 0.5 ? ': ' + fix(cut) + ' frames before the hit window ends, the hit is cut' : '')]);
+  }
   const box = el('div', 'mvfacts');
   for (const [k, tip, v] of rows) {
     const row = el('div', 'fact');

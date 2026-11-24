@@ -80,15 +80,21 @@ def timing(row, frames):
         return None
     sp = row["vel"] if row.get("vel", 0) > 0 else 1.0
     f = frames / sp
-    return {"frames": round(frames), "start": round(row["ini"] * f), "active": max(0, round((row["fim"] - row["ini"]) * f)),
-            "total": round(f)}
+    out = {"frames": round(frames), "start": round(row["ini"] * f), "active": max(0, round((row["fim"] - row["ini"]) * f)),
+           "total": round(f)}
+    if "cadeia" in row:   # so o soco tem o ponto de encadeamento (+0x50): o golpe seguinte entra quando a animacao passa dele
+        out["chain"] = round(row["cadeia"] * f)
+        out["input_from"] = row["jan_ini"]   # campos (60/s) depois do comeco (e do atraso) em que o clique do proximo golpe vale
+        out["input_to"] = row["jan_fim"]
+    return out
 
 
 # as chaves das linhas do chr_dump (portugues) -> as do resultado (ingles)
 RENAME = {"tipo": "ptype", "dano": "damage", "raio": "radius", "raio_padrao": "radius_default", "atord": "stun", "pausa": "pause",
           "estamina": "stamina", "vel": "speed", "ini": "win_start", "fim": "win_end", "cont_ini": "counter_start",
           "cont_fim": "counter_end", "kb_h": "kb_out", "kb_v": "kb_up", "dano_objeto": "object_damage", "prox": "next_ms",
-          "locs": "locators"}
+          "locs": "locators", "cadeia": "chain_at", "jan_ini": "input_start", "jan_fim": "input_end", "rec_ini": "recover_at",
+          "rec_vel": "recover_speed", "primeiro_ms": "first_ms"}
 
 
 def decorate(row, mdl, weapon):
@@ -334,6 +340,40 @@ def set_field(path, weapon, pos, tipo, field, value):
     return old, struct.unpack_from(fmt, d, a)[0]
 
 
+def chain_timing(r, who, by):
+    """Avisos do encadeamento de um golpe (StatePunch::update): o golpe seguinte entra quando a animacao passa de `chain_at`
+    (+0x50), entao um `chain_at` antes do fim da janela de acerto corta o golpe antes de ele acertar; e o acerto so e testado com a
+    animacao fora da transicao para o golpe (a duracao dela e o atraso `next_ms` do golpe anterior, em ms), entao uma janela que abre
+    dentro dessa transicao perde o comeco. [texto]"""
+    out = []
+    t = r.get("timing")
+    if r["weapon"] or "chain_at" not in r or not t:
+        return out
+    f = t["frames"] / (r["speed"] if r.get("speed", 0) > 0 else 1.0)   # quadros do golpe na velocidade dele
+    a, b, c = r["win_start"] * f, r["win_end"] * f, r["chain_at"] * f
+    nxt_types = [k for k in range(cd.TYPES) if r["next_ms"][k] > 0 and (False, r["pos"] + 1, k) in by]
+    if nxt_types and c < a - 0.5:
+        out.append("%s: the next move starts at frame %.0f, before the hit window opens (frame %.0f): this move is replaced before it can hit" % (who, c, a))
+    elif nxt_types and c < b - 0.5:
+        out.append("%s: the next move starts at frame %.0f, before the hit window ends (frame %.0f): the hit is cut after %.0f of its %.0f frames" % (who, c, b, c - a, b - a))
+    if r["pos"] == 1 and r.get("first_ms", 0) * FPS / 1000.0 >= b:   # o 1o golpe de uma corrente entra com a transicao do proprio golpe (+0x6C)
+        out.append("%s: the blend into it (%.0f ms = %.1f frames) outlasts its hit window (frames %.0f-%.0f): it never hits" % (who, r["first_ms"], r["first_ms"] * FPS / 1000.0, a, b))
+    elif r["pos"] == 1 and r.get("first_ms", 0) * FPS / 1000.0 > a + 0.5:
+        out.append("%s: the blend into it (%.0f ms = %.1f frames) covers the first %.1f frames of its hit window (frames %.0f-%.0f), which are not tested" % (who, r["first_ms"], r["first_ms"] * FPS / 1000.0, r["first_ms"] * FPS / 1000.0 - a, a, b))
+    for k in nxt_types:   # a transicao para o proximo golpe come o comeco da janela dele
+        n = by[(False, r["pos"] + 1, k)]
+        nt = n.get("timing")
+        if not nt:
+            continue
+        nf = nt["frames"] / (n["speed"] if n.get("speed", 0) > 0 else 1.0)
+        na, nb, blend = n["win_start"] * nf, n["win_end"] * nf, r["next_ms"][k] * FPS / 1000.0
+        if blend >= nb:
+            out.append("%s: the blend into %s (%.0f ms = %.1f frames) outlasts its hit window (frames %.0f-%.0f): it never hits" % (who, TYPE_INFO[k][0], r["next_ms"][k], blend, na, nb))
+        elif blend > na + 0.5:
+            out.append("%s: the blend into %s (%.0f ms = %.1f frames) covers the first %.1f frames of its hit window (frames %.0f-%.0f), which are not tested" % (who, TYPE_INFO[k][0], r["next_ms"][k], blend, blend - na, na, nb))
+    return out
+
+
 def problems(m):
     """Avisos sobre os golpes que o jogo faria de um jeito que o autor nao espera: [texto]. So golpes que causam dano (um espaco de
     enchimento do arquivo nao conta)."""
@@ -365,6 +405,7 @@ def problems(m):
         for k in range(cd.TYPES):   # a combo that points to a step that is not there
             if r["next_ms"][k] > 0 and r["pos"] < cd.TIERS and (r["weapon"], r["pos"] + 1, k) not in by:
                 out.append("%s: chains to %s but that step is empty" % (who, TYPE_INFO[k][0]))
+        out += chain_timing(r, who, by)
     return out
 
 
