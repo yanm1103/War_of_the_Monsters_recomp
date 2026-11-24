@@ -510,6 +510,10 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   monster, and `JELLY.CHR`'s sits between Jelly's legs; Togera's at 2x (Goliath) and 3x (Jelly) behaves like a regular
   monster's. `FINAL.CHR`'s already works. The port reads the camera from the `from`'s `.CHR` (from `mods/` or from the disc) and puts it on the monster on every
   POV change (log `[custom] jelly: camera do RST/LIZARD.CHR, distancias x3.00 (POV 0: ...)`).
+  `back` and `height` (`%`, 10 to 1000 and 10 to 2000) scale only the camera position on the ground (`back` behind, `height` up;
+  without `height` it follows `back`), while `scale` still scales the vectors the camera looks along. A big monster seen from behind
+  at its own height hides what is in front of it: farther and higher (`"scale": 150, "back": 190, "height": 250` for King Ghidorah),
+  the modern camera looks down at the point ~120 above the monster's feet and the enemy shows.
   `fly` and `flyHeight` (`%`, 10 to 1000 and 10 to 2000) give a camera of its own while the monster flies (a flying base such as
   Raptros: `StateFly` is the whole jump too, so the camera of its own starts at the first flap, glide or boost sub-state, not at
   the jump or at a fall off a roof, and ends when it leaves the state or lands): when it starts and ends the port reloads the POV with only the camera position scaled (`fly`

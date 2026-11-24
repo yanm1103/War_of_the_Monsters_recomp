@@ -178,6 +178,8 @@ struct Custom {
     std::map<int, std::vector<float>> rootTurn;
     std::string cameraFrom;   // MonsterLongNames do .CHR da camera ("lizard"); vazio = a do proprio tipo
     float cameraScale = 1.f;    // distancias da camera emprestada
+    float cameraBack = 0.f;     // no chao, a posicao da camera (so ela, nao o ponto de mira) nesta escala ("camera": {"back": %}); 0 = a "scale"
+    float cameraHeight = 0.f;   // idem para a altura ("height": %); 0 = o mesmo que "back"
     float cameraFlyScale = 0.f; // afastamento da camera (so a posicao, nao o ponto de mira) com o monstro no StateFly ("camera": {"fly": %}); 0 = o mesmo
     float cameraFlyHeight = 0.f;  // idem para a altura ("flyHeight": %); 0 = o mesmo que "fly" (wotm_custom.inc)
     std::string narrator;       // narrator/<nome>.mp3 (vazio = o do tipo)
@@ -1038,6 +1040,10 @@ private:
                         if (const MonsterInfo *b = customBase(lower(f->s))) c.cameraFrom = kLongNames[b->type];
                     if (const json::Value *sc = cam->get("scale"); sc && sc->type == json::Value::Int && sc->i >= 10 && sc->i <= 1000)   // em %
                         c.cameraScale = float(sc->i) / 100.f;
+                    if (const json::Value *bk = cam->get("back"); bk && bk->type == json::Value::Int && bk->i >= 10 && bk->i <= 1000)
+                        c.cameraBack = float(bk->i) / 100.f;
+                    if (const json::Value *ht = cam->get("height"); ht && ht->type == json::Value::Int && ht->i >= 10 && ht->i <= 2000)
+                        c.cameraHeight = float(ht->i) / 100.f;
                     if (const json::Value *fl = cam->get("fly"); fl && fl->type == json::Value::Int && fl->i >= 10 && fl->i <= 1000)
                         c.cameraFlyScale = float(fl->i) / 100.f;
                     if (const json::Value *fh = cam->get("flyHeight"); fh && fh->type == json::Value::Int && fh->i >= 10 && fh->i <= 2000)

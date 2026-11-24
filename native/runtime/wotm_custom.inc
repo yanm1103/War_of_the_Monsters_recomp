@@ -461,7 +461,7 @@ namespace wotm_custom
         if (base)
         {
             float scale = cu && !cu->cameraFrom.empty() ? cu->cameraScale : kCamScaleDefault;
-            float posScale = 0.f, posHeight = 0.f;
+            float posScale = cu ? cu->cameraBack : 0.f, posHeight = cu ? cu->cameraHeight : 0.f;   // no chao ("back", "height")
             if (cu && cu->cameraFlyScale > 0.f && flyCamActive(rdram, m))   // voando ("camera": {"fly", "flyHeight"}): so move a camera
             {
                 posScale = cu->cameraFlyScale;

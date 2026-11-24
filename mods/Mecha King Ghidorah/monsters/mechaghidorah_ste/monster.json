@@ -11,8 +11,8 @@
   "camera": {
     "from": "raptros",
     "scale": 150,
-    "fly": 300,
-    "flyHeight": 120
+    "back": 190,
+    "height": 250
   },
   "fireColor": "#FFE060",
   "shotFx": {
