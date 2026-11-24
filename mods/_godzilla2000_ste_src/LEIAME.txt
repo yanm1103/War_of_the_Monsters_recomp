@@ -21,3 +21,4 @@ modkit.py monster stats "Godzilla 2000" godzilla_ste (uma vez), depois tools/chr
 --ngp <pasta de trabalho>/LIZARD0.NGP --out <pasta de trabalho>/LIZARD.CHR e modkit.py pack "Godzilla 2000". Velocidade por golpe:
 "speed" em moves.json (1 = o ritmo do STE).
 Logo: logo_source.webp centrado num 512x256 como os logos do jogo (caixa de 80% x 60% da imagem, como os do SHELL.TEX).
+Transicao entre golpes: moves.json tem "nextDelay" e "firstDelay" em 30 ms (o padrao de 60/96 ms do WotM tirava ate metade da janela de acerto dos jabs do STE: o jogo nao testa o acerto durante a transicao). Conferir pela aba Moves do kit.

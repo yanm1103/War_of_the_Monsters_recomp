@@ -22,3 +22,4 @@ do monster.json do Godzilla 2000, com as texturas dele (fx/); os sons 5 e 6 ja s
 Golpes: as animacoes inteiras do STE nos ids 10-24 (PROFILES['Godzilla90s'] do ste_clips.py) e um .CHR proprio feito de moves.json:
 modkit.py monster stats ... (uma vez), depois tools/chr_moves.py moves.json disc/RST/LIZARD.CHR --ngp <pasta de trabalho>/LIZARD0.NGP
 --out <pasta de trabalho>/LIZARD.CHR e modkit.py pack "Godzilla 90s". Mapa no comentario do moves.json.
+Transicao entre golpes: moves.json tem "nextDelay" e "firstDelay" em 30 ms (o padrao de 60/96 ms do WotM tirava ate metade da janela de acerto dos jabs do STE: o jogo nao testa o acerto durante a transicao). Conferir pela aba Moves do kit.

@@ -66,3 +66,4 @@ Conferido no jogo (treino com PS2X_PAD, WOTM_ANIMLOG=1; docs/screenshots/2026-11
 (a direcao tem de ser apertada junto com o botao; no roteiro de pad, "cima" e frente e "baixo" e tras) e cada um aparece nas tiras de
 quadros com as esferas de ataque (azul) e de acerto (vermelho). Sons (audiocheck.py): cada som do LIZARD_S e do GENAMB_S do mod
 decodifica com a duracao e o envelope do WAV do STE; o jogo pede ao banco do mod (PS2X_SND_LOG=1) os sons 2, 5, 6, 7, 16, 55, 63 e 70.
+Transicao entre golpes: moves.json tem "nextDelay" e "firstDelay" em 30 ms (o padrao de 60/96 ms do WotM tirava ate metade da janela de acerto dos jabs do STE: o jogo nao testa o acerto durante a transicao). Conferir pela aba Moves do kit.

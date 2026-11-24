@@ -10,6 +10,9 @@ The JSON names each move once and then the chain of each attack type (combo posi
    "chains": {"square": ["jab", "jab_l", ...], "fwd_square": [...], "back_square": [...],
               "triangle": [...], "fwd_triangle": [...], "back_triangle": [...]}}
 
+Top-level "nextDelay" and "firstDelay" (ms) are the defaults of every move's blend into the next move and into the first move of a
+combo (without "firstDelay" the file's slot keeps its own, 96 ms for the disc's; a move's own "nextDelay"/"firstDelay" wins).
+
 Position p of a type plays chain[p], or the chain's last move once the chain is shorter. Every move of positions
 1..maxChain-1 lets the combo go on with any type; the moves at position maxChain end it. A type listed in "stop"
 (e.g. "stop": ["triangle"]) has no positions past its chain: the combo cannot go on with it there. Slots past maxChain keep
@@ -23,7 +26,7 @@ Per move (only "anim" and "hit" are required):
   into the idle over the rest of the animation, played at that speed (default [1, 1]: the whole animation, then the idle);
 - "chainAt": fraction of the animation where a combo press already made starts the next move (default: the hit's end);
 - "damage", "stamina" (cost), "radius" (hit sphere, 0 = the default), "stun" (> 100 stuns), "pause" (hit pause, ms),
-  "knockback": [out, up] (nonzero knocks down), "nextDelay" (ms before the next move of the combo; default 60);
+  "knockback": [out, up] (nonzero knocks down), "nextDelay" (ms before the next move of the combo, which is also the blend into it: the hit is not tested while it blends; default 60, or the file's top-level "nextDelay");
 - "locators": up to two of hand_l, hand_r, foot_l, foot_r, mouth, head, tail_mid, tail_tip, shoulder, or a number.
 
 The state lasts the whole animation (frames / speed, with "recover" applied): the combo input stays open from the hit's
@@ -66,7 +69,7 @@ def locator(v):
     return LOCATORS[v]
 
 
-def write_move(d, b, mv, frames, allowed):
+def write_move(d, b, mv, frames, allowed, default_delay=60.0, first_delay=None):
     pf = lambda o, v: struct.pack_into("<f", d, b + o, float(v))
     pi = lambda o, v: struct.pack_into("<i", d, b + o, int(v))
     h0, h1 = mv["hit"]
@@ -91,7 +94,10 @@ def write_move(d, b, mv, frames, allowed):
     pi(0x48, round(h0 * frames / speed))   # combo input window, fields after the start (and the hit pause)
     pi(0x4C, round(total))                 # ... and, with no wind-down, the end of the state
     pf(0x50, mv.get("chainAt", h1))
-    delay = float(mv.get("nextDelay", 60))
+    delay = float(mv.get("nextDelay", default_delay))
+    first = mv.get("firstDelay", first_delay)   # the blend into the first move of a combo (+0x6C); None keeps the template's
+    if first is not None:
+        pf(0x6C, first)
     for k in range(6):
         pf(0x54 + 4 * k, delay if allowed[k] else 0.0)
     kb = mv.get("knockback", [0, 0])
@@ -149,7 +155,7 @@ def main(argv):
             b = slot_at(ko, pos, typ)
             d[b + 0x10:b + 0x10 + SLOT] = template
             allowed = [pos + 1 < min(n, length.get(k, 0)) for k in range(6)]
-            total = write_move(d, b, moves[name], frames[name], allowed)
+            total = write_move(d, b, moves[name], frames[name], allowed, float(spec.get("nextDelay", 60)), spec.get("firstDelay"))
             print("pos %d %-13s %-14s anim %3d  %3.0f frames, %3.0f fields  hit %2.0f-%3.0f%%" % (
                 pos + 1, tname, name, moves[name]["anim"], frames[name], total, moves[name]["hit"][0] * 100,
                 moves[name]["hit"][1] * 100))

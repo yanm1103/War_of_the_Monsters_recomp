@@ -1,6 +1,8 @@
 {
   "comment": "Golpes do Godzilla 90s do STE no .CHR proprio do godzilla90s_ste (tools/chr_moves.py), no mesmo esquema do Godzilla 2000: hit = janela do ataque no STE (tools/ste/ste_moves.py), dano = 3 + 0,25 x o do STE. No lugar do Overhand, o Hook (cima + soco no STE); no do Double Swipe, o Double Hammer (para longe + soco); no da mordida, o Combo Crossover Claw; no do Tail_Full_Spin, o Tail_Overhead (sem evento de ataque no STE: janela da ponta da cauda passando na frente). Velocidade 1 em todos: acelerar so o que ficar lento no teste ('speed').",
   "maxChain": 5,
+  "nextDelay": 30,
+  "firstDelay": 30,
   "stop": ["triangle", "back_square"],
   "moves": {
     "jab_r":         {"anim": 10, "hit": [0.07, 0.41], "damage": 4.0, "locators": ["hand_r"], "radius": 18, "stun": 20, "pause": 40, "stamina": 5},

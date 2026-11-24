@@ -31,3 +31,4 @@ portrait_compose.py; modkit.py monster portrait ... portrait.png.
 Logo: mklogo.py logo.png C:\Windows\Fonts\impact.ttf (tipografico, aco; "MECHA KING" em cima), provisorio.
 Narrador: a fala "MECHAG INTRO" do locutor do STE (MGG e o Megaguirus; o MECHAG e o do Mecha-King Ghidorah, pelo nome e pela duracao); tools/ste/ste_sound.py <iso> godzilla_voice_e <pasta> --match "<NOME> INTRO" (o banco de voz do locutor do STE, godzilla_voice_e; o WAV fica aqui como narrator_ste.wav) + ffmpeg (corta o silencio do fim, 44100 Hz mono, 128k): narrator/mechaghidorah_ste.mp3.
 O nome na tela (HUD, 11 letras) sai igual ao do King Ghidorah ("ghidorah"): a regra do jogo pega a ultima palavra que cabe.
+Transicao entre golpes: moves.json tem "nextDelay" e "firstDelay" em 30 ms (o padrao de 60/96 ms do WotM tirava ate metade da janela de acerto dos jabs do STE: o jogo nao testa o acerto durante a transicao). Conferir pela aba Moves do kit.

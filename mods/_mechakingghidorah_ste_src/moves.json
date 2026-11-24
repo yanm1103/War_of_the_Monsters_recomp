@@ -1,6 +1,8 @@
 {
   "comment": "Golpes do Mecha-King Ghidorah do STE no .CHR proprio do mechaghidorah_ste (tools/chr_moves.py sobre o DRAGON.CHR), no esquema do King Ghidorah (mods/_kingghidorah_ste_src/moves.json): hit = janela do ataque no STE (tools/ste/ste_moves.py MGhidorah.cmp), dano = 3 + 0,25 x o do STE. Botoes do STE: A = cabecas e punhos, X = chutes, B = cauda; Left = para longe, Right = para perto. No WotM o A e o X dividem o Quadrado, o B vira o Triangulo: square = Jab_right, Jab_left, Jab_double, Kick1 e o Punch_right (fim de combo); triangle = Tail_Whip (1 e 2 num clipe so) e Punch_left; fwd_square = Lunge Smash (Right A), Kick Launch (Right X) e Triple Smash (Up A); back_square = Full Spin (Left A) e Hip Strike (Left X); fwd_triangle = Tail Uppercut (Right B) e Overhead Kick (Up X); back_triangle = Double Uppercut (Down A) e Tail Sweep (Down B). Fora: Tail Reverse (Left B), Blunting Wind (Up B), Duck Kick (Down X) e os golpes de pulo. Locators: hand_r/hand_l = bocas das cabecas D/E, mouth = a do meio, tail_mid/tail_tip = Tail6/Tail12 (0x816/0x817 no rigmap; no Raptros sao as asas). Conjuntos de esferas do STE: [0,1,2] cabeca D, [3,4,5] E, [6-9] cauda, [11,12,13] e [14-16] pe D, [17-19] pe E.",
   "maxChain": 5,
+  "nextDelay": 30,
+  "firstDelay": 30,
   "stop": ["triangle"],
   "moves": {
     "jab_r":          {"anim": 10, "hit": [0.10, 0.29], "damage": 4.0, "locators": ["hand_r"], "radius": 20, "stun": 20, "pause": 40, "stamina": 5},
