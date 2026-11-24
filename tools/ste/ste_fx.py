@@ -13,7 +13,8 @@ maiusculas e um indice em base 26 (AA = 0) na tabela de nomes do ELF (336 pontei
 int.emitter_count blocos "{ ... }", um por emissor. Valores de grafico: "const N" ou "poly G c0 c1 .. cG" (polinomio de grau G na
 idade normalizada da particula, 0..1). Flags: +AdditiveAlpha (mistura aditiva), +EmitterRelativeParticles (as particulas andam com
 o emissor). enum.particle_type Stretch = risco esticado na direcao da velocidade: cresce ate val.stretch_percent_time da vida e
-encolhe a partir de val.destretch_percent_time. graph.gen_rate = particulas por segundo; graph.em_vel.x = velocidade no eixo do
+encolhe a partir de val.destretch_percent_time; +RenderAsDatapoints (o raio do Ghidorah) liga as particulas vivas numa fita unica
+("mode": "ribbon"); graph.p_vel_mult.y/z multiplica a velocidade lateral pela idade ("sideMul"). graph.gen_rate = particulas por segundo; graph.em_vel.x = velocidade no eixo do
 emissor (o do sopro aponta para a frente da boca); p_lifetime em segundos; p_size = lado do quadrado.
 
 Texturas (tipo 9): descritor {3, psm, u16 w, u16 h, n mips, tamanho, ...}; psm 0x13 = PSMT8 (bit 30 = embaralhada no GS, ver
@@ -167,6 +168,13 @@ def layer_of(em, scale_tex):
     p = poly('graph.size_mul')
     if p:
         L['sizePoly'] = p
+    p = poly('graph.p_vel_mult.y')   # a velocidade lateral (y e z do emissor) muda com a idade
+    if p:
+        L['sideMul'] = p
+    if '+RenderAsDatapoints' in eflags:   # as particulas sao os pontos de uma fita ligada: um fio so, nao riscos soltos
+        L['mode'] = 'ribbon'
+        if L['radial'] and not g('graph.start_area.x'):
+            L['radialSide'] = True   # a area nasce so no plano lateral: o radial nao tem componente para a frente
     if L['mode'] == 'stretch':
         L['stretch'] = [float(fmt(a.get('val.stretch_percent_time', [('lit', '0')])).strip('"') or 0),
                         float(fmt(a.get('val.destretch_percent_time', [('lit', '1')])).strip('"') or 1)]

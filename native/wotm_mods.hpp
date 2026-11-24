@@ -573,7 +573,10 @@ private:
                 else
                     L.site = site == "hit" ? breathfx::Hit : breathfx::Mouth;
                 L.hit = L.site == breathfx::Hit;
-                L.stretch = mode && mode->type == json::Value::Str && lower(mode->s) == "stretch";
+                const std::string modeName = mode && mode->type == json::Value::Str ? lower(mode->s) : "";
+                L.ribbon = modeName == "ribbon";
+                L.stretch = modeName == "stretch" || L.ribbon;
+                if (const json::Value *x = l.get("radialSide")) L.radialSide = x->asBool(false);
                 L.relative = L.site == breathfx::Mouth;
                 if (const json::Value *x = l.get("relative")) L.relative = x->asBool(L.relative);
                 if (const json::Value *x = l.get("once")) L.once = x->asBool(false);
@@ -600,6 +603,7 @@ private:
                     poly(cp->get("a"), L.a);
                 }
                 poly(l.get("sizePoly"), L.sizeMul);
+                poly(l.get("sideMul"), L.sideMul);
                 pair(l.get("stretch"), L.grow, L.shrink);
                 L.duration = std::max(0.f, num(l.get("duration"), L.duration));
                 cfg->layers.push_back(std::move(L));

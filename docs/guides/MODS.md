@@ -567,6 +567,13 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
     full), `colorPoly` (`{"r": [c0, c1, ...], ...}`: each channel multiplied by c0 + c1·t + c2·t² over the particle's age t, 0 to 1)
     and `sizePoly` (the same for the size), `stretch` (`[grow, shrink]`: the streak grows until that fraction of its life and
     shrinks from the second one), `additive` (default true; false = normal blend), `rotate` (random starting rotation).
+    `mode: "ribbon"` draws the layer's live particles as the points of one connected string: a streak from the layer's origin
+    (its `offset` from the mouth) to the youngest particle, then to the next one, up to the oldest (the *Godzilla: Save the Earth*
+    `RenderAsDatapoints`; King Ghidorah's lightning). Size, colour and fade of each streak are the ones of the particle that ends it.
+    `sideMul` (`[c0, c1, ...]`, over the particle's age like `sizePoly`; relative particles only) multiplies the sideways velocity
+    (side and up of the mouth), so a particle thrown out to the side can come back; `radialSide` (default false) keeps a `radial`
+    thrown in a random direction (no spawn area) in the sideways plane, with no forward component. `radial` is measured from the
+    centre of the spawn area, which is `offset`.
   - The units are the game's (Togera's breath reaches 800). `tools/ste/ste_fx.py` builds the layers from a *Godzilla: Save the
     Earth* effect (`TOOLS.md`); the `Godzilla 2000` mod carries the Godzilla 2000 atomic breath made that way.
 - `shotFx`: the monster's own default shot (the ranged attack: square with no opponent in reach, `Monster` +0x6878), drawn by the

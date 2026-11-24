@@ -85,9 +85,12 @@ namespace wotm_breathfx
         float vl[3] = {(L.speed + L.speedRandom * (2.f * frand(e.rng) - 1.f)) * scale, 0.f, 0.f};
         if (L.radial != 0.f)
         {
-            float dir[3] = {off[0], off[1], off[2]};
+            // para fora do centro da area (o "offset" e o centro, nao parte da direcao); area sem tamanho = direcao sorteada
+            float dir[3] = {off[0] - L.offset[0] * scale, off[1] - L.offset[1] * scale, off[2] - L.offset[2] * scale};
+            if (L.radialSide)
+                dir[0] = 0.f;
             if (dot3v(dir, dir) < 1e-8f)
-                for (int k = 0; k < 3; ++k) dir[k] = 2.f * frand(e.rng) - 1.f;
+                for (int k = L.radialSide ? 1 : 0; k < 3; ++k) dir[k] = 2.f * frand(e.rng) - 1.f;
             norm3(dir);
             for (int k = 0; k < 3; ++k) vl[k] += dir[k] * L.radial * scale;
         }
@@ -116,10 +119,70 @@ namespace wotm_breathfx
         st.parts.push_back(q);
     }
 
-    // Uma camada em quadrados: o risco vai da cauda (o caminho dos ultimos instantes) a cabeca; as da boca param no limite da linha
-    // de visada (o que o bafo atingiu)
-    void emitQuads(const wotm::breathfx::Layer &L, const LayerState &st, const Frame &fr, float limit, wotm::Particles::BeamSystem &out)
+    // Anda uma particula dt segundos; "sideMul" tira ou devolve a velocidade lateral (lado e cima da boca) conforme a idade
+    void stepPart(const wotm::breathfx::Layer &L, Part &q, float dt)
     {
+        const float m = L.relative && !L.sideMul.c.empty() ? L.sideMul.at(std::clamp(q.age / q.life, 0.f, 1.f)) : 1.f;
+        q.age += dt;
+        q.p[0] += q.v[0] * dt;
+        q.p[1] += q.v[1] * m * dt;
+        q.p[2] += q.v[2] * m * dt;
+    }
+
+    // Uma camada em quadrados: o risco vai da cauda (o caminho dos ultimos instantes) a cabeca; as da boca param no limite da linha
+    // de visada (o que o bafo atingiu). Em fita ("ribbon") as particulas vivas, da mais nova a mais velha, sao os pontos de um fio
+    // que sai da origem da camada: um risco entre cada par de pontos.
+    void emitQuads(const wotm::breathfx::Layer &L, const LayerState &st, const Frame &fr, float limit, float scale, wotm::Particles::BeamSystem &out)
+    {
+        if (L.ribbon)
+        {
+            // corta o segmento a->b no limite da linha de visada (o que o bafo atingiu); false = inteiro depois do limite
+            auto clip = [&](float *head, float *tail) {
+                if (L.hit || limit < 0.f)
+                    return true;
+                float dh[3], dt[3];
+                for (int a = 0; a < 3; ++a) { dh[a] = head[a] - fr.o[a]; dt[a] = tail[a] - fr.o[a]; }
+                const float ph = dot3v(dh, fr.f), pt = dot3v(dt, fr.f);
+                if (std::min(ph, pt) >= limit)
+                    return false;
+                if (ph > limit && ph > pt)
+                    for (int a = 0; a < 3; ++a) head[a] = tail[a] + (head[a] - tail[a]) * (limit - pt) / (ph - pt);
+                else if (pt > limit && pt > ph)
+                    for (int a = 0; a < 3; ++a) tail[a] = head[a] + (tail[a] - head[a]) * (limit - ph) / (pt - ph);
+                return true;
+            };
+            std::vector<const Part *> by;
+            by.reserve(st.parts.size());
+            for (const Part &q : st.parts)
+                by.push_back(&q);
+            std::sort(by.begin(), by.end(), [](const Part *x, const Part *y) { return x->age < y->age; });
+            float prev[3], o[3] = {L.offset[0] * scale, L.offset[1] * scale, L.offset[2] * scale};
+            if (L.relative)
+                toWorld(fr, o, prev);
+            else
+                for (int k = 0; k < 3; ++k) prev[k] = fr.o[k] + o[0] * fr.f[k] + o[1] * fr.s[k] + o[2] * fr.u[k];
+            for (const Part *q : by)
+            {
+                const float t = std::clamp(q->age / q->life, 0.f, 1.f);
+                wotm::Particles::BeamQuad bq{};
+                bq.half = 0.5f * q->size * L.sizeMul.at(t);
+                bq.rgba = gsColor(L, t);
+                bq.stretch = true;
+                float cur[3];
+                if (L.relative)
+                    toWorld(fr, q->p, cur);
+                else
+                    std::copy(q->p, q->p + 3, cur);
+                float a[3] = {prev[0], prev[1], prev[2]}, b[3] = {cur[0], cur[1], cur[2]};
+                std::copy(cur, cur + 3, prev);
+                if (bq.half <= 0.f || (bq.rgba >> 24) == 0 || !clip(b, a))
+                    continue;
+                std::copy(b, b + 3, bq.b);
+                std::copy(a, a + 3, bq.a);
+                out.quads.push_back(bq);
+            }
+            return;
+        }
         for (const Part &q : st.parts)
         {
             const float t = std::clamp(q.age / q.life, 0.f, 1.f);
@@ -211,13 +274,10 @@ namespace wotm_breathfx
         fr.u[2] = s[0] * f[1] - s[1] * f[0];
         return fr;
     }
-    void ageLayer(LayerState &st, float dt)
+    void ageLayer(const wotm::breathfx::Layer &L, LayerState &st, float dt)
     {
         for (Part &q : st.parts)
-        {
-            q.age += dt;
-            for (int k = 0; k < 3; ++k) q.p[k] += q.v[k] * dt;
-        }
+            stepPart(L, q, dt);
         st.parts.erase(std::remove_if(st.parts.begin(), st.parts.end(), [](const Part &q) { return q.age >= q.life; }), st.parts.end());
     }
     void spawnAny(uint32_t &rng, const wotm::breathfx::Layer &L, LayerState &st, float scale, const Frame &fr, float age0 = 0.f)
@@ -255,7 +315,7 @@ namespace wotm_breathfx
             wotm::Particles::BeamSystem bs;
             bs.texture = L.texture;
             bs.additive = L.additive;
-            emitQuads(L, layers[j], fr, -1.f, bs);
+            emitQuads(L, layers[j], fr, -1.f, cfg.scale, bs);
             if (!bs.quads.empty())
                 fx.beams.push_back(std::move(bs));
         }
@@ -311,7 +371,7 @@ namespace wotm_breathfx
                 const wotm::breathfx::Layer &L = cfg.layers[j];
                 LayerState &st = e.layers[j];
                 if (dt > 0.f || first)
-                    ageLayer(st, dt);
+                    ageLayer(L, st, dt);
                 if (L.site == Site::Shot && active && dt > 0.f)
                     emitLayer(e, L, st, cfg.scale, e.fr, dt);
                 else if (L.site == Site::Launch && e.seen && (first || (dt > 0.f && !L.once && e.burst <= L.duration)))
@@ -352,7 +412,7 @@ namespace wotm_breathfx
                 LayerState &st = le.layers[j];
                 if (dt > 0.f)
                 {
-                    ageLayer(st, dt);
+                    ageLayer(L, st, dt);
                     if (L.site == Site::Impact && !L.once && le.t <= L.duration)
                         emitLayer(le, L, st, le.cfg->scale, le.fr, dt);
                 }
@@ -415,10 +475,7 @@ namespace wotm_breathfx
                 if (dt > 0.f)
                 {
                     for (Part &q : st.parts)
-                    {
-                        q.age += dt;
-                        for (int k = 0; k < 3; ++k) q.p[k] += q.v[k] * dt;
-                    }
+                        stepPart(L, q, dt);
                     st.parts.erase(std::remove_if(st.parts.begin(), st.parts.end(), [](const Part &q) { return q.age >= q.life; }), st.parts.end());
                     const bool emit = on && (!L.hit || blocked);
                     if (!emit)
@@ -447,7 +504,7 @@ namespace wotm_breathfx
                 wotm::Particles::BeamSystem bs;
                 bs.texture = L.texture;
                 bs.additive = L.additive;
-                emitQuads(L, st, fr, limit, bs);
+                emitQuads(L, st, fr, limit, cfg->scale, bs);
                 if (!bs.quads.empty())
                     fx.beams.push_back(std::move(bs));
             }

@@ -36,6 +36,9 @@ struct Layer {
     Site site = Mouth;
     bool hit = false;           // "at": "hit" = nasce onde o sopro bate (so enquanto bate em algo); "mouth" = na boca
     bool stretch = false;       // "mode": "stretch" = risco esticado na direcao da velocidade; "sprite" = quadrado de frente
+    bool ribbon = false;        // "mode": "ribbon" = as particulas vivas viram os pontos de uma fita ligada da origem da camada a mais
+                                // velha (o RenderAsDatapoints do STE: o raio como um fio so); implica stretch
+    bool radialSide = false;    // "radialSide": o "radial" sorteado sai so para os lados (sem a componente para a frente)
     bool relative = true;       // as particulas andam com a boca (a cabeca vira e o sopro acompanha); padrao: so as da boca
     bool once = false;          // "once": solta "rate" particulas de uma vez quando a camada liga, e nada mais
     bool additive = true;       // mistura aditiva (Cs As + Cd); false = comum
@@ -50,6 +53,7 @@ struct Layer {
     float offset[3] = {0.f, 0.f, 0.f};   // centro do cubo em relacao a boca (frente, lado, cima): outra boca, ao lado da do jogo
     float color[4] = {1.f, 1.f, 1.f, 1.f};
     Poly r, g, b, a, sizeMul;
+    Poly sideMul;               // "sideMul": multiplica a velocidade lateral (lado e cima da boca) na idade normalizada; vazio = 1 (so relativas)
     float grow = 0.2f, shrink = 0.6f;   // risco: cresce ate grow da vida e encolhe a partir de shrink (fracoes)
     float duration = 0.2f;      // camadas de explosao e de saida do tiro sem "once": segundos emitindo
 };

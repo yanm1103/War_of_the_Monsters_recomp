@@ -220,7 +220,7 @@
     "layers": [
       {
         "texture": "fx/ghid_bolts_1.png",
-        "mode": "stretch",
+        "mode": "ribbon",
         "rate": 10.0,
         "speed": 1600.0,
         "speedRandom": 0.0,
@@ -249,10 +249,12 @@
           5.0,
           -2.0
         ],
-        "stretch": [
-          0.0,
-          1.0
-        ]
+        "sideMul": [
+          1.0,
+          1.0,
+          -5.5
+        ],
+        "radialSide": true
       },
       {
         "texture": "fx/basic.png",
@@ -291,6 +293,11 @@
           2.0,
           -2.0
         ],
+        "sideMul": [
+          1.0,
+          1.0,
+          -5.5
+        ],
         "stretch": [
           1.0,
           1.0
@@ -298,7 +305,7 @@
       },
       {
         "texture": "fx/ghid_bolts_1.png",
-        "mode": "stretch",
+        "mode": "ribbon",
         "rate": 10.0,
         "speed": 1600.0,
         "speedRandom": 0.0,
@@ -327,10 +334,12 @@
           5.0,
           -2.0
         ],
-        "stretch": [
-          0.0,
-          1.0
+        "sideMul": [
+          1.0,
+          1.0,
+          -5.5
         ],
+        "radialSide": true,
         "offset": [
           12.8,
           -19.2,
@@ -374,6 +383,11 @@
           2.0,
           -2.0
         ],
+        "sideMul": [
+          1.0,
+          1.0,
+          -5.5
+        ],
         "stretch": [
           1.0,
           1.0
@@ -386,7 +400,7 @@
       },
       {
         "texture": "fx/ghid_bolts_1.png",
-        "mode": "stretch",
+        "mode": "ribbon",
         "rate": 10.0,
         "speed": 1600.0,
         "speedRandom": 0.0,
@@ -415,10 +429,12 @@
           5.0,
           -2.0
         ],
-        "stretch": [
-          0.0,
-          1.0
+        "sideMul": [
+          1.0,
+          1.0,
+          -5.5
         ],
+        "radialSide": true,
         "offset": [
           13.4,
           20.1,
@@ -461,6 +477,11 @@
           1.0,
           2.0,
           -2.0
+        ],
+        "sideMul": [
+          1.0,
+          1.0,
+          -5.5
         ],
         "stretch": [
           1.0,
