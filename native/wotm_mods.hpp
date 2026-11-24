@@ -592,6 +592,18 @@ private:
                 L.lifeMin = std::max(0.01f, L.lifeMin);
                 L.lifeMax = std::max(L.lifeMin, L.lifeMax);
                 L.spread = num(l.get("spread"), 0.f);
+                if (const json::Value *a = l.get("anchor")) {   // localizador: alias de ngprig.py (hand_l, hand_r, foot_l, foot_r, mouth) ou o id
+                    static const std::pair<const char *, int> kAnchors[] = {{"hand_l", 0x802}, {"hand_r", 0x803}, {"foot_l", 0x804},
+                                                                             {"foot_r", 0x805}, {"mouth", 0x80B}};
+                    if (a->type == json::Value::Str) {
+                        for (const auto &kv : kAnchors)
+                            if (lower(a->s) == kv.first) L.anchor = kv.second;
+                    } else if (a->type == json::Value::Int && a->i >= 0x802 && a->i <= 0x832) {
+                        L.anchor = int(a->i);
+                    }
+                    if (!L.anchor)
+                        std::fprintf(stderr, "[mods] monstro %s: \"%s\" anchor desconhecido (fica a boca)\n", where.c_str(), key);
+                }
                 if (const json::Value *o = l.get("offset"); o && o->type == json::Value::Arr)
                     for (size_t k = 0; k < 3 && k < o->arr.size(); ++k) L.offset[k] = num(&o->arr[k], 0.f);
                 if (const json::Value *c = l.get("color"); c && c->type == json::Value::Arr)

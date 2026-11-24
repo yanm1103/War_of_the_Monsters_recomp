@@ -510,8 +510,9 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   monster, and `JELLY.CHR`'s sits between Jelly's legs; Togera's at 2x (Goliath) and 3x (Jelly) behaves like a regular
   monster's. `FINAL.CHR`'s already works. The port reads the camera from the `from`'s `.CHR` (from `mods/` or from the disc) and puts it on the monster on every
   POV change (log `[custom] jelly: camera do RST/LIZARD.CHR, distancias x3.00 (POV 0: ...)`).
-  `fly` and `flyHeight` (`%`, 10 to 1000 and 10 to 2000) give a camera of its own while the monster is in `StateFly` (a flying
-  base such as Raptros): on entering and leaving the state the port reloads the POV with only the camera position scaled (`fly`
+  `fly` and `flyHeight` (`%`, 10 to 1000 and 10 to 2000) give a camera of its own while the monster flies (a flying base such as
+  Raptros: `StateFly` is the whole jump too, so the camera of its own starts at the first flap, glide or boost sub-state, not at
+  the jump or at a fall off a roof, and ends when it leaves the state or lands): when it starts and ends the port reloads the POV with only the camera position scaled (`fly`
   behind, `flyHeight` up; without `flyHeight` the height follows `fly`), and the point the camera looks at keeps the ground scale.
   The modern camera shrinks the distance when the line from the monster to the camera hits the stage (the invisible ceiling at the
   flight limit included), so a flying monster wants a far and low camera (`"fly": 300, "flyHeight": 120`), not a high one. Log:
@@ -562,8 +563,10 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
     the hit), `rate` (particles per second), `once` (true: `rate` particles at once when the layer turns on), `speed` and
     `speedRandom` (forward, ±), `radial` (outward from the spawn area's centre), `up` (world up), `life` and `size` (`[min, max]`,
     seconds and side of the square; in a streak, its width), `spread` (half side of the spawn cube), `offset` (`[forward, side,
-    up]`: where the spawn cube sits from the mouth, in game units; copies of the layers with side offsets make more mouths, like
-    King Ghidorah's three beams), `color` (`[r, g, b, a]`, 1 =
+    up]`: where the spawn cube sits from the mouth, in game units), `anchor` (`"hand_l"`, `"hand_r"`, `"foot_l"`, `"foot_r"`,
+    `"mouth"` or a locator id 0x802 to 0x832: the layer leaves from that locator, which the game moves with the skeleton every
+    frame, instead of the game's mouth, and `offset` adds to it; copies of the layers with another `anchor` make more mouths, like
+    King Ghidorah's three beams, whose side heads are `hand_l` and `hand_r`), `color` (`[r, g, b, a]`, 1 =
     full), `colorPoly` (`{"r": [c0, c1, ...], ...}`: each channel multiplied by c0 + c1·t + c2·t² over the particle's age t, 0 to 1)
     and `sizePoly` (the same for the size), `stretch` (`[grow, shrink]`: the streak grows until that fraction of its life and
     shrinks from the second one), `additive` (default true; false = normal blend), `rotate` (random starting rotation).

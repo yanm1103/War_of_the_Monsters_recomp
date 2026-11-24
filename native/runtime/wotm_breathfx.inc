@@ -472,6 +472,23 @@ namespace wotm_breathfx
             {
                 const wotm::breathfx::Layer &L = cfg->layers[j];
                 LayerState &st = e.layers[j];
+                Frame fl = fr;   // o quadro da camada: o da boca, com a origem no localizador ("anchor") quando ela tem um
+                if (L.anchor)
+                {
+                    float ap[3];
+                    for (int k = 0; k < 3; ++k) ap[k] = ram.f32(m + uint32_t(L.anchor) * 16u - 0x4260u + 4u * k);   // getLocatorTrans: mundo
+                    if (std::isfinite(ap[0] + ap[1] + ap[2]) && (ap[0] != 0.f || ap[1] != 0.f || ap[2] != 0.f))
+                    {
+                        std::copy(ap, ap + 3, fl.o);
+                        static int logged = 0;
+                        if (logged < 6 && dt > 0.f && ++logged)
+                        {
+                            float d[3] = {ap[0] - fr.o[0], ap[1] - fr.o[1], ap[2] - fr.o[2]};
+                            std::fprintf(stderr, "[custom] sopro: camada %zu sai do localizador 0x%X, (frente, lado, cima) da boca = (%.1f, %.1f, %.1f)\n", j,
+                                         L.anchor, dot3v(d, fr.f), dot3v(d, fr.s), dot3v(d, fr.u));
+                        }
+                    }
+                }
                 if (dt > 0.f)
                 {
                     for (Part &q : st.parts)
@@ -486,7 +503,7 @@ namespace wotm_breathfx
                     else if (L.once)
                     {
                         if (!st.fired)
-                            for (int n = 0; n < int(L.rate + 0.5f) && n < 512; ++n) spawn(e, L, st, cfg->scale, fr, hitPt, 0.f);
+                            for (int n = 0; n < int(L.rate + 0.5f) && n < 512; ++n) spawn(e, L, st, cfg->scale, fl, hitPt, 0.f);
                         st.fired = true;
                     }
                     else
@@ -495,7 +512,7 @@ namespace wotm_breathfx
                         while (st.acc >= 1.f && st.parts.size() < 2048)
                         {
                             st.acc -= 1.f;
-                            spawn(e, L, st, cfg->scale, fr, hitPt, L.rate > 0.f ? st.acc / L.rate : 0.f);
+                            spawn(e, L, st, cfg->scale, fl, hitPt, L.rate > 0.f ? st.acc / L.rate : 0.f);
                         }
                     }
                 }
@@ -504,7 +521,7 @@ namespace wotm_breathfx
                 wotm::Particles::BeamSystem bs;
                 bs.texture = L.texture;
                 bs.additive = L.additive;
-                emitQuads(L, st, fr, limit, cfg->scale, bs);
+                emitQuads(L, st, fl, limit, cfg->scale, bs);
                 if (!bs.quads.empty())
                     fx.beams.push_back(std::move(bs));
             }

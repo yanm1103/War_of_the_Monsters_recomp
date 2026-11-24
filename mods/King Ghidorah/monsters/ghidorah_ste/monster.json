@@ -149,11 +149,7 @@
           -5.5
         ],
         "radialSide": true,
-        "offset": [
-          10.7,
-          -20.6,
-          -20.5
-        ]
+        "anchor": "hand_l"
       },
       {
         "texture": "fx/basic.png",
@@ -201,11 +197,7 @@
           1.0,
           1.0
         ],
-        "offset": [
-          10.7,
-          -20.6,
-          -20.5
-        ]
+        "anchor": "hand_l"
       },
       {
         "texture": "fx/ghid_bolts_1.png",
@@ -244,11 +236,7 @@
           -5.5
         ],
         "radialSide": true,
-        "offset": [
-          12.2,
-          19.8,
-          -35.8
-        ]
+        "anchor": "hand_r"
       },
       {
         "texture": "fx/basic.png",
@@ -296,11 +284,7 @@
           1.0,
           1.0
         ],
-        "offset": [
-          12.2,
-          19.8,
-          -35.8
-        ]
+        "anchor": "hand_r"
       },
       {
         "texture": "fx/basic.png",

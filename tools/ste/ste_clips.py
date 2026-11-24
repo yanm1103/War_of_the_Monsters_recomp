@@ -202,10 +202,11 @@ PROFILES = {
     # King Ghidorah, sobre o Raptros (voa): o caido e o do Raptros (LAID_*_RAPTROS); sem bracos, pega e joga com as bocas. Os ids
     # que o STE nao tem (o planar 110/111, o agarrar, o pisao) ficam com o Raptros retargetado. O bater de asas (113/114) e o
     # HOVER_IDLE do STE: a batida do Raptros fecha as duas asas uma sobre a outra no alto (as pontas chegam a ~11 unidades) e as asas
-    # grandes do Ghidorah se atravessam; a do STE mantem as asas separadas.
+    # grandes do Ghidorah se atravessam; a do STE mantem as asas separadas. O ciclo dura 80 quadros (1,33 s), o do 113/114 do Raptros:
+    # o StateFly espera a batida (anim 113/114) acabar para o impulso seguinte, entao um ciclo mais longo deixa o voo mais lento.
     'Ghidorah': {
-        113: ('HOVER_IDLE', True, 2.2),
-        114: ('HOVER_IDLE', True, 2.2),
+        113: ('HOVER_IDLE', True, 1.33),
+        114: ('HOVER_IDLE', True, 1.33),
         130: ('ROAR', False, None),
         71: ('BLOCKHIT_F_STAND', False, None),
         77: ('BLOCKHIT_F_STAND', False, None),
@@ -248,8 +249,8 @@ PROFILES = {
     # Mecha-King Ghidorah: o mesmo corpo e esqueleto do King Ghidorah (sem as juntas Hand), o mesmo voo do Raptros. O STE nao tem
     # TAUNT, VICTORY, 1HAND_PICKUP, THROW_OBJECT nem WALK_LIFTING_OBJECT para ele: o que muda em relacao ao 'Ghidorah' e o nome.
     'MGhidorah': {
-        113: ('HOVER_IDLE', True, 2.2),
-        114: ('HOVER_IDLE', True, 2.2),
+        113: ('HOVER_IDLE', True, 1.33),
+        114: ('HOVER_IDLE', True, 1.33),
         92: ('INTRO_ROAR2', False, None),
         130: ('ROAR', False, None),
         71: ('BLOCKHIT_F_STAND', False, None),

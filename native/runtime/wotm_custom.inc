@@ -439,6 +439,14 @@ namespace wotm_custom
         return vt >= wotm::sym::x_vt_8StateFly && vt < wotm::sym::x_vt_8StateFly + 0x50;
     }
 
+    // Monstro -> a camera do voo esta ligada (ver flySubState); so vale com o monstro ainda no StateFly
+    std::map<uint32_t, bool> g_flyCam;
+    bool flyCamActive(uint8_t *rdram, uint32_t m)
+    {
+        const auto it = g_flyCam.find(m);
+        return it != g_flyCam.end() && it->second && isFlyState(rdram, cRd32(rdram, m + kCurStateCam));
+    }
+
     void setPov(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t view = GPR_U32(ctx, 4);
@@ -454,7 +462,7 @@ namespace wotm_custom
         {
             float scale = cu && !cu->cameraFrom.empty() ? cu->cameraScale : kCamScaleDefault;
             float posScale = 0.f, posHeight = 0.f;
-            if (cu && cu->cameraFlyScale > 0.f && isFlyState(rdram, READ32(m + kCurStateCam)))   // voando ("camera": {"fly", "flyHeight"}): so move a camera
+            if (cu && cu->cameraFlyScale > 0.f && flyCamActive(rdram, m))   // voando ("camera": {"fly", "flyHeight"}): so move a camera
             {
                 posScale = cu->cameraFlyScale;
                 posHeight = cu->cameraFlyHeight;
@@ -546,6 +554,43 @@ namespace wotm_custom
         ret(ctx, ok ? 1u : 0u);
     }
 
+    // Camera do voo ("camera": {"fly"}): so com o monstro no StateFly em subestado de voo (4 bate asas, 5 impulso, 7 planar). O StateFly
+    // tambem e o pulo inteiro (agachar, subir, cair, pousar) e a queda de um predio: a camera longe nesses puxava a vista para tras
+    // do nada. Os subestados 1, 2, 8 e 9 (agachar, decolar, pousar) tiram a camera do voo; o 3 (subir) e o 6 (cair) a mantem como esta.
+    // Pede de novo o POV da camera do jogador do monstro: o setPov (acima) escolhe a escala pelo estado e copia a tabela
+    void refreshFlyCam(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t m)
+    {
+        if (const wotm::mods::Custom *cu = customOf(rdram, m); cu && cu->cameraFlyScale > 0.f && READ32(m + 0x6CD4) != 0)
+        {
+            const uint32_t view = READ32(m + 0x6CD8);
+            if (view < 4)
+            {
+                wotm_modes4::call(rdram, ctx, runtime, kSetPov, {view, READ32(kCameras + view * kCamStride + 0xCF8)});
+                const bool on = flyCamActive(rdram, m);
+                std::fprintf(stderr, "[custom] %s: camera %s (x%.2f)\n", cu->id.c_str(), on ? "do voo" : "do chao", on ? cu->cameraFlyScale : cu->cameraScale);
+            }
+        }
+    }
+    PS2Runtime::RecompiledFunction g_origFlySub = nullptr;
+    void flySubState(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t st = GPR_U32(ctx, 4), sub = GPR_U32(ctx, 5);
+        const uint32_t m = st ? READ32(st + kStateOwner) : 0;
+        g_origFlySub(rdram, ctx, runtime);
+        const wotm::mods::Custom *cu = m ? customOf(rdram, m) : nullptr;
+        if (!cu || cu->cameraFlyScale <= 0.f)
+            return;
+        const bool was = flyCamActive(rdram, m);
+        bool on = g_flyCam.count(m) && g_flyCam[m];
+        if (sub == 4 || sub == 5 || sub == 7)
+            on = true;
+        else if (sub == 1 || sub == 2 || sub == 8 || sub == 9)
+            on = false;
+        g_flyCam[m] = on;
+        if (was != flyCamActive(rdram, m))
+            refreshFlyCam(rdram, ctx, runtime, m);
+    }
+
     void enterState(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t m = GPR_U32(ctx, 4);
@@ -562,19 +607,14 @@ namespace wotm_custom
         const bool roar = ctx->pc == kEnterState && m && next && next == READ32(m + kSpecialState) && next != READ32(m + kCurState);
         // "camera": {"fly"}: entrar ou sair do StateFly troca a escala da tabela de camera; o setPov (acima) escolhe a escala pelo
         // estado atual, entao depois da troca o POV da camera e pedido de novo para ele copiar a tabela
-        const bool flyCam = ctx->pc == kEnterState && m && next && isFlyState(rdram, next) != isFlyState(rdram, READ32(m + kCurState));
+        // so o voo de verdade (bater de asas e planar) usa a camera do voo, nao o pulo e a queda (flyCamActive)
+        const bool flyCam = ctx->pc == kEnterState && m && next;
+        const bool flyBefore = flyCam && flyCamActive(rdram, m);
+        if (flyCam && isFlyState(rdram, READ32(m + kCurState)) != isFlyState(rdram, next))
+            g_flyCam.erase(m);   // entrar ou sair do StateFly recomeca sem a camera do voo (o transitionInto pode ligar a seguir)
         g_origEnterState(rdram, ctx, runtime);
-        if (flyCam)
-            if (const wotm::mods::Custom *cu = customOf(rdram, m); cu && cu->cameraFlyScale > 0.f && READ32(m + 0x6CD4) != 0)
-            {
-                const uint32_t view = READ32(m + 0x6CD8);
-                if (view < 4)
-                {
-                    wotm_modes4::call(rdram, ctx, runtime, kSetPov, {view, READ32(kCameras + view * kCamStride + 0xCF8)});
-                    std::fprintf(stderr, "[custom] %s: camera %s (x%.2f)\n", cu->id.c_str(), isFlyState(rdram, next) ? "do voo" : "do chao",
-                                 isFlyState(rdram, next) ? cu->cameraFlyScale : cu->cameraScale);
-                }
-            }
+        if (flyCam && flyBefore != flyCamActive(rdram, m))
+            refreshFlyCam(rdram, ctx, runtime, m);
         if (const wotm::mods::Custom *cu = roar ? ownFilesCustom(rdram, m) : nullptr; cu && cu->specialRoar)
         {
             constexpr uint32_t kMonsterSound = 0x1A7C;   // Monster::m_sound
@@ -2106,6 +2146,8 @@ void wotmCustomInstall(PS2Runtime &runtime)
         runtime.registerFunction(kCrowdOK, &crowdOK);
     if ((g_origEnterState = runtime.lookupFunction(kEnterState)))
         runtime.registerFunction(kEnterState, &enterState);
+    if ((g_origFlySub = runtime.lookupFunction(wotm::fn::enterSubState__8StateFlyQ211JumpFlyBase8SubState)))
+        runtime.registerFunction(wotm::fn::enterSubState__8StateFlyQ211JumpFlyBase8SubState, &flySubState);
     if ((g_origSpinUpdate = runtime.lookupFunction(kSpinUpdate)))
         runtime.registerFunction(kSpinUpdate, &spinUpdate);
     if ((g_origSetBossState = runtime.lookupFunction(kSetBossState)))

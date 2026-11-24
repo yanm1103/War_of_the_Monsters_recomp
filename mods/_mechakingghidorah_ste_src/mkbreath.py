@@ -4,14 +4,16 @@ import json, sys, copy
 src = json.load(open(sys.argv[1]))
 beam = [L for L in src['layers'] if L.get('at') != 'hit']
 hit = [L for L in src['layers'] if L.get('at') == 'hit']
-# bocas laterais em relacao a do meio na pose do disparo (TRIPLE_ENERGY_BEAM; beampose.py): (frente, lado, cima)
-OFFS = [[0, 0, 0], [12.8, -19.2, -17.7], [13.4, 20.1, -34.5]]
+# a boca do meio e a do jogo; as laterais saem dos localizadores das cabecas (hand_l = a esquerda, hand_r = a direita: o jogo os
+# atualiza a cada quadro e as cabecas mexem), com "anchor". Na pose do disparo (TRIPLE_ENERGY_BEAM) elas ficam, em relacao a do meio
+# (frente, lado, cima), em (12.8, -19.2, -17.7) e (13.4, 20.1, -34.5)
+ANCHORS = [None, 'hand_l', 'hand_r']
 layers = []
-for o in OFFS:
+for a in ANCHORS:
     for L in beam:
         L = copy.deepcopy(L)
-        if any(o):
-            L['offset'] = o
+        if a:
+            L['anchor'] = a
         layers.append(L)
 layers += hit
 out = {'scale': 1.0, 'hide': [8, 51, 148, 53, 149, 80, 81], 'pitch': 0, 'aim': 45, 'layers': layers}

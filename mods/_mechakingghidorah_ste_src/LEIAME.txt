@@ -9,7 +9,7 @@ Esqueleto: tools/rigmaps/ste_mghidorah.json (o do King Ghidorah sem as Hand, com
 de cada cabeca e da mandibula). Altura: --height 142 (o corpo tem 119 de altura no STE, como o do King Ghidorah).
 Animacoes: tools/ste/ste_clips.py <iso> MGhidorah.cmp clips.json (ID_MAP do 2000 + PROFILES['MGhidorah']), depois tools/retarget.py
 <DRAGON0.glb> mechaghidorah_ste.dae tools/rigmaps/ste_mghidorah.json rig.glb --height 142 --own clips.json --base disc/MON/DRAGON0.NGP.
-O bater de asas (113/114) e o HOVER_IDLE do STE em ciclo de 2,2 s, como no King Ghidorah. O STE nao tem TAUNT (92 = INTRO_ROAR2),
+O bater de asas (113/114) e o HOVER_IDLE do STE em ciclo de 1,33 s, como no King Ghidorah. O STE nao tem TAUNT (92 = INTRO_ROAR2),
 1HAND_PICKUP (41 = 1HAND_PICKUP_MIDDLE), THROW_OBJECT (55/56 = THROW_1HAND) nem WALK_LIFTING_OBJECT (173 = WALK_LIFTING) para ele.
 O mod: modkit.py monster new "Mecha King Ghidorah" mechaghidorah_ste --base raptros --costume 0 --name "MECHA KING GHIDORAH" --ai;
 modkit.py monster mesh export ... (DRAGON0.glb); monster rig ... mechaghidorah_ste_rig.glb; textura dragon0_t0013.png =

@@ -51,6 +51,10 @@ struct Layer {
     float sizeMin = 10.f, sizeMax = 10.f;   // lado do quadrado (no risco: a largura)
     float spread = 0.f;         // meio-lado do cubo onde nasce
     float offset[3] = {0.f, 0.f, 0.f};   // centro do cubo em relacao a boca (frente, lado, cima): outra boca, ao lado da do jogo
+    // "anchor": o localizador (id do jogo, 0x802 mao E, 0x803 mao D, 0x804/0x805 pes, 0x80B boca) de onde a camada sai no lugar da boca
+    // do jogo; segue o osso a cada quadro (a cabeca lateral de um monstro de varias bocas mexe). 0 = a boca; o "offset" soma a ele.
+    // Sem localizador valido (fora do mundo), cai na boca. So no sopro.
+    int anchor = 0;
     float color[4] = {1.f, 1.f, 1.f, 1.f};
     Poly r, g, b, a, sizeMul;
     Poly sideMul;               // "sideMul": multiplica a velocidade lateral (lado e cima da boca) na idade normalizada; vazio = 1 (so relativas)
