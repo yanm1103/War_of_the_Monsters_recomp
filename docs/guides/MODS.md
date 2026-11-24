@@ -510,6 +510,12 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   monster, and `JELLY.CHR`'s sits between Jelly's legs; Togera's at 2x (Goliath) and 3x (Jelly) behaves like a regular
   monster's. `FINAL.CHR`'s already works. The port reads the camera from the `from`'s `.CHR` (from `mods/` or from the disc) and puts it on the monster on every
   POV change (log `[custom] jelly: camera do RST/LIZARD.CHR, distancias x3.00 (POV 0: ...)`).
+  `fly` and `flyHeight` (`%`, 10 to 1000 and 10 to 2000) give a camera of its own while the monster is in `StateFly` (a flying
+  base such as Raptros): on entering and leaving the state the port reloads the POV with only the camera position scaled (`fly`
+  behind, `flyHeight` up; without `flyHeight` the height follows `fly`), and the point the camera looks at keeps the ground scale.
+  The modern camera shrinks the distance when the line from the monster to the camera hits the stage (the invisible ceiling at the
+  flight limit included), so a flying monster wants a far and low camera (`"fly": 300, "flyHeight": 120`), not a high one. Log:
+  `[custom] ghidorah_ste: camera do voo (x3.00)` and `camera do chao`.
 - `narrator`: `narrator/<nome>.mp3` spoken on confirmation (empty = the type's). It also serves the custom's skins that have no
   `narrator` of their own.
 - `costumeName`: the name of the custom's own costume in the select screen's costume list, next to its skins (`"GODZILLA 90s"`;

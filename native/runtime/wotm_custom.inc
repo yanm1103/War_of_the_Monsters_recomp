@@ -382,9 +382,10 @@ namespace wotm_custom
         return false;
     }
 
-    const std::vector<uint8_t> &camTable(uint8_t *rdram, uint32_t m, const std::string &base, float scale, const char *who)
+    // posScale > 0: so a posicao da camera (m_00) usa essa escala; os outros dois vetores (para onde olha) ficam em `scale`
+    const std::vector<uint8_t> &camTable(uint8_t *rdram, uint32_t m, const std::string &base, float scale, const char *who, float posScale = 0.f, float posHeight = 0.f)
     {
-        const std::string key = base + "*" + std::to_string(scale);
+        const std::string key = base + "*" + std::to_string(scale) + "*" + std::to_string(posScale) + "*" + std::to_string(posHeight);
         if (const auto it = g_camTables.find(key); it != g_camTables.end())
             return it->second;
         std::vector<uint8_t> &cam = g_camTables[key];
@@ -419,13 +420,23 @@ namespace wotm_custom
                 {
                     float f;
                     std::memcpy(&f, &cam[p * kCamPov + v * 16 + c * 4], 4);
-                    f *= scale;
+                    f *= v == 0 && posScale > 0.f ? (c == 2 && posHeight > 0.f ? posHeight : posScale) : scale;
                     std::memcpy(&cam[p * kCamPov + v * 16 + c * 4], &f, 4);
                 }
         float d10[3];
         std::memcpy(d10, cam.data(), 12);
         std::fprintf(stderr, "[custom] %s: camera do %s, distancias x%.2f (POV 0: %.0f, %.0f, %.0f)\n", who, rel.c_str(), scale, d10[0], d10[1], d10[2]);
         return cam;
+    }
+
+    // StateFly: o primeiro campo do estado e o ponteiro da vtable (x_vt_8StateFly, 0x50 bytes)
+    constexpr uint32_t kCurStateCam = 0x34;   // Monster::m_curState
+    bool isFlyState(uint8_t *rdram, uint32_t st)
+    {
+        if (!st)
+            return false;
+        const uint32_t vt = cRd32(rdram, st + 0x10);   // MonsterState::vptr
+        return vt >= wotm::sym::x_vt_8StateFly && vt < wotm::sym::x_vt_8StateFly + 0x50;
     }
 
     void setPov(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
@@ -441,8 +452,14 @@ namespace wotm_custom
         const char *base =cu && !cu->cameraFrom.empty() ? cu->cameraFrom.c_str() : type == 13 && !cu ? kCamBaseDefault : nullptr;
         if (base)
         {
-            const float scale = cu && !cu->cameraFrom.empty() ? cu->cameraScale : kCamScaleDefault;
-            const std::vector<uint8_t> &cam = camTable(rdram, m, base, scale, cu ? cu->id.c_str() : "assboss");
+            float scale = cu && !cu->cameraFrom.empty() ? cu->cameraScale : kCamScaleDefault;
+            float posScale = 0.f, posHeight = 0.f;
+            if (cu && cu->cameraFlyScale > 0.f && isFlyState(rdram, READ32(m + kCurStateCam)))   // voando ("camera": {"fly", "flyHeight"}): so move a camera
+            {
+                posScale = cu->cameraFlyScale;
+                posHeight = cu->cameraFlyHeight;
+            }
+            const std::vector<uint8_t> &cam = camTable(rdram, m, base, scale, cu ? cu->id.c_str() : "assboss", posScale, posHeight);
             if (!cam.empty())
                 std::memcpy(rdram + ((m + kCamTable) & 0x01FFFFFFu), cam.data(), cam.size());
         }
@@ -543,7 +560,21 @@ namespace wotm_custom
         // banco proprio (wotm_snd.inc) toca do .BNK do custom
         const uint32_t next = GPR_U32(ctx, 5);
         const bool roar = ctx->pc == kEnterState && m && next && next == READ32(m + kSpecialState) && next != READ32(m + kCurState);
+        // "camera": {"fly"}: entrar ou sair do StateFly troca a escala da tabela de camera; o setPov (acima) escolhe a escala pelo
+        // estado atual, entao depois da troca o POV da camera e pedido de novo para ele copiar a tabela
+        const bool flyCam = ctx->pc == kEnterState && m && next && isFlyState(rdram, next) != isFlyState(rdram, READ32(m + kCurState));
         g_origEnterState(rdram, ctx, runtime);
+        if (flyCam)
+            if (const wotm::mods::Custom *cu = customOf(rdram, m); cu && cu->cameraFlyScale > 0.f && READ32(m + 0x6CD4) != 0)
+            {
+                const uint32_t view = READ32(m + 0x6CD8);
+                if (view < 4)
+                {
+                    wotm_modes4::call(rdram, ctx, runtime, kSetPov, {view, READ32(kCameras + view * kCamStride + 0xCF8)});
+                    std::fprintf(stderr, "[custom] %s: camera %s (x%.2f)\n", cu->id.c_str(), isFlyState(rdram, next) ? "do voo" : "do chao",
+                                 isFlyState(rdram, next) ? cu->cameraFlyScale : cu->cameraScale);
+                }
+            }
         if (const wotm::mods::Custom *cu = roar ? ownFilesCustom(rdram, m) : nullptr; cu && cu->specialRoar)
         {
             constexpr uint32_t kMonsterSound = 0x1A7C;   // Monster::m_sound

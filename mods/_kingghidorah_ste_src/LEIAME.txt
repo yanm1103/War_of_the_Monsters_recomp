@@ -18,7 +18,9 @@ do 87/88, como foi medido no Togera).
 O mod: modkit.py monster new "King Ghidorah" ghidorah_ste --base raptros --costume 0 --name "KING GHIDORAH" --ai; modkit.py monster
 mesh export ... (DRAGON0.glb); monster rig ... ghidorah_ste_rig.glb; textura dragon0_t0013.png = ghidorah_ste.png x0.62 (como nos
 outros; o monster rig grava de novo a textura crua: refazer depois dele); modkit.py pack "King Ghidorah".
-monster.json: "camera" do Raptros a 150% (a 100% o corpo enche a tela; a 200% fica longe no chao).
+monster.json: "camera" do Raptros a 150% (a 100% o corpo enche a tela; a 200% fica longe no chao); no voo (StateFly) a camera
+passa a "fly": 300 (para tras) e "flyHeight": 120 (para cima): o Ghidorah tem o dobro do tamanho do Raptros e, com a camera do chao,
+as asas enchiam a tela; uma camera alta batia no teto invisivel do palco (o "alcance" da camera orbital caia a 0,15).
 
 Golpes: tools/ste/ste_moves.py <iso> Ghidorah.cmp da as janelas (A = cabecas, X = chutes, B = cauda; Left = para longe, Right =
 para perto). moves.json tem o mapa de botoes e os 16 golpes (ids 10-25 do PROFILES['Ghidorah']); modkit.py monster stats ... (uma

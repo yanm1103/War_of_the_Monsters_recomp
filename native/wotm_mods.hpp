@@ -178,6 +178,8 @@ struct Custom {
     std::map<int, std::vector<float>> rootTurn;
     std::string cameraFrom;   // MonsterLongNames do .CHR da camera ("lizard"); vazio = a do proprio tipo
     float cameraScale = 1.f;    // distancias da camera emprestada
+    float cameraFlyScale = 0.f; // afastamento da camera (so a posicao, nao o ponto de mira) com o monstro no StateFly ("camera": {"fly": %}); 0 = o mesmo
+    float cameraFlyHeight = 0.f;  // idem para a altura ("flyHeight": %); 0 = o mesmo que "fly" (wotm_custom.inc)
     std::string narrator;       // narrator/<nome>.mp3 (vazio = o do tipo)
     std::string costumeName;    // nome do traje proprio na selecao (vazio = "FROM MOD <mod>")
     // "fireColor": cor do fogo do traje proprio e das skins sem a sua (kFireSet | 0xRRGGBB; 0 = a do jogo). Os efeitos de
@@ -1020,6 +1022,10 @@ private:
                         if (const MonsterInfo *b = customBase(lower(f->s))) c.cameraFrom = kLongNames[b->type];
                     if (const json::Value *sc = cam->get("scale"); sc && sc->type == json::Value::Int && sc->i >= 10 && sc->i <= 1000)   // em %
                         c.cameraScale = float(sc->i) / 100.f;
+                    if (const json::Value *fl = cam->get("fly"); fl && fl->type == json::Value::Int && fl->i >= 10 && fl->i <= 1000)
+                        c.cameraFlyScale = float(fl->i) / 100.f;
+                    if (const json::Value *fh = cam->get("flyHeight"); fh && fh->type == json::Value::Int && fh->i >= 10 && fh->i <= 2000)
+                        c.cameraFlyHeight = float(fh->i) / 100.f;
                 }
                 if (const json::Value *na = v.get("narrator"); na && na->type == json::Value::Str) c.narrator = lower(na->s);
                 if (const json::Value *cn = v.get("costumeName"); cn && cn->type == json::Value::Str) c.costumeName = cn->s;

@@ -8,7 +8,9 @@
   "costumeName": "KING GHIDORAH",
   "camera": {
     "from": "raptros",
-    "scale": 150
+    "scale": 150,
+    "fly": 300,
+    "flyHeight": 120
   },
   "fireColor": "#FFE060",
   "breathFx": {
