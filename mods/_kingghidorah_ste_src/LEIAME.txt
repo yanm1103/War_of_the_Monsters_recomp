@@ -32,6 +32,10 @@ o Ghidorah morria. O do Togera segura o 161 (TRIPLE_ENERGY_BEAM, as tres cabecas
 ghidorah_lightning_hit, depois mkbreath.py copia as camadas do raio para as tres bocas ("offset" de cada camada: as bocas laterais
 em relacao a do meio na pose do disparo, em unidades do jogo) e grava breathfx_gravitybeams.json, com "pitch": 0 (eixo na frente
 do monstro, a cabeca do meio esta erguida), "aim": 45 e "hide" com o fogo do Togera e o do Raptros (53, 149).
+Tiro ("shotFx"): o STE nao tem projetil do Ghidorah (so o raio e o furacao), entao o tiro do quadrado e uma bola de raio feita das
+mesmas texturas do raio (fx/ghid_bolts_1.png, fx/basic.png): nucleo amarelo que anda com o tiro, relampagos para os lados, rastro, e na
+explosao relampagos e faiscas ("at": "impact"). Esta escrito a mao no monster.json (5 camadas, "hideBody" e o "hide" padrao); os
+tamanhos foram ajustados vendo o tiro da IA no jogo.
 Sons: ste_sounds.py <iso> <pasta files/ da pasta de trabalho> sounds (depois de modkit.py monster sounds ...), depois modkit.py
 pack. Os numeros do DRAGON_S sao os do ramo do tipo 0x120 do MonsterSound (src/game/Sound.cpp): 0 pulo, 1 bater de asas, 2/18/19
 mortes, 3 dor, 4 grito (entrada e especial), 5 controle da multidao, 6 aterrissagem, 10 raio em laco, 12 grunhido, 13 planar em

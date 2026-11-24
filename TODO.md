@@ -27,8 +27,7 @@ Mod em `mods/Mechagodzilla 3/`, fontes em `mods/_mechagodzilla3_ste_src/` (o `LE
 
 ## King Ghidorah (STE), o que falta
 Mod em `mods/King Ghidorah/` (custom `ghidorah_ste` sobre o Raptros), fontes, receita e mapa de golpes em `mods/_kingghidorah_ste_src/LEIAME.txt`. Provisórios: logo tipográfico e narração com voz do Windows.
-- **Conferir no jogo (dono):** se os três raios do especial se distinguem (de lado o raio sai das cabeças e bate no prédio: `docs/screenshots/2026-11-23/2026-11-23_king_ghidorah_gravity_beams.png`), os 16 golpes contra a IA (só o frente+△ foi visto acertando), os sons de ouvido, o caído e o levantar, o climb do Raptros com três pescoços.
-- **Tiro:** o □ sem alvo ao alcance solta a bola de fogo do Raptros; trocar pelo Gravity Beam curto (`shotFx`, `ste_fx.py shot`) ou pelo raio no ar (Flying Gravity Beams).
+- **Conferir no jogo (dono):** se os três raios do especial se distinguem (de lado o raio sai das cabeças e bate no prédio: `docs/screenshots/2026-11-23/2026-11-23_king_ghidorah_gravity_beams.png`), os 16 golpes contra a IA (só o frente+△ foi visto acertando), os sons de ouvido, o caído e o levantar, o climb do Raptros com três pescoços, o tiro novo do □ (bola de raio: `docs/screenshots/2026-11-23/2026-11-23_king_ghidorah_tiro_gravity_beam.png`; se achar fraco, é só mexer nos tamanhos do `shotFx`).
 - **Câmera no voo:** batendo asas a câmera fica colada (a do chão vem do `.CHR` a 150%; conferir de onde vem a do voo).
 
 ## Fora da ordem (até o dono escolher)
