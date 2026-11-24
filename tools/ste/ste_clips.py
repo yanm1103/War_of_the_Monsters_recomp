@@ -245,6 +245,50 @@ PROFILES = {
         24: ('TRIPLE_UPPERCUT', False, None, dict(NAT, face={'from': 0.43})),    # Triple Uppercut (Down A), 26-33% e 43%
         25: ('TAIL_SWEEP', False, None, dict(NAT, face={'from': 0.63})),         # Tail Sweep (Down B), 32-63%
     },
+    # Mecha-King Ghidorah: o mesmo corpo e esqueleto do King Ghidorah (sem as juntas Hand), o mesmo voo do Raptros. O STE nao tem
+    # TAUNT, VICTORY, 1HAND_PICKUP, THROW_OBJECT nem WALK_LIFTING_OBJECT para ele: o que muda em relacao ao 'Ghidorah' e o nome.
+    'MGhidorah': {
+        113: ('HOVER_IDLE', True, 2.2),
+        114: ('HOVER_IDLE', True, 2.2),
+        92: ('INTRO_ROAR2', False, None),
+        130: ('ROAR', False, None),
+        71: ('BLOCKHIT_F_STAND', False, None),
+        77: ('BLOCKHIT_F_STAND', False, None),
+        80: ('KOED_FACEUP_IDLE', False, None, {'laid': LAID_UP_RAPTROS}),
+        81: ('KOED_FACEDOWN_IDLE', False, None, {'laid': LAID_DOWN_RAPTROS}),
+        85: ('KOED_FACEDOWN_IDLE', False, None, {'laid': LAID_DOWN_RAPTROS, 'still': True}),
+        86: ('KOED_FACEUP_IDLE', False, None, {'laid': LAID_UP_RAPTROS, 'still': True}),
+        120: ('KOED_SLUMP', False, None),
+        41: ('1HAND_PICKUP_MIDDLE', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.87, 0.38), (1, 0.60)]}),
+        52: ('THROW_1HAND', False, 1.0, {'settle': True, 'knots': [(0, 0), (0.45, 0.50), (1, 1)]}),
+        54: ('THROW_1HAND', False, 0.4, {'settle': True, 'knots': [(0, 0), (0.50, 0.50), (1, 1)]}),
+        55: ('THROW_1HAND', False, 0.5, {'settle': True, 'knots': [(0, 0), (0.37, 0.25), (1, 1)]}),
+        56: ('THROW_1HAND', False, 40 / 60.0, {'settle': True, 'knots': [(0, 0), (0.37, 0.25), (1, 1)]}),
+        172: ('LIFTING_IDLE_OBJECT', True, None),
+        173: ('WALK_LIFTING', True, None),
+        170: None, 185: None, 240: None, 241: None,
+        # especial (Gravity Beams), como no King Ghidorah: o STE tem os mesmos TRIPLE_ENERGY_BEAM e ELECTRIC_BLAST_CHARGE
+        160: ('ELECTRIC_BLAST_CHARGE', False, 1.2),
+        161: ('TRIPLE_ENERGY_BEAM', True, None),
+        162: ('TRIPLE_ENERGY_BEAM', False, 0.4, {'segs': [(0.75, 1.0, 1.0)]}),
+        # golpes (mods/_mechakingghidorah_ste_src/moves.json): janela de acerto do STE (tools/ste/ste_moves.py MGhidorah.cmp) no comentario
+        10: ('JAB_RIGHT', False, None, dict(NAT, face={'from': 0.29})),          # Jab_right (cabeca D), 10-29%
+        11: ('JAB_LEFT', False, None, dict(NAT, face={'from': 0.25})),           # Jab_left (cabeca E), 14-25%
+        12: ('JAB_DOUBLE', False, None, dict(NAT, face={'from': 0.63})),         # Jab_double (D e E), 32-39% e 46-63%
+        13: ('KICK_RIGHT', False, None, dict(NAT, face={'from': 0.34})),         # Kick1, 17-34%
+        14: ('PUNCH_RIGHT', False, None, dict(NAT, face={'from': 0.51})),        # Punch_right, 31-51%
+        15: ('TAIL_SNAP', False, None, dict(NAT, face={'from': 0.70})),          # Tail_Whip_1 e 2, 33-48% e 60-70%
+        16: ('PUNCH_LEFT', False, None, dict(NAT, face={'from': 0.44})),         # Punch_left, 32-44%
+        17: ('LUNGE_SMASH', False, None, dict(NAT, face={'from': 0.69})),        # Lunge Smash (Right A), 52-69%
+        18: ('KICK_LAUNCH', False, None, dict(NAT, face={'from': 0.31})),        # Kick Launch (Right X), 22-31% e 51-59%
+        19: ('FULL_SPIN', False, None, dict(NAT, face={'from': 0.60})),          # Full Spin (Left A), 23-35% e 50-60%
+        20: ('HIP_STRIKE', False, None, dict(NAT, face={'from': 0.59})),         # Hip Strike (Left X), 29-59%
+        21: ('TAIL_UPPERCUT', False, None, dict(NAT, face={'from': 0.51})),      # Tail Uppercut (Right B), 37-51%
+        22: ('OVERHEAD_KICK', False, None, dict(NAT, face={'from': 0.60})),      # Overhead Kick (Up X), 50-60%
+        23: ('DOUBLE_UPPERCUT', False, None, dict(NAT, face={'from': 0.50})),    # Double Uppercut (Down A), 25-56%, ataque em 40%
+        24: ('TAIL_SWEEP', False, None, dict(NAT, face={'from': 0.63})),         # Tail Sweep (Down B), 32-63%
+        25: ('TRIPLE_SMASH', False, None, dict(NAT, face={'from': 0.62})),       # Triple Smash (Up A), tres acertos, 26-62%
+    },
 }
 
 

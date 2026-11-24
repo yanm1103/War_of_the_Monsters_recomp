@@ -1,0 +1,33 @@
+Mod "Mecha King Ghidorah" (custom mechaghidorah_ste): o Mecha-King Ghidorah de Godzilla: Save the Earth sobre o Raptros, que da o
+voo, no mesmo esquema do King Ghidorah (mods/_kingghidorah_ste_src/LEIAME.txt, que tem os detalhes). ISO do STE: a mesma dos
+outros; abaixo <iso>. O corpo e o esqueleto sao os mesmos do King Ghidorah (tres pescocos, asas na cadeia do braco, cauda de 13,
+dois dedos por pe) sem as juntas Hand; o que muda e a pele (aco e ouro), o conjunto de golpes do STE e a voz.
+
+Corpo: tools/ste/export_dae.py <iso> MGhidorah.cmp <pasta> --name mechaghidorah_ste --opaque (.dae/.png aqui). O --opaque porque a
+paleta tem alfa 46..206 (um mapa de brilho, nao transparencia) e o jogo o leria como translucido.
+Esqueleto: tools/rigmaps/ste_mghidorah.json (o do King Ghidorah sem as Hand, com as bocas medidas no .dae: o vertice mais a frente
+de cada cabeca e da mandibula). Altura: --height 142 (o corpo tem 119 de altura no STE, como o do King Ghidorah).
+Animacoes: tools/ste/ste_clips.py <iso> MGhidorah.cmp clips.json (ID_MAP do 2000 + PROFILES['MGhidorah']), depois tools/retarget.py
+<DRAGON0.glb> mechaghidorah_ste.dae tools/rigmaps/ste_mghidorah.json rig.glb --height 142 --own clips.json --base disc/MON/DRAGON0.NGP.
+O bater de asas (113/114) e o HOVER_IDLE do STE em ciclo de 2,2 s, como no King Ghidorah. O STE nao tem TAUNT (92 = INTRO_ROAR2),
+1HAND_PICKUP (41 = 1HAND_PICKUP_MIDDLE), THROW_OBJECT (55/56 = THROW_1HAND) nem WALK_LIFTING_OBJECT (173 = WALK_LIFTING) para ele.
+O mod: modkit.py monster new "Mecha King Ghidorah" mechaghidorah_ste --base raptros --costume 0 --name "MECHA KING GHIDORAH" --ai;
+modkit.py monster mesh export ... (DRAGON0.glb); monster rig ... mechaghidorah_ste_rig.glb; textura dragon0_t0013.png =
+mechaghidorah_ste.png x0.62; modkit.py pack "Mecha King Ghidorah".
+monster.json: camera, especial, raio e tiro iguais aos do King Ghidorah (o mkjson do King Ghidorah copia "camera", "fireColor" e
+"shotFx"; o raio e o breathfx_gravitybeams.json, com a posicao das bocas laterais no disparo do Mecha).
+
+Golpes: tools/ste/ste_moves.py <iso> MGhidorah.cmp da as janelas. moves.json tem o mapa de botoes e os 16 golpes (ids 10-25 do
+PROFILES['MGhidorah']); modkit.py monster stats ... (uma vez), depois tools/chr_moves.py moves.json disc/RST/DRAGON.CHR --ngp
+<pasta de trabalho>/DRAGON0.NGP --out <pasta de trabalho>/DRAGON.CHR e modkit.py pack. Os golpes do Mecha que nao entram: Tail
+Reverse (Left B), Blunting Wind (Up B), Duck Kick (Down X) e os de pulo; os dois Tail_Whip do STE sao um clipe so (id 15, uma
+janela de 33 a 70%); chr_moves aceita como locator hand_l/hand_r, foot_l/foot_r, mouth, tail_mid/tail_tip, head e shoulder.
+Especial (Gravity Beams): "special": "togera", como no King Ghidorah; o MGhidorah.cmp tem o mesmo ghidorah_lightning (as mesmas
+texturas). mkbreath.py copia as camadas do raio para as tres bocas (OFFS medido com as bocas do Mecha na pose do TRIPLE_ENERGY_BEAM).
+Sons: ste_sounds.py <iso> <pasta files/ da pasta de trabalho> sounds (depois de modkit.py monster sounds ...). Voz do Mecha (MKG_*,
+MECHAGHIDORAH_*, mkg_*) nos numeros do DRAGON_S do Raptros; bater de asas, planar, raio e passo sao os do King Ghidorah.
+Retrato: mods/_godzilla2000_ste_src/portrait_render.py (Blender) com o portrait_shot.json daqui (a131, quadro 100) e
+portrait_compose.py; modkit.py monster portrait ... portrait.png.
+Logo: mklogo.py logo.png C:\Windows\Fonts\impact.ttf (tipografico, aco; "MECHA KING" em cima), provisorio.
+Narrador: narrator_tts.ps1 (voz do Windows, "Mecha King Ghidorah!") + ffmpeg: narrator/mechaghidorah_ste.mp3, quebra-galho.
+O nome na tela (HUD, 11 letras) sai igual ao do King Ghidorah ("ghidorah"): a regra do jogo pega a ultima palavra que cabe.
