@@ -41,6 +41,7 @@ namespace
         constexpr uint32_t kPfOwner = 0x1810u, kPfConfigActive = 0x16E4u, kPfConfigWanted = 0x16E8u, kPfRingIndex = 0x16F0u;
         constexpr int kMaxCams = 4;
         constexpr float kPi = 3.14159265f;
+        constexpr float kOffsetRate = 0.05f;   // D10 do POV: fracao do caminho ate o valor do jogo por quadro (~0,3 s)
         constexpr float kLockRate = 0.15f;   // alvo travado: angulo e mira por quadro (~6 quadros; 0,25 era seco demais para o dono)
 
         struct Cam
@@ -62,6 +63,8 @@ namespace
             float lockAim[3] = {};   // desvio da mira para o alvo (o ultimo, enquanto o peso cai ao soltar)
             float reach = 1.f;       // fracao da distancia livre (colisao: encolhe na hora, volta devagar)
             float lift = 0.f;        // altura somada para ficar acima do chao (suavizada na descida)
+            float offY = 0.f, offZ = 0.f;   // o D10 do POV suavizado (a escala do POV muda de um quadro para o outro: ao voar, em estados)
+            bool offInit = false;    // offY/offZ ainda sem valor (primeiro quadro, corte, troca de monstro): comecam no D10 do jogo
             uint32_t lastPin = 0;    // m_pinTarget visto no quadro anterior (log)
         } g_cam[kMaxCams];
 
@@ -458,6 +461,7 @@ namespace
                     s.locked = false;
                     s.reach = 1.f;
                     s.lift = 0.f;
+                    s.offInit = false;
                     s.mon = mon;
                     in.stick[0] = in.stick[1] = 0.f;
                     if (log)
@@ -558,7 +562,21 @@ namespace
                 // dividida). Sem o balanco nem a inclinacao do jogo: os dois mudam com o estado do monstro (virando no lugar e
                 // comecando a andar para tras o jogo mira direto no monstro; travar/soltar refaz uma rampa; travado, o balanco subia
                 // a camera ate em cima do monstro), e com a camera em outro angulo viravam solavancos
-                const float offY = rdF(rdram, c + kCamOffset + 4), offZ = rdF(rdram, c + kCamOffset + 8);
+                // O D10 muda de um quadro para o outro quando a escala do POV muda (a camera do voo de um custom, estados do jogo): a
+                // distancia vai ate o novo valor em ~1 s (constante de ~0,3 s) em vez de saltar; cortes e trocas de monstro recomecam nele
+                const float gameY = rdF(rdram, c + kCamOffset + 4), gameZ = rdF(rdram, c + kCamOffset + 8);
+                if (!s.offInit)
+                {
+                    s.offY = gameY;
+                    s.offZ = gameZ;
+                    s.offInit = true;
+                }
+                else
+                {
+                    s.offY += (gameY - s.offY) * kOffsetRate;
+                    s.offZ += (gameZ - s.offZ) * kOffsetRate;
+                }
+                const float offY = s.offY, offZ = s.offZ;
                 const float back = -offY, len = std::sqrt(back * back + offZ * offZ);
                 const float e0 = std::atan2(offZ, back), e = std::clamp(e0 + s.elev, -0.25f, 1.45f);
                 const float horiz = len * std::cos(e), height = len * std::sin(e);
