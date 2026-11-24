@@ -200,8 +200,12 @@ PROFILES = {
         25: ('KICK_SWEEP', False, None, dict(NAT, face={'from': 0.63})),           # Sweep Kick (Down X), 23-63%
     },
     # King Ghidorah, sobre o Raptros (voa): o caido e o do Raptros (LAID_*_RAPTROS); sem bracos, pega e joga com as bocas. Os ids
-    # que o STE nao tem (o voo 110-114, o agarrar, o pisao) ficam com o Raptros retargetado.
+    # que o STE nao tem (o planar 110/111, o agarrar, o pisao) ficam com o Raptros retargetado. O bater de asas (113/114) e o
+    # HOVER_IDLE do STE: a batida do Raptros fecha as duas asas uma sobre a outra no alto (as pontas chegam a ~11 unidades) e as asas
+    # grandes do Ghidorah se atravessam; a do STE mantem as asas separadas.
     'Ghidorah': {
+        113: ('HOVER_IDLE', True, 2.2),
+        114: ('HOVER_IDLE', True, 2.2),
         130: ('ROAR', False, None),
         71: ('BLOCKHIT_F_STAND', False, None),
         77: ('BLOCKHIT_F_STAND', False, None),

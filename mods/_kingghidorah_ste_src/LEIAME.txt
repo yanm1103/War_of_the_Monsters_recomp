@@ -10,6 +10,9 @@ asa; o pescoco dele (bone18, bone17, cabeca bone16) move os tres pescocos; os br
 pes so se mexem nas animacoes do STE. Bocas na fenda entre focinho e mandibula de cada cabeca (o vertice mais a frente de cada uma
 no .dae): mouth na do meio, hand_l/grab na E, hand_r/hold na D. 0x816/0x817 (no Raptros, pontas das asas) viram o meio e a ponta da
 cauda, 0x818 a cabeca do meio e 0x819 o peito, como o tools/chr_moves.py espera.
+Bater de asas (113/114): o HOVER_IDLE do STE em ciclo de 2,2 s; a batida do Raptros fecha as duas asas uma sobre a outra no alto
+(as pontas dos antebracos chegam a ~11 unidades) e as asas do Ghidorah se atravessam. O planar (110/111) e a decolagem (30) nao
+cruzam e ficam como estao.
 Animacoes: tools/ste/ste_clips.py <iso> Ghidorah.cmp clips.json (ID_MAP do 2000 + PROFILES['Ghidorah']), depois tools/retarget.py
 <DRAGON0.glb> ghidorah_ste.dae tools/rigmaps/ste_ghidorah.json rig.glb --height 142.5 --own clips.json --base disc/MON/DRAGON0.NGP.
 --height 142.5: a escala dos outros mods do STE (1,183 unidade do jogo por unidade do STE; o Ghidorah tem 120,5 no STE), o dobro
