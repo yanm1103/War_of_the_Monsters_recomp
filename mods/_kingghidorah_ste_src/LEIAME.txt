@@ -48,4 +48,4 @@ laco, 14-16 vitorias, 17 provocacao. 7, 8, 9 e 11 ficam os do Raptros.
 Retrato: mods/_godzilla2000_ste_src/portrait_render.py (Blender) com o portrait_shot.json daqui (rugido a131 no quadro 100, as tres
 cabecas; "headBone"/"jawBone" da cabeca do meio) e portrait_compose.py; modkit.py monster portrait ... portrait.png.
 Logo: mklogo.py logo.png C:\Windows\Fonts\impact.ttf (tipografico, dourado), provisorio ate haver uma arte do logo.
-Narrador: narrator_tts.ps1 (voz do Windows, "King Ghidorah!") + ffmpeg: narrator/ghidorah_ste.mp3, quebra-galho.
+Narrador: a fala "GHIDORAH INTRO" do locutor do STE; tools/ste/ste_sound.py <iso> godzilla_voice_e <pasta> --match "<NOME> INTRO" (o banco de voz do locutor do STE, godzilla_voice_e; o WAV fica aqui como narrator_ste.wav) + ffmpeg (corta o silencio do fim, 44100 Hz mono, 128k): narrator/ghidorah_ste.mp3.

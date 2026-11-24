@@ -21,16 +21,16 @@ Plano aprovado em `docs/investigacoes/2026-11-22/plano_malha_kit.md`. Dois camin
 - **Kit no Linux:** conferir o kit no navegador no Linux (abrir o navegador, diálogos de arquivo por zenity ou kdialog) e decidir se ele entra no AppImage.
 
 ## Mechagodzilla 3 (STE), bugs achados pelo dono
-Mod em `mods/Mechagodzilla 3/`, fontes em `mods/_mechagodzilla3_ste_src/` (o `LEIAME.txt` tem a receita e a tabela de golpes). Seguem provisórios: narração com voz do Windows e sons nunca conferidos de ouvido.
+Mod em `mods/Mechagodzilla 3/`, fontes em `mods/_mechagodzilla3_ste_src/` (o `LEIAME.txt` tem a receita e a tabela de golpes). Seguem provisórios: os sons nunca conferidos de ouvido.
 - **Último golpe da corrente de □ não acerta (não reproduzido):** no treino contra a IA o 5º golpe (anim 14, chute alto de 90 quadros, janela 26-41%) sai e acerta, e a tira de `docs/screenshots/2026-11-23/` mostra a esfera vermelha nele. Falta o dono dizer em que situação vê o "chutinho": se é o 4º (anim 13, chute baixo) contra o boneco parado, empurrado para longe pelos três primeiros, ou outro caso.
 - **Conferir no jogo (dono):** o climb (tronco e cabeça pelo `clipBones` do rigmap), o raio saindo de dentro da boca (também no Godzilla 90s), o olho amarelo e o retrato novo (rugido, quadro 48).
 
 ## King Ghidorah (STE), o que falta
-Mod em `mods/King Ghidorah/` (custom `ghidorah_ste` sobre o Raptros), fontes, receita e mapa de golpes em `mods/_kingghidorah_ste_src/LEIAME.txt`. Provisórios: logo tipográfico e narração com voz do Windows.
+Mod em `mods/King Ghidorah/` (custom `ghidorah_ste` sobre o Raptros), fontes, receita e mapa de golpes em `mods/_kingghidorah_ste_src/LEIAME.txt`. Provisório: logo tipográfico.
 - **Conferir no jogo (dono):** o bater de asas do voo (113/114 agora é o `HOVER_IDLE` do STE em 2,2 s, sem as asas se cruzarem: `docs/screenshots/2026-11-24/2026-11-24_king_ghidorah_batida_de_asas_hover.png`; se achar rápido ou lento, é o `2.2` em `PROFILES['Ghidorah']`), se os três raios do especial se distinguem (de lado o raio sai das cabeças e bate no prédio: `docs/screenshots/2026-11-23/2026-11-23_king_ghidorah_gravity_beams.png`), os 16 golpes contra a IA (só o frente+△ foi visto acertando), os sons de ouvido, o caído e o levantar, o climb do Raptros com três pescoços, a câmera do voo nova (`"fly": 300`, `"flyHeight": 120` no `monster.json`; colada só junto do teto de altura do palco), o tiro novo do □ (bola de raio: `docs/screenshots/2026-11-23/2026-11-23_king_ghidorah_tiro_gravity_beam.png`; se achar fraco, é só mexer nos tamanhos do `shotFx`).
 
 ## Mecha King Ghidorah (STE), o que falta
-Mod em `mods/Mecha King Ghidorah/` (custom `mechaghidorah_ste` sobre o Raptros, mesmo esquema do King Ghidorah), fontes e receita em `mods/_mechakingghidorah_ste_src/LEIAME.txt`. Provisórios: logo tipográfico e narração com voz do Windows.
+Mod em `mods/Mecha King Ghidorah/` (custom `mechaghidorah_ste` sobre o Raptros, mesmo esquema do King Ghidorah), fontes e receita em `mods/_mechakingghidorah_ste_src/LEIAME.txt`. Provisório: logo tipográfico.
 - **Conferir no jogo (dono):** a pele (aço e ouro) no corpo e nas asas, os 16 golpes (só 10, 15, 16, 19, 21 e 24 foram vistos tocando; as janelas de acerto e o dano vêm do STE, o Hip Strike acerta por `shoulder` e `tail_mid`), os sons de ouvido (voz do Mecha), o especial e o tiro (iguais aos do King Ghidorah), o caído e o levantar. O nome no HUD sai "ghidorah", igual ao do King Ghidorah.
 
 ## Fora da ordem (até o dono escolher)

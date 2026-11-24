@@ -29,5 +29,5 @@ MECHAGHIDORAH_*, mkg_*) nos numeros do DRAGON_S do Raptros; bater de asas, plana
 Retrato: mods/_godzilla2000_ste_src/portrait_render.py (Blender) com o portrait_shot.json daqui (a131, quadro 100) e
 portrait_compose.py; modkit.py monster portrait ... portrait.png.
 Logo: mklogo.py logo.png C:\Windows\Fonts\impact.ttf (tipografico, aco; "MECHA KING" em cima), provisorio.
-Narrador: narrator_tts.ps1 (voz do Windows, "Mecha King Ghidorah!") + ffmpeg: narrator/mechaghidorah_ste.mp3, quebra-galho.
+Narrador: a fala "MECHAG INTRO" do locutor do STE (MGG e o Megaguirus; o MECHAG e o do Mecha-King Ghidorah, pelo nome e pela duracao); tools/ste/ste_sound.py <iso> godzilla_voice_e <pasta> --match "<NOME> INTRO" (o banco de voz do locutor do STE, godzilla_voice_e; o WAV fica aqui como narrator_ste.wav) + ffmpeg (corta o silencio do fim, 44100 Hz mono, 128k): narrator/mechaghidorah_ste.mp3.
 O nome na tela (HUD, 11 letras) sai igual ao do King Ghidorah ("ghidorah"): a regra do jogo pega a ultima palavra que cabe.

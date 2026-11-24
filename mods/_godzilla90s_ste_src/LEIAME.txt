@@ -10,7 +10,7 @@ o rig.glb e de um retarget.py anterior: so o localizador da boca (loc_80b, [0, 2
 e o focinho) foi trocado depois no .glb; rodar o retarget.py de hoje muda tambem as animacoes, que entao precisam ser conferidas;
 retrato do HUD = render do proprio modelo, como no 2000 (portrait_render.py e portrait_compose.py de mods/_godzilla2000_ste_src),
 com o portrait_shot.json daqui (rugido a208 no quadro 0, boca aberta mais 22 graus); monster portrait ... portrait.png.
-Narrador: narrator/godzilla_90s.mp3 do mod Godzilla copiado como narrator/godzilla_90s_ste.mp3. Logo: logo_source.png centrado num
+Narrador: a fala "GZ90 INTRO" do locutor do STE; tools/ste/ste_sound.py <iso> godzilla_voice_e <pasta> --match "<NOME> INTRO" (o banco de voz do locutor do STE, godzilla_voice_e; o WAV fica aqui como narrator_ste.wav) + ffmpeg (corta o silencio do fim, 44100 Hz mono, 128k): narrator/godzilla_90s_ste.mp3. Logo: logo_source.png centrado num
 512x256 como os logos do jogo (caixa de 80% x 60%).
 Sons: no STE o Godzilla 90s usa as mesmas amostras do 2000 (GODZILLA90 * = amostras 419-431, 445, 446); entram os mesmos sons:
 modkit.py monster sounds ..., depois mods/_godzilla2000_ste_src/ste_sounds.py <iso> <pasta files/ da pasta de trabalho>.

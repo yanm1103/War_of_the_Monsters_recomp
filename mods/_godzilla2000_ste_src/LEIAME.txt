@@ -7,7 +7,7 @@ Retrato do HUD: render do proprio modelo (rig.glb) no Blender, no estilo dos ret
 direita, contorno branco, metade direita "rage", gravado de ponta-cabeca): blender -b -P portrait_render.py -- godzilla2000_ste_rig.glb
 <saida> portrait_shot.json (taunt a92 no quadro 60, boca aberta mais 30 graus), depois portrait_compose.py <saida>_final.png
 portrait.png e modkit.py monster portrait "Godzilla 2000" godzilla_ste portrait.png.
-Narrador: o do Godzilla 2000 do mod Godzilla (narrator/godzilla_2000.mp3 copiado como narrator/godzilla_2000_ste.mp3).
+Narrador: a fala "GZ2K INTRO" do locutor do STE; tools/ste/ste_sound.py <iso> godzilla_voice_e <pasta> --match "<NOME> INTRO" (o banco de voz do locutor do STE, godzilla_voice_e; o WAV fica aqui como narrator_ste.wav) + ffmpeg (corta o silencio do fim, 44100 Hz mono, 128k): narrator/godzilla_2000_ste.mp3.
 Sons: ste_sounds.py <iso> <pasta files/ da pasta de trabalho> sounds (tools/ste/ste_sound.py); sounds/ = os WAVs que ele grava
 (lizard_s_NNN = banco proprio LIZARD_S, genamb_s_NNN = banco comum proprio GENAMB_S), depois modkit.py pack "Godzilla 2000".
 Bola de fogo: 5 (disparo) = GODZILLA2K ATOMIC BREATH cortado em 1,4 s (no STE, o laco do voo da atomicfireball), 6 (explosao) =
