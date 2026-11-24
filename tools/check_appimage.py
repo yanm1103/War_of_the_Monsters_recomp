@@ -16,7 +16,7 @@ BANNED_NAMES = {"save.json", "settings.ini", "wotm.ini", "wotm.log"}
 ALLOWED_FILES = {
     "AppRun", "wotm.desktop", "wotm.svg", ".DirIcon",
     "usr/bin/assets/Oswald-Medium.ttf", "usr/bin/assets/Oswald_OFL.txt",
-    "usr/bin/assets/prompts.png", "usr/bin/assets/prompts_LICENSE.txt",
+    "usr/bin/assets/prompts.png", "usr/bin/assets/prompts_LICENSE.txt", "usr/bin/assets/cursor.png",
     "usr/share/applications/wotm.desktop",
     "usr/share/icons/hicolor/scalable/apps/wotm.svg",
     "usr/share/doc/wotm/README.txt", "usr/share/doc/wotm/THIRD_PARTY.txt",

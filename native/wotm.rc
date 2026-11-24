@@ -5,5 +5,8 @@ GLFW_ICON ICON "wotm.ico"
 // Icones de botao (Kenney "Input Prompts", CC0; tools/prompts_atlas.py): atlas desenhado no lugar dos icones 3D do jogo (native/runtime/wotm_prompts.inc)
 WOTM_PROMPTS RCDATA "assets/prompts.png"
 
+// Cursor do mouse do jogo (native/runtime/wotm_cursor.inc)
+WOTM_CURSOR RCDATA "assets/cursor.png"
+
 // Fonte do texto da tela de opcoes do jogo (Oswald Medium, SIL OFL 1.1: assets/Oswald_OFL.txt; native/runtime/wotm_optscreen.inc)
 FONT_OSWALD RCDATA "assets/Oswald-Medium.ttf"

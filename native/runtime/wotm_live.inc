@@ -336,6 +336,7 @@ static const bool g_wotmFxTintLinked = (wotm::Particles::tintTags = g_wotmFxTint
 static const bool g_wotmFxHideLinked = (wotm::Particles::hideTags = wotm::breathfx::g_hide, true);
 #include "wotm_breathfx.inc"   // sopro proprio de custom ("breathFx"): camadas simuladas aqui, desenhadas pelo Particles
 #include "wotm_prompts.inc"   // icones de botao 2D (Kenney) no lugar dos 3D do jogo
+#include "wotm_cursor.inc"   // cursor do mouse do jogo no lugar do do sistema
 #include "wotm_trainview.inc"   // modo treino: volumes, esferas dos golpes, painel de dano e numeros do HUD
 #define WOTM_HAVE_NATIVE 1
 
@@ -2446,6 +2447,8 @@ static bool wotmDrawNative(const uint8_t *rdram)
         }
     }
 
+    if (!wotm_live::g_localCollect && !wotm_live::g_hideFps)   // replay (--vu1cmp): sem janela de verdade
+        wotm_cursor::draw();
 
     if (++S.frame % 300 == 0 && std::getenv("PS2X_STATS"))
         std::fprintf(stderr, "[native] frame %ld redesenhos=%ld misturados=%ld t=%.1f itens=%zu ceu=%zu rtx=%s\n", S.frame, s_renders, s_blends, GetTime(),

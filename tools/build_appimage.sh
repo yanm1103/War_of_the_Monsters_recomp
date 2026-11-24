@@ -139,7 +139,7 @@ install -m 755 "$repo/tools/release/linux/AppRun" "$appdir/AppRun"
 install -m 644 "$repo/tools/release/linux/wotm.desktop" "$appdir/wotm.desktop"
 install -m 644 "$repo/tools/release/linux/wotm.svg" "$appdir/wotm.svg"
 install -m 755 "$exe" "$appdir/usr/bin/wotm"
-for asset in Oswald-Medium.ttf Oswald_OFL.txt prompts.png prompts_LICENSE.txt; do
+for asset in Oswald-Medium.ttf Oswald_OFL.txt prompts.png prompts_LICENSE.txt cursor.png; do
     install -m 644 "$repo/native/assets/$asset" "$appdir/usr/bin/assets/$asset"
 done
 for doc in README.txt THIRD_PARTY.txt FFmpeg-BUILD.txt AppImageKit-LICENSE.txt; do
