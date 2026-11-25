@@ -3993,7 +3993,7 @@ public:
                     }
                     for (int s = 0; s < 31; ++s) {   // maior |elemento| de cada matriz da paleta (detecta lixo/NaN)
                         float mx = 0.f; bool bad = false;
-                        for (int r = 0; r < 4; ++r) for (int c = 0; c < 4; ++c) { const float e = pm[s].m[r][c]; if (!(e == e) || std::fabs(e) > 1e6f) bad = true; mx = std::max(mx, std::fabs(e)); }
+                        for (int r = 0; r < 4; ++r) for (int c = 0; c < 4; ++c) { const float e = pm[s].m[r][c]; if (!std::isfinite(e) || std::fabs(e) > 1e6f) bad = true; mx = std::max(mx, std::fabs(e)); }
                         if (bad || mx > 500.f) std::fprintf(stderr, "[skinbox]   osso %d: max|e| %.3g%s\n", s, double(mx), bad ? " (LIXO)" : "");
                     }
                     std::fprintf(stderr, "[skinbox] node %x mundo x[%.1f %.1f] y[%.1f %.1f] z[%.1f %.1f] | cru x[%.1f %.1f] y[%.1f %.1f] z[%.1f %.1f]\n", it.node, lo[0], hi[0], lo[1], hi[1], lo[2], hi[2], rlo[0], rhi[0], rlo[1], rhi[1], rlo[2], rhi[2]);

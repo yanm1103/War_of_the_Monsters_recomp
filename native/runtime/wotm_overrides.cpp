@@ -81,6 +81,7 @@ void wotmMainMenuInstall(PS2Runtime &runtime);   // wotm_mainmenu.inc: menu prin
 void wotmBoot(const char *fmt, ...);   // wotm_live.inc: etapa do boot no log e na tela preta (nada depois do primeiro filme)
 
 // Trapacas de debug: a janela (menu F1, wotm_live.inc) escreve, a thread do EE (monsterUpdateCheats) le. Bits em wotm_cheats.h.
+#include "wotm_check.h"   // invariantes: linhas [check]
 #include "wotm_cheats.h"
 #include "wotm_guestcall.h"   // termina as chamadas a codigo do jogo feitas de dentro de ganchos
 #include "wotm_settings.hpp"   // opcoes ao vivo (painel "recompiled options" e launcher)
@@ -1810,6 +1811,8 @@ namespace
         if (d2 > kJump * kJump || !std::isfinite(d2))
         {
             std::memcpy(rdram + e + kEmitPrevVec, rdram + e + kEmitVec, 16);
+            if (!std::isfinite(d2))
+                wotm::check::report("emitter_nan", "emissor de particulas fxId %u com posicao NaN", FAST_READ32(e + kEmitFxId));
             if (g_emitFixes < 8 && ++g_emitFixes)
                 std::fprintf(stderr, "[wotm] emissor de particulas fxId %u saltou %.3g unidades: contado como parado\n", FAST_READ32(e + kEmitFxId),
                              std::sqrt(d2));

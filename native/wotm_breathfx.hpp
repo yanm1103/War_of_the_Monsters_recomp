@@ -9,6 +9,8 @@
 #pragma once
 
 #include <atomic>
+
+#include "wotm_check.h"   // invariantes: linhas [check]
 #include <cstdint>
 #include <string>
 #include <vector>

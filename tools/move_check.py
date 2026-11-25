@@ -33,7 +33,11 @@ import chr_view as cv  # noqa: E402
 FPS = 60.0
 MS = FPS / 1000.0          # fields per millisecond
 GETUP_ANIMS = (242, 243)   # StateGetupAttack: face down, face up
-GETUP_LOC = 0x802          # the constructor's locator of the get-up attack (left hand)
+GETUP_LOC = 0x802          # the constructor's locator of the get-up attack (left hand); a custom's "getupLocator" replaces it
+LOC_NAMES = {0x802: "left hand", 0x803: "right hand", 0x804: "left foot", 0x805: "right foot", 0x80B: "mouth", 0x816: "tail (middle)",
+             0x817: "tail (tip)", 0x818: "head", 0x819: "shoulder"}
+LOC_KEYS = {0x802: "hand_l", 0x803: "hand_r", 0x804: "foot_l", 0x805: "foot_r", 0x80B: "mouth", 0x816: "tail_mid", 0x817: "tail_tip",
+            0x818: "head", 0x819: "shoulder"}
 PIN = 0x809                # the monster's centre (getPinTrans)
 XFORM_OPS = (3, 4, 17, 30, 38)
 SEV = {"error": 0, "warn": 1, "info": 2}
@@ -191,8 +195,39 @@ def name_of(r):
     return "%s%s step %d" % (DIRS.get(r["dir"], ""), r["button"], r["pos"])
 
 
-def analyze(m, rig=None):
+def getup_locators(ngp):
+    """The locators the get-up attack tests, face down and face up: the game's left hand, or the "getupLocator" of the
+    monster.json next to the model's files/ folder (a name, an id, or [face down, face up])."""
+    out = [GETUP_LOC, GETUP_LOC]
+    if not ngp:
+        return out
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(ngp))), "monster.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            v = json.load(fh).get("getupLocator")
+    except (OSError, ValueError):
+        return out
+    keys = {k: i for i, k in LOC_KEYS.items()}
+
+    def one(x):
+        if isinstance(x, str):
+            return keys.get(x.lower(), 0)
+        return x if isinstance(x, int) and 0x802 <= x <= 0x832 else 0
+
+    vals = [one(x) for x in v[:2]] if isinstance(v, list) else [one(v), one(v)] if v is not None else []
+    for i, x in enumerate(vals):
+        if x:
+            out[i] = x
+    return out
+
+
+def loc_name(lid):
+    return LOC_NAMES.get(lid, "locator 0x%X" % lid)
+
+
+def analyze(m, rig=None, getup=None):
     """The measurements of a monster's punches (m = chr_view.moves_of with the model): {moves, links, openers, getup}.
+    getup: the locators of the get-up attack, face down and face up (default: the game's left hand).
     Nothing is judged here; see findings()."""
     out = {"moves": [], "links": [], "getup": [], "frames": bool(m.get("frames"))}
     if m.get("legacy") or not m.get("frames"):
@@ -234,9 +269,15 @@ def analyze(m, rig=None):
         radius = m.get("default_radius") or 0.0
         for i, anim in enumerate(GETUP_ANIMS):
             fr = rig.frames(anim)
-            g = {"anim": anim, "face": ("down", "up")[i], "frames": fr, "sweep": None}
+            lid = (getup or (GETUP_LOC, GETUP_LOC))[i]
+            g = {"anim": anim, "face": ("down", "up")[i], "frames": fr, "sweep": None, "locator": lid, "others": {}}
             if fr:
-                g["sweep"] = sweep(rig, anim, [GETUP_LOC], 0.0, 1.0, radius)
+                g["sweep"] = sweep(rig, anim, [lid], 0.0, 1.0, radius)
+                for other in LOC_KEYS:   # what the other limbs do in the clip: the one that really attacks
+                    if other != lid and other in rig.locs:
+                        o = sweep(rig, anim, [other], 0.0, 1.0, radius)
+                        if o:
+                            g["others"][other] = {"path": o["path"], "reach": o["reach"]}
                 pin = sweep(rig, anim, [PIN], 0.0, 1.0, 0.0)
                 g["body_high"] = pin["high"] if pin else None
             out["getup"].append(g)
@@ -550,20 +591,36 @@ def findings(m, a, ref=None):
 
     for g in a["getup"]:
         w = "Get-up attack, face %s" % g["face"]
-        hint = "The get-up attack plays animation %d of the model and hits with the left hand: put an attack there (3D model tab, the animations of the rig)." % g["anim"]
+        limb = loc_name(g.get("locator", GETUP_LOC))
+        hint = ("The get-up attack plays animation %d of the model and tests its hit on the %s: put an attack there (3D model tab, the animations "
+                "of the rig), or name the limb the animation hits with in \"getupLocator\" of the monster.json (hand_l, hand_r, foot_l, foot_r, "
+                "tail_mid, tail_tip, head; [face down, face up] for one per side)." % (g["anim"], limb))
+        # a limb that does sweep like the game's get-up attacks: the animation attacks with it, the hit is tested elsewhere
+        better = None
+        if ref and ref["getup_path"] and ref["getup_reach"]:
+            cand = [(o["path"], lid) for lid, o in g.get("others", {}).items()
+                    if o["path"] >= ref["getup_path"]["min"] and o["reach"] >= 0.8 * ref["getup_reach"]["min"]]
+            if cand:
+                better = max(cand)[1]
+        if better:
+            hint = ("In this animation the %s sweeps %.0f units and reaches %.0f, like an attack: set \"getupLocator\": \"%s\" in the "
+                    "monster.json so the hit is tested there (or [face down, face up] for one limb per side)." % (
+                        loc_name(better), g["others"][better]["path"], g["others"][better]["reach"], LOC_KEYS[better]))
         if not g["frames"]:
             add("error", "getup_missing", [], "No get-up attack", "The model has no animation %d: the game refuses the attack when getting up lying face %s." % (g["anim"], g["face"]), hint, where=w, anim=g["anim"])
             continue
         s = g["sweep"]
         if not s:
-            add("warn", "getup_no_hand", [], "Get-up attack cannot hit", "The model has no left hand locator, where the get-up attack tests its hit.", "Add the left hand locator to the rig.", where=w, anim=g["anim"])
+            add("warn", "getup_no_hand", [], "Get-up attack cannot hit", "The model has no %s locator, where the get-up attack tests its hit." % limb, "Add that locator to the rig, or pick another limb with \"getupLocator\" in the monster.json.", where=w, anim=g["anim"])
             continue
         if ref and ref["getup_path"] and s["path"] < 0.5 * ref["getup_path"]["min"]:
-            add("warn", "getup_still", [], "Get-up attack that is not an attack", "In animation %d the left hand, which carries the hit, moves only %.0f units in total. In the game's "
-                "get-up attacks it sweeps %.0f to %.0f: this animation probably just stands up, so it hits nothing." % (g["anim"], s["path"], ref["getup_path"]["min"], ref["getup_path"]["max"]), hint, where=w, anim=g["anim"])
+            add("warn", "getup_still", [], "Get-up attack that is not an attack", "In animation %d the %s, which carries the hit, moves only %.0f units in total. In the game's "
+                "get-up attacks the hand sweeps %.0f to %.0f: %s" % (g["anim"], limb, s["path"], ref["getup_path"]["min"], ref["getup_path"]["max"],
+                                                                     "the animation attacks with another limb, so the hit is tested in the wrong place." if better
+                                                                     else "this animation probably just stands up, so it hits nothing."), hint, where=w, anim=g["anim"])
         elif ref and ref["getup_reach"] and s["reach"] < 0.8 * ref["getup_reach"]["min"]:
-            add("warn", "getup_short", [], "Get-up attack with short reach", "In animation %d the left hand gets only %.0f units away from the monster; in the game's get-up "
-                "attacks %.0f to %.0f." % (g["anim"], s["reach"], ref["getup_reach"]["min"], ref["getup_reach"]["max"]), hint, where=w, anim=g["anim"])
+            add("warn", "getup_short", [], "Get-up attack with short reach", "In animation %d the %s gets only %.0f units away from the monster; in the game's get-up "
+                "attacks the hand gets %.0f to %.0f away." % (g["anim"], limb, s["reach"], ref["getup_reach"]["min"], ref["getup_reach"]["max"]), hint, where=w, anim=g["anim"])
         if ref and ref["getup_body_high"] and g.get("body_high") is not None and g["body_high"] > 1.5 * ref["getup_body_high"]["max"]:
             add("warn", "getup_flies", [], "Get-up attack leaves the ground", "In animation %d the body rises to %.0f units of height; in the game's get-up attacks it stays "
                 "under %.0f." % (g["anim"], g["body_high"], ref["getup_body_high"]["max"]), hint, where=w, anim=g["anim"])
@@ -594,7 +651,7 @@ def check(m, ngp, disc=None):
             rig = Rig(ngp)
         except Exception:  # noqa: BLE001
             rig = None
-    a = analyze(m, rig)
+    a = analyze(m, rig, getup_locators(ngp))
     ref = reference(disc)
     a["findings"] = findings(m, a, ref)
     a["reference"] = bool(ref)
@@ -635,7 +692,8 @@ def report(label, m, a, every=False):
     for g in a["getup"]:
         s = g["sweep"]
         out.append("  GET-UP ATTACK face %-4s animation %d: %s" % (g["face"], g["anim"], "missing" if not g["frames"] else (
-            "%.0f frames, hand travels %.0f, reach %.0f, body up to %.0f" % (g["frames"], s["path"], s["reach"], g.get("body_high") or 0) if s else "no hand locator")))
+            "%.0f frames, %s travels %.0f, reach %.0f, body up to %.0f" % (g["frames"], loc_name(g.get("locator", GETUP_LOC)), s["path"], s["reach"], g.get("body_high") or 0)
+            if s else "no %s locator" % loc_name(g.get("locator", GETUP_LOC)))))
     fs = a.get("findings", [])
     out.append("  FINDINGS: %d error, %d warn, %d info%s" % (sum(f["sev"] == "error" for f in fs), sum(f["sev"] == "warn" for f in fs),
                                                               sum(f["sev"] == "info" for f in fs), "" if a.get("reference") else "  (no disc: nothing was compared with the game's monsters)"))

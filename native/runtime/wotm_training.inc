@@ -14,6 +14,7 @@
 //   agarradas. Recarga: vida cheia depois de 1,5 s sem dano, e um golpe que mataria enche a vida antes (ninguem morre no treino).
 
 #include "wotm_training.h"
+#include "wotm_check.h"   // invariantes: linhas [check]
 #include "wotm_lms.h"   // last monster standing: sem o "WINS n" (skipWins)
 
 namespace wotm_train
@@ -100,8 +101,8 @@ namespace wotm_train
 
     struct Track
     {
-        uint32_t off = 0, start = 0, lastActive = 0, firstActive = 0;
-        int chain = -1, step = -1, active = 0, hitVictim = -1;
+        uint32_t off = 0, start = 0, lastActive = 0, firstActive = 0, hitFrame = 0;
+        int chain = -1, step = -1, active = 0, hitVictim = -1, anim = -1;
         bool blocked = false;   // no recuo: o golpe foi defendido
     } g_track[16];
     constexpr uint32_t kRecoilState = 0x7E30u, kRecoilBlocked = kRecoilState + 0x64u;
@@ -487,6 +488,14 @@ namespace wotm_train
 
     // ---- dano e boneco
 
+    // Telemetria de golpe (WOTM_HITLOG=<arquivo>, com o treino ligado): um CSV com o que o treino mede, para o tools/move_measure.py
+    // comparar com o previsto pelo move_check. Linhas, em quadros do jogo (g_frame):
+    //   move,inicio,fim,slot,estado,passo,tipo,anim,startup,ativos,vitima,acerto   (startup e acerto contam o 1o quadro do estado como 1; 0 = nao houve)
+    //   react,inicio,fim,slot,estado,defendido
+    //   dmg,quadro,vitima,atacante,aplicado,pedido,source
+    std::FILE *g_moveLog = nullptr;
+    PunchCfg readPunchCfg(const uint8_t *rdram, uint32_t m, int tier, int type);
+
     // classe do estado em que o monstro esta (cls da kStates; 0 sem nome)
     int stateCls(const uint8_t *rdram, uint32_t m)
     {
@@ -569,6 +578,8 @@ namespace wotm_train
         if (++logged <= 30 || logged % 100 == 0)
             std::fprintf(stderr, "[treino] dano %.2f em slot %d (de %d; pedido %.2f, source %d), vida %.1f -> %.1f de %.0f (%u)\n", h.applied,
                          slot, h.attacker, h.base, h.source, before, after, maxH, logged);
+        if (g_moveLog)
+            std::fprintf(g_moveLog, "dmg,%u,%d,%d,%.3f,%.3f,%d\n", h.frame, slot, h.attacker, h.applied, h.base, h.source);
         Shared &sh = shared();
         std::lock_guard<std::mutex> lk(sh.m);
         // dano continuo (fogo, choque: um pouco por quadro, sem takeHit) vira um registro so enquanto continua
@@ -639,7 +650,10 @@ namespace wotm_train
             if (g_hitMark[slot].victim >= 0)
             {
                 if (tr.hitVictim < 0)
+                {
                     tr.hitVictim = g_hitMark[slot].victim;
+                    tr.hitFrame = g_hitMark[slot].frame;
+                }
                 g_hitMark[slot] = HitMark{};
             }
         };
@@ -670,6 +684,9 @@ namespace wotm_train
                 if (++nlog <= 40)
                     std::fprintf(stderr, "[treino] golpe slot %d %s c%d s%d: inicio %d, ativo %d, total %u, vitima %d\n", slot, r.name, r.chain,
                                  r.step, r.startup, r.active, r.end - r.start, r.hitVictim);
+                if (g_moveLog)
+                    std::fprintf(g_moveLog, "move,%u,%u,%d,%s,%d,%d,%d,%d,%d,%d,%d\n", t.start, f, slot, r.name, t.chain, t.step, t.anim, r.startup, r.active,
+                                 t.hitVictim, t.hitFrame >= t.start && t.hitVictim >= 0 ? int(t.hitFrame - t.start) + 1 : 0);
                 sh.moves.push_back(r);
                 if (sh.moves.size() > 64)
                     sh.moves.erase(sh.moves.begin());
@@ -680,6 +697,8 @@ namespace wotm_train
                 if (++nlog <= 40)
                     std::fprintf(stderr, "[treino] reacao slot %d %s%s: %u quadros (%u..%u)\n", slot, sn->name,
                                  t.blocked ? " (defendido)" : "", f - t.start, t.start, f);
+                if (g_moveLog)
+                    std::fprintf(g_moveLog, "react,%u,%u,%d,%s,%d\n", t.start, f, slot, sn->name, int(t.blocked));
                 sh.stuns.push_back(StunRec{int8_t(slot), t.blocked ? "BLOCKSTUN" : sn->name, t.start, f, t.blocked});
                 if (sh.stuns.size() > 64)
                     sh.stuns.erase(sh.stuns.begin());
@@ -690,6 +709,16 @@ namespace wotm_train
         t.chain = chain;
         t.step = step;
         t.start = f;
+        if (g_moveLog && off)   // a animacao do golpe: a do soco (config do .CHR) ou a do estado
+        {
+            if (off == kPunch)
+            {
+                const PunchCfg c = readPunchCfg(rdram, m, chain, step);
+                t.anim = c.valid ? c.anim : -1;
+            }
+            else if (off != kBat)
+                t.anim = int(rd32(rdram, st + 0x50u));
+        }
         absorb(t);
     }
 
@@ -1246,6 +1275,12 @@ namespace wotm_train
         }
     }
 
+    void callFn(uint8_t *rdram, R5900Context *ctx, PS2Runtime *rt, uint32_t fn, uint32_t a0, uint32_t a1, uint32_t a2);
+    // WOTM_FORCESPECIAL=<segundos>: o monstro do slot 0, parado ou correndo, entra no estado do especial dele (Monster +0x7980) a cada
+    // tantos segundos, para o smoke (tools/smoke.ps1) conferir o sopro de todo monstro sem depender da IA resolver usar
+    int g_forceSpecial = 0;
+    constexpr uint32_t kSpecialPtr = 0x7980u, kIdleState = 0x7984u, kRunState = 0x79ACu;
+
     void monsterUpdate(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         const uint32_t m = GPR_U32(ctx, 4) & 0x1FFFFFFFu;
@@ -1255,6 +1290,19 @@ namespace wotm_train
             return;
         }
         const int slot = slotOf(rdram, m);
+        if (g_forceSpecial > 0 && slot == 0)
+        {
+            static uint32_t last = 0;
+            const uint32_t f = frameNow(rdram), st = rd32(rdram, m + 0x34) & 0x1FFFFFFFu, sp = rd32(rdram, m + kSpecialPtr) & 0x1FFFFFFFu;
+            if (f < last)
+                last = f;
+            if (f - last >= uint32_t(g_forceSpecial) * 60u && sp > m && sp - m < 0x11190u && (st == m + kIdleState || st == m + kRunState))
+            {
+                last = f;
+                std::fprintf(stderr, "[treino] especial forcado no slot 0 (WOTM_FORCESPECIAL)\n");
+                callFn(rdram, ctx, runtime, wotm::fn::enterNewState__7MonsterP12MonsterState, m, sp, 0);
+            }
+        }
         const bool on = g_on.load(std::memory_order_relaxed);
         if (on)
             applyDifficulty(rdram, kGameObj + kDifficulty);   // dificuldade da CPU escolhida no painel (ou a do jogo de volta)
@@ -1295,6 +1343,13 @@ namespace wotm_train
         g_curMonster = m;
         g_origUpdate(rdram, ctx, runtime);
         g_curMonster = saved;
+        if (slot >= 0 && returned(ctx, ra))
+        {   // invariante: o monstro tem que estar num lugar do mundo
+            float p[3];
+            readVec(rdram, m + kPinTrans, p);
+            if (!wotm::check::finite3(p) || std::fabs(p[0]) > 2e5f || std::fabs(p[1]) > 2e5f || std::fabs(p[2]) > 2e5f)
+                wotm::check::report("monster_pos", "monstro do slot %d em (%g, %g, %g)", slot, double(p[0]), double(p[1]), double(p[2]));
+        }
         if (on && slot >= 0 && returned(ctx, ra))
         {
             trackState(rdram, m, slot);
@@ -1414,6 +1469,11 @@ void wotmTrainingInstall(PS2Runtime &runtime)
     using namespace wotm_train;
     if (const char *e = std::getenv("WOTM_TRAINING"); e && *e && *e != '0')
         g_on = true;
+    if (const char *e = std::getenv("WOTM_FORCESPECIAL"); e && *e)
+        g_forceSpecial = std::clamp(std::atoi(e), 0, 600);
+    if (const char *e = std::getenv("WOTM_HITLOG"); e && *e)
+        if ((g_moveLog = std::fopen(e, "w")))
+            std::setvbuf(g_moveLog, nullptr, _IONBF, 0);   // o processo e encerrado de fora: nada fica no buffer
     if (const char *e = std::getenv("WOTM_TRAINING_DUMMY"); e && *e)   // 0 parado, 1 CPU, 2 sempre bloqueia, 3 bloqueia depois do 1o acerto, 4 pula
         g_dummy = std::clamp(std::atoi(e), 0, DCount - 1);
     if (const char *e = std::getenv("WOTM_TRAINING_HEALTH"); e && *e)  // % da vida do boneco na recarga

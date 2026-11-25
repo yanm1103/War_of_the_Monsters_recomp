@@ -15,6 +15,7 @@
 //   atacante (a unica leitura de m_monsters[0] no takeHit e esse teste); o resto do takeHit segue o caminho normal (bloqueio,
 //   recuos). So quando o Goliath atingido e um jogador.
 
+#include "wotm_check.h"   // invariantes: linhas [check]
 #include "wotm_disc.hpp"   // .CHR do monstro base da camera (camTable)
 
 uint32_t wotmObjectMainColor(const uint8_t *rdram, uint32_t node);   // wotm_live.inc (outro TU): cor de vertice de um modelo
@@ -29,6 +30,7 @@ namespace wotm_custom
     constexpr uint32_t kNumAIs = 0x1203E0, kGameMode = 0x1203C8;   // TheGame::m_numAIs, m_gameMode
     constexpr uint32_t kSlots = 0xB80, kSlotStride = 0x11190, kNumSlots = 0x1203D4;   // TheGame::m_slots[16], m_numSlots
     constexpr uint32_t kGoliath = 13u << 5, kJelly = 14u << 5, kFinal = 15u << 5;
+    constexpr uint32_t kGetupState = 0x10C40;         // o StateGetupAttack dentro do Monster
     constexpr uint32_t kSpecialState = 0x7980;        // Monster::m_specialState (o estado do golpe especial)
     // Chefe que e Monster (a selecao nao oferece; o SetAIMonster o esconde)
     bool bossType(uint32_t bits) { return bits == kGoliath || bits == kJelly || bits == kFinal; }
@@ -612,6 +614,13 @@ namespace wotm_custom
         const bool flyBefore = flyCam && flyCamActive(rdram, m);
         if (flyCam && isFlyState(rdram, READ32(m + kCurState)) != isFlyState(rdram, next))
             g_flyCam.erase(m);   // entrar ou sair do StateFly recomeca sem a camera do voo (o transitionInto pode ligar a seguir)
+        // "getupLocator": os dois registros do StateGetupAttack (+0x14 de brucos, +0x38 de costas; localizador em +8) saem do
+        // construtor com a mao esquerda; quem levanta chutando ou com a cauda troca aqui, na entrada do estado
+        if (ctx->pc == kEnterState && m && next == m + kGetupState)
+            if (const wotm::mods::Custom *cu = customOf(rdram, m))
+                for (uint32_t k = 0; k < 2; ++k)
+                    if (cu->getupLocator[k])
+                        WRITE32(next + 0x14u + 0x24u * k + 8u, uint32_t(cu->getupLocator[k]));
         g_origEnterState(rdram, ctx, runtime);
         if (flyCam && flyBefore != flyCamActive(rdram, m))
             refreshFlyCam(rdram, ctx, runtime, m);
@@ -1930,6 +1939,16 @@ namespace wotm_custom
         }
         withFxOwner(rdram, ctx, runtime, m, g_origBreathCollis, true);
         g_breathLosM = prevM;
+        if (cfg)
+        {
+            float ax[3];
+            rdV(rdram, m + kBreathAxis, ax);
+            const float len = std::sqrt(ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2]);
+            if (!wotm::check::finite3(ax) || len < 0.5f || len > 2.f)
+                wotm::check::report(("breath_axis:" + cu->id).c_str(), "eixo do sopro (%g, %g, %g)", double(ax[0]), double(ax[1]), double(ax[2]));
+            else if (g_breathLimit == 0.f && !g_breathBlocked)   // a linha parou na propria boca sem bater em nada: o sopro inteiro e cortado ali
+                wotm::check::report(("breath_line_zero:" + cu->id).c_str(), "linha do sopro ate 0 sem bater em nada");
+        }
         if (aimLog && m)   // eixo do bafo (+0x33D0) contra a frente do monstro (linha 1 da matriz do _cs) e contra o peito do outro mais perto
         {
             const uint32_t cs = READ32(m + kCs);

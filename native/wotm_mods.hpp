@@ -180,6 +180,9 @@ struct Custom {
     float cameraScale = 1.f;    // distancias da camera emprestada
     float cameraBack = 0.f;     // no chao, a posicao da camera (so ela, nao o ponto de mira) nesta escala ("camera": {"back": %}); 0 = a "scale"
     float cameraHeight = 0.f;   // idem para a altura ("height": %); 0 = o mesmo que "back"
+    // "getupLocator": o localizador em que o ataque ao levantar testa o acerto, de brucos e de costas (o jogo usa a mao esquerda,
+    // 0x802, nos dois); 0 = o do jogo. Para quem levanta chutando ou com a cauda
+    int getupLocator[2] = {0, 0};
     float cameraFlyScale = 0.f; // afastamento da camera (so a posicao, nao o ponto de mira) com o monstro no StateFly ("camera": {"fly": %}); 0 = o mesmo
     float cameraFlyHeight = 0.f;  // idem para a altura ("flyHeight": %); 0 = o mesmo que "fly" (wotm_custom.inc)
     std::string narrator;       // narrator/<nome>.mp3 (vazio = o do tipo)
@@ -1057,6 +1060,24 @@ private:
                     c.breathFx = breathFx(*bf, s, m, where);
                 if (const json::Value *sf = v.get("shotFx"); sf && sf->type == json::Value::Obj)
                     c.shotFx = breathFx(*sf, s, m, where, true);
+                if (const json::Value *gl = v.get("getupLocator")) {   // um nome ou id, ou [de brucos, de costas]
+                    const auto loc = [](const json::Value &a) {
+                        static const std::pair<const char *, int> kLocs[] = {{"hand_l", 0x802}, {"hand_r", 0x803}, {"foot_l", 0x804}, {"foot_r", 0x805},
+                                                                           {"mouth", 0x80B}, {"tail_mid", 0x816}, {"tail_tip", 0x817},
+                                                                           {"head", 0x818}, {"shoulder", 0x819}};
+                        if (a.type == json::Value::Str)
+                            for (const auto &kv : kLocs)
+                                if (lower(a.s) == kv.first) return kv.second;
+                        return a.type == json::Value::Int && a.i >= 0x802 && a.i <= 0x832 ? int(a.i) : 0;
+                    };
+                    if (gl->type == json::Value::Arr) {
+                        for (size_t k = 0; k < 2 && k < gl->arr.size(); ++k) c.getupLocator[k] = loc(gl->arr[k]);
+                    } else {
+                        c.getupLocator[0] = c.getupLocator[1] = loc(*gl);
+                    }
+                    if (!c.getupLocator[0] && !c.getupLocator[1])
+                        std::fprintf(stderr, "[mods] monstro %s: \"getupLocator\" sem um localizador conhecido\n", where.c_str());
+                }
                 if (const json::Value *ki = v.get("kind"); ki && ki->type == json::Value::Str) c.kind = lower(ki->s);
                 if (const json::Value *sr = v.get("specialRoar")) c.specialRoar = sr->asBool(false);
                 if (const json::Value *fb = v.get("fallBlend"); fb && fb->type == json::Value::Int && fb->i >= 0 && fb->i <= 120)

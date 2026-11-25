@@ -488,6 +488,8 @@ namespace wotm_breathfx
                                          L.anchor, dot3v(d, fr.f), dot3v(d, fr.s), dot3v(d, fr.u));
                         }
                     }
+                    else
+                        wotm::check::report("breath_anchor", "camada %zu: localizador 0x%X sem posicao, saiu da boca", j, L.anchor);
                 }
                 if (dt > 0.f)
                 {

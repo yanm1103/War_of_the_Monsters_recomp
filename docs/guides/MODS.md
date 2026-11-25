@@ -696,6 +696,11 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
 - `landOnTouch`: `true` = the jump's landing layer (animation 35) only comes in when the feet touch the ground. Without it the
   game puts it on near the ground, still in the air, held on its first frame (a pose bracing for the landing). Log:
   `[custom] cj: pouso no toque`.
+- `getupLocator`: the limb the get-up attack tests its hit on: a locator name (`hand_l`, `hand_r`, `foot_l`, `foot_r`, `mouth`,
+  `head`, `tail_mid`, `tail_tip`, `shoulder`) or id, or `[face down, face up]` for one per side. The game tests the left hand in
+  both (the locator is hard-coded in the `StateGetupAttack` constructor; animations 242 and 243), so a monster that gets up kicking or
+  with its tail names the limb here. `tools/move_check.py` measures the same limb and, when the tested limb barely moves while
+  another one sweeps like an attack, says which one to name.
 - `rootTurn`: `{"<animation id>": [degrees, ...]}`, how far the character turns during an animation of its own, one entry per frame of
   the clip (accumulated from the first frame, positive towards +x like the game's heading). A model from another game that spins
   its whole body in a move (Godzilla's tail spin) leaves the game turning only the pose: the clip is made without that turn

@@ -1,0 +1,28 @@
+{
+ "anims": {
+  "cj | ends_body_low | 77": "cj: Ends lying or crouched where the game's monsters end standing",
+  "ghidorah_ste | ends_feet_up | 222": "ghidorah_ste: Ends with the feet off the ground",
+  "ghidorah_ste | root_moves | 69": "ghidorah_ste: The clip moves the body away",
+  "godzilla | feet_sink | 88,120,122,243": "godzilla: Feet go under the ground",
+  "godzilla90s_ste | ends_feet_up | 30": "godzilla90s_ste: Ends with the feet off the ground",
+  "godzilla90s_ste | root_moves | 69,70,71,77": "godzilla90s_ste: The clip moves the body away",
+  "godzilla_ste | ends_feet_up | 30": "godzilla_ste: Ends with the feet off the ground",
+  "godzilla_ste | root_moves | 70,71": "godzilla_ste: The clip moves the body away",
+  "mecha | missing_required | 30": "mecha: A move cannot be used: its animation is missing",
+  "mechaghidorah_ste | body_high | 22": "mechaghidorah_ste: Body leaves the ground",
+  "mechaghidorah_ste | ends_feet_up | 18,21,92,222": "mechaghidorah_ste: Ends with the feet off the ground",
+  "mechaghidorah_ste | root_moves | 69": "mechaghidorah_ste: The clip moves the body away",
+  "mechagodzilla3_ste | ends_feet_up | 76,88,165,220,221,224,226,229,239,242,243": "mechagodzilla3_ste: Ends with the feet off the ground",
+  "mechagodzilla3_ste | root_moves | 69,70,71": "mechagodzilla3_ste: The clip moves the body away"
+ },
+ "docs": {},
+ "fp": {},
+ "json": {},
+ "mods": {},
+ "moves": {
+  "ghidorah_ste | reach_high | LIGHT step 3": "ghidorah_ste: LIGHT step 3: Passes over the victim",
+  "mechaghidorah_ste | reach_high | LIGHT step 2": "mechaghidorah_ste: LIGHT step 2: Passes over the victim",
+  "mechagodzilla3_ste | getup_still | Get-up attack, face down": "mechagodzilla3_ste: Get-up attack, face down: Get-up attack that is not an attack"
+ },
+ "smoke": {}
+}

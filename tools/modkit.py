@@ -1945,9 +1945,17 @@ def check(disc, mods, only=None):
                 if not trel:
                     note, problems = "ERROR: %s%s is not on the disc" % (stem.upper(), ".RTX" if rtx else ".TEX"), problems + 1
                 else:
+                    # the texture file the PNG replaces a texture of: the one next to it (a custom monster's own files/), the one a
+                    # custom of the same mod brings (its skins), the mod's copy of the disc file, the disc's
                     modded = os.path.join(mods, mod, *trel.split("/"))
-                    pk = next((q for q in tex.parse(tex.read_file(modded if os.path.exists(modded) else disc_file(disc, trel))[0])["packets"]
-                               if q.texId == tid and not (rtx and q.is_palette())), None)
+                    tname = os.path.basename(trel).lower()
+                    own = [os.path.join(d, f) for d in [os.path.dirname(p)] + sorted(glob.glob(os.path.join(mods, mod, "monsters", "*", "files")))
+                           if os.path.isdir(d) for f in os.listdir(d) if f.lower() == tname]
+                    pk = None
+                    for src in own + [modded if os.path.exists(modded) else disc_file(disc, trel)]:
+                        pk = next((q for q in tex.parse(tex.read_file(src)[0])["packets"] if q.texId == tid and not (rtx and q.is_palette())), None)
+                        if pk is not None:
+                            break
                     if pk is None:
                         note, problems = "ERROR: %s has no texId %d" % (trel, tid), problems + 1
                     else:
