@@ -21,6 +21,16 @@ Plano aprovado em `docs/investigacoes/2026-11-22/plano_malha_kit.md`. Dois camin
 - **Move check, calibrar com o jogo:** o `tools/move_check.py` mede os golpes pelo `.CHR` e pelo modelo (linha do tempo, elos, alcance) sem a pausa do acerto, a investida do golpe nem a distância entre os monstros. Falta comparar meia dúzia de golpes com o que o modo treino mede (startup, vantagem no acerto) e, se divergir, corrigir o modelo; e ajustar os mods STE pelos achados (`python tools/move_check.py --mod "mods/<mod>"`).
 - **Kit no Linux:** conferir o kit no navegador no Linux (abrir o navegador, diálogos de arquivo por zenity ou kdialog) e decidir se ele entra no AppImage.
 
+## Ferramentas de desenvolvimento (conferir por número, não na tela)
+A linha é a do `tools/move_check.py`: o que hoje só aparece olhando o jogo vira invariante que um script confere. Nesta ordem:
+- **Smoke dos mods com invariantes do runtime:** o runtime emite linhas `[check]` para o que nunca deveria acontecer (NaN em eixo ou partícula, sopro com linha 0, localizador fora do mundo) e um script roda uma luta curta de IA com cada monstro de `mods/` e devolve uma tabela. Começar pelo `tools/lote.ps1` (já roda `WOTM_MATCH` + `WOTM_AIVSAI` e lê o log) e pelo sopro (`native/runtime/wotm_custom.inc`, `breathLos`).
+- **Lint de `/fp:fast`:** o pre-commit recusa `x == x`, `isnan` e sentinela NaN em `native/` (o runtime compila com `/fp:fast`, onde esses testes não valem).
+- **Telemetria de golpe medida no jogo:** o runtime grava em CSV, por golpe executado, o quadro em que a esfera ligou, o do acerto, o dano e quando o atacante voltou ao controle; um script compara com o previsto pelo `move_check.py`. Começar pelos ganchos do modo treino (`native/runtime/wotm_training.inc`), que já marcam o teste de golpe e o dano.
+- **Check de animação:** por clipe de um monstro de mod, contra o clipe do monstro base: altura do corpo, pés abaixo ou acima do chão, duração, localizadores. Sai uma lista de clipes suspeitos no formato dos achados do move check (`Rig` e `sweep` do `move_check.py` já dão as posições).
+- **Um comando só, com baseline:** `check` que roda doclint, `wotm_env`, validação do `monster.json`, move check, check de animação e o smoke, e mostra só o que é novo em relação à base aceita.
+- **Ataque ao levantar por outro osso:** o jogo testa o acerto do ataque ao levantar sempre na mão esquerda (localizador `0x802`, fixo no construtor do `StateGetupAttack`); um monstro que levanta chutando ou com a cauda precisa escolher o localizador no `monster.json`, e o move check tem que medir o mesmo osso.
+- **Recarregar o mod no treino:** reler `monster.json` e `.CHR` sem rebootar o jogo (conferir antes o que já existe).
+
 ## Mechagodzilla 3 (STE), bugs achados pelo dono
 Mod em `mods/Mechagodzilla 3/`, fontes em `mods/_mechagodzilla3_ste_src/` (o `LEIAME.txt` tem a receita e a tabela de golpes). Seguem provisórios: os sons nunca conferidos de ouvido.
 - **Último golpe da corrente de □ não acerta (não reproduzido):** no treino contra a IA o 5º golpe (anim 14, chute alto de 90 quadros, janela 26-41%) sai e acerta, e a tira de `docs/screenshots/2026-11-23/` mostra a esfera vermelha nele. Falta o dono dizer em que situação vê o "chutinho": se é o 4º (anim 13, chute baixo) contra o boneco parado, empurrado para longe pelos três primeiros, ou outro caso.
