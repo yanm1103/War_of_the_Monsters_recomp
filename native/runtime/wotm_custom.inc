@@ -1878,7 +1878,7 @@ namespace wotm_custom
         // Mira ("aim" do breathFx): o jogo aponta o bafo virando a cabeca para o alvo (camadas de olhar 154/155, updateLookAt); a
         // inclinacao chega, mas num esqueleto proprio a virada para o lado pode nao chegar e o bafo passa ao lado (Godzilla STE: 7,6
         // graus; o Togera acerta o peito do alvo em cheio). O eixo (+0x33D0, o que o TestCollis testa) aponta para o peito
-        // (+0x3E30) do monstro vivo mais perto do eixo, dentro do cone (para o lado e para cima ou baixo) e do alcance
+        // (+0x3E30) do monstro vivo mais perto do eixo, dentro do cone (para o lado e para cima ou baixo), a qualquer distancia: o desenho do sopro vai alem do alcance do golpe e um alvo longe sem mira mostrava o desvio
         float aimed[3];
         bool didAim = false;
         if (cfg && cfg->hasPitch)   // "pitch": a frente do monstro (linha 1 da matriz do _cs) com essa inclinacao
@@ -1905,7 +1905,6 @@ namespace wotm_custom
             rdV(rdram, m + kBreathAxis, ax);
             rdV(rdram, m + kLocMuzzle, mu);
             const float h = std::sqrt(ax[0] * ax[0] + ax[1] * ax[1]);
-            const float range = rdF(rdram, m + 0x68C0 + 0x9C) + 100.f;
             const float cone = cfg->aim * 0.017453293f;
             float best = cone, dir[3] = {0.f, 0.f, 0.f};
             for (uint32_t i = 0; h > 1e-4f && i < 8; ++i)
@@ -1914,7 +1913,7 @@ namespace wotm_custom
                     float c[3];
                     rdV(rdram, o + kLocChest, c);
                     const float dx = c[0] - mu[0], dy = c[1] - mu[1], dz = c[2] - mu[2], d = std::sqrt(dx * dx + dy * dy);
-                    if (d < 1.f || d > range)
+                    if (d < 1.f)
                         continue;
                     const float off = std::fabs(std::remainder(std::atan2(dx, dy) - std::atan2(ax[0], ax[1]), 6.2831853f));
                     const float pitchOff = std::fabs(std::atan2(dz, d) - std::atan2(ax[2], h));

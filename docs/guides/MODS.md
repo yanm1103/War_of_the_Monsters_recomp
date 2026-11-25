@@ -582,7 +582,7 @@ type (another prefix in `MON/`) does not exist yet. The first one is Goliath Pri
   - `aim` (degrees, default 30; 0 = off): the game aims the breath by turning the head toward the target (look-at layers 154 and
     155), which lands Togera's breath on the target's chest; on an own skeleton the sideways turn can fall short and the breath
     passes beside the target. With `aim`, the breath axis the game tests (+0x33D0) points at the chest (+0x3E30) of the living
-    monster nearest to it within that cone (sideways and up or down) and the breath's range, and the layers follow that axis.
+    monster nearest to it within that cone (sideways and up or down), at any distance (the drawn breath goes past the reach of the hit), and the layers follow that axis.
   - `pitch` (degrees, + up; missing = off): before `aim`, the breath axis becomes the monster's front tilted by that much, for a
     mouth that does not face forward in the breath pose (King Ghidorah's middle head is raised while the three beams fire).
   - `scale`: multiplies every layer's sizes, speeds and spawn area. `hide`: the presets that disappear when this monster's
