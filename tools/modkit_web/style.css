@@ -619,3 +619,33 @@ footer.collapsed section { flex: 1; }
 footer.collapsed .tasks > h2 { border-bottom: 0; }
 footer.collapsed .logtitle { border-bottom: 0; }
 body:has(footer.collapsed) #split { display: none; }
+
+/* the move check of the Moves view (moves.js): the list of findings, the mark on a move's row, the findings of the picked move */
+.mvcheck { border: 1px solid var(--line); background: var(--inset); border-radius: 10px; padding: 8px 10px; margin-bottom: 12px; font: 13px/1.45 var(--text); }
+.mvchead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mvchead .ttl { color: var(--orange); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; font-size: 12px; }
+.mvchead .cnt { border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 700; }
+.mvchead .cnt.error { color: var(--err); border: 1px solid rgba(255, 138, 114, .6); }
+.mvchead .cnt.warn { color: var(--warn); border: 1px solid rgba(255, 191, 60, .5); }
+.mvchead .cnt.ok { color: #8fd694; border: 1px solid rgba(143, 214, 148, .5); }
+.mvchead .dim { font-size: 12px; cursor: help; border-bottom: 1px dotted currentColor; }
+.mvclist { margin-top: 6px; max-height: 230px; overflow-y: auto; }
+.mvcrow { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-top: 1px solid var(--line); cursor: pointer; }
+.mvcrow:hover { background: rgba(240, 138, 44, .1); }
+.mvcrow.plain { cursor: default; }
+.mvcrow.on { background: rgba(240, 138, 44, .2); }
+.mvcrow .who { flex: none; display: inline-flex; align-items: center; min-width: 78px; }
+.mvcrow .who .mvglyph { margin: 0 2px 0 0; }
+.mvcrow .who .sep { color: var(--dim); margin: 0 4px; }
+.mvcrow .who .tstep { color: var(--dim); font-size: 12px; }
+.mvcrow .what { color: var(--fg); min-width: 0; }
+.mvcdet { padding: 4px 6px 8px 30px; color: #d9d4c5; }
+.mvcdet .fix, .mvfind .fix { color: #f1dfb4; margin-top: 3px; }
+.tmark { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; font: 700 11px/1 var(--text);
+  margin-left: 6px; color: #1b1408; background: var(--warn); }
+.tmark.error { background: var(--err); }
+.mvcrow .tmark { margin-left: 0; }
+.mvfind { border-left: 3px solid var(--warn); background: rgba(255, 191, 60, .07); border-radius: 0 8px 8px 0; padding: 6px 10px; margin: 8px 0; font: 13px/1.45 var(--text); color: #d9d4c5; }
+.mvfind.error { border-left-color: var(--err); background: rgba(255, 138, 114, .08); }
+.mvfind .ttl { color: var(--warn); font-weight: 700; }
+.mvfind.error .ttl { color: var(--err); }

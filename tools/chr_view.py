@@ -299,11 +299,13 @@ def moves_of(path, ngp=None, check=True):
 _F = {"win_start": ("f", 0, 1), "win_end": ("f", 0, 1), "counter_start": ("f", 0, 1), "counter_end": ("f", 0, 1),
       "kb_out": ("f", -1e5, 1e5), "kb_up": ("f", -1e5, 1e5), "stun": ("f", 0, 1e4), "pause": ("f", 0, 1e4), "radius": ("f", 0, 1e4),
       "stamina": ("f", 0, 1e4), "speed": ("f", 0.05, 20), "anim": ("i", 1, 299), "damage": ("f", 0, 1e4), "mult": ("f", 0, 100),
-      "object_damage": ("f", 0, 1e4)}
+      "object_damage": ("f", 0, 1e4), "chain_at": ("f", 0, 1), "recover_at": ("f", 0, 1), "recover_speed": ("f", 0.05, 20),
+      "first_ms": ("f", 0, 1e5)}
 _NEXT_P, _NEXT_S = 0x54, 0x4C   # the six delays (ms) to the next move, by its type: where they start in a punch / an object config
 EDIT = {
     False: {"damage": 0x20, "win_start": 0x2C, "win_end": 0x30, "counter_start": 0x34, "counter_end": 0x38, "kb_out": 0x8C, "kb_up": 0x90,
-            "stun": 0x94, "pause": 0x98, "radius": 0xA8, "stamina": 0x18, "speed": 0x24, "anim": 0x28},
+            "stun": 0x94, "pause": 0x98, "radius": 0xA8, "stamina": 0x18, "speed": 0x24, "anim": 0x28,
+            "chain_at": 0x50, "recover_at": 0x3C, "recover_speed": 0x40, "first_ms": 0x6C},
     True: {"mult": 0x04, "object_damage": 0x08, "win_start": 0x14, "win_end": 0x18, "counter_start": 0x1C, "counter_end": 0x20,
            "kb_out": 0x98, "kb_up": 0x94, "stun": 0x9C, "pause": 0xA0, "radius": 0xA8, "stamina": 0x00, "speed": 0x0C, "anim": 0x10},
 }

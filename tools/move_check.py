@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks a monster's moves without playing: the timeline of every punch and of every combo link in fields (60 per second),
+"""Checks a monster's moves without playing: the timeline of every punch and of every combo link in frames (60 per second, the game's fields),
 where the hit sphere goes during the hit window, and how those numbers compare with the monsters of the disc.
 
     python tools/move_check.py <file.CHR> --ngp <model.NGP> [--disc disc] [--json] [--all]
@@ -10,7 +10,7 @@ The model is the one of `StatePunch::update`/`startChain` and `StateRecoil::upda
 - a move lasts frames / speed fields; the hit is tested from the hit window's start, but not while the blend into the move runs
   (the first move of a combo blends for +0x6C ms, a chained one for the previous move's delay to its type);
 - a combo press is taken from `input_start` fields after the blend and the next move starts when the animation passes `chain_at`;
-- a victim that is hit recoils for the move's `stun` fields (above 100 it ends up stunned; a knockback throws it instead), and
+- a victim that is hit recoils for the move's `stun` frames (above 100 it ends up stunned; a knockback throws it instead), and
   can block or hit back after that.
 So, per move: startup (first field that can hit), active, end, and the advantage on hit (victim's recoil left when the attacker
 is free again). Per link: the fields between the two hits and how many of them the victim is free. The hit pause, the lunge and
@@ -183,8 +183,12 @@ def graph(m):
     return by, reach, links
 
 
+DIRS = {8: "FORWARD + ", 2: "BACK + ", 5: ""}
+
+
 def name_of(r):
-    return "%s step %d" % (r["type"], r["pos"])
+    """The move as the kit's Moves view names it: "FORWARD + LIGHT step 2"."""
+    return "%s%s step %d" % (DIRS.get(r["dir"], ""), r["button"], r["pos"])
 
 
 def analyze(m, rig=None):
@@ -271,12 +275,12 @@ def routes(a, answer):
     out = {"pressure": None, "stun": None, "reset": {}}
     top = max((run((x["pos"], x["ptype"])) for x in openers), default=None, key=lambda t: (t[0], t[1]))
     if top:
-        out["pressure"] = {"hits": top[0], "damage": top[1], "moves": [by[k]["name"] for k in top[2]]}
+        out["pressure"] = {"hits": top[0], "damage": top[1], "moves": [by[k]["name"] for k in top[2]], "keys": [list(k) for k in top[2]]}
     cand = [(x["startup"], to_stun((x["pos"], x["ptype"]))) for x in openers]
     cand = [(st, path) for st, path in cand if path and len(path) > 1]
     if cand:
         st, path = min(cand, key=lambda t: t[0])
-        out["stun"] = {"startup": st, "hits": len(path), "moves": [by[k]["name"] for k in path]}
+        out["stun"] = {"startup": st, "hits": len(path), "moves": [by[k]["name"] for k in path], "keys": [list(k) for k in path]}
     fastest = min((x["startup"] for x in openers), default=None)
     if fastest is not None:
         for x in a["moves"]:
@@ -414,148 +418,172 @@ def monster_lasts(m, a, btn):
 # ---------------------------------------------------------------- findings
 
 def findings(m, a, ref=None):
-    """[{sev, code, where, text}] sorted by severity: what is broken (error), off the disc's ranges or rules (warn), or worth a look."""
+    """[{sev, code, where, keys, title, text, fix}] sorted by severity: what is broken (error), off the disc's ranges or rules
+    (warn), or worth a look (info). keys: the moves it is about, [[step, type]] (empty for the whole combo or the get-up
+    attack); title: a few words; text: what was measured; fix: what to change, by the names of the kit's fields."""
     out = []
-
-    def add(sev, code, where, text):
-        out.append({"sev": sev, "code": code, "where": where, "text": text})
-
     if not a["frames"]:
         return out
     moves = a["moves"]
     by = {(x["pos"], x["ptype"]): x for x in moves}
+
+    def add(sev, code, keys, title, text, fix, where=None, anim=None):
+        keys = [list(k) for k in keys]
+        out.append({"sev": sev, "code": code, "keys": keys, "title": title, "text": text, "fix": fix, "anim": anim,
+                    "where": where or " > ".join(by[tuple(k)]["name"] for k in keys if tuple(k) in by) or "combo"})
+
     openers = [x for x in moves if x["pos"] == 1 and x["startup"] is not None]
     fastest = min((x["startup"] for x in openers), default=None)
     answer = ref["answer"] if ref else None
+    slower = "Slow it down: lower Speed or raise Hit from."
 
     for x in moves:
-        w = x["name"]
+        k = [(x["pos"], x["ptype"])]
         if x["startup"] is None:
-            add("error", "never_hits", w, "the blend into it (%.1f fields) outlasts its hit window: it never hits" % x["blend"])
+            add("error", "never_hits", k, "Never hits", "The blend into this move lasts %.1f frames, longer than its whole hit window, and the game does not "
+                "test the hit while it blends." % x["blend"], "Lower the delay that leads into it (Then ... of the move before, or its own first-move blend), or move Hit from / Hit until later.")
             continue
         r = ref[x["button"]] if ref else None
-        # 1. an advantage on hit big enough to hit again before the victim is out of the recoil: an endless loop
-        if not x["knocks"] and not x["stuns"] and fastest is not None and x["adv"] >= fastest:
-            add("error", "loop", w, "on hit the attacker is free %.0f fields before the victim (recoil %.0f, the move ends %.0f after the hit) and its "
-                "fastest first move hits in %.0f: it can be repeated forever on a victim that cannot answer" % (
-                    x["adv"], x["stun"], x["end"] - x["startup"], fastest))
-        elif r and not x["knocks"] and not x["stuns"] and x["adv"] > r["adv"]["hi"] + 0.5:
-            add("warn", "adv_high", w, "advantage on hit %+.0f fields; 95%% of the disc's %s moves stay at %+.0f or less" % (x["adv"], x["button"], r["adv"]["hi"]))
-        # 2. a last move that leaves the attacker open after it hits
-        if r and x["last"] and not x["knocks"] and not x["stuns"] and x["adv"] < r["adv"]["lo"] - 0.5:
-            add("warn", "adv_low", w, "it ends the combo and, after hitting, leaves the attacker stuck %.0f fields while the victim is free "
-                "(recoil %.0f, the move ends %.0f after the hit); 95%% of the disc's moves leave %.0f or less. Raise stun, speed up the end (recover) or make it knock down" % (
-                    -x["adv"], x["stun"], x["end"] - x["startup"], -r["adv"]["lo"]))
+        plain = not x["knocks"] and not x["stuns"]
+        after = x["end"] - x["startup"]
+        if plain and fastest is not None and x["adv"] >= fastest:
+            add("error", "loop", k, "Can be repeated forever", "After it hits, the victim recoils for %.0f frames but the attacker is free again in %.0f, and "
+                "its fastest first move hits in %.0f: the next hit lands while the victim still cannot do anything." % (x["stun"], after, fastest),
+                "Lower Stun (the victim's recoil, in frames) below %.0f, or make the move last longer (lower Speed)." % max(1.0, after + fastest))
+        elif r and plain and x["adv"] > r["adv"]["hi"] + 0.5:
+            add("warn", "adv_high", k, "Too safe on hit", "After it hits, the attacker is free %s the victim (recoil %.0f frames, the move goes on for %.0f after the hit). "
+                "Almost every %s move of the game leaves the attacker at least %.0f frames behind." % (
+                    "%.0f frames before" % x["adv"] if x["adv"] > 0 else "only %.0f frames after" % -x["adv"], x["stun"], after, x["button"], -r["adv"]["hi"]),
+                "Lower Stun or make the move last longer (lower Speed).")
+        if r and x["last"] and plain and x["adv"] < r["adv"]["lo"] - 0.5:
+            add("warn", "adv_low", k, "Leaves you open after it hits", "It is the last move of the combo. After it hits, the victim recoils for %.0f frames but the move goes on "
+                "for %.0f: the victim has %.0f frames to hit back for free. Almost no move of the game leaves more than %.0f." % (x["stun"], after, -x["adv"], -r["adv"]["lo"]),
+                "Raise Stun to about %.0f (the game's %s moves go up to %.0f), or give it Knockback out / up so the victim is thrown, or make the end of the "
+                "animation play faster (Wind-down from below 1 and Wind-down speed above 1)." % (
+                    min(r["stun"]["max"], after + r["adv"]["med"]) if after + r["adv"]["med"] > x["stun"] else after + r["adv"]["lo"] + 1, x["button"], r["stun"]["max"]))
         if r:
             if x["startup"] < r["startup"]["lo"] - 0.5:
-                add("warn", "startup_low", w, "hits %.0f fields after it starts; 95%% of the disc's %s moves take %.0f or more (median %.0f)" % (
-                    x["startup"], x["button"], r["startup"]["lo"], r["startup"]["med"]))
+                add("warn", "startup_low", k, "Hits almost instantly", "It can hit %.0f frames after the button. The usual %s move of the game takes %.0f, and almost "
+                    "none takes less than %.0f." % (x["startup"], x["button"], r["startup"]["med"], r["startup"]["lo"]), slower)
             if x["damage"] > r["damage"]["max"] + 0.01:
-                add("warn", "damage_high", w, "damage %g; the disc's %s moves go up to %g" % (x["damage"], x["button"], r["damage"]["max"]))
-            if not x["stuns"] and not x["knocks"] and x["stun"] > r["stun"]["max"] + 0.5:
-                add("warn", "stun_high", w, "recoil of %.0f fields; the disc's %s moves that neither stun nor knock down go up to %.0f" % (x["stun"], x["button"], r["stun"]["max"]))
+                add("warn", "damage_high", k, "More damage than any move of the game", "Damage %g; the strongest %s move of the game does %g." % (
+                    x["damage"], x["button"], r["damage"]["max"]), "Lower Damage.")
+            if plain and x["stun"] > r["stun"]["max"] + 0.5:
+                add("warn", "stun_high", k, "Very long recoil", "The victim recoils for %.0f frames; the game's %s moves that neither stun nor knock down go up to %.0f." % (
+                    x["stun"], x["button"], r["stun"]["max"]), "Lower Stun.")
             s = x["sweep"]
             if s and s["reach"] < r["reach"]["min"] - 0.5:
-                add("warn", "reach_short", w, "the hit sphere gets only %.0f units away from the monster's axis; the shortest %s move of the disc reaches %.0f" % (
-                    s["reach"], x["button"], r["reach"]["min"]))
+                add("warn", "reach_short", k, "Short reach", "During the hit frames the hit sphere gets only %.0f units away from the monster; the shortest %s move of the "
+                    "game reaches %.0f." % (s["reach"], x["button"], r["reach"]["min"]),
+                    "Watch the red sphere in the 3D view. Pick the bone that really strikes (Hits with), raise Radius, or move Hit from / Hit until to the frames where the limb is stretched.")
             if s and s["low"] > r["low"]["max"] + 0.5:
-                add("warn", "reach_high", w, "the hit sphere never comes below %.0f units of height; on the disc every %s move comes down to %.0f or lower" % (
-                    s["low"], x["button"], r["low"]["max"]))
+                add("warn", "reach_high", k, "Passes over the victim", "During the hit frames the hit sphere never comes below %.0f units of height; every %s move of the game "
+                    "comes down to %.0f or lower." % (s["low"], x["button"], r["low"]["max"]),
+                    "Watch the red sphere in the 3D view. Pick a lower bone (Hits with), raise Radius, or move Hit from / Hit until.")
         if x["sweep"] is None and x["pos"] == 1:
-            add("warn", "no_sphere", w, "none of its locators is in the model: nothing tests the hit")
+            add("warn", "no_sphere", k, "Nothing tests the hit", "None of the bones this move hits with is in the model.", "Pick bones the model has (Hits with).")
 
-    # 3. heavy faster than light, at the same step
     for pos in sorted({x["pos"] for x in moves}):
-        li = [x for x in moves if x["pos"] == pos and x["button"] == "LIGHT" and x["startup"] is not None]
-        he = [x for x in moves if x["pos"] == pos and x["button"] == "HEAVY" and x["startup"] is not None]
-        if not li or not he:
-            continue
         lneu, hneu = by.get((pos, 5)), by.get((pos, 0))
-        if lneu and hneu and lneu["startup"] is not None and hneu["startup"] is not None:
-            if hneu["startup"] < lneu["startup"] - 0.5 and hneu["end"] < lneu["end"] - 0.5 and hneu["damage"] >= lneu["damage"]:
-                add("warn", "heavy_fast", hneu["name"], "HEAVY that hits in %.0f fields and is over in %.0f, faster on both than the LIGHT of the same step "
-                    "(%.0f and %.0f), with as much damage or more" % (hneu["startup"], hneu["end"], lneu["startup"], lneu["end"]))
-            elif hneu["startup"] < lneu["startup"] - 0.5:
-                add("info", "heavy_quick", hneu["name"], "HEAVY that hits in %.0f fields, before the LIGHT of the same step (%.0f)" % (hneu["startup"], lneu["startup"]))
+        if lneu and hneu and lneu["startup"] is not None and hneu["startup"] is not None and hneu["startup"] < lneu["startup"] - 0.5:
+            both = hneu["end"] < lneu["end"] - 0.5 and hneu["damage"] >= lneu["damage"]
+            add("warn" if both else "info", "heavy_fast", [(pos, 0)], "HEAVY faster than the LIGHT", "This HEAVY hits %.0f frames after the button%s. The LIGHT of the same "
+                "step hits at %.0f%s%s." % (hneu["startup"], " and is over in %.0f" % hneu["end"] if both else "", lneu["startup"],
+                                            " and is over in %.0f" % lneu["end"] if both else "", ", with less or the same damage" if both else ""),
+                "Slow the HEAVY down (lower Speed or raise Hit from), speed the LIGHT up, or swap the two animations.")
 
-    # 4. links: the next move cutting this one, and how long the victim is free between the two hits
     for l in a["links"]:
-        w = "%s > %s" % (l["from"], l["to"])
+        k = [tuple(l["from_key"]), tuple(l["to_key"])]
         if l["cut_before"]:
-            add("error", "cut", w, "the next move starts at field %.0f, before the hit window of %s opens (field %.0f): it is replaced before it can hit" % (
-                l["start"], l["from"], l["hit_a"]))
+            add("error", "cut", k, "Replaced before it hits", "The next move of the combo starts at frame %.0f, before the hit frames of the first one even begin (frame %.0f): "
+                "in a combo the first move never hits." % (l["start"], l["hit_a"]), "On the first move, raise Next move at to its Hit until or later.")
         elif l["cut_inside"] and l["start"] - max(l["hit_a"], l["blend_a"]) < 3:
-            add("warn", "cut_part", w, "the next move starts at field %.0f, when the hit window of %s (fields %.0f-%.0f) has been tested for only %.0f" % (
-                l["start"], l["from"], max(l["hit_a"], l["blend_a"]), l["hit_b"], max(0.0, l["start"] - max(l["hit_a"], l["blend_a"]))))
-        if l["next_startup"] is None or l["gap"] is None:
-            continue
-        if l["knocks"] or l["stuns"]:
+            add("warn", "cut_part", k, "Cut right as it starts to hit", "The next move of the combo starts at frame %.0f, when the first one has been able to hit for only %.0f "
+                "frames (its hit frames are %.0f-%.0f)." % (l["start"], max(0.0, l["start"] - max(l["hit_a"], l["blend_a"])), max(l["hit_a"], l["blend_a"]), l["hit_b"]),
+                "On the first move, raise Next move at towards its Hit until.")
+        if l["next_startup"] is None or l["gap"] is None or l["knocks"] or l["stuns"]:
             continue
         r = ref[l["button"]]["free"] if ref and l["same"] else None
         if r and l["free"] > r["hi"] + 0.5:
-            add("warn", "link_open", w, "%.0f fields between the two hits and the recoil lasts %.0f: the victim is free for %.0f before the next hit%s; "
-                "95%% of the disc's same-button links leave %.0f or less (median %.0f)" % (
-                    l["gap"], l["stun"], l["free"], ", enough to hit first" if l["free"] >= answer else "", r["hi"], r["med"]))
+            add("warn", "link_open", k, "Gap in the combo: the victim can hit back" if l["free"] >= answer else "Wide gap in the combo",
+                "The second hit lands %.0f frames after the first, but the victim recoils for only %.0f: it is free for %.0f frames before the second hit%s. "
+                "In the game's combos of one button this is usually about %.0f and almost never above %.0f." % (
+                    l["gap"], l["stun"], l["free"], " (a usual first move needs %.0f)" % answer if l["free"] >= answer else "", max(0.0, r["med"]), r["hi"]),
+                "Raise Stun of the first move to about %.0f, or make the second come out sooner: lower Next move at of the first (not below its Hit until), "
+                "raise Speed or lower Hit from of the second." % (l["gap"] - max(0.0, r["med"])))
 
-    # 5. what the victim cannot fight back: the held run, a route into a stun, and starting over on a victim still recoiling
-    a["lock"] = None
+    a["lock"] = a["stun_route"] = None
     if answer is not None:
         rt = routes(a, answer)
-        a["lock"] = rt["pressure"]
+        a["lock"], a["stun_route"] = rt["pressure"], rt["stun"]
         pr = rt["pressure"]
         if pr and (pr["hits"] > ref["pressure_hits"]["max"] or pr["damage"] > ref["pressure_damage"]["max"] + 0.01):
-            add("warn", "pressure", "combo", "%d hits in a row, %g damage, where the victim never has the %.0f fields to hit first (%s); the disc's longest is "
-                "%d hits and its strongest %g damage" % (pr["hits"], round(pr["damage"], 2), answer, " > ".join(pr["moves"]),
-                                                         ref["pressure_hits"]["max"], ref["pressure_damage"]["max"]))
+            add("warn", "pressure", pr["keys"], "Longer inescapable combo than any in the game", "%d hits in a row (%g damage) where the victim never gets the %.0f frames a "
+                "usual first move needs: %s. The longest such run in the game is %d hits and the strongest %g damage." % (
+                    pr["hits"], round(pr["damage"], 2), answer, " > ".join(pr["moves"]), ref["pressure_hits"]["max"], ref["pressure_damage"]["max"]),
+                "Open a gap somewhere in it: lower Stun of one move, or raise the delay to the move after it (Then ...).", where="combo")
         st = rt["stun"]
-        a["stun_route"] = st
         if st and (not ref["stun_startup"] or st["startup"] < ref["stun_startup"]["min"] - 0.5):
-            add("warn", "stun_route", "combo", "a first move that hits in %.0f fields leads, without a gap to hit back, to a move that stuns (%s): the stunned "
-                "victim takes the same combo again. %s" % (st["startup"], " > ".join(st["moves"]),
-                                                          "On the disc %d of %d monsters have such a route, the quickest from a first move of %.0f fields" % (
-                                                              ref["stun_routes"], len(ref["monsters"]), ref["stun_startup"]["min"])
-                                                          if ref["stun_startup"] else "No monster of the disc has such a route"))
+            add("warn", "stun_route", st["keys"], "Stuns over and over", "A first move that hits in %.0f frames leads, with no gap to hit back, into a move that stuns: %s. "
+                "The stunned victim takes the same combo again. %s" % (st["startup"], " > ".join(st["moves"]),
+                                                                       "The game has such routes too, but none starts from a move faster than %.0f frames." % ref["stun_startup"]["min"]
+                                                                       if ref["stun_startup"] else "No monster of the game has such a route."),
+                "Slow the first move down (lower Speed or raise Hit from), or lower Stun of the last one to 100 or less so it does not stun, or open a gap before it.", where="combo")
         for x in moves:
             v = rt["reset"].get(x["name"])
             if v is not None and 0 < v < min(answer, ref["reset"]["lo"]) - 0.5 and x["adv"] < (fastest or 0):
-                add("warn", "reset", x["name"], "after it hits, the attacker's fastest first move lands again when the victim has been free for only %.0f "
-                    "fields: it can block but not hit first (it needs %.0f); 95%% of the disc's moves leave %.0f or more" % (v, answer, ref["reset"]["lo"]))
+                add("warn", "reset", [(x["pos"], x["ptype"])], "The combo can start over at once", "After it hits, the attacker's fastest first move lands again when the victim has been "
+                    "free for only %.0f frames: it can block but not hit first (a usual first move needs %.0f)." % (v, answer), "Lower Stun or make the move last longer (lower Speed).")
 
-    # 6. the heavy combo ends by throwing the victim (every monster of the disc does)
     if ref:
-        rule = all(k == n and n > 0 for k, n in zip(ref["HEAVY"]["last_knocks"], ref["HEAVY"]["last_count"]) if n)
+        n_all = sum(1 for n in ref["HEAVY"]["last_count"] if n)
+        n_ok = sum(1 for kk, n in zip(ref["HEAVY"]["last_knocks"], ref["HEAVY"]["last_count"]) if n and kk == n)
         for c in m["chains"]:
             if c["weapon"] or c["button"] != "HEAVY" or c["dir"] != 5:
                 continue
             x = by.get((c["length"], c["ptype"]))
             if x and not x["knocks"]:
-                n_ok = sum(1 for k, n in zip(ref["HEAVY"]["last_knocks"], ref["HEAVY"]["last_count"]) if n and k == n)
-                add("warn", "heavy_end", x["name"], "the last move of the HEAVY combo does not knock the victim down (knockback 0); %s" % (
-                    "every monster of the disc ends it with a knockback" if rule else "%d of the %d monsters of the disc end every heavy combo with one" % (
-                        n_ok, sum(1 for n in ref["HEAVY"]["last_count"] if n))))
+                add("warn", "heavy_end", [(x["pos"], x["ptype"])], "The HEAVY combo does not end by throwing the victim", "This is the last move of the HEAVY combo and its knockback "
+                    "is 0. %s." % ("Every monster of the game ends its heavy combos by knocking the victim down" if n_ok == n_all else
+                                   "%d of the %d monsters of the game end every heavy combo by knocking the victim down" % (n_ok, n_all)),
+                    "Give it Knockback out and Knockback up (the game's finishers use a few hundred of each).")
 
-    # 7. the get-up attack (StateGetupAttack: animations 242 and 243, a sphere on the left hand for the whole animation)
     for g in a["getup"]:
-        w = "get-up attack, face %s (animation %d)" % (g["face"], g["anim"])
+        w = "Get-up attack, face %s" % g["face"]
+        hint = "The get-up attack plays animation %d of the model and hits with the left hand: put an attack there (3D model tab, the animations of the rig)." % g["anim"]
         if not g["frames"]:
-            add("error", "getup_missing", w, "the model has no animation %d: the game refuses the get-up attack" % g["anim"])
+            add("error", "getup_missing", [], "No get-up attack", "The model has no animation %d: the game refuses the attack when getting up lying face %s." % (g["anim"], g["face"]), hint, where=w, anim=g["anim"])
             continue
         s = g["sweep"]
         if not s:
-            add("warn", "getup_no_hand", w, "the model has no left hand locator (0x802), where the get-up attack tests its hit")
+            add("warn", "getup_no_hand", [], "Get-up attack cannot hit", "The model has no left hand locator, where the get-up attack tests its hit.", "Add the left hand locator to the rig.", where=w, anim=g["anim"])
             continue
         if ref and ref["getup_path"] and s["path"] < 0.5 * ref["getup_path"]["min"]:
-            add("warn", "getup_still", w, "the left hand, which carries the hit, travels %.0f units in the whole animation; on the disc it sweeps %.0f to %.0f. "
-                "The animation is probably not an attack" % (s["path"], ref["getup_path"]["min"], ref["getup_path"]["max"]))
+            add("warn", "getup_still", [], "Get-up attack that is not an attack", "In animation %d the left hand, which carries the hit, moves only %.0f units in total. In the game's "
+                "get-up attacks it sweeps %.0f to %.0f: this animation probably just stands up, so it hits nothing." % (g["anim"], s["path"], ref["getup_path"]["min"], ref["getup_path"]["max"]), hint, where=w, anim=g["anim"])
         elif ref and ref["getup_reach"] and s["reach"] < 0.8 * ref["getup_reach"]["min"]:
-            add("warn", "getup_short", w, "the hit sphere gets %.0f units away from the monster's axis; on the disc %.0f to %.0f" % (
-                s["reach"], ref["getup_reach"]["min"], ref["getup_reach"]["max"]))
+            add("warn", "getup_short", [], "Get-up attack with short reach", "In animation %d the left hand gets only %.0f units away from the monster; in the game's get-up "
+                "attacks %.0f to %.0f." % (g["anim"], s["reach"], ref["getup_reach"]["min"], ref["getup_reach"]["max"]), hint, where=w, anim=g["anim"])
         if ref and ref["getup_body_high"] and g.get("body_high") is not None and g["body_high"] > 1.5 * ref["getup_body_high"]["max"]:
-            add("warn", "getup_flies", w, "the body rises to %.0f units of height during the animation; on the disc it stays under %.0f" % (
-                g["body_high"], ref["getup_body_high"]["max"]))
+            add("warn", "getup_flies", [], "Get-up attack leaves the ground", "In animation %d the body rises to %.0f units of height; in the game's get-up attacks it stays "
+                "under %.0f." % (g["anim"], g["body_high"], ref["getup_body_high"]["max"]), hint, where=w, anim=g["anim"])
 
-    out.sort(key=lambda f: SEV[f["sev"]])
-    return out
+    # the table repeats a chain's last move over the steps after it: one finding, with the other steps in "also"
+    merged, seen = [], {}
+    for f in out:
+        sig = (f["code"], f["text"], tuple(k[1] for k in f["keys"])) if len(f["keys"]) == 1 else None
+        if sig and sig in seen:
+            seen[sig]["also"].append(f["keys"][0])
+            continue
+        f["also"] = []
+        if sig:
+            seen[sig] = f
+        merged.append(f)
+    for f in merged:
+        if f["also"]:
+            f["where"] += " (and step%s %s)" % ("s" if len(f["also"]) > 1 else "", ", ".join(str(k[0]) for k in f["also"]))
+    merged.sort(key=lambda f: SEV[f["sev"]])
+    return merged
 
 
 def check(m, ngp, disc=None):
@@ -585,25 +613,25 @@ def report(label, m, a, every=False):
         return out + ["  " + m["note"]]
     if not a["frames"]:
         return out + ["  no model: the frames cannot be measured (pass --ngp)"]
-    out.append("  MOVES (fields: startup = first that can hit; adv = on hit, + is the attacker free first)")
-    out.append("    %-22s %-5s anim  dmg  startup active  end   adv  recoil  reach  height" % ("move", ""))
+    out.append("  MOVES (frames, 60 per second: startup = first that can hit; adv = on hit, + is the attacker free first)")
+    out.append("    %-24s anim  dmg  startup active  end   adv  recoil  reach  height" % "move")
     for x in a["moves"]:
         s = x["sweep"]
         fate = "knocks down" if x["knocks"] else "stuns" if x["stuns"] else _f(x["adv"], "%+4.0f")
-        out.append("    %-22s %-5s %4d %4.1f  %s   %s  %s  %-11s %3.0f  %s  %s" % (
-            x["name"], x["button"], x["anim"], x["damage"], _f(x["startup"]), _f(x["active"]), _f(x["end"]), fate, x["stun"],
+        out.append("    %-24s %4d %4.1f  %s   %s  %s  %-11s %3.0f  %s  %s" % (
+            x["name"], x["anim"], x["damage"], _f(x["startup"]), _f(x["active"]), _f(x["end"]), fate, x["stun"],
             _f(s["reach"] if s else None, "%5.0f"), "%3.0f-%-3.0f" % (s["low"], s["high"]) if s else "  -"))
     lk = [l for l in a["links"] if every or l["same"]]
     if lk:
-        out.append("  LINKS%s (gap = fields between the two hits; free = of those, the victim out of the recoil)" % ("" if every else " of the same button"))
+        out.append("  LINKS%s (gap = frames between the two hits; free = of those, the victim out of the recoil)" % ("" if every else " of the same button"))
         for l in lk:
             fate = "knocked down" if l["knocks"] else "stunned" if l["stuns"] else (
                 "combo" if l["free"] is not None and l["free"] <= 0 else "free %s" % _f(l["free"], "%.0f"))
-            out.append("    %-22s > %-22s next starts %s  gap %s  recoil %3.0f  %s" % (l["from"], l["to"], _f(l["start"], "%3.0f"), _f(l["gap"], "%3.0f"), l["stun"], fate))
+            out.append("    %-24s > %-24s next starts %s  gap %s  recoil %3.0f  %s" % (l["from"], l["to"], _f(l["start"], "%3.0f"), _f(l["gap"], "%3.0f"), l["stun"], fate))
     if a.get("lock"):
         out.append("  LONGEST RUN WITHOUT A GAP TO HIT BACK: %d hits, %g damage: %s" % (a["lock"]["hits"], round(a["lock"]["damage"], 2), " > ".join(a["lock"]["moves"])))
     if a.get("stun_route"):
-        out.append("  QUICKEST ROUTE INTO A STUN: first hit at field %.0f: %s" % (a["stun_route"]["startup"], " > ".join(a["stun_route"]["moves"])))
+        out.append("  QUICKEST ROUTE INTO A STUN: first hit at frame %.0f: %s" % (a["stun_route"]["startup"], " > ".join(a["stun_route"]["moves"])))
     for g in a["getup"]:
         s = g["sweep"]
         out.append("  GET-UP ATTACK face %-4s animation %d: %s" % (g["face"], g["anim"], "missing" if not g["frames"] else (
@@ -612,7 +640,7 @@ def report(label, m, a, every=False):
     out.append("  FINDINGS: %d error, %d warn, %d info%s" % (sum(f["sev"] == "error" for f in fs), sum(f["sev"] == "warn" for f in fs),
                                                               sum(f["sev"] == "info" for f in fs), "" if a.get("reference") else "  (no disc: nothing was compared with the game's monsters)"))
     for f in fs:
-        out.append("    [%s] %s: %s" % (f["sev"], f["where"], f["text"]))
+        out += ["    [%s] %s: %s" % (f["sev"], f["where"], f["title"]), "        %s" % f["text"], "        Fix: %s" % f["fix"]]
     return out
 
 
@@ -621,7 +649,7 @@ def reference_text(ref):
     for btn in ("LIGHT", "HEAVY"):
         r = ref[btn]
         out.append("  %s" % btn)
-        for k, lab in (("opener", "startup of a first move"), ("startup", "startup of any move"), ("total", "fields until the move ends"),
+        for k, lab in (("opener", "startup of a first move"), ("startup", "startup of any move"), ("total", "frames until the move ends"),
                        ("adv", "advantage on hit"), ("stun", "recoil (no stun, no knockdown)"), ("free", "victim free between same-button hits"),
                        ("damage", "damage"), ("chain_damage", "damage of a same-button combo"), ("reach", "reach of the sphere"),
                        ("low", "lowest edge of the sphere")):
@@ -636,7 +664,7 @@ def reference_text(ref):
                    ("stun_startup", "first move of a route into a stun"), ("reset", "victim free before the attacker starts over")):
         if ref[k]:
             out.append("  %-42s min %6.1f  median %6.1f  max %6.1f  (%d)" % (lab, ref[k]["min"], ref[k]["med"], ref[k]["max"], ref[k]["n"]))
-    out.append("  usual LIGHT first move of the disc (what a free victim answers with): %.0f fields" % ref["answer"])
+    out.append("  usual LIGHT first move of the disc (what a free victim answers with): %.0f frames" % ref["answer"])
     return out
 
 

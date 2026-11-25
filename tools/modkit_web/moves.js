@@ -53,6 +53,10 @@ const FIELDS = [
   ['kb_out', 'Knockback out', 'How far the victim is thrown away from the attacker; anything other than 0 knocks down.'],
   ['kb_up', 'Knockback up', 'How high the victim is thrown.'],
   ['pause', 'Hit pause (ms)', 'How long the game freezes the two monsters on a hit.'],
+  ['chain_at', 'Next move at (0–1)', 'Where in the animation (0 to 1) the next move of the combo takes over, if its button was pressed. Before Hit until it cuts this move\'s hit short.', 'punch'],
+  ['recover_at', 'Wind-down from (0–1)', 'From this point of the animation (0 to 1) the rest plays at the wind-down speed while the monster goes back to its idle. 1: no wind-down.', 'punch'],
+  ['recover_speed', 'Wind-down speed', 'The animation\'s speed after the wind-down point: above 1 the move ends sooner.', 'punch'],
+  ['first_ms', 'First-move blend (ms)', 'When this move starts a combo, the game blends into it over this time and does not test the hit meanwhile.', 'punch'],
   ['speed', 'Speed', 'The animation\'s speed: 1 is its own pace, 2 twice as fast.'],
   ['stamina', 'Stamina cost', 'What the move takes from the stamina meter.'],
   ['anim', 'Animation id', 'Which animation of the model the move plays (1 to 299).'],
@@ -86,7 +90,7 @@ const ORDER = NEXT.map(n => n[0]);
 // (the next step of the combo, the same button first), and so on down. A move that comes after another one needs that move's
 // delay (next_ms) above 0. Rows are built when opened. state: {open: Set of paths, seeded}; onPick(row, path, ms) when one is picked.
 // Returns {el, nodes}: nodes maps a path ("p:1.5>2.5" = the step 1 type 5, then the step 2 type 5) to {line, r, via}.
-function tree(rows, weapon, state, onPick) {
+function tree(rows, weapon, state, onPick, marks) {
   const by = new Map(rows.map(r => [r.pos + '.' + r.ptype, r]));
   const prefix = weapon ? 'w:' : 'p:';
   const root = el('div', 'mvtree');
@@ -122,6 +126,8 @@ function tree(rows, weapon, state, onPick) {
     };
     const tl = el('span', 'tl');
     tl.append(tg, moveGlyph(r), el('span', 'tstep', 'step ' + r.pos));
+    const mk = marks && marks.get(r.pos + '.' + r.ptype);   // the move check has something about this move
+    if (mk) { const b = el('span', 'tmark ' + mk.sev, mk.sev === 'error' ? '✖' : '!'); b.title = 'Move check: ' + mk.titles.join('; '); tl.appendChild(b); }
     line.append(tl, el('span', 'tn', weapon ? '×' + fix(r.mult, 2) : fix(r.damage, 1)), el('span', 'tn', hitFrames(r)),
                 el('span', 'tn', weapon ? '×' + fix(total, 2) : fix(total, 1)));
     line.title = moveName(r) + ', step ' + r.pos + (via ? ' · may follow after ' + via + ' ms' : '') + (why ? ' · ' + why : '');
@@ -290,23 +296,89 @@ export async function movesPage(page, args, hooks = {}) {
     }
     // the warnings of the table itself (chr_view.problems) and the move check (move_check.py: timeline of each move and combo
     // link, reach of the hit sphere, the disc's monsters as the reference); errors first
-    const found = (m.check && m.check.findings || []).filter(f => f.sev !== 'info');
-    if ((m.problems && m.problems.length) || found.length) {
-      const w = el('div', 'warnbox');
-      const nerr = found.filter(f => f.sev === 'error').length;
-      w.appendChild(el('div', '', 'Move check: ' + (nerr ? nerr + ' broken, ' : '') + (found.length - nerr + (m.problems || []).length) + ' to look at'
-        + (m.check && !m.check.reference ? ' (no disc: not compared with the game\'s monsters)' : '')));
-      const ul = el('ul');
-      ul.style.maxHeight = '260px'; ul.style.overflowY = 'auto';
-      for (const f of found) {
-        const li = el('li', '', f.where + ': ' + f.text);
-        if (f.sev === 'error') li.style.color = 'var(--err)';
-        ul.appendChild(li);
+    const chk = m.check || null;
+    const found = chk ? chk.findings.filter(f => f.sev !== 'info') : [];
+    const marks = new Map();       // "step.type" -> {sev, titles}: the mark on the move's row of the list
+    const ofMove = new Map();      // "step.type" -> the findings shown under the picked move
+    for (const f of found) {
+      for (const k of [...f.keys, ...(f.also || [])]) {
+        const id = k[0] + '.' + k[1], mk = marks.get(id) || { sev: 'warn', titles: [] };
+        if (f.sev === 'error') mk.sev = 'error';
+        if (!mk.titles.includes(f.title)) mk.titles.push(f.title);
+        marks.set(id, mk);
+        if (!ofMove.has(id)) ofMove.set(id, []);
+        ofMove.get(id).push(f);
       }
-      for (const p of m.problems || []) ul.appendChild(el('li', '', p));
+    }
+    const measured = new Map((chk ? chk.moves : []).map(x => [x.pos + '.' + x.ptype, x]));
+    const linkOf = new Map((chk ? chk.links : []).map(l => [l.from_key.join('.') + '>' + l.to_key.join('.'), l]));
+    let goTo = () => {};           // (step, type): picks that move in the list (set below, once the list exists)
+    // The move check (tools/move_check.py): one line per finding, worst first; a click opens what was measured and how to fix it,
+    // and picks the move it is about. The table's own warnings (chr_view.problems) follow as plain lines.
+    if (chk && chk.frames) {
+      const box = el('div', 'mvcheck');
+      const nerr = found.filter(f => f.sev === 'error').length, nwarn = found.length - nerr + (m.problems || []).length;
+      const head = el('div', 'mvchead');
+      head.appendChild(el('span', 'ttl', 'Move check'));
+      if (nerr) head.appendChild(el('span', 'cnt error', nerr + ' broken'));
+      if (nwarn) head.appendChild(el('span', 'cnt warn', nwarn + (nwarn === 1 ? ' warning' : ' warnings')));
+      if (!nerr && !nwarn) head.appendChild(el('span', 'cnt ok', '✓ nothing off'));
+      const what = el('span', 'dim', chk.reference ? 'against the game\'s own monsters' : 'no disc: not compared with the game\'s monsters');
+      what.title = 'Every punch and combo is laid on a timeline from the .CHR and the model (when it can hit, when it ends, how long the victim recoils, where the hit sphere goes) ' +
+        'and compared with the same numbers of the monsters of the game. The frames are estimates (no hit pause, no distance between the monsters): they point at what to try in the training mode, they do not replace it.';
+      head.appendChild(what);
+      box.appendChild(head);
+      const list = el('div', 'mvclist');
+      let openDet = null;
+      for (const f of found) {
+        const row = el('div', 'mvcrow ' + f.sev);
+        row.appendChild(el('span', 'tmark ' + f.sev, f.sev === 'error' ? '✖' : '!'));
+        const who = el('span', 'who');
+        f.keys.slice(0, 4).forEach((k, i) => {
+          const r = m.punches.find(x => x.pos === k[0] && x.ptype === k[1]);
+          if (!r) return;
+          if (i) who.appendChild(el('span', 'sep', '›'));
+          who.append(moveGlyph(r), el('span', 'tstep', String(k[0])));
+        });
+        if (!f.keys.length) who.appendChild(el('span', 'tstep', f.where));
+        row.append(who, el('span', 'what', f.title));
+        row.title = f.where;
+        const det = el('div', 'mvcdet');
+        det.hidden = true;
+        det.append(el('div', '', f.text), el('div', 'fix', 'How to fix: ' + f.fix));
+        // a finding about a move picks that move (what was measured and the fix show under it, with its numbers); one about
+        // the monster as a whole (the get-up attack) opens right here
+        row.onclick = () => {
+          for (const o of list.querySelectorAll('.mvcrow.on')) o.classList.remove('on');
+          row.classList.add('on');
+          if (f.keys.length) { goTo(f.keys[0][0], f.keys[0][1]); return; }
+          if (openDet && openDet !== det) openDet.hidden = true;
+          det.hidden = !det.hidden;
+          openDet = det;
+          if (!det.hidden) {
+            det.scrollIntoView({ block: 'nearest' });
+            if (f.anim) { setMoveHit(null, null); withBusy(playMove(f.anim, null, null, 1)); }   // the get-up attack: its animation plays
+          }
+        };
+        list.append(row);
+        if (!f.keys.length) list.append(det);
+      }
+      for (const p of m.problems || []) {
+        const row = el('div', 'mvcrow warn plain');
+        row.append(el('span', 'tmark warn', '!'), el('span', 'what', p));
+        list.appendChild(row);
+      }
+      if (found.length || (m.problems || []).length) box.appendChild(list);
+      mid.appendChild(box);
+    } else if (m.problems && m.problems.length) {
+      const w = el('div', 'warnbox');
+      w.appendChild(el('div', '', 'Check these moves of the .CHR:'));
+      const ul = el('ul');
+      for (const p of m.problems) ul.appendChild(el('li', '', p));
       w.appendChild(ul);
       mid.appendChild(w);
     }
+    let lastTree = null;
     const noteBox = el('div');
     const edit = el('div', 'moveedit');
     const intro = el('div', 'dim mvfoot', 'From ' + m.label + (m.own ? ': this monster\'s own .CHR' : ': the base type\'s .CHR') + (m.frames ? '' : '. No model: no frames.'));
@@ -371,7 +443,34 @@ export async function movesPage(page, args, hooks = {}) {
       });
       h.append('step ' + r.pos);
       edit.appendChild(h);
-      edit.appendChild(facts(r, names, via));
+      const fc = facts(r, names, via);
+      edit.appendChild(fc);
+      // what the move check measured for this move, and what it found about it
+      const x = !r.weapon && measured.get(r.pos + '.' + r.ptype);
+      if (x) {
+        const fact = (k, tip, v) => { const row = el('div', 'fact'); row.title = tip; row.append(el('span', 'k', k), el('span', 'v', v)); fc.appendChild(row); };
+        if (x.startup != null) {
+          fact('Free again', 'When the attacker is out of the move and can act again, counted from the move\'s start (estimated).', 'frame ' + fix(x.end));
+          fact(x.last ? 'On hit' : 'On hit, if you stop', 'What happens when it hits and no other move follows: the victim recoils for the move\'s Stun frames (above 100 it is stunned, with knockback it is thrown). ' +
+            'The difference to the frame the attacker is free again says who can act first.',
+            x.knocks ? 'knocks the victim down' : x.stuns ? 'stuns the victim' :
+            'the victim recoils ' + fix(r.stun) + ' frames: ' + (x.adv >= 0 ? 'you act ' + fix(x.adv) + ' frames before it' : 'it acts ' + fix(-x.adv) + ' frames before you'));
+        }
+        const toks = path.slice(2).split('>');
+        const l = toks.length > 1 && linkOf.get(toks[toks.length - 2] + '>' + toks[toks.length - 1]);
+        if (l && l.gap != null) {
+          fact('Combo gap', 'In the combo: how long after the previous move\'s hit this one can land, and how many of those frames the victim is already out of its recoil (0: it cannot escape).',
+            'lands ' + fix(l.gap) + ' frames later' + (l.knocks ? ' (the victim was knocked down)' : l.stuns ? ' (the victim is stunned)' :
+              l.free <= 0 ? ': the victim is still recoiling, it cannot escape' : ': the victim is free for ' + fix(l.free) + ' of them'));
+        }
+        if (x.sweep) fact('Reach', 'How far from the monster the hit sphere gets during the hit frames, and the heights it covers (game units; a monster is about 100 to 150 tall).',
+          fix(x.sweep.reach) + ' units, height ' + fix(x.sweep.low) + ' to ' + fix(x.sweep.high));
+      }
+      for (const f of (!r.weapon && ofMove.get(r.pos + '.' + r.ptype)) || []) {
+        const b = el('div', 'mvfind ' + f.sev);
+        b.append(el('div', 'ttl', (f.sev === 'error' ? '✖ ' : '! ') + f.title + (f.keys.length > 1 ? '  (' + f.where + ')' : '')), el('div', '', f.text), el('div', 'fix', 'How to fix: ' + f.fix));
+        edit.appendChild(b);
+      }
       if (!m.own) edit.appendChild(notOwn());
       // the status line: only what a save says (empty otherwise)
       const status = el('div', 'autosave');
@@ -388,7 +487,7 @@ export async function movesPage(page, args, hooks = {}) {
         if (only && only !== (r.weapon ? 'object' : 'punch')) continue;
         const lab = el('label', '', label);
         lab.title = tip;
-        grid.append(lab, cell(fix(r[f], f === 'speed' || f === 'win_start' || f === 'win_end' || f === 'mult' ? 3 : 2), tip, inp => saveMove(r, f, label, inp, status)));
+        grid.append(lab, cell(fix(r[f], ['speed', 'win_start', 'win_end', 'mult', 'chain_at', 'recover_at', 'recover_speed'].includes(f) ? 3 : 2), tip, inp => saveMove(r, f, label, inp, status)));
       }
       // the combo: which move may follow this one, and after how many ms (0 = none)
       const nx = el('div', 'editgrid');
@@ -437,13 +536,38 @@ export async function movesPage(page, args, hooks = {}) {
       const weapon = v === 'weapon';
       const rows = weapon ? m.swipes : m.punches;
       if (!rows.length) { out.appendChild(el('div', 'dim', 'No moves of this kind in the .CHR.')); edit.innerHTML = ''; setMoveHit(null, null); return; }
-      const T = tree(rows, weapon, state, pick);
+      const T = tree(rows, weapon, state, pick, weapon ? null : marks);
       out.appendChild(T.el);
+      lastTree = T;
       // the move picked before (this view's), still on after a change; else the first one, so the 3D view plays something
       const keep = state.pickPath && state.pickPath.startsWith(weapon ? 'w:' : 'p:') && T.nodes.get(state.pickPath);
       if (keep) { keep.line.classList.add('on'); drawEdit(keep.r, state.pickPath, keep.via); setMoveHit(...hitOf(keep.r)); } else T.nodes.values().next().value.line.click();
     }
     view.onchange = show;
+    // the way to a punch through the combo: the same button all the way when that chain exists, else any chain that reaches it
+    const wayTo = (pos, t) => {
+      const by = new Map(m.punches.map(r => [r.pos + '.' + r.ptype, r]));
+      const walk = (p, k) => {
+        if (!by.has(p + '.' + k)) return null;
+        if (p === 1) return ['1.' + k];
+        for (const q of [k, ...ORDER.filter(o => o !== k)]) {
+          const prev = by.get((p - 1) + '.' + q);
+          if (prev && prev.next_ms[k] > 0) { const w = walk(p - 1, q); if (w) return [...w, p + '.' + k]; }
+        }
+        return null;
+      };
+      return walk(pos, t);
+    };
+    goTo = (pos, t) => {
+      const w = wayTo(pos, t);
+      if (!w) return;
+      for (let i = 1; i < w.length; i++) state.open.add('p:' + w.slice(0, i).join('>'));
+      state.pickPath = 'p:' + w.join('>');
+      view.value = 'punch';
+      show();
+      const n = lastTree && lastTree.nodes.get(state.pickPath);
+      if (n) { n.line.scrollIntoView({ block: 'nearest' }); pick(n.r, state.pickPath, n.via); }
+    };
     show();
   }
   await load();

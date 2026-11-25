@@ -176,10 +176,17 @@ the move check below, and
 `moves set <mod> <id> punch|object <step> <type> <field>=<value>` changes one number of a move (`next_0`..`next_5` are the combo delays) and
 `moves set <mod> <id> key <0xKEY> <0xOFFSET> <value>` one of the Other moves or Specials. The same view (read only) opens from the button
 **Moves of this monster...** in the panel of every costume of a game monster. **Move check** (the box at the top of the middle column, and `python tools/move_check.py`): a
-monster's moves are checked without playing. From the `.CHR` and the model it lays every punch and every combo link on a timeline in
-fields (60 per second): *startup* (the first field that can hit: the hit window's start, or the end of the blend into the move), *active*,
-*end* (when the attacker is out of the move), the *advantage on hit* (the victim's recoil, which lasts the move's `stun` fields, minus what
-is left of the move after the hit) and, per link, the *gap* between the two hits and how many of those fields the victim is *free* (out of
+monster's moves are checked without playing. The box lists one line per finding, the worst first (the buttons of the move or of the two
+moves of a combo link, its step, a few words); a click picks that move in the list, where the finding shows what was measured and
+**How to fix** by the names of the fields below it (the get-up attack's finding opens in the box and plays its animation), and the
+moves with a finding carry a mark in the list. Changing a number checks everything again. The picked move also shows **Free again**
+(the frame the attacker is out of the move), **On hit** (who acts first after it hits), **Combo gap** (how long after the previous
+move's hit it lands and how much of that the victim is free) and **Reach**. The fields **Next move at**, **Wind-down from**,
+**Wind-down speed** and **First-move blend** are the combo timing of a punch (`chain_at`, `recover_at`, `recover_speed` and `first_ms`
+for `moves set`). From the `.CHR` and the model it lays every punch and every combo link on a timeline in
+frames (60 per second): *startup* (the first field that can hit: the hit window's start, or the end of the blend into the move), *active*,
+*end* (when the attacker is out of the move), the *advantage on hit* (the victim's recoil, which lasts the move's `stun` frames, minus what
+is left of the move after the hit) and, per link, the *gap* between the two hits and how many of those frames the victim is *free* (out of
 the recoil). It also follows the hit sphere on its locators along the hit window (reach from the monster's axis, lowest and highest
 edge) and the left hand along the two get-up attack animations (242 and 243). The same measures of the disc's monsters are the
 reference (5% and 95% of each, per button; kept in `build/move_check_ref.json` until the disc's files change). Findings:
@@ -188,7 +195,7 @@ move that can be repeated on a victim still recoiling); `warn` is a number outsi
 follow: a HEAVY faster than the LIGHT of the same step with as much damage, a link that leaves the victim free long enough to hit
 first, a last move that leaves the attacker open after it hits, a HEAVY combo that does not end in a knockdown, a run of hits or a
 route into a stun with no gap to hit back, a hit sphere that stays short or high, a get-up attack whose hand barely moves. The hit
-pause, the lunge of a move and the distance between the monsters are not modelled, so the fields rank and compare moves; the
+pause, the lunge of a move and the distance between the monsters are not modelled, so the frames rank and compare moves; the
 training mode measures a real fight. `python tools/move_check.py <file.CHR> --ngp <model.NGP>` prints the full table,
 `--mod <folder>` checks every monster of a mod, `--roster` prints the reference and the disc's own findings, `--all` adds the links
 between different buttons, `--json` the data; the exit code is 1 with an `error`. *3D model*: "Currently using" (the model the game loads, what
