@@ -72,10 +72,12 @@ struct Config {
     // sopro: cone (graus para cada lado) em que o eixo vira para o peito do monstro mais perto na frente; 0 = o eixo do jogo. O
     // jogo mira o bafo virando a cabeca (camadas de olhar 154/155); num esqueleto proprio a virada para o lado nao chega
     float aim = 30.f;
-    // sopro: eixo do jogo trocado pela frente do monstro com esta inclinacao (graus, + para cima) antes da mira; NAN = o eixo do
+    // sopro: eixo do jogo trocado pela frente do monstro com esta inclinacao (graus, + para cima) antes da mira; sem a chave = o eixo do
     // jogo. Para uma cabeca que nao olha para a frente na pose do sopro (King Ghidorah sobre o Raptros sopra durante o idle, com
     // a cabeca do meio baixa)
-    float pitch = __builtin_nanf("");
+    // hasPitch diz se a chave veio: o runtime compila com /fp:fast, onde "pitch == pitch" e verdade mesmo com NAN
+    float pitch = 0.f;
+    bool hasPitch = false;
     bool hides(uint32_t preset) const {
         for (int p : hide)
             if (uint32_t(p) == preset) return true;
