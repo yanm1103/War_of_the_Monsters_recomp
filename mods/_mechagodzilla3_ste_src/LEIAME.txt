@@ -18,6 +18,11 @@ O mod: modkit.py monster new "Mechagodzilla 3" mechagodzilla3_ste --base togera 
 modkit.py monster mesh export ... (LIZARD0.glb); monster rig ... mechagodzilla3_ste_rig.glb; textura lizard0_t0013.png = mechagodzilla3_ste.png
 x0.62 (como no 2000; o alfa fica: o STE usa 0 a 128 e as costuras do pescoco sao alfa 0), depois eye_yellow.py <.dae> lizard0_t0013.png
 (o monster rig grava de novo a textura crua: refazer os dois passos depois dele).
+Pescoco: no STE os aneis dele sao pecas 100% no Spine1 e o Bip01_Neck_Dont_Touch nao tem vertice, entao com a cabeca para cima
+ela descolava do pescoco. neck_blend.py <rig.glb> (no lugar, antes do monster rig) da aos aneis e as aletas do pescoco pesos
+Spine1 -> Neck -> Head pela posicao ao longo da cadeia; o pescoco dobra em arco. A base do pescoco fica 100% no Spine1 (presa ao
+tronco) e o anel da gola, na altura da cabeca, vai inteiro para a Head: com a base no Neck ou a gola meio no Spine1 abria um vao
+atras, na base e logo abaixo da cabeca. Roda sobre o rig que sai do retarget, nao sobre um ja passado por ele.
 Olho: no STE e uma submalha propria (8 triangulos rigidos na cabeca) desenhada com uma cor que o export nao leva; os texels dela sao
 cinza. eye_yellow.py pinta de amarelo so os texels que esses triangulos usam (nenhum outro triangulo do modelo os amostra).
 Retrato do HUD: render do proprio modelo, como no 2000 (mods/_godzilla2000_ste_src/portrait_render.py e portrait_compose.py) com o
