@@ -261,8 +261,9 @@ def set_key_field(path, key, off, value):
     return old, struct.unpack_from(fmt, data, o + off)[0]
 
 
-def moves_of(path, ngp=None):
-    """Os golpes do .CHR: {file, legacy, punches, swipes, chains, specials, fps, frames}. Com ngp, os quadros de cada golpe."""
+def moves_of(path, ngp=None, check=True):
+    """Os golpes do .CHR: {file, legacy, punches, swipes, chains, specials, fps, frames}. Com ngp, os quadros de cada golpe e
+    (check) "check": as medidas e os achados do move_check.py (linha do tempo, elos do combo, alcance, comparacao com o disco)."""
     data = open(path, "rb").read()
     keys = cd.read_keys(data)
     name = os.path.splitext(os.path.basename(path))[0]
@@ -286,6 +287,9 @@ def moves_of(path, ngp=None):
     res["specials"] = specials_view(data, keys, name)
     res["others"] = others_view(data, keys, name)
     res["problems"] = problems(res)
+    if check and mdl:
+        import move_check
+        res["check"] = move_check.check(res, ngp)
     return res
 
 
@@ -437,6 +441,10 @@ def table(m):
     if m.get("problems"):
         out.append("WARNINGS")
         out.extend("  " + p for p in m["problems"])
+    if m.get("check"):
+        import move_check
+        out.append("")
+        out.extend(move_check.report("MOVE CHECK (python tools/move_check.py)", m, m["check"]))
     return out
 
 

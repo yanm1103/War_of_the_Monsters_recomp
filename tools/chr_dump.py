@@ -228,7 +228,7 @@ def punch_table(data, keys):
                 # encadeamento (StatePunch::update): o clique do proximo golpe vale entre jan_ini e jan_fim campos (60/s) depois do
                 # comeco mais o atraso, e o proximo golpe so entra quando a animacao passa de cadeia (fracao); rec_*: a recuperacao
                 'jan_ini': i32(data, b + 0x48), 'jan_fim': i32(data, b + 0x4C), 'cadeia': f32(data, b + 0x50),
-                'rec_ini': f32(data, b + 0x3C), 'rec_vel': f32(data, b + 0x40), 'primeiro_ms': f32(data, b + 0x6C),
+                'rec_ini': f32(data, b + 0x3C), 'rec_vel': f32(data, b + 0x40), 'rec_blend': f32(data, b + 0x44), 'primeiro_ms': f32(data, b + 0x6C),
             })
     return rows, default_r
 

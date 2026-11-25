@@ -288,12 +288,22 @@ export async function movesPage(page, args, hooks = {}) {
       b.title = 'Extract stats: copies the base type\'s .CHR and .AIC to this monster\'s files (the same as Stats & sounds)';
       mid.appendChild(b);
     }
-    if (m.problems && m.problems.length) {
+    // the warnings of the table itself (chr_view.problems) and the move check (move_check.py: timeline of each move and combo
+    // link, reach of the hit sphere, the disc's monsters as the reference); errors first
+    const found = (m.check && m.check.findings || []).filter(f => f.sev !== 'info');
+    if ((m.problems && m.problems.length) || found.length) {
       const w = el('div', 'warnbox');
-      w.appendChild(el('div', '', 'Check these moves of the .CHR:'));
+      const nerr = found.filter(f => f.sev === 'error').length;
+      w.appendChild(el('div', '', 'Move check: ' + (nerr ? nerr + ' broken, ' : '') + (found.length - nerr + (m.problems || []).length) + ' to look at'
+        + (m.check && !m.check.reference ? ' (no disc: not compared with the game\'s monsters)' : '')));
       const ul = el('ul');
-      for (const p of m.problems.slice(0, 12)) ul.appendChild(el('li', '', p));
-      if (m.problems.length > 12) ul.appendChild(el('li', '', '… and ' + (m.problems.length - 12) + ' more'));
+      ul.style.maxHeight = '260px'; ul.style.overflowY = 'auto';
+      for (const f of found) {
+        const li = el('li', '', f.where + ': ' + f.text);
+        if (f.sev === 'error') li.style.color = 'var(--err)';
+        ul.appendChild(li);
+      }
+      for (const p of m.problems || []) ul.appendChild(el('li', '', p));
       w.appendChild(ul);
       mid.appendChild(w);
     }

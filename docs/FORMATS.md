@@ -332,7 +332,11 @@ disc/RST/<MONSTRO>.CHR [--keys] [--csv]` (punch table; `--keys` lists the keys).
   animation's current percent reaches this fraction (not before, whatever the delay). +0x54..+0x68 (+0x94..+0xA8): per next type, the delay in ms before the next
   move's timing starts; 0 forbids that type. The same value is the blend time `startChain` gives `animationTransitionInto` for the next
   move, and `update` skips the hit test while the animation is blending, so a hit window that opens inside the blend loses that part.
-  +0x6C (+0x34): the same delay for the first move of a combo.
+  +0x6C (+0x34): the same delay for the first move of a combo. The stun value (+0x94) is also the length of the victim's recoil:
+  `StateRecoil::update` leaves the recoil once that many fields have passed since the hit (into the block if it was blocked, into
+  `StateStunned` above 100, else into the idle). `StateStunned` lasts up to 15 s; each new face button press takes 6 off its meter of 100.
+  `StateGetupAttack` (animations 0xF2 face down, 0xF3 face up) tests a sphere of the default fist radius on locator 0x802 over the
+  whole animation, with the numbers of the monster type's constructor (3 damage in the base one).
 - **Position and type:** the position (`StatePunch` +0x2988) starts at 0 and goes up with each chained hit (up to 9). The type (+0x298C) comes from the
   `PadFlags::curMappedAction` accepted by `StatePunch::transitionOK`: 5 → 0 triangle, 6 → 1 forward + triangle, 7 → 2 back + triangle,
   1 → 3 forward + square, 2 → 4 back + square, 0 → 5 square (in control scheme 0; the direction is a recent tap on the d-pad).

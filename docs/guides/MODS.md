@@ -172,9 +172,26 @@ A veil with a spinner holds the middle column and the 3D view while something lo
 taunt are in the game's code for each monster type, not in the `.CHR`, so the kit does not show them. A box lists the moves of
 the file that cannot work (a hit window outside 0..1, an animation the model does not have, no bone to test the hit, a combo step that is
 empty). `python tools/modkit.py moves <monster>` and `moves <mod> <id> [--json]` print the same tables and the warnings, and
+the move check below, and
 `moves set <mod> <id> punch|object <step> <type> <field>=<value>` changes one number of a move (`next_0`..`next_5` are the combo delays) and
 `moves set <mod> <id> key <0xKEY> <0xOFFSET> <value>` one of the Other moves or Specials. The same view (read only) opens from the button
-**Moves of this monster...** in the panel of every costume of a game monster. *3D model*: "Currently using" (the model the game loads, what
+**Moves of this monster...** in the panel of every costume of a game monster. **Move check** (the box at the top of the middle column, and `python tools/move_check.py`): a
+monster's moves are checked without playing. From the `.CHR` and the model it lays every punch and every combo link on a timeline in
+fields (60 per second): *startup* (the first field that can hit: the hit window's start, or the end of the blend into the move), *active*,
+*end* (when the attacker is out of the move), the *advantage on hit* (the victim's recoil, which lasts the move's `stun` fields, minus what
+is left of the move after the hit) and, per link, the *gap* between the two hits and how many of those fields the victim is *free* (out of
+the recoil). It also follows the hit sphere on its locators along the hit window (reach from the monster's axis, lowest and highest
+edge) and the left hand along the two get-up attack animations (242 and 243). The same measures of the disc's monsters are the
+reference (5% and 95% of each, per button; kept in `build/move_check_ref.json` until the disc's files change). Findings:
+`error` is a move that cannot work as written (never hits, replaced before its hit window, a get-up animation that is missing, a
+move that can be repeated on a victim still recoiling); `warn` is a number outside the disc's range or against a rule its monsters
+follow: a HEAVY faster than the LIGHT of the same step with as much damage, a link that leaves the victim free long enough to hit
+first, a last move that leaves the attacker open after it hits, a HEAVY combo that does not end in a knockdown, a run of hits or a
+route into a stun with no gap to hit back, a hit sphere that stays short or high, a get-up attack whose hand barely moves. The hit
+pause, the lunge of a move and the distance between the monsters are not modelled, so the fields rank and compare moves; the
+training mode measures a real fight. `python tools/move_check.py <file.CHR> --ngp <model.NGP>` prints the full table,
+`--mod <folder>` checks every monster of a mod, `--roster` prints the reference and the disc's own findings, `--all` adds the links
+between different buttons, `--json` the data; the exit code is 1 with an `error`. *3D model*: "Currently using" (the model the game loads, what
 it was made from and the source files; the skeleton and the animations are inside the `.NGP`), **Check model...** first, then
 **Import rigged model...** / **Adjust bones...**, **Export 3D model** / **Import mesh...** / **Import animations...**, **Import
 character with animations...** (below) and **Import model files...** (copies `.NGP` + `.PTR`, and optional `.TEX`/`.RTX`, to
